@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace TodoX.Web.Services.DanceSell;
 
 public static class DanceSellConstants
@@ -8,12 +10,29 @@ public static class DanceSellConstants
     public const string KieCapabilityCode = "motion_control_video";
     public const string ReferenceCapabilityCode = "reference_image_generation";
     public const string FeatureCode = "dance_sell";
-    public const string Model = "kling_video_motion";
+    public const string Model = "kling_video_motion_3";
     public const string KieMotionModel = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
+    public const string Ai79GptImage2Model = "imagegen_2_0";
+    public const string Ai79Banana2KReferenceModel = "google_image_gen_banana_2";
+    public const string Ai79ReferenceModel = Ai79Banana2KReferenceModel;
+    public const string ReferenceComparisonExperiment = "dance_sell_reference_ab_test";
     public const string BillingEnabledConfigKey = "dance_sell_billing_enabled";
     public const string AllowCodeProviderFallbackConfigKey = "dance_sell_allow_code_provider_fallback";
 }
+
+public static class DanceSellReferenceComparisonCandidates
+{
+    public static IReadOnlyList<DanceSellReferenceComparisonCandidate> All { get; } = new[]
+    {
+        new DanceSellReferenceComparisonCandidate("79ai", DanceSellConstants.Ai79GptImage2Model, "GPT Image 2"),
+        new DanceSellReferenceComparisonCandidate("79ai", "o1", "IMAGE O1 - Kling"),
+        new DanceSellReferenceComparisonCandidate("79ai", "seedream_4_0", "Seedream 4.0"),
+        new DanceSellReferenceComparisonCandidate("79ai", "google_image_gen_banana_pro", "Nano Banana Pro")
+    };
+}
+
+public sealed record DanceSellReferenceComparisonCandidate(string ProviderCode, string ModelName, string DisplayName);
 
 public static class DanceSellReferenceModes
 {
@@ -30,6 +49,14 @@ public static class DanceSellOperationTypes
     public const string OutputStage = "output_stage";
 
     public static IReadOnlyList<string> All { get; } = new[] { ReferenceImage, MotionVideo, OutputStage };
+}
+
+public static class RDanceDownloadTypes
+{
+    public const string Result = "result";
+    public const string Reference = "reference";
+
+    public static IReadOnlyList<string> All { get; } = new[] { Result, Reference };
 }
 
 public static class DanceSellOperationStatuses
@@ -70,6 +97,80 @@ public static class DanceSellBillingStatuses
     public const string Refunded = "refunded";
 }
 
+public static class DanceSellCustomerStatusText
+{
+    public static string JobStatusLabel(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        DanceSellJobStatuses.Draft => "Bản nháp",
+        "reference_inputs" => "Chuẩn bị dữ liệu",
+        "reference_generation" => "Đang tạo ảnh tham chiếu",
+        "reference_ready" => "Ảnh tham chiếu đã sẵn sàng",
+        "reference_approved" => "Đã duyệt ảnh tham chiếu",
+        DanceSellJobStatuses.Queued => "Đang chờ xử lý",
+        DanceSellJobStatuses.Submitted => "Đã gửi xử lý",
+        DanceSellJobStatuses.Rendering => "Đang tạo video",
+        DanceSellJobStatuses.Completed => "Hoàn thành",
+        DanceSellJobStatuses.Failed => "Lỗi",
+        DanceSellJobStatuses.Timeout => "Quá thời gian xử lý",
+        "cancelled" => "Đã hủy",
+        _ => string.IsNullOrWhiteSpace(status) ? "Chưa bắt đầu" : status!
+    };
+
+    public static string StageLabel(string? stage) => stage?.Trim().ToLowerInvariant() switch
+    {
+        DanceSellCurrentStages.Draft => "Bản nháp",
+        DanceSellCurrentStages.MediaUpload => "Chuẩn bị dữ liệu",
+        "reference_inputs" => "Chuẩn bị dữ liệu",
+        DanceSellCurrentStages.ReferenceGeneration => "Đang tạo ảnh tham chiếu",
+        DanceSellCurrentStages.ReferenceReady => "Ảnh tham chiếu đã sẵn sàng",
+        DanceSellCurrentStages.ReferenceApproved => "Đã duyệt ảnh tham chiếu",
+        DanceSellCurrentStages.MotionQueued => "Đang chờ tạo video",
+        DanceSellCurrentStages.MotionRendering => "Đang tạo video",
+        "motion_submitted" => "Đã gửi xử lý",
+        "output_staging" => "Đang hoàn thiện",
+        DanceSellCurrentStages.Completed => "Hoàn thành",
+        DanceSellCurrentStages.Failed => "Lỗi",
+        "timeout" => "Quá thời gian xử lý",
+        "cancelled" => "Đã hủy",
+        DanceSellOperationStatuses.Queued => "Đang chờ xử lý",
+        DanceSellOperationStatuses.Submitted => "Đã gửi xử lý",
+        DanceSellOperationStatuses.Generating => "Đang tạo video",
+        _ => string.IsNullOrWhiteSpace(stage) ? "Chưa bắt đầu" : stage!
+    };
+
+    public static string BillingStatusLabel(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        "pending" => "Đang xử lý điểm",
+        DanceSellBillingStatuses.Charged => "Đã trừ điểm",
+        DanceSellBillingStatuses.Estimated => "Đã ước tính điểm",
+        DanceSellBillingStatuses.Reconciliation => "Chờ đối soát",
+        DanceSellBillingStatuses.NotRequired => "Không cần tính điểm",
+        DanceSellBillingStatuses.Refunded => "Đã hoàn điểm",
+        DanceSellRefundStatuses.NotCharged => "Chưa trừ điểm",
+        DanceSellBillingStatuses.Reserved => "Đang giữ điểm",
+        DanceSellBillingStatuses.ChargeFailed => "Trừ điểm thất bại",
+        DanceSellBillingStatuses.PartiallyRefunded => "Hoàn điểm một phần",
+        _ => string.IsNullOrWhiteSpace(status) ? "Không xác định" : status!
+    };
+
+    public static string ProviderStatusLabel(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        "queued" => "Đang chờ",
+        "submitted" => "Đã gửi",
+        "processing" => "Đang xử lý",
+        "rendering" => "Đang xử lý",
+        "completed" => "Hoàn thành",
+        "success" => "Hoàn thành",
+        "failed" => "Lỗi",
+        "error" => "Lỗi",
+        "timeout" => "Quá thời gian",
+        "cancelled" => "Đã hủy",
+        _ => string.IsNullOrWhiteSpace(status) ? "Không xác định" : status!
+    };
+
+    public static string PointStatusLabel(string? status) => BillingStatusLabel(status);
+}
+
 public static class DanceSellRefundStatuses
 {
     public const string NotRequired = "not_required";
@@ -88,6 +189,8 @@ public static class DanceSellAssetRoles
     public const string DirectReferenceInput = "direct_reference_input";
     public const string ReferenceOutput = "reference_output";
     public const string MotionInput = "motion_input";
+    public const string MotionReferenceProviderUpload = "motion_reference_provider_upload";
+    public const string MotionProviderUpload = "motion_provider_upload";
     public const string VideoOutput = "video_output";
     public const string ProviderRawOutput = "provider_raw_output";
 }
@@ -151,6 +254,7 @@ public sealed class DanceSellJobCreateRequest
     public string CharacterImageUrl { get; set; } = string.Empty;
     public string MotionVideoUrl { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string ProviderCode { get; set; } = DanceSellConstants.ProviderCode;
     public string ProviderModel { get; set; } = DanceSellConstants.Model;
@@ -161,10 +265,13 @@ public sealed class DanceSellDraftCreateRequest
     public Guid? TenantId { get; set; }
     public Guid? CustomerId { get; set; }
     public Guid? UserId { get; set; }
+    public Guid? ServiceId { get; set; }
+    public string? ServiceCode { get; set; }
     public string Title { get; set; } = string.Empty;
     public string ReferenceMode { get; set; } = DanceSellReferenceModes.GenerateReference;
     public string Prompt { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string PlacementMode { get; set; } = DanceSellPlacementModes.HoldProduct;
     public string? CustomPlacementInstruction { get; set; }
@@ -173,6 +280,7 @@ public sealed class DanceSellDraftCreateRequest
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
+    public bool AutoFinish { get; set; } = true;
 }
 
 public sealed class DanceSellJobDto
@@ -188,6 +296,7 @@ public sealed class DanceSellJobDto
     public string CharacterImageUrl { get; set; } = string.Empty;
     public string MotionVideoUrl { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string ProviderCode { get; set; } = DanceSellConstants.ProviderCode;
     public string ProviderModel { get; set; } = DanceSellConstants.Model;
@@ -251,6 +360,7 @@ public sealed class DanceSellJobDto
     public DateTime? PreparedReferenceApprovedAt { get; set; }
     public string SourceStageStatus { get; set; } = DanceSellSourceStageStatuses.Pending;
     public string? SourceStageError { get; set; }
+    public bool AutoFinish { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
 }
@@ -296,20 +406,117 @@ public sealed class DanceSellReferenceVersionDto
     public DateTime? CompletedAt { get; set; }
 }
 
+public static class DanceSellMotionProviderContract
+{
+    public const string DefaultProviderMode = "standard";
+    public const string DefaultProviderRatio = "default";
+    public const string DefaultReferenceImageField = "character_image";
+    public const string DefaultMotionVideoField = "motion_video";
+
+    public static string ResolveProviderMode(DanceSellProviderRouteDto route, string? businessMode)
+        => FirstNonBlank(
+               ReadConfigString(route.ConfigJson, "mode"),
+               ReadConfigString(route.ConfigJson, "provider_mode"),
+               MapBusinessMode(businessMode),
+               DefaultProviderMode)!;
+
+    public static string ResolveProviderRatio(DanceSellProviderRouteDto route, string? selectedRatio = null)
+        => string.Equals(route.ModelName, DanceSellConstants.Model, StringComparison.OrdinalIgnoreCase)
+            ? DefaultProviderRatio
+            : FirstNonBlank(
+                   selectedRatio,
+                   ReadConfigString(route.ConfigJson, "ratio"),
+                   ReadConfigString(route.ConfigJson, "provider_ratio"),
+                   DefaultProviderRatio)!;
+
+    public static string ResolveReferenceImageField(DanceSellProviderRouteDto route)
+        => FirstNonBlank(ReadConfigString(route.ConfigJson, "reference_image_field"), DefaultReferenceImageField)!;
+
+    public static string ResolveMotionVideoField(DanceSellProviderRouteDto route)
+        => FirstNonBlank(ReadConfigString(route.ConfigJson, "motion_video_field"), DefaultMotionVideoField)!;
+
+    public static string MapBusinessMode(string? businessMode)
+    {
+        var value = businessMode?.Trim();
+        return value?.ToLowerInvariant() switch
+        {
+            "720p" => "standard",
+            "1080p" => "professional",
+            "standard" => "standard",
+            "professional" => "professional",
+            _ => DefaultProviderMode
+        };
+    }
+
+    private static string? ReadConfigString(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return doc.RootElement.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+}
+
+public static class DanceSellRatioNormalizer
+{
+    public static string NormalizeDanceSellRatio(string? ratio)
+        => string.Equals(ratio?.Trim(), "16:9", StringComparison.OrdinalIgnoreCase)
+            ? "16:9"
+            : "9:16";
+}
+
+public sealed class DanceSellReferenceComparisonResultDto
+{
+    public DanceSellReferenceComparisonCandidate Candidate { get; set; } = new("79ai", string.Empty, string.Empty);
+    public DanceSellReferenceVersionDto? Version { get; set; }
+    public string Status { get; set; } = DanceSellReferenceStatuses.NotCreated;
+    public string? ErrorMessage { get; set; }
+    public TimeSpan? Elapsed { get; set; }
+}
+
+public sealed class DanceSellReferenceComparisonScoreRequest
+{
+    public int ShirtColorFidelity { get; set; }
+    public int GarmentShapeFidelity { get; set; }
+    public int GraphicTextFidelity { get; set; }
+    public int LogoArtworkFidelity { get; set; }
+    public int SelectedBottomFidelity { get; set; }
+    public int IdentityPreservation { get; set; }
+}
+
 public sealed class DanceSellCreateJobRequest
 {
+    public Guid? ServiceId { get; set; }
+    public string? ServiceCode { get; set; }
     public string? Title { get; set; }
     public string ReferenceMode { get; set; } = DanceSellReferenceModes.GenerateReference;
     public string Prompt { get; set; } = string.Empty;
     public string PlacementMode { get; set; } = DanceSellPlacementModes.HoldProduct;
     public string? CustomPlacementInstruction { get; set; }
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string? ImagePrompt { get; set; }
     public string? ReferenceProviderCode { get; set; }
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
+    public bool AutoFinish { get; set; } = true;
 }
 
 public sealed class DanceSellUpdateBusinessRequest
@@ -320,12 +527,14 @@ public sealed class DanceSellUpdateBusinessRequest
     public string PlacementMode { get; set; } = DanceSellPlacementModes.HoldProduct;
     public string? CustomPlacementInstruction { get; set; }
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string? ImagePrompt { get; set; }
     public string? ReferenceProviderCode { get; set; }
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
+    public bool AutoFinish { get; set; }
 }
 
 public sealed class DanceSellTikTokStageRequest
@@ -347,6 +556,7 @@ public sealed class DanceSellJsonBusinessRequest
     public string? CustomPlacementInstruction { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string? ImagePrompt { get; set; }
     public string? ReferenceProviderCode { get; set; }
@@ -370,10 +580,12 @@ public sealed class DanceSellProviderRouteDto
     public Guid? ProviderCapabilityId { get; set; }
     public Guid? ProviderAccountId { get; set; }
     public string ModelName { get; set; } = DanceSellConstants.Model;
+    public string? ModelMode { get; set; }
     public int Priority { get; set; } = 100;
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; }
     public bool AllowUserSelect { get; set; }
+    public string[] FallbackOn { get; set; } = Array.Empty<string>();
     public string ConfigJson { get; set; } = "{}";
     public string DisplayName => $"{ProviderCode} / {ModelName}";
 }
@@ -505,6 +717,7 @@ public sealed class DanceSellCostEstimate
     public string OperationType { get; set; } = string.Empty;
     public string ProviderCode { get; set; } = string.Empty;
     public string ModelName { get; set; } = string.Empty;
+    public string? ProviderMode { get; set; }
     public string UsageUnit { get; set; } = "credits";
     public decimal EstimatedUsage { get; set; }
     public decimal? ProviderUnitPrice { get; set; }
@@ -532,4 +745,19 @@ public sealed class ProviderBalanceResult
     public string? RawResponseJson { get; set; }
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
+}
+
+public static class DanceSellCustomerErrorPolicy
+{
+    public static string Message(string? errorCode)
+        => errorCode?.Trim().ToUpperInvariant() switch
+        {
+            "DANCE_SELL_INVALID_CHARACTER" => "Ảnh người mẫu chưa hợp lệ. Vui lòng tải lại ảnh.",
+            "DANCE_SELL_INVALID_PRODUCT" => "Ảnh sản phẩm chưa hợp lệ. Vui lòng tải lại ảnh.",
+            "DANCE_SELL_INVALID_MOTION" or "DANCE_SELL_MOTION_FILE_REQUIRED" => "Video chuyển động chưa hợp lệ. Vui lòng tải lại video.",
+            "DANCE_SELL_VIDEO_DURATION_REQUIRED" or "DANCE_SELL_MOTION_DURATION_NOT_READY" => "Chưa xác định được thời lượng video. Vui lòng tải lại video.",
+            "DANCE_SELL_CANCEL_FAILED" => "Không thể dừng video lúc này. Vui lòng thử lại.",
+            "DANCE_SELL_REFERENCE_NOT_APPROVED" or "DANCE_SELL_REFERENCE_FILE_REQUIRED" => "Không thể chuẩn bị ảnh để tạo video. Vui lòng thử lại.",
+            _ => "Không thể tạo video ở lần xử lý này. Vui lòng thử lại hoặc liên hệ hỗ trợ."
+        };
 }

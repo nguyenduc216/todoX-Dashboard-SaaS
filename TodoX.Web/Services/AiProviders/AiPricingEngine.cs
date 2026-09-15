@@ -23,6 +23,30 @@ public static class AiPricingEngine
             EqualsOrNull(price.Ratio, normalizedRatio));
     }
 
+    public static AiModelPriceDto? FindPrice(
+        IEnumerable<AiModelPriceDto> prices,
+        string? mode,
+        string? resolution,
+        int? durationSeconds,
+        string? ratio)
+    {
+        var exact = FindExactPrice(prices, mode, resolution, durationSeconds, ratio);
+        if (exact is not null || durationSeconds is null)
+        {
+            return exact;
+        }
+
+        var normalizedMode = Normalize(mode);
+        var normalizedResolution = Normalize(resolution);
+        var normalizedRatio = Normalize(ratio);
+        return prices.FirstOrDefault(price =>
+            price.Active &&
+            EqualsOrNull(price.Mode, normalizedMode) &&
+            EqualsOrNull(price.Resolution, normalizedResolution) &&
+            price.DurationSeconds is null &&
+            EqualsOrNull(price.Ratio, normalizedRatio));
+    }
+
     public static decimal CalculateInternalUnitCostPoints(decimal providerPrice, decimal providerCreditPerInternalPoint)
     {
         if (providerCreditPerInternalPoint <= 0)

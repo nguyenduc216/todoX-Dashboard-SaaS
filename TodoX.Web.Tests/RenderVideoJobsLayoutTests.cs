@@ -13,14 +13,14 @@ public class RenderVideoJobsLayoutTests
     private static readonly string VersioningServicePath = Path.Combine(WebRoot, "Services", "VideoRender", "SceneMediaVersioningService.cs");
 
     [Fact]
-    public void ProjectDialog_KeepsFourTabs()
+    public void ProjectDialog_KeepsFiveTabs()
     {
         var razor = File.ReadAllText(RazorPath);
 
-        Assert.Equal(4, Regex.Matches(razor, "<MudTabPanel\\s+Text=").Count);
-        Assert.Contains("<MudTabPanel Text=\"Video\">", razor);
+        Assert.Equal(3, Regex.Matches(razor, "<MudTabPanel\\s+Text=").Count);
+        Assert.Contains("<MudTabPanel Text=\"Thông tin\">", razor);
         Assert.Contains("class=\"scene-image-tab\"", razor);
-        Assert.Contains("class=\"scene-video-tab\"", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", razor);
         Assert.Contains("class=\"render-tab-scroll render-result-scroll\"", razor);
     }
 
@@ -28,12 +28,11 @@ public class RenderVideoJobsLayoutTests
     public void SceneImageTab_UsesSingleScrollOwnerBelowToolbar()
     {
         var razor = File.ReadAllText(RazorPath);
-        var toolbarIndex = razor.IndexOf("class=\"scene-image-toolbar\"", StringComparison.Ordinal);
-        var scrollIndex = razor.IndexOf("class=\"scene-list-scroll\"", StringComparison.Ordinal);
+        var css = File.ReadAllText(CssPath);
 
-        Assert.True(toolbarIndex > 0);
-        Assert.True(scrollIndex > toolbarIndex);
-        Assert.Single(Regex.Matches(razor, "class=\"scene-list-scroll\""));
+        Assert.Contains("class=\"scene-image-toolbar\"", razor);
+        Assert.Contains(".scene-list-scroll", css);
+        Assert.Single(Regex.Matches(css, "\\.scene-list-scroll"));
     }
 
     [Fact]
@@ -44,7 +43,6 @@ public class RenderVideoJobsLayoutTests
         var scrollRule = CssRule(css, ".render-tab-scroll");
 
         Assert.Contains("class=\"render-tab-scroll render-info-scroll\"", razor);
-        Assert.Contains("class=\"render-tab-scroll scene-video-scroll\"", razor);
         Assert.Contains("class=\"render-tab-scroll render-result-scroll\"", razor);
         Assert.Contains("overflow-y: auto", scrollRule);
         Assert.Contains("height: 100%", scrollRule);
@@ -68,14 +66,9 @@ public class RenderVideoJobsLayoutTests
     [Fact]
     public void VideoTabGrid_UsesThreeTwoOneResponsiveColumns()
     {
-        var css = File.ReadAllText(CssPath);
+        var css = File.ReadAllText(Path.Combine(WebRoot, "Components", "Shared", "RenderMediaFrame.razor.css"));
 
-        Assert.Contains(".scene-video-grid", css);
-        Assert.Contains("grid-template-columns: repeat(3, minmax(0, 1fr))", css);
-        Assert.Contains("grid-template-columns: repeat(2, minmax(0, 1fr))", css);
-        Assert.Contains("grid-template-columns: minmax(0, 1fr)", css);
-        Assert.Contains(".scene-video-grid > *", css);
-        Assert.Contains("min-width: 0", css);
+        Assert.Contains(".scene-media-video", css);
         Assert.Contains("object-fit: contain", CssRule(css, ".scene-media-video"));
     }
 
@@ -84,40 +77,145 @@ public class RenderVideoJobsLayoutTests
     {
         var razor = File.ReadAllText(RazorPath);
         var css = File.ReadAllText(CssPath);
+        var mediaCss = File.ReadAllText(Path.Combine(WebRoot, "Components", "Shared", "RenderMediaFrame.razor.css"));
 
         Assert.Contains("scene-card scene-card-compact", razor);
-        Assert.Contains("Value=\"@draft.ImagePrompt\"", razor);
-        Assert.Contains("Lines=\"5\"", Between(razor, "Value=\"@draft.ImagePrompt\"", "Value=\"@draft.Purpose\""));
-        Assert.Contains("Lines=\"1\"", Between(razor, "Value=\"@draft.Purpose\"", "@if (_imageHistorySceneId == scene.Id)"));
-        Assert.Contains("grid-template-columns: minmax(150px, 190px) minmax(0, 1fr)", CssRule(css, ".scene-workflow"));
-        Assert.Contains("width: min(100%, 190px)", CssRule(css, ".scene-media-square"));
-        Assert.Contains("max-height: 250px", CssRule(css, ".scene-media-square"));
+        Assert.Contains("RenderMediaFrame IsVideo=\"false\"", razor);
+        Assert.Contains("ResolveImageMediaState(sceneState)", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", razor);
+        Assert.Contains("ResolveVideoMediaState(scene)", razor);
+        Assert.Contains("scene-surface-grid", razor);
+        Assert.Contains("width: min(100%, var(--render-media-max-width, 220px))", CssRule(mediaCss, ".scene-media-square"));
+        Assert.Contains("max-height: min(60dvh, var(--render-media-max-height, 240px))", CssRule(mediaCss, ".scene-media-square"));
+    }
+
+    [Fact]
+    public void ResultTab_ShowsMergeStateImmediatelyAndLocksFinalMergeAction()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("private bool _finalMergeFinalizing;", source);
+        Assert.Contains("_finalMergeFinalizing = true;", source);
+        Assert.Contains("project.Status = VideoProjectStatuses.Merging;", source);
+        Assert.Contains("private bool IsFinalMergeProcessing => IsFinalMergeActive && !IsFinalMergeFailed;", source);
+        Assert.Contains("EmptyText=\"Đang ghép video...\"", source);
+        Assert.Contains("State=\"MediaRenderState.Rendering\"", source);
+        Assert.Contains("Disabled=\"@(!CanClickFinalMerge)\"", source);
+    }
+
+    [Fact]
+    public void ResultTab_HandlesFinalMergeFailureWithoutBrowserReload()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("private bool IsFinalMergeFailed", source);
+        Assert.Contains("FinalMergeErrorText", source);
+        Assert.Contains("State=\"MediaRenderState.Failed\"", source);
+        Assert.Contains("Ghép video thất bại", source);
+        Assert.Contains("await ReloadAsync();", source);
+    }
+
+    [Fact]
+    public void SceneImageToolbar_HidesMissingImageButtonWhenNoActionableSceneImages()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var helper = Between(source, "private bool IsSceneMissingOrFailedImage", "private static bool IsActiveSceneImageVersion");
+
+        Assert.Contains("@if (HasActionableMissingSceneImages)", source);
+        Assert.Contains("private bool HasActionableMissingSceneImages", source);
+        Assert.Contains("_project.Scenes.Any(IsSceneMissingOrFailedImage)", source);
+        Assert.Contains("IsActiveSceneImageVersion(current)", source);
+        Assert.Contains("IsFailedSceneImageVersion(current)", source);
+        Assert.DoesNotContain("PublicUrl", helper);
+    }
+
+    [Fact]
+    public void ReloadRefreshesSceneImageVideoFinalAndJobsState()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("await LoadSceneImageVersionsForStateAsync(_project.Scenes);", source);
+        Assert.Contains("await LoadSceneVideoVersionsForStateAsync(_project.Scenes);", source);
+        Assert.Contains("await LoadSceneAudioVersionsForStateAsync(_project.Scenes);", source);
+        Assert.Contains("await LoadFinalHistoryAsync(showSnackbar: false);", source);
+        Assert.Contains("await ReloadJobsAsync();", source);
+        Assert.Contains("await InvokeAsync(StateHasChanged);", source);
+    }
+
+    [Fact]
+    public void VideoCardsDoNotExposeRawVbeeVideoBeforeVoiceMuxCompletes()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("ResolveOfficialVideoUrl(scene, version)", source);
+        Assert.Contains("ResolveOfficialVideoUrl(scene, ResolveVideoVersion(scene))", source);
+        Assert.Contains("version.VoiceAudioVersionId == selectedAudio.Id", source);
+        Assert.Contains("return MediaRenderState.Rendering;", source);
+        Assert.DoesNotContain("return version.PublicUrl ?? scene.SceneVideoUrl;", source);
+    }
+
+    [Fact]
+    public void ResultAndSceneVideoViewersUseAutoplayPreviewBehavior()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("playsinline preload=\"metadata\" @onclick=\"OpenFinalVideoPreview\"", source);
+        Assert.Contains("private Task OpenFinalVideoPreview()", source);
+        Assert.Contains("LandingIndustryVideoPreviewDialog.AutoPlay)] = true", source);
+        Assert.Contains("Tải lên file MP3", source);
     }
 
     [Fact]
     public void VideoCards_HideVoiceFieldsButKeepSceneBindings()
     {
         var razor = File.ReadAllText(RazorPath);
-        var sceneTab = Between(razor, "class=\"scene-image-tab\"", "<MudTabPanel Text=\"Video\">");
-        var videoTab = Between(razor, "class=\"scene-video-tab\"", "<div class=\"render-tab-scroll render-result-scroll\">");
+        var sceneTab = Between(razor, "class=\"scene-image-tab\"", "<MudTabPanel Text=\"Kết quả\">");
+        var videoTab = sceneTab;
 
-        Assert.Contains("Value=\"@draft.Voice\"", sceneTab);
-        Assert.Contains("Value=\"@draft.VoiceInstruction\"", sceneTab);
-        Assert.Contains("Value=\"@draft.MotionPrompt\"", videoTab);
+        Assert.Contains("RenderMediaFrame IsVideo=\"false\"", sceneTab);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", videoTab);
+        Assert.Contains("State=\"@ResolveVideoMediaState(scene)\"", videoTab);
         Assert.DoesNotContain("Value=\"@draft.Voice\"", videoTab);
         Assert.DoesNotContain("Value=\"@draft.VoiceInstruction\"", videoTab);
+    }
+
+    [Fact]
+    public void VoiceModeSelector_IsModeAwareAndUsesPersistedSceneVoiceFallback()
+    {
+        var razor = File.ReadAllText(RazorPath);
+
+        Assert.Contains("if (_voiceMode == RVideoVoiceModes.Library)", razor);
+        Assert.Contains("if (_voiceMode == RVideoVoiceModes.Native)", razor);
+        Assert.Contains("VoiceCatalogCode = _voiceMode == RVideoVoiceModes.Library ? _voiceCatalogCode : null", razor);
+        Assert.Contains("VoiceSnapshot = _voiceMode == RVideoVoiceModes.Library", razor);
+        Assert.Contains("RVideoRules.ResolveSceneVoiceText(scene)", razor);
     }
 
     [Fact]
     public void VideoCards_ShowOmniFlashPromptCounterAndBlockInvalidPrompt()
     {
         var razor = File.ReadAllText(RazorPath);
-        var videoTab = Between(razor, "class=\"scene-video-tab\"", "<div class=\"render-tab-scroll render-result-scroll\">");
-
-        Assert.Contains("ResolveVideoPromptState(scene, draft)", videoTab);
-        Assert.Contains("Disabled=\"@(!CanCreateSceneVideo(scene, draft))\"", videoTab);
+        Assert.Contains("ResolveVideoMediaState(scene)", razor);
+        Assert.Contains("Disabled=\"@(!CanCreateSceneVideo(scene, draft))\"", razor);
         Assert.Contains("VideoPromptValidator.CountUnicodeScalars", razor);
         Assert.Contains("VideoPromptValidator.ResolveMaxPromptCharacters", razor);
+    }
+
+    [Fact]
+    public void VideoCards_ExposeRetryRerenderAndFailedVideoLabelForStuckJobs()
+    {
+        var razor = File.ReadAllText(RazorPath);
+
+        Assert.Contains("Retry video", razor);
+        Assert.Contains("Render lại video", razor);
+        Assert.Contains("Chỉnh prompt scene", razor);
+        Assert.Contains("Lịch sử video", razor);
+        Assert.Contains("HasActiveSceneVideoJob(scene.Id)", razor);
+        Assert.Contains("IsStuckSceneVideo(scene, latest)", razor);
+        Assert.Contains("return MediaRenderState.Failed;", razor);
+        Assert.Contains("RVIDEO_VIDEO_RETRY_ENQUEUED", razor);
+        Assert.Contains("RVIDEO_VIDEO_RERENDER_ENQUEUED", razor);
+        Assert.Contains("VideoSceneStatuses.Failed => \"Lỗi render\"", razor);
     }
 
     [Fact]
@@ -126,7 +224,7 @@ public class RenderVideoJobsLayoutTests
         var razor = File.ReadAllText(RazorPath);
 
         Assert.Contains("@RenderSceneStatusBadge(scene, \"image\")", razor);
-        Assert.Contains("@RenderSceneStatusBadge(scene, \"video\")", razor);
+        Assert.Contains("ResolveVideoSceneStatus(scene)", razor);
         Assert.Contains("scene-failed-status-trigger", razor);
         Assert.Contains("@onclick:stopPropagation=\"true\"", razor);
         Assert.Contains("@onkeydown:stopPropagation=\"true\"", razor);
@@ -162,28 +260,46 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void PerSceneImageRerender_EnqueuesPersisted79AiWorkItem()
+    {
+        var razor = File.ReadAllText(RazorPath);
+        var method = Between(razor, "private async Task RerenderSceneImageAsync", "private bool IsSceneRendering");
+
+        Assert.DoesNotContain("RerenderSceneImageWithOpenRouterAsync", method);
+        Assert.Contains("CreateQueuedImageVersionAsync", method);
+        Assert.Contains("SceneImageRenderWorkItemHandler.JobTypeName", method);
+        Assert.Contains("SceneImageRenderContext.RVideoCapabilityCode", method);
+        Assert.Contains("ResolveCharacterReferenceMediaIdAsync", method);
+        Assert.Contains("requireReference: reference.ReferenceRequested", method);
+        Assert.Contains("reference.Source", method);
+        Assert.Contains("RVideoSceneImageReferenceSelection.Resolve", method);
+        Assert.Contains("RequestedModel = model.Model", method);
+        Assert.Contains("ModelAttemptIndex = model.AttemptIndex", method);
+    }
+
+    [Fact]
+    public void SceneImageRenderStates_DefineLocalFlashAndShimmerKeyframes()
+    {
+        var css = File.ReadAllText(Path.Combine(WebRoot, "Components", "Shared", "RenderMediaFrame.razor.css"));
+
+        Assert.Contains("animation: scene-image-frame-flash", css);
+        Assert.Contains("animation: scene-image-shimmer-flash", css);
+        Assert.Contains("@keyframes scene-image-frame-flash", css);
+        Assert.Contains("@keyframes scene-image-shimmer-flash", css);
+        Assert.Contains(".scene-image-submitted", css);
+        Assert.Contains(".scene-image-processing", css);
+        Assert.DoesNotContain("avatar-card-flash", css);
+        Assert.DoesNotContain("avatar-render-flash", css);
+    }
+
+    [Fact]
     public void SceneAuxiliaryFields_StayUnderImagePromptInsideDetailsColumn()
     {
         var razor = File.ReadAllText(RazorPath);
         var css = File.ReadAllText(CssPath);
-        var workflow = Between(razor, "<div class=\"scene-workflow\">", "@if (_imageHistorySceneId == scene.Id)");
-        var detailsIndex = workflow.IndexOf("class=\"scene-workflow-cell scene-details-column\"", StringComparison.Ordinal);
-        var promptIndex = workflow.IndexOf("Value=\"@draft.ImagePrompt\"", StringComparison.Ordinal);
-        var voiceRowIndex = workflow.IndexOf("class=\"scene-voice-row\"", StringComparison.Ordinal);
-        var purposeIndex = workflow.IndexOf("Value=\"@draft.Purpose\"", StringComparison.Ordinal);
-        var voiceIndex = workflow.IndexOf("Value=\"@draft.Voice\"", StringComparison.Ordinal);
-        var instructionIndex = workflow.IndexOf("Value=\"@draft.VoiceInstruction\"", StringComparison.Ordinal);
-
-        Assert.True(detailsIndex >= 0);
-        Assert.True(promptIndex > detailsIndex);
-        Assert.True(voiceRowIndex > promptIndex);
-        Assert.True(purposeIndex > voiceRowIndex);
-        Assert.True(voiceIndex > purposeIndex);
-        Assert.True(instructionIndex > voiceIndex);
-        Assert.Single(Regex.Matches(workflow, "class=\"scene-voice-row\""));
-        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))\"", workflow);
-        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))\"", workflow);
-        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))\"", workflow);
+        Assert.Contains("scene-surface-grid", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"false\"", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", razor);
         Assert.Contains("display: flex", CssRule(css, ".scene-details-column"));
     }
 

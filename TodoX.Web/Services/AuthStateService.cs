@@ -34,6 +34,12 @@ public sealed class AuthStateService
 
     public event Action? OnChange;
 
+    public void ResetInitializationForRetry()
+    {
+        IsInitialized = false;
+        CurrentUser = null;
+    }
+
     internal sealed record PersistedAuth(
         Guid UserId,
         bool Remember,

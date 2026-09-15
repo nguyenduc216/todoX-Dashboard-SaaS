@@ -20,12 +20,20 @@ public sealed class TodoXVideoPromptModel
 public sealed class TodoXVideoScenePromptModel
 {
     public int? Scene { get; set; }
+    public string? RawJson { get; set; }
     public string? ScenePurpose { get; set; }
     public int? DurationSeconds { get; set; }
     public string? ImagePrompt { get; set; }
+    public string? ImagePromptFallback { get; set; }
+    public string? EffectiveImagePrompt { get; set; }
     public string? MotionPrompt { get; set; }
+    public string? VideoPrompt { get; set; }
     public string? Voice { get; set; }
+    public string? VoiceText { get; set; }
+    public string? TtsText { get; set; }
     public string? VoiceInstruction { get; set; }
+    public decimal? TtsRate { get; set; }
+    public List<string> Warnings { get; set; } = new();
 }
 
 public sealed class TodoXVideoPromptSummary
@@ -39,6 +47,7 @@ public sealed class TodoXVideoPromptSummary
     public int? DeclaredDurationSeconds { get; set; }
     public int SceneDurationTotal { get; set; }
     public int SceneCount { get; set; }
+    public string? SceneDurationValidationMessage { get; set; }
     public bool HasDurationMismatch => !HasExplicitScenes && DeclaredDurationSeconds.HasValue && DeclaredDurationSeconds.Value != SceneDurationTotal;
     public bool HasExplicitScenes { get; set; }
     public string? DurationMismatchMessage { get; set; }
@@ -47,6 +56,7 @@ public sealed class TodoXVideoPromptSummary
 public sealed class TodoXVideoPromptParseResult
 {
     public bool IsTodoXPrompt { get; set; }
+    public bool IsTodoXSchemaValid { get; set; }
     public bool IsJsonValid { get; set; }
     public bool HasInvalidAspectRatio { get; set; }
     public string? InvalidAspectRatio { get; set; }
@@ -54,6 +64,7 @@ public sealed class TodoXVideoPromptParseResult
     public string? InvalidResolution { get; set; }
     public bool HasScenes => Model.Scenes.Count > 0;
     public string? ErrorMessage { get; set; }
+    public List<string> Warnings { get; set; } = new();
     public TodoXVideoPromptModel Model { get; set; } = new();
     public TodoXVideoPromptSummary Summary { get; set; } = new();
     public string RawText { get; set; } = string.Empty;
@@ -91,14 +102,18 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             var model = DeserializeModel(json);
             if (model is null)
             {
-                result.ErrorMessage = "JSON không tạo được dữ liệu.";
+                result.IsJsonValid = true;
+                result.ErrorMessage = "JSON hợp lệ nhưng phải có object gốc để dùng làm TodoX prompt.";
                 return result;
             }
 
             result.Model = Normalize(model);
             result.IsJsonValid = true;
             result.IsTodoXPrompt = HasTodoXMetadata(result.Model);
+            result.IsTodoXSchemaValid = HasTodoXSchema(json, result.Model, result.Warnings);
             result.Summary = BuildSummary(result.Model);
+            result.Warnings.AddRange(result.Model.Scenes.SelectMany(scene => scene.Warnings));
+            AddMetadataWarnings(result.Model, result.Warnings);
             var rawAspectRatio = model.RawAspectRatio;
             if (!string.IsNullOrWhiteSpace(rawAspectRatio) && string.IsNullOrWhiteSpace(result.Model.AspectRatio))
             {
@@ -115,9 +130,14 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             }
             return result;
         }
+        catch (JsonException)
+        {
+            result.ErrorMessage = "JSON syntax không hợp lệ hoặc chưa parse được.";
+            return result;
+        }
         catch (Exception ex)
         {
-            result.ErrorMessage = ex.Message;
+            result.ErrorMessage = $"Không thể đọc JSON: {ex.Message}";
             return result;
         }
     }
@@ -132,6 +152,12 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             foreach (var scene in model.Scenes)
             {
                 scene.DurationSeconds = ParseDuration(scene.DurationSeconds?.ToString());
+                scene.MotionPrompt = FirstNonBlank(scene.MotionPrompt, scene.VideoPrompt);
+                scene.Voice = FirstNonBlank(scene.Voice, scene.VoiceText, scene.TtsText);
+                scene.EffectiveImagePrompt = IsPlaceholder(scene.ImagePrompt)
+                    ? FirstUsablePrompt(scene.ImagePromptFallback)
+                    : FirstUsablePrompt(scene.ImagePrompt);
+                AddPlaceholderWarning(scene);
             }
         }
 
@@ -142,15 +168,24 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var meta = root.TryGetProperty("meta", out var metaElement) && metaElement.ValueKind == JsonValueKind.Object
+            ? metaElement
+            : default;
         var model = new TodoXVideoPromptModel
         {
             RawAspectRatio = ReadString(root, "aspect_ratio", "aspectRatio", "video_aspect_ratio", "ratio"),
             RawResolution = ReadString(root, "resolution", "video_resolution", "output_resolution", "quality_resolution"),
-            VideoTitle = ReadString(root, "video_title", "title"),
-            VideoObjective = ReadString(root, "video_objective", "objective"),
-            DurationSeconds = ParseDuration(ReadRaw(root, "duration")),
-            Style = ReadString(root, "style"),
-            Cta = ReadString(root, "cta"),
+            VideoTitle = ReadString(root, "video_title", "title") ?? ReadString(meta, "product_name", "video_title"),
+            VideoObjective = ReadString(root, "video_objective", "objective") ?? ReadString(meta, "kieu_kich_ban", "video_objective"),
+            DurationSeconds = ParseDuration(ReadRaw(root, "duration_seconds", "duration"))
+                ?? ParseDuration(ReadRaw(meta, "total_duration_seconds")),
+            Style = ReadString(root, "style") ?? ReadString(meta, "style"),
+            Cta = ReadString(root, "cta") ?? ReadString(meta, "cta"),
             CharacterImageNote = ReadString(root, "character_image_note")
         };
 
@@ -160,13 +195,19 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             {
                 model.Scenes.Add(new TodoXVideoScenePromptModel
                 {
-                    Scene = TryGetInt(item, "scene"),
+                    RawJson = item.GetRawText(),
+                    Scene = TryGetInt(item, "scene", "scene_index", "sceneIndex"),
                     ScenePurpose = ReadString(item, "scene_purpose", "purpose"),
                     DurationSeconds = ParseDuration(ReadRaw(item, "duration_seconds", "duration")),
                     ImagePrompt = ReadString(item, "image_prompt"),
-                    MotionPrompt = ReadString(item, "motion_prompt"),
+                    ImagePromptFallback = ReadString(item, "image_prompt_fallback", "imagePromptFallback"),
+                    MotionPrompt = ReadString(item, "motion_prompt", "video_prompt"),
+                    VideoPrompt = ReadString(item, "video_prompt"),
                     Voice = ReadString(item, "voice"),
-                    VoiceInstruction = ReadString(item, "voice_instruction")
+                    VoiceText = ReadString(item, "voice_text"),
+                    TtsText = ReadString(item, "tts_text"),
+                    VoiceInstruction = ReadString(item, "voice_instruction"),
+                    TtsRate = ReadDecimal(item, "tts_rate", "ttsRate", "speech_rate")
                 });
             }
         }
@@ -189,6 +230,14 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             SceneCount = model.Scenes.Count,
             HasExplicitScenes = model.Scenes.Count > 0
         };
+
+        var sceneLabels = model.Scenes
+            .Select((scene, index) => scene.Scene ?? index + 1)
+            .ToArray();
+        if (sceneLabels.Length > 0 && model.Scenes.All(scene => scene.DurationSeconds is > 0))
+        {
+            summary.SceneDurationValidationMessage = $"Scene {string.Join("/", sceneLabels)} đủ duration.";
+        }
 
         if (summary.HasDurationMismatch)
         {
@@ -214,6 +263,11 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
 
     private static string? ReadString(JsonElement element, params string[] names)
     {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
         foreach (var name in names)
         {
             if (element.TryGetProperty(name, out var child))
@@ -243,6 +297,112 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
            || !string.IsNullOrWhiteSpace(model.Cta)
            || model.Scenes.Count > 0;
 
+    private static bool HasTodoXSchema(string json, TodoXVideoPromptModel model, List<string> warnings)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("scenes", out var scenes) || scenes.ValueKind != JsonValueKind.Array)
+        {
+            warnings.Add("Thiếu trường scenes dạng mảng theo schema TodoX.");
+            return false;
+        }
+
+        if (model.Scenes.Count == 0)
+        {
+            warnings.Add("Trường scenes phải có ít nhất một scene.");
+            return false;
+        }
+
+        var valid = true;
+        for (var index = 0; index < model.Scenes.Count; index++)
+        {
+            var scene = model.Scenes[index];
+            if (scene.DurationSeconds is null or <= 0)
+            {
+                warnings.Add($"Scene {scene.Scene ?? index + 1}: thiếu duration_seconds hợp lệ.");
+                valid = false;
+            }
+
+            if (string.IsNullOrWhiteSpace(scene.EffectiveImagePrompt))
+            {
+                warnings.Add($"SCENE_IMAGE_SOURCE_UNRESOLVED: Scene {scene.Scene ?? index + 1} không có image prompt thực tế hoặc fallback dùng được.");
+                valid = false;
+            }
+
+            if (string.IsNullOrWhiteSpace(scene.MotionPrompt))
+            {
+                warnings.Add($"Scene {scene.Scene ?? index + 1}: thiếu motion_prompt/video_prompt.");
+                valid = false;
+            }
+        }
+
+        return valid;
+    }
+
+    private static void AddMetadataWarnings(TodoXVideoPromptModel model, List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(model.VideoTitle))
+        {
+            warnings.Add("Metadata thiếu video title/product name.");
+        }
+
+        if (string.IsNullOrWhiteSpace(model.VideoObjective))
+        {
+            warnings.Add("Metadata thiếu video objective/kieu_kich_ban.");
+        }
+
+        if (string.IsNullOrWhiteSpace(model.Style))
+        {
+            warnings.Add("Metadata thiếu style.");
+        }
+
+        if (string.IsNullOrWhiteSpace(model.Cta))
+        {
+            warnings.Add("Metadata thiếu cta.");
+        }
+    }
+
+    private static void AddPlaceholderWarning(TodoXVideoScenePromptModel scene)
+    {
+        if (string.IsNullOrWhiteSpace(scene.ImagePrompt))
+        {
+            return;
+        }
+
+        if (IsPlaceholder(scene.ImagePrompt))
+        {
+            if (string.IsNullOrWhiteSpace(scene.EffectiveImagePrompt))
+            {
+                scene.Warnings.Add($"SCENE_IMAGE_SOURCE_UNRESOLVED: Scene {scene.Scene ?? 0} image_prompt là placeholder và không có fallback dùng được.");
+            }
+            else
+            {
+                scene.Warnings.Add($"Scene {scene.Scene ?? 0}: image_prompt là placeholder; đã dùng image_prompt_fallback.");
+            }
+        }
+    }
+
+    private static bool IsPlaceholder(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var text = value.Trim();
+        return text.Contains("[[", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("PLACEHOLDER", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("TODO", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("THAY BẰNG", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("THAY BANG", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? FirstUsablePrompt(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value) && !IsPlaceholder(value))?.Trim();
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
     private static int? ParseDuration(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -265,6 +425,31 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
         }
 
         return int.TryParse(text, out direct) ? direct : null;
+    }
+
+    private static decimal? ReadDecimal(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var child))
+            {
+                continue;
+            }
+
+            if (child.ValueKind == JsonValueKind.Number && child.TryGetDecimal(out var number))
+            {
+                return number;
+            }
+
+            if (child.ValueKind == JsonValueKind.String
+                && decimal.TryParse(child.GetString(), System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture, out number))
+            {
+                return number;
+            }
+        }
+
+        return null;
     }
 
     private static string? NormalizeAspectRatio(string? value)

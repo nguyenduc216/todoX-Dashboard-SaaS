@@ -24,12 +24,12 @@ public static class CustomerServiceRouting
 
         if (string.Equals(engineType, TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
         {
-            return new(CustomerServiceDestination.RVideoCreator, null, "Dịch vụ RVideo đang hoàn thiện.");
+            return new(CustomerServiceDestination.RVideoCreator, BuildRoute("/jobs/rvideo/new", serviceId, serviceCode), null);
         }
 
         if (string.Equals(engineType, TodoXServiceEngineTypes.RDance, StringComparison.OrdinalIgnoreCase))
         {
-            return new(CustomerServiceDestination.RDanceCreator, null, "Dịch vụ RDance đang hoàn thiện.");
+            return new(CustomerServiceDestination.RDanceCreator, BuildRoute("/jobs/rdance/new", serviceId, serviceCode), null);
         }
 
         return new(CustomerServiceDestination.Unavailable, null, "Dịch vụ hiện chưa khả dụng.");
@@ -52,11 +52,47 @@ public static class CustomerServiceRouting
     }
 }
 
+public sealed record TimelapseServiceDefinition(
+    string ServiceCode,
+    string DisplayName,
+    string Category,
+    string CategoryLabel,
+    int SortOrder);
+
+public static class TimelapseServiceCatalog
+{
+    public const string ConstructionCategory = "construction_exterior";
+    public const string LivingRoomCategory = "interior_livingroom";
+    public const string BedroomCategory = "interior_bedroom";
+    public const string KitchenCategory = "interior_kitchen";
+    public const string PoolCategory = "pool_construction";
+    public const string InfrastructureCategory = "road_bridge_construction";
+    public const string LandscapeCategory = "landscape";
+
+    public static IReadOnlyList<TimelapseServiceDefinition> Services { get; } =
+    [
+        new("TIMELAPSE_CONSTRUCTION", "Timelapse Xây dựng công trình", ConstructionCategory, "Xây dựng công trình", 11),
+        new("TIMELAPSE_LIVING_ROOM", "Timelapse Phòng khách", LivingRoomCategory, "Phòng khách", 12),
+        new("TIMELAPSE_BEDROOM", "Timelapse Phòng ngủ", BedroomCategory, "Phòng ngủ", 13),
+        new("TIMELAPSE_KITCHEN", "Timelapse Nhà bếp", KitchenCategory, "Nhà bếp", 14),
+        new("TIMELAPSE_POOL", "Timelapse Hồ bơi", PoolCategory, "Hồ bơi", 15),
+        new("TIMELAPSE_INFRASTRUCTURE", "Timelapse Cầu đường / Hạ tầng", InfrastructureCategory, "Cầu đường / Hạ tầng", 16),
+        new("TIMELAPSE_LANDSCAPE", "Timelapse Cảnh quan / Sân vườn / Cây xanh", LandscapeCategory, "Cảnh quan / Sân vườn / Cây xanh", 17)
+    ];
+
+    public static bool TryGet(string? serviceCode, out TimelapseServiceDefinition definition)
+    {
+        definition = Services.FirstOrDefault(x => string.Equals(x.ServiceCode, serviceCode, StringComparison.OrdinalIgnoreCase))!;
+        return definition is not null;
+    }
+}
+
 public sealed class TimelapseProfileDto
 {
     public string ProfileCode { get; set; } = string.Empty;
     public string ProfileName { get; set; } = string.Empty;
     public bool Enabled { get; set; }
+    public string Category { get; set; } = string.Empty;
 }
 
 public sealed class TimelapseRenderProfileDto
@@ -65,18 +101,21 @@ public sealed class TimelapseRenderProfileDto
     public string ProfileName { get; set; } = string.Empty;
     public bool Enabled { get; set; }
     public string ProfileJson { get; set; } = "{}";
+    public string Category { get; set; } = string.Empty;
 }
 
 public sealed class TimelapseCreateRequest
 {
     public Guid? ServiceId { get; set; }
     public string? ServiceCode { get; set; }
+    public string? ServiceCategory { get; set; }
     public string? Title { get; set; } = "Video Timelapse";
     public string ProfileCode { get; set; } = string.Empty;
     public int SceneCount { get; set; } = 3;
     public string VideoMode { get; set; } = TimelapseRequestRules.FastMode;
     public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
     public bool RequireVideoConfirmation { get; set; }
+    public bool AutoFinish { get; set; } = true;
 }
 
 public sealed class TimelapseOriginalImageSnapshot
@@ -85,14 +124,21 @@ public sealed class TimelapseOriginalImageSnapshot
     public string? ObjectKey { get; set; }
     public string? PublicUrl { get; set; }
     public string? MimeType { get; set; }
+
+    public bool IsUsable()
+        => MediaId != Guid.Empty
+           && (!string.IsNullOrWhiteSpace(PublicUrl) || !string.IsNullOrWhiteSpace(ObjectKey));
 }
 
 public sealed class TimelapseJobSnapshot
 {
     public int SchemaVersion { get; set; } = 1;
     public string Engine { get; set; } = TodoXServiceEngineTypes.Timelapse;
+    public Guid? CoreJobId { get; set; }
     public Guid ServiceId { get; set; }
     public string ServiceCode { get; set; } = string.Empty;
+    public string ServiceName { get; set; } = string.Empty;
+    public string ServiceCategory { get; set; } = string.Empty;
     public string ProfileCode { get; set; } = string.Empty;
     public string ProfileName { get; set; } = string.Empty;
     public int SceneCount { get; set; }
@@ -101,9 +147,13 @@ public sealed class TimelapseJobSnapshot
     public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
     public string Title { get; set; } = "Video Timelapse";
     public bool RequireVideoConfirmation { get; set; }
+    public bool AutoFinish { get; set; }
     public bool VideoRenderConfirmed { get; set; }
     public TimelapseSellPriceSnapshot? SellPrice { get; set; }
     public TimelapseOriginalImageSnapshot OriginalImage { get; set; } = new();
+    public TimelapseOriginalImageSnapshot? StartImage { get; set; }
+
+    public bool HasStartImage => StartImage?.IsUsable() == true;
 }
 
 public sealed class TimelapseSellPriceSnapshot
@@ -112,8 +162,39 @@ public sealed class TimelapseSellPriceSnapshot
     public int RuntimeClipDurationSeconds { get; set; }
     public int SceneCount { get; set; }
     public decimal VideoSceneSellPoints { get; set; }
+    public int ImageCount { get; set; }
+    public decimal ImageRate { get; set; }
+    public decimal ImageSubtotal { get; set; }
+    public int VideoSeconds { get; set; }
+    public decimal VideoRatePerSecond { get; set; }
     public decimal VideoSubtotal { get; set; }
+    public int VoiceCount { get; set; }
+    public decimal VoiceRate { get; set; }
+    public decimal VoiceSubtotal { get; set; }
     public decimal TotalPoints { get; set; }
+    public PointPricingEstimate? Pricing { get; set; }
+    public IReadOnlyList<int> ClipDurationsSeconds { get; set; } = Array.Empty<int>();
+
+    public static TimelapseSellPriceSnapshot FromPointEstimate(PointPricingEstimate estimate, int sceneCount, IReadOnlyList<int>? clipDurations = null)
+        => new()
+        {
+            QualityTier = estimate.Video.Quality,
+            RuntimeClipDurationSeconds = estimate.Video.Count > 0 ? estimate.Video.Count / Math.Max(1, sceneCount) : 0,
+            SceneCount = sceneCount,
+            VideoSceneSellPoints = estimate.Video.Points,
+            ImageCount = estimate.Image.Count,
+            ImageRate = estimate.Image.Rate,
+            ImageSubtotal = estimate.Image.Points,
+            VideoSeconds = estimate.Video.Count,
+            VideoRatePerSecond = estimate.Video.Rate,
+            VideoSubtotal = estimate.Video.Points,
+            VoiceCount = estimate.Voice.Count,
+            VoiceRate = estimate.Voice.Rate,
+            VoiceSubtotal = estimate.Voice.Points,
+            TotalPoints = estimate.TotalPoints,
+            Pricing = estimate
+            ,ClipDurationsSeconds = clipDurations ?? Array.Empty<int>()
+        };
 }
 
 public sealed class TimelapseJobView
@@ -136,11 +217,13 @@ public static class TimelapseParentStatuses
     public const string Completed = "COMPLETED";
     public const string Paused = "PAUSED";
     public const string Failed = "FAILED";
+    public const string Cancelled = "CANCELLED";
 
     public static bool IsEditableStopped(string? status)
         => string.Equals(status, Draft, StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, Paused, StringComparison.OrdinalIgnoreCase)
-           || string.Equals(status, Failed, StringComparison.OrdinalIgnoreCase);
+           || string.Equals(status, Failed, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, Cancelled, StringComparison.OrdinalIgnoreCase);
 }
 
 public static class TimelapseOperationStatuses
@@ -150,6 +233,7 @@ public static class TimelapseOperationStatuses
     public const string Completed = "COMPLETED";
     public const string Failed = "FAILED";
     public const string Invalidated = "INVALIDATED";
+    public const string Cancelled = "CANCELLED";
 
     public static bool IsActive(string? status)
         => string.Equals(status, Rendering, StringComparison.OrdinalIgnoreCase);
@@ -179,11 +263,36 @@ public sealed class TimelapseStageImage
     public DateTime? CompletedAt { get; set; }
 }
 
+public static class TimelapseImageExecutionPhase
+{
+    public const string QueuedForWorker = "QUEUED_FOR_WORKER";
+    public const string Claimed = "CLAIMED";
+    public const string Submitted = "SUBMITTED";
+
+    public static string? Resolve(TimelapseStageImage image, bool hasWorkerClaim = false)
+        => image.Status != TimelapseOperationStatuses.Rendering
+            ? null
+            : hasWorkerClaim && string.IsNullOrWhiteSpace(image.ProviderTaskId)
+                ? Claimed
+            : string.IsNullOrWhiteSpace(image.ProviderTaskId)
+                ? QueuedForWorker
+                : Submitted;
+
+    public static bool IsWaitingForWorker(TimelapseStageImage image)
+        => Resolve(image) == QueuedForWorker;
+
+    public static bool IsStuckWaitingForWorker(TimelapseStageImage image, DateTime nowUtc, TimeSpan threshold)
+        => IsWaitingForWorker(image)
+           && image.StartedAt.HasValue
+           && nowUtc - image.StartedAt.Value.ToUniversalTime() >= threshold;
+}
+
 public sealed class TimelapseVideoClip
 {
     public int ClipIndex { get; set; }
     public int StartProgressPercent { get; set; }
     public int EndProgressPercent { get; set; }
+    public int DurationSeconds { get; set; }
     public string Status { get; set; } = TimelapseOperationStatuses.Waiting;
     public int Attempt { get; set; }
     public Guid? MediaId { get; set; }
@@ -240,6 +349,33 @@ public static class TimelapseProgress
     }
 }
 
+public static class TimelapseWorkflowReadiness
+{
+    public static bool HasAllImagesCompleted(IEnumerable<TimelapseStageImage> images)
+    {
+        var stageImages = images as IReadOnlyCollection<TimelapseStageImage> ?? images.ToArray();
+        return stageImages.Count > 0
+               && stageImages.All(x => TimelapseOperationStatuses.IsCurrentCompleted(x.Status));
+    }
+
+    public static bool HasActiveImageOperations(IEnumerable<TimelapseStageImage> images)
+        => images.Any(x => TimelapseOperationStatuses.IsActive(x.Status));
+
+    public static bool HasVideos(IEnumerable<TimelapseVideoClip> videos)
+        => videos.Any();
+
+    public static bool CanConfirmVideoRender(
+        IEnumerable<TimelapseStageImage> images,
+        IEnumerable<TimelapseVideoClip> videos,
+        bool requiresVideoConfirmation,
+        bool videoRenderConfirmed)
+        => requiresVideoConfirmation
+           && !videoRenderConfirmed
+           && HasVideos(videos)
+           && HasAllImagesCompleted(images)
+           && !HasActiveImageOperations(images);
+}
+
 public static class TimelapseVideoOrchestration
 {
     public static bool IsReady(
@@ -266,6 +402,104 @@ public static class TimelapseVideoOrchestration
            && !string.IsNullOrWhiteSpace(clip.PublicUrl);
 }
 
+public sealed class TimelapseHistoryItem
+{
+    public string Kind { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public int Version { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? PublicUrl { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? ProviderCode { get; set; }
+    public string? ProviderModel { get; set; }
+    public DateTime? CreatedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public bool IsSelected { get; set; }
+}
+
+public sealed record TimelapseVideoDirectionValidation(
+    bool IsValid,
+    string? ErrorCode,
+    string? ErrorMessage);
+
+public static class TimelapseVideoDirectionValidator
+{
+    public static TimelapseVideoDirectionValidation Validate(
+        TimelapseVideoEdge clip,
+        Guid? startStageId,
+        int? startStageProgressPercent,
+        Guid? endStageId,
+        int? endStageProgressPercent,
+        Guid? startMediaId,
+        Guid? endMediaId)
+        => Validate(
+            clip.StartProgressPercent,
+            clip.EndProgressPercent,
+            startStageId,
+            startStageProgressPercent,
+            endStageId,
+            endStageProgressPercent,
+            startMediaId,
+            endMediaId);
+
+    public static TimelapseVideoDirectionValidation Validate(
+        int startProgressPercent,
+        int endProgressPercent,
+        Guid? startStageId,
+        int? startStageProgressPercent,
+        Guid? endStageId,
+        int? endStageProgressPercent,
+        Guid? startMediaId,
+        Guid? endMediaId)
+    {
+        if (startProgressPercent >= endProgressPercent)
+        {
+            return Invalid("timelapse_video_direction_invalid", "Timelapse video progress must move forward.");
+        }
+
+        if (startStageProgressPercent != startProgressPercent)
+        {
+            return Invalid("timelapse_video_start_stage_mismatch", "Timelapse video start stage does not match its progress metadata.");
+        }
+
+        if (endStageProgressPercent != endProgressPercent)
+        {
+            return Invalid("timelapse_video_end_stage_mismatch", "Timelapse video end stage does not match its progress metadata.");
+        }
+
+        if (startStageId is null || startStageId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_start_media", "Timelapse video start stage is missing.");
+        }
+
+        if (endStageId is null || endStageId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_end_media", "Timelapse video end stage is missing.");
+        }
+
+        if (startMediaId is null || startMediaId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_start_media", "Timelapse video start media is missing.");
+        }
+
+        if (endMediaId is null || endMediaId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_end_media", "Timelapse video end media is missing.");
+        }
+
+        if (startMediaId == endMediaId)
+        {
+            return Invalid("timelapse_video_direction_invalid", "Timelapse video start and end media must be different.");
+        }
+
+        return new TimelapseVideoDirectionValidation(true, null, null);
+    }
+
+    private static TimelapseVideoDirectionValidation Invalid(string errorCode, string message)
+        => new(false, errorCode, message);
+}
+
 public static class TimelapseStatusText
 {
     public static string Parent(string? status)
@@ -280,6 +514,7 @@ public static class TimelapseStatusText
             TimelapseParentStatuses.Completed => "Hoàn thành",
             TimelapseParentStatuses.Failed => "Thất bại",
             TimelapseParentStatuses.Paused => "Tạm dừng",
+            TimelapseParentStatuses.Cancelled => "Đã dừng",
             _ => "Chưa bắt đầu"
         };
 
@@ -291,6 +526,7 @@ public static class TimelapseStatusText
             TimelapseOperationStatuses.Completed => "Hoàn thành",
             TimelapseOperationStatuses.Failed => "Thất bại",
             TimelapseOperationStatuses.Invalidated => "Cần tạo lại",
+            TimelapseOperationStatuses.Cancelled => "Đã dừng",
             _ => "Chưa bắt đầu"
         };
 }
@@ -310,7 +546,7 @@ public static class TimelapseRequestRules
         3 => [0, 35, 70, 100],
         4 => [0, 25, 50, 75, 100],
         5 => [0, 20, 40, 60, 80, 100],
-        6 => [0, 25, 40, 55, 70, 85, 100],
+        6 => [0, 25, 40, 55, 70, 75, 90, 100],
         _ => throw new ArgumentOutOfRangeException(nameof(sceneCount), "Scene count must be from 3 to 6.")
     };
 
@@ -359,7 +595,7 @@ public sealed record TimelapseStageGraph(
     IReadOnlyList<TimelapseVideoEdge> VideoClips,
     IReadOnlyList<int> GeneratedImageOrder);
 
-public sealed record TimelapseVideoEdge(int ClipIndex, int StartProgressPercent, int EndProgressPercent);
+public sealed record TimelapseVideoEdge(int ClipIndex, int StartProgressPercent, int EndProgressPercent, int DurationSeconds = TimelapseRequestRules.RuntimeClipDurationSeconds);
 
 public sealed record TimelapseInvalidationPlan(
     IReadOnlyList<int> ImageProgressions,
@@ -377,13 +613,17 @@ public sealed record TimelapseImagePromptDialogResult(string Prompt, bool Rerend
 public static class TimelapseStageGraphBuilder
 {
     public static TimelapseStageGraph Build(int sceneCount)
+        => Build(sceneCount, hasStartAnchor: false);
+
+    public static TimelapseStageGraph Build(int sceneCount, bool hasStartAnchor)
     {
         var images = TimelapseRequestRules.GetProgressMapping(sceneCount).ToArray();
         var clips = images.Zip(images.Skip(1), (start, end) => new { start, end })
-            .Select((x, index) => new TimelapseVideoEdge(index + 1, x.start, x.end))
+            .Select((x, index) => new TimelapseVideoEdge(index + 1, x.start, x.end, TimelapseRequestRules.RuntimeClipDurationSeconds))
             .ToArray();
         var generatedOrder = images
             .Where(x => x < 100)
+            .Where(x => !hasStartAnchor || x > 0)
             .OrderByDescending(x => x)
             .ToArray();
 

@@ -2,6 +2,7 @@ using System.Data;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.AiProviders;
 
@@ -57,7 +58,7 @@ public sealed class AiImageBillingReserveRequest
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public string? TariffSnapshotJson { get; set; }
     public object? Metadata { get; set; }
-    public string? CreatedBy { get; set; }
+    public Guid? CreatedBy { get; set; }
 }
 
 public sealed class AiImageBillingCompleteRequest
@@ -91,10 +92,28 @@ public sealed record AiImageBillingReservation(
     decimal ChargedPoints,
     Guid? BillingRecordId,
     Guid? WalletTransactionId,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    decimal? AvailablePoints = null)
 {
+    public decimal RequiredPoints => ChargedPoints;
+    public decimal MissingPoints => Math.Max(0, RequiredPoints - (AvailablePoints ?? 0));
+
     public static AiImageBillingReservation Failed(string logicalRequestId, string status, string message)
-        => new(false, false, string.Empty, status, logicalRequestId, 0, null, null, message);
+        => new(false, false, string.Empty, status, logicalRequestId, 0, null, null, message, null);
+}
+
+public static class AiImageBillingMessageFormatter
+{
+    public static string FormatInsufficientPoints(decimal requiredPoints, decimal availablePoints, string operationLabel)
+    {
+        var missingPoints = Math.Max(0, requiredPoints - availablePoints);
+        var label = string.IsNullOrWhiteSpace(operationLabel) ? "tạo nội dung" : operationLabel.Trim();
+        return
+            $"Không đủ điểm để {label}.\n\n" +
+            $"Cần: {requiredPoints:0.####} điểm\n" +
+            $"Hiện có: {availablePoints:0.####} điểm\n" +
+            $"Cần bổ sung thêm: {missingPoints:0.####} điểm";
+    }
 }
 
 public sealed record AiImageBillingCompletion(
@@ -102,6 +121,12 @@ public sealed record AiImageBillingCompletion(
     string Status,
     Guid? WalletTransactionId,
     string? ErrorMessage);
+
+public static class AiImageBillingCreatedByParser
+{
+    public static Guid? Normalize(string? value)
+        => Guid.TryParse(value?.Trim(), out var parsed) ? parsed : null;
+}
 
 public sealed class AiImageBillingReconciliationItem
 {
@@ -111,6 +136,13 @@ public sealed class AiImageBillingReconciliationItem
     public string? RequestedModel { get; init; }
     public string? ActualModel { get; init; }
     public string? ProviderTaskId { get; init; }
+    public string? ProviderCode { get; init; }
+    public string? CapabilityCode { get; init; }
+    public long ProviderId { get; init; }
+    public long ProviderCapabilityId { get; init; }
+    public string? PayerType { get; init; }
+    public decimal CustomerChargedPoints { get; init; }
+    public decimal SystemChargedPoints { get; init; }
     public int ReconciliationAttemptCount { get; init; }
     public string? TariffSnapshotJson { get; init; }
 }
@@ -119,6 +151,7 @@ public interface IAiImageBillingService
 {
     AiImageBillingCost BuildConfiguredCost(decimal unitCostPoints, decimal quantity);
     Task<AiImageBillingReservation> ReserveAsync(AiImageBillingReserveRequest request, CancellationToken ct = default);
+    Task<AiImageBillingReservation?> GetReservationAsync(string logicalRequestId, CancellationToken ct = default);
     Task<AiImageBillingCompletion> CompleteAsync(AiImageBillingCompleteRequest request, CancellationToken ct = default);
     Task<AiImageBillingCompletion> MarkPendingReconciliationAsync(AiImageBillingPendingReconciliationRequest request, CancellationToken ct = default);
     Task<IReadOnlyList<AiImageBillingReconciliationItem>> ClaimReconciliationBatchAsync(string workerKey, int batchSize, TimeSpan lockFor, int maxAttempts, CancellationToken ct = default);
@@ -162,6 +195,35 @@ public sealed class AiImageBillingService : IAiImageBillingService
             return AiImageBillingReservation.Failed(string.Empty, "invalid", "Missing logical_request_id for image billing.");
         }
 
+        if (LegacyPointBillingFeatureFlags.IsDisabled(_config))
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var legacyConn = await _factory.OpenAsync(ct);
+            using var legacyTx = legacyConn.BeginTransaction();
+
+            await LockLogicalRequestAsync(legacyConn, legacyTx, _tenant.TenantId, request.LogicalRequestId);
+
+            var legacyExisting = await GetRecordForUpdateAsync(legacyConn, legacyTx, request.LogicalRequestId);
+            if (legacyExisting is not null)
+            {
+                var decision = await HandleExistingReservationWithLegacyBillingDisabledAsync(legacyConn, legacyTx, legacyExisting);
+                legacyTx.Commit();
+                return decision;
+            }
+
+            var legacyPayer = new AiBillingPayerContext(
+                request.CustomerId.HasValue
+                    ? AiBillingPayerTypes.Customer
+                    : AiBillingPayerTypes.System,
+                request.CustomerId,
+                SystemWalletCode: null,
+                ResolutionSource: "legacy_point_billing_disabled");
+
+            var recordId = await InsertRecordAsync(legacyConn, legacyTx, request, legacyPayer, walletId: null, status: "not_required", walletTransactionId: null);
+            legacyTx.Commit();
+            return new AiImageBillingReservation(true, true, legacyPayer.PayerType, "not_required", request.LogicalRequestId, 0, recordId, null, null);
+        }
+
         AiBillingPayerContext payer;
         try
         {
@@ -202,8 +264,11 @@ public sealed class AiImageBillingService : IAiImageBillingService
         {
             var recordId = await InsertRecordAsync(conn, tx, request, payer, wallet.Id, "insufficient", walletTransactionId: null);
             tx.Commit();
+            var operationLabel = string.Equals(request.FeatureCode, "render_job_scene_video", StringComparison.OrdinalIgnoreCase)
+                ? "tạo video"
+                : "tạo ảnh";
             return new AiImageBillingReservation(false, false, payer.PayerType, "insufficient", request.LogicalRequestId, chargePoints,
-                recordId, null, $"Insufficient TodoX image points. Required {chargePoints:0.####}, available {available:0.####}.");
+                recordId, null, AiImageBillingMessageFormatter.FormatInsufficientPoints(chargePoints, available, operationLabel), available);
         }
 
         await conn.ExecuteAsync(
@@ -220,6 +285,34 @@ public sealed class AiImageBillingService : IAiImageBillingService
         tx.Commit();
 
         return new AiImageBillingReservation(true, true, payer.PayerType, "reserved", request.LogicalRequestId, chargePoints, reservedId, null, null);
+    }
+
+    public async Task<AiImageBillingReservation?> GetReservationAsync(string logicalRequestId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(logicalRequestId))
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var existing = await conn.QuerySingleOrDefaultAsync<BillingRecordRow>(
+            """
+            SELECT id AS Id,
+                   logical_request_id AS LogicalRequestId,
+                   payer_type AS PayerType,
+                   COALESCE(payer_wallet_id, wallet_id) AS PayerWalletId,
+                   wallet_transaction_id AS WalletTransactionId,
+                   customer_charged_points AS CustomerChargedPoints,
+                   system_charged_points AS SystemChargedPoints,
+                   status AS Status,
+                   created_by AS CreatedBy
+              FROM billing.ai_image_billing_records
+             WHERE logical_request_id = @logicalRequestId;
+            """,
+            new { logicalRequestId });
+
+        return existing is null ? null : HandleExistingReservation(existing.ToBillingRecord());
     }
 
     public async Task<AiImageBillingCompletion> CompleteAsync(AiImageBillingCompleteRequest request, CancellationToken ct = default)
@@ -323,6 +416,10 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    provider_actual_cost_usd = @actualUsd,
                    provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
                    wallet_transaction_id = @txId,
+                   error_message = NULL,
+                   pending_reconciliation_at = NULL,
+                   reconciliation_lock_owner = NULL,
+                   reconciliation_lock_until = NULL,
                    completed_at = now(),
                    updated_at = now()
              WHERE id = @id;
@@ -369,7 +466,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    pending_reconciliation_at = now(),
                    updated_at = now()
              WHERE id = @id
-               AND status IN ('reserved','pending_reconciliation');
+               AND status IN ('not_required','reserved','pending_reconciliation');
             """,
             new { id = record.Id, model = request.ActualModel, taskId = request.ProviderTaskId, errorMessage = request.ErrorMessage }, tx);
 
@@ -419,6 +516,13 @@ public sealed class AiImageBillingService : IAiImageBillingService
                        r.requested_model AS RequestedModel,
                        r.actual_model AS ActualModel,
                        r.provider_task_id AS ProviderTaskId,
+                       r.provider_code AS ProviderCode,
+                       r.capability_code AS CapabilityCode,
+                       r.provider_id AS ProviderId,
+                       r.provider_capability_id AS ProviderCapabilityId,
+                       r.payer_type AS PayerType,
+                       r.customer_charged_points AS CustomerChargedPoints,
+                       r.system_charged_points AS SystemChargedPoints,
                        COALESCE(r.reconciliation_attempt_count, 0) AS ReconciliationAttemptCount,
                        r.tariff_snapshot_json::text AS TariffSnapshotJson;
             """,
@@ -478,12 +582,67 @@ public sealed class AiImageBillingService : IAiImageBillingService
             new { lockName = $"{tenantId:N}:{logicalRequestId}" }, tx);
     }
 
+    private static async Task<AiImageBillingReservation> HandleExistingReservationWithLegacyBillingDisabledAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        BillingRecord existing)
+    {
+        if (existing.Status == "insufficient")
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE billing.ai_image_billing_records
+                   SET status = 'not_required',
+                       customer_charged_points = 0,
+                       system_charged_points = 0,
+                       wallet_transaction_id = NULL,
+                       error_message = NULL,
+                       updated_at = now()
+                 WHERE id = @id;
+                """,
+                new { id = existing.Id }, tx);
+
+            if (string.IsNullOrWhiteSpace(existing.ProviderTaskId))
+            {
+                return new AiImageBillingReservation(
+                    true,
+                    true,
+                    existing.PayerType,
+                    "not_required",
+                    existing.LogicalRequestId,
+                    0,
+                    existing.Id,
+                    null,
+                    null);
+            }
+
+            return new AiImageBillingReservation(
+                true,
+                false,
+                existing.PayerType,
+                "not_required",
+                existing.LogicalRequestId,
+                0,
+                existing.Id,
+                null,
+                null);
+        }
+
+        return HandleExistingReservation(existing);
+    }
+
     private static AiImageBillingReservation HandleExistingReservation(BillingRecord existing)
     {
         if (existing.Status is "completed")
         {
             return new AiImageBillingReservation(true, false, existing.PayerType, "completed", existing.LogicalRequestId,
                 existing.ReservedPoints, existing.Id, existing.WalletTransactionId, "Image render request was already completed.");
+        }
+
+        if (existing.Status is "not_required")
+        {
+            return new AiImageBillingReservation(true, true, existing.PayerType, "not_required", existing.LogicalRequestId,
+                0, existing.Id, existing.WalletTransactionId, null);
         }
 
         if (existing.Status is "reserved" or "pending_reconciliation")
@@ -580,8 +739,12 @@ public sealed class AiImageBillingService : IAiImageBillingService
         string status,
         Guid? walletTransactionId)
     {
-        var customerPoints = payer.PayerType == AiBillingPayerTypes.Customer ? request.Cost.CustomerChargedPoints : 0m;
-        var systemPoints = payer.PayerType == AiBillingPayerTypes.System ? request.Cost.CustomerChargedPoints : 0m;
+        var customerPoints = LegacyPointBillingFeatureFlags.IsDisabled(_config)
+            ? 0m
+            : payer.PayerType == AiBillingPayerTypes.Customer ? request.Cost.CustomerChargedPoints : 0m;
+        var systemPoints = LegacyPointBillingFeatureFlags.IsDisabled(_config)
+            ? 0m
+            : payer.PayerType == AiBillingPayerTypes.System ? request.Cost.CustomerChargedPoints : 0m;
 
         return await conn.ExecuteScalarAsync<Guid>(
             """
@@ -642,13 +805,14 @@ public sealed class AiImageBillingService : IAiImageBillingService
     }
 
     private static async Task<BillingRecord?> GetRecordForUpdateAsync(IDbConnection conn, IDbTransaction tx, string logicalRequestId)
-        => await conn.QuerySingleOrDefaultAsync<BillingRecord>(
+        => (await conn.QuerySingleOrDefaultAsync<BillingRecordRow>(
             """
             SELECT id AS Id,
                    logical_request_id AS LogicalRequestId,
                    payer_type AS PayerType,
                    COALESCE(payer_wallet_id, wallet_id) AS PayerWalletId,
                    wallet_transaction_id AS WalletTransactionId,
+                   provider_task_id AS ProviderTaskId,
                    customer_charged_points AS CustomerChargedPoints,
                    system_charged_points AS SystemChargedPoints,
                    status AS Status,
@@ -657,7 +821,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
              WHERE logical_request_id = @logicalRequestId
              FOR UPDATE;
             """,
-            new { logicalRequestId }, tx);
+            new { logicalRequestId }, tx))?.ToBillingRecord();
 
     private static async Task CompleteRecordWithoutDebitAsync(IDbConnection conn, IDbTransaction tx, BillingRecord record, AiImageBillingCompleteRequest request)
     {
@@ -669,6 +833,10 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    provider_task_id = @taskId,
                    provider_actual_cost_usd = @actualUsd,
                    provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
+                   error_message = NULL,
+                   pending_reconciliation_at = NULL,
+                   reconciliation_lock_owner = NULL,
+                   reconciliation_lock_until = NULL,
                    completed_at = now(),
                    updated_at = now()
              WHERE id = @id;
@@ -812,6 +980,35 @@ public sealed class AiImageBillingService : IAiImageBillingService
         public decimal OverdraftLimit { get; init; }
     }
 
+    private sealed class BillingRecordRow
+    {
+        public Guid Id { get; init; }
+        public string LogicalRequestId { get; init; } = string.Empty;
+        public string PayerType { get; init; } = AiBillingPayerTypes.Customer;
+        public Guid? PayerWalletId { get; init; }
+        public Guid? WalletTransactionId { get; init; }
+        public string? ProviderTaskId { get; init; }
+        public decimal CustomerChargedPoints { get; init; }
+        public decimal SystemChargedPoints { get; init; }
+        public string Status { get; init; } = string.Empty;
+        public string? CreatedBy { get; init; }
+
+        public BillingRecord ToBillingRecord()
+            => new()
+            {
+                Id = Id,
+                LogicalRequestId = LogicalRequestId,
+                PayerType = PayerType,
+                PayerWalletId = PayerWalletId,
+                WalletTransactionId = WalletTransactionId,
+                ProviderTaskId = ProviderTaskId,
+                CustomerChargedPoints = CustomerChargedPoints,
+                SystemChargedPoints = SystemChargedPoints,
+                Status = Status,
+                CreatedBy = AiImageBillingCreatedByParser.Normalize(CreatedBy)
+            };
+    }
+
     private sealed class BillingRecord
     {
         public Guid Id { get; init; }
@@ -819,11 +1016,12 @@ public sealed class AiImageBillingService : IAiImageBillingService
         public string PayerType { get; init; } = AiBillingPayerTypes.Customer;
         public Guid? PayerWalletId { get; init; }
         public Guid? WalletTransactionId { get; init; }
+        public string? ProviderTaskId { get; init; }
         public decimal CustomerChargedPoints { get; init; }
         public decimal SystemChargedPoints { get; init; }
         public decimal ReservedPoints => CustomerChargedPoints + SystemChargedPoints;
         public string Status { get; init; } = string.Empty;
-        public string? CreatedBy { get; init; }
+        public Guid? CreatedBy { get; init; }
     }
 }
 

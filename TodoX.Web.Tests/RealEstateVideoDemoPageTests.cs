@@ -57,16 +57,14 @@ public sealed class RealEstateVideoDemoPageTests
     }
 
     [Fact]
-    public void PageIsRegisteredInNavigationWithAlwaysPolicy()
+    public void PageIsNotRegisteredInProductionNavigation()
     {
         var layout = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Layout", "MainLayout.razor"));
 
-        Assert.Contains("BuildRealEstateVideoDemoItem", layout, StringComparison.Ordinal);
-        Assert.Contains("real_estate_video_demo", layout, StringComparison.Ordinal);
-        Assert.Contains("Video Bất Động Sản", layout, StringComparison.Ordinal);
-        Assert.Contains("/real-estate-video-demo", layout, StringComparison.Ordinal);
-        Assert.Contains("Apartment", layout, StringComparison.Ordinal);
-        Assert.Contains("VisibilityPolicy = \"always\"", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildRealEstateVideoDemoItem", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("real_estate_video_demo", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("Video Bất Động Sản", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("/real-estate-video-demo", layout, StringComparison.Ordinal);
     }
 
     private static string ReadStrictUtf8(string file)

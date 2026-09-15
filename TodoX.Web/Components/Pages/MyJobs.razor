@@ -1,9 +1,16 @@
 @page "/jobs"
 @implements IDisposable
 @using TodoX.Web.Models.Timelapse
+@using TodoX.Web.Services.DanceSell
 @using TodoX.Web.Services.Timelapse
+@using TodoX.Web.Services.VideoRender
 @inject AuthStateService AuthState
-@inject ITimelapseJobService Jobs
+@inject ITimelapseJobService TimelapseJobs
+@inject IDanceSellPhase2Service DanceJobs
+@inject IDanceSellOperationRepository DanceOperations
+@inject IRVideoJobService RVideoJobs
+@inject TodoX.Web.Services.Platform.ICoreJobApplicationService CoreJobs
+@inject TodoX.Web.Services.Platform.ICoreServiceCatalogService ServiceCatalog
 @inject NavigationManager Navigation
 
 <PageTitle>Jobs của tôi</PageTitle>
@@ -12,7 +19,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Jobs của tôi</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Các cấu hình video thuộc tài khoản của bạn.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Các job video thuộc tài khoản của bạn.</MudText>
         </div>
         <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Navigation.NavigateTo("/create"))">
             Tạo video
@@ -47,17 +54,19 @@
             <HeaderContent>
                 <MudTh>Tiêu đề</MudTh>
                 <MudTh>Dịch vụ</MudTh>
+                <MudTh>Giai đoạn</MudTh>
                 <MudTh>Ngày tạo</MudTh>
-                <MudTh>Trạng thái</MudTh>
+                <MudTh>Điểm</MudTh>
                 <MudTh></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="Tiêu đề">@context.Snapshot.Title</MudTd>
-                <MudTd DataLabel="Dịch vụ">Video Timelapse AI</MudTd>
+                <MudTd DataLabel="Tiêu đề">@context.Title</MudTd>
+                <MudTd DataLabel="Dịch vụ">@context.ServiceLabel</MudTd>
+                <MudTd DataLabel="Giai đoạn">@context.StageLabel</MudTd>
                 <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
-                <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.Status</MudChip></MudTd>
+                <MudTd DataLabel="Điểm">@context.PointsLabel</MudTd>
                 <MudTd DataLabel="Hành động">
-                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" title="Xem" OnClick="@(() => Navigation.NavigateTo($"/jobs/timelapse/{context.Id}"))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" title="Xem" OnClick="@(() => Navigation.NavigateTo(context.Route))" />
                 </MudTd>
             </RowTemplate>
         </MudTable>
@@ -65,7 +74,7 @@
 </MudStack>
 
 @code {
-    private IReadOnlyList<TimelapseJobView> _jobs = Array.Empty<TimelapseJobView>();
+    private IReadOnlyList<CustomerJobRow> _jobs = Array.Empty<CustomerJobRow>();
     private bool _loading = true;
 
     protected override async Task OnInitializedAsync()
@@ -85,13 +94,90 @@
     private async Task LoadJobsAsync()
     {
         _loading = true;
-        _jobs = Array.Empty<TimelapseJobView>();
+        _jobs = Array.Empty<CustomerJobRow>();
+
         if (AuthState.CurrentUser is { IsCustomer: true } currentUser)
         {
-            _jobs = await Jobs.ListOwnedAsync(currentUser);
+            var timelapseTask = TimelapseJobs.ListOwnedAsync(currentUser);
+            var danceTask = DanceJobs.ListAsync(currentUser, 100);
+            var coreTask = CoreJobs.ListAsync(new TodoX.Web.Services.Platform.CoreRequestContext(
+                currentUser.CustomerId, currentUser.UserId, TodoX.Web.Services.Platform.CoreChannelCodes.Dashboard), new(1, 100));
+            var catalogTask = ServiceCatalog.ListAsync();
+            await Task.WhenAll(timelapseTask, danceTask, coreTask, catalogTask);
+            var catalog = catalogTask.Result.ToDictionary(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase);
+            var danceRows = await BuildDanceRowsAsync(danceTask.Result, CancellationToken.None);
+
+            var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
+                    x.Id,
+                    x.Snapshot.Title,
+                    "Video Timelapse AI",
+                    TimelapseStatusText.Parent(x.Workflow.ParentStatus),
+                    x.Workflow.CurrentStep,
+                    x.CreatedAt,
+                    x.Snapshot.SellPrice?.TotalPoints is decimal points ? $"{points:0.##}" : "—",
+                    $"/jobs/timelapse/{x.Id}"))
+                .Concat(danceRows)
+                .Concat(coreTask.Result.Items
+                    .Where(x => string.Equals(x.OperationType, TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
+                    .Select(x => new CustomerJobRow(
+                        x.JobId,
+                        ReadSnapshotString(x.Input, "title") ?? catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
+                        catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
+                        x.Status,
+                        x.CurrentStep ?? "info",
+                        x.CreatedAt,
+                        x.PointCostEstimate > 0 ? $"{x.PointCostEstimate:0.##}" : "—",
+                        $"/jobs/rvideo/{x.JobId}")))
+                .OrderByDescending(x => x.CreatedAt)
+                .ToList();
+
+            _jobs = rows;
         }
 
         _loading = false;
         await InvokeAsync(StateHasChanged);
     }
+
+    private async Task<IReadOnlyList<CustomerJobRow>> BuildDanceRowsAsync(IReadOnlyList<DanceSellJobDto> jobs, CancellationToken ct)
+    {
+        var rows = new List<CustomerJobRow>(jobs.Count);
+        foreach (var job in jobs)
+        {
+            rows.Add(new CustomerJobRow(
+                job.Id,
+                job.Title ?? "Video nhảy quảng cáo thời trang",
+                "Video nhảy quảng cáo thời trang",
+                DanceSellCustomerStatusText.JobStatusLabel(job.Status),
+                DanceSellCustomerStatusText.StageLabel(job.CurrentStage),
+                job.CreatedAt,
+                await ResolveDancePointsLabelAsync(job, ct),
+                $"/jobs/rdance/{job.Id}"));
+        }
+
+        return rows;
+    }
+
+    private async Task<string> ResolveDancePointsLabelAsync(DanceSellJobDto job, CancellationToken ct)
+    {
+        var operation = await DanceOperations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
+        var points = DanceSellPointDisplay.ResolveDisplayPoints(job, operation);
+        return points.HasValue ? $"{points.Value:0.##}" : "—";
+    }
+
+    private static string? ReadSnapshotString(System.Text.Json.JsonElement snapshot, string propertyName)
+        => snapshot.ValueKind == System.Text.Json.JsonValueKind.Object
+           && snapshot.TryGetProperty(propertyName, out var value)
+           && value.ValueKind == System.Text.Json.JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private sealed record CustomerJobRow(
+        Guid Id,
+        string Title,
+        string ServiceLabel,
+        string StatusLabel,
+        string StageLabel,
+        DateTime CreatedAt,
+        string PointsLabel,
+        string Route);
 }

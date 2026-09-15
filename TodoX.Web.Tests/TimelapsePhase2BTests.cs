@@ -1,4 +1,5 @@
 using TodoX.Web.Models.Timelapse;
+using System.Text.Json;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -9,16 +10,51 @@ public class TimelapsePhase2BTests
     [InlineData(3, new[] { 0, 35, 70, 100 }, new[] { 70, 35, 0 })]
     [InlineData(4, new[] { 0, 25, 50, 75, 100 }, new[] { 75, 50, 25, 0 })]
     [InlineData(5, new[] { 0, 20, 40, 60, 80, 100 }, new[] { 80, 60, 40, 20, 0 })]
-    [InlineData(6, new[] { 0, 25, 40, 55, 70, 85, 100 }, new[] { 85, 70, 55, 40, 25, 0 })]
+    [InlineData(6, new[] { 0, 25, 40, 55, 70, 75, 90, 100 }, new[] { 90, 75, 70, 55, 40, 25, 0 })]
     public void StageGraph_BuildsImagesVideosAndReverseGenerationOrder(int sceneCount, int[] images, int[] generatedOrder)
     {
         var graph = TimelapseStageGraphBuilder.Build(sceneCount);
 
         Assert.Equal(images, graph.ImageProgressions);
-        Assert.Equal(sceneCount, graph.VideoClips.Count);
+        Assert.Equal(images.Length - 1, graph.VideoClips.Count);
         Assert.Equal(generatedOrder, graph.GeneratedImageOrder);
         Assert.DoesNotContain(100, graph.GeneratedImageOrder);
         Assert.Equal(images.Zip(images.Skip(1), (start, end) => (start, end)), graph.VideoClips.Select(x => (x.StartProgressPercent, x.EndProgressPercent)));
+    }
+
+    [Fact]
+    public void SixScenePreset_UsesConstructionCheckpointDefinitionWithSevenClips()
+    {
+        var graph = TimelapseStageGraphBuilder.Build(6);
+
+        Assert.Equal(new[] { 0, 25, 40, 55, 70, 75, 90, 100 }, graph.ImageProgressions);
+        Assert.Equal(7, graph.GeneratedImageOrder.Count);
+        Assert.Equal(7, graph.VideoClips.Count);
+        Assert.Equal((0, 25), (graph.VideoClips[0].StartProgressPercent, graph.VideoClips[0].EndProgressPercent));
+        Assert.Equal((90, 100), (graph.VideoClips[^1].StartProgressPercent, graph.VideoClips[^1].EndProgressPercent));
+    }
+
+    [Fact]
+    public void StageGraph_WithStartAnchorSkipsAiGenerationForZeroPercent()
+    {
+        var graph = TimelapseStageGraphBuilder.Build(3, hasStartAnchor: true);
+
+        Assert.Equal(new[] { 0, 35, 70, 100 }, graph.ImageProgressions);
+        Assert.Equal(new[] { 70, 35 }, graph.GeneratedImageOrder);
+        Assert.Equal(new[] { "0->35", "35->70", "70->100" }, graph.VideoClips.Select(x => $"{x.StartProgressPercent}->{x.EndProgressPercent}"));
+    }
+
+    [Fact]
+    public void LegacySnapshotWithoutStartImageDeserializesAsFinalOnlyMode()
+    {
+        var snapshot = JsonSerializer.Deserialize<TimelapseJobSnapshot>(
+            """{"schemaVersion":1,"engine":"Timelapse","originalImage":{"mediaId":"11111111-1111-1111-1111-111111111111","publicUrl":"https://cdn.example/final.png"}}""",
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.NotNull(snapshot);
+        Assert.Null(snapshot!.StartImage);
+        Assert.False(snapshot.HasStartImage);
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), snapshot.OriginalImage.MediaId);
     }
 
     [Fact]
@@ -178,33 +214,33 @@ public class TimelapsePhase2BTests
         => Assert.Equal(expected, TimelapseStatusText.Parent(status));
 
     [Fact]
-    public void VideoCards_KeepMainPreviewSeparateFromCompactInputThumbnails()
+    public void VideoCards_UseMainPreviewWithoutInputThumbnails()
     {
         var detail = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
         var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+        var mediaCss = ReadSource("TodoX.Web", "Components", "Shared", "RenderMediaFrame.razor.css");
         var videoCardStart = detail.IndexOf("video-stage-card", StringComparison.Ordinal);
         var previewIndex = detail.IndexOf("PreviewClass(\"video-preview\"", videoCardStart, StringComparison.Ordinal);
-        var thumbnailsIndex = detail.IndexOf("class=\"clip-input-thumbnails\"", previewIndex, StringComparison.Ordinal);
-        var footerIndex = detail.IndexOf("class=\"tl-video-card-footer\"", thumbnailsIndex, StringComparison.Ordinal);
+        var footerIndex = detail.IndexOf("class=\"tl-video-card-footer\"", previewIndex, StringComparison.Ordinal);
 
         Assert.True(videoCardStart >= 0);
         Assert.True(previewIndex > videoCardStart);
-        Assert.True(thumbnailsIndex > previewIndex);
-        Assert.True(footerIndex > thumbnailsIndex);
-        Assert.Contains("Ảnh đầu @clip.StartProgressPercent%", detail, StringComparison.Ordinal);
-        Assert.Contains("Ảnh cuối @clip.EndProgressPercent%", detail, StringComparison.Ordinal);
-        Assert.Contains("clip-input-image", detail, StringComparison.Ordinal);
-        Assert.Contains("clip-input-placeholder", detail, StringComparison.Ordinal);
+        Assert.True(footerIndex > previewIndex);
+        Assert.DoesNotContain("class=\"clip-input-thumbnails\"", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("RenderImageThumb", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ảnh đầu @clip.StartProgressPercent%", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ảnh cuối @clip.EndProgressPercent%", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("clip-input-image", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("clip-input-placeholder", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"clip-thumbs\"", detail, StringComparison.Ordinal);
 
         var normalizedCss = css.ReplaceLineEndings("\n");
         Assert.Contains(".video-preview {\n    aspect-ratio: 16 / 9;", normalizedCss, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: minmax(72px, 88px) 20px minmax(72px, 88px);", css, StringComparison.Ordinal);
-        Assert.Contains("width: min(100%, 208px);", css, StringComparison.Ordinal);
-        Assert.Contains("object-fit: cover;", css, StringComparison.Ordinal);
-        Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: repeat(3, minmax(0, 1fr));", css, StringComparison.Ordinal);
+        Assert.Contains("object-fit: contain;", mediaCss, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: break-word;", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 700px)", css, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: minmax(72px, 80px) 18px minmax(72px, 80px);", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".clip-input-thumbnails", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".clip-thumbs img", css, StringComparison.Ordinal);
     }
 
@@ -228,24 +264,20 @@ public class TimelapsePhase2BTests
         Assert.Contains("Đang tạo ảnh...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo video...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo video", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang ghép video cuối cùng...", detail, StringComparison.Ordinal);
+        Assert.Contains("Đang hoàn thiện video...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang chờ hoàn thiện kết quả...", detail, StringComparison.Ordinal);
         Assert.Contains("TimelapseParentStatuses.Finalizing", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-loading-skeleton", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-loading-shimmer", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-pulse", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-flash-soft", detail, StringComparison.Ordinal);
+        Assert.Contains("<RenderMediaFrame IsVideo=\"false\"", detail, StringComparison.Ordinal);
+        Assert.Contains("<RenderMediaFrame IsVideo=\"true\"", detail, StringComparison.Ordinal);
+        Assert.Contains("TimelapseFinalizingOverlay", detail, StringComparison.Ordinal);
         Assert.Contains("tl-status-dot", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-active-render", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-active-scanline", detail, StringComparison.Ordinal);
         Assert.Contains("IsRenderingOperation", detail, StringComparison.Ordinal);
         Assert.Contains("OperationStateClass", detail, StringComparison.Ordinal);
-        Assert.Contains("is-waiting", detail, StringComparison.Ordinal);
-        Assert.Contains("is-rendering", detail, StringComparison.Ordinal);
+        Assert.Contains("ResolveTimelapseMediaState", detail, StringComparison.Ordinal);
         Assert.Contains("image-stage-card", detail, StringComparison.Ordinal);
         Assert.Contains("video-stage-card", detail, StringComparison.Ordinal);
-        Assert.Contains("role=\"status\"", detail, StringComparison.Ordinal);
-        Assert.Contains("Hoàn thành video", detail, StringComparison.Ordinal);
+        Assert.Contains("MediaRenderState", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Hoàn thành video", detail, StringComparison.Ordinal);
         Assert.Contains("Tải video", detail, StringComparison.Ordinal);
         Assert.Contains("PeriodicTimer(TimeSpan.FromSeconds(4))", detail, StringComparison.Ordinal);
         Assert.Contains("LoadInitialAsync", detail, StringComparison.Ordinal);
@@ -263,8 +295,8 @@ public class TimelapsePhase2BTests
         Assert.Contains("ImageProgress.Percent", detail, StringComparison.Ordinal);
         Assert.Contains("private int CompletedVideos => VideoCards.Count", detail, StringComparison.Ordinal);
         Assert.Contains("private int TotalVideos => VideoCards.Count", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang chờ render", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang chờ ảnh", detail, StringComparison.Ordinal);
+        Assert.Contains("ImagePlaceholderText", detail, StringComparison.Ordinal);
+        Assert.Contains("VideoPlaceholderText", detail, StringComparison.Ordinal);
         Assert.Contains("hoàn thành", detail, StringComparison.Ordinal);
         Assert.Contains("ImageFailureCount", detail, StringComparison.Ordinal);
         Assert.Contains("VideoFailureCount", detail, StringComparison.Ordinal);
@@ -279,18 +311,19 @@ public class TimelapsePhase2BTests
         Assert.DoesNotContain("Fast", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("Professional", detail, StringComparison.Ordinal);
 
-        Assert.Contains(".tl-loading-shimmer", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-loading-skeleton", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-pulse", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-flash-soft", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-video-wave", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-active-render", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-image-scanline", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-video-scanline", detailCss, StringComparison.Ordinal);
-        Assert.Contains("tl-active-border-pulse", detailCss, StringComparison.Ordinal);
-        Assert.Contains("tl-active-sweep", detailCss, StringComparison.Ordinal);
-        Assert.Contains("tl-preview-scan-down", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-final-loading", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-loading-shimmer", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-loading-skeleton", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-pulse", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-flash-soft", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-video-wave", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-active-render", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-image-scanline", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-video-scanline", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("tl-active-border-pulse", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("tl-active-sweep", detailCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("tl-preview-scan-down", detailCss, StringComparison.Ordinal);
+        Assert.Contains("<TimelapseFinalizingOverlay Title=\"@FinalLoadingTitle\" Subtitle=\"@FinalLoadingSubtitle\" />", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-final-loading", detailCss, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", detailCss, StringComparison.Ordinal);
 
         Assert.Contains("pg_advisory_xact_lock", workflow, StringComparison.Ordinal);

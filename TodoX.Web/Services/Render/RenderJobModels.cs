@@ -69,6 +69,8 @@ public sealed class RenderJobDto
     public string PointStatus { get; set; } = RenderPointStatuses.NotRequired;
     public string? ProviderCode { get; set; }
     public string? ModelCode { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? ProviderVideoIdBase { get; set; }
     public DateTime QueuedAt { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
@@ -79,9 +81,16 @@ public sealed class RenderJobDto
 
 public static class RenderJobTypes
 {
+    /// <summary>
+    /// Canonical platform job type. The service identity lives in the core envelope/service_id and
+    /// execution is delegated through ICoreJobExecutionAdapter.
+    /// </summary>
+    public const string CoreService = "core_service";
     public const string Timelapse = "timelapse";
     public const string RenderVideoBatch = "render_video_job";
     public const string RenderSceneVideo = "render_scene_video";
+    public const string RenderSceneAudio = "render_scene_audio";
+    public const string RenderSceneAudioMux = "render_scene_audio_mux";
     public const string MergeProjectVideo = "merge_video_job";
     public const string DanceSell = "dance_sell";
 }

@@ -94,7 +94,10 @@ public sealed class AiBillingPayerResolver : IAiBillingPayerResolver
             return ResolveTrustedContext(request);
         }
 
-        throw new InvalidOperationException("Cannot resolve image billing payer: missing authenticated session or trusted background payer context.");
+        var operation = string.Equals(request.FeatureCode, "render_job_scene_video", StringComparison.OrdinalIgnoreCase)
+            ? "RVIDEO scene video"
+            : "image";
+        throw new InvalidOperationException($"Cannot resolve billing payer for {operation}: missing authenticated session or trusted background payer context.");
     }
 
     public static AiBillingTrustedPayerContext CreateTrustedBackgroundContext(CurrentUserSession user)

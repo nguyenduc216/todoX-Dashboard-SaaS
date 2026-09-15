@@ -1,6 +1,8 @@
 @page "/customer-accounts"
 @using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Models.Catalog
 @inject AccountService Accounts
+@inject CatalogRepository Catalog
 @inject AuthStateService AuthState
 @inject AuditRepository Audit
 @inject IDialogService DialogService
@@ -83,6 +85,7 @@
 @code {
     private IReadOnlyList<CustomerAccount> _accounts = new List<CustomerAccount>();
     private IReadOnlyList<CustomerProfile> _customers = new List<CustomerProfile>();
+    private IReadOnlyList<CatalogServiceView> _services = new List<CatalogServiceView>();
     private string _search = string.Empty;
 
     protected override async Task OnInitializedAsync() => await Reload();
@@ -91,6 +94,7 @@
     {
         _accounts = await Accounts.GetCustomerAccountsAsync();
         _customers = await Accounts.GetCustomersAsync();
+        _services = await Catalog.GetActiveCatalogServicesAsync();
     }
 
     private IEnumerable<CustomerAccount> Filtered
@@ -112,31 +116,52 @@
 
     private async Task OpenCreate()
     {
-        var parameters = new DialogParameters<CustomerAccountDialog> { { x => x.Customers, _customers } };
+        var parameters = new DialogParameters<CustomerAccountDialog>
+        {
+            { x => x.Customers, _customers },
+            { x => x.Services, _services }
+        };
         var dialog = await DialogService.ShowAsync<CustomerAccountDialog>("Tạo tài khoản khách hàng", parameters);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is CustomerAccount model)
         {
             var (ok, message) = await Accounts.SaveCustomerAccountAsync(model);
-            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
-            if (ok) await Reload();
+            if (ok)
+            {
+                var (favoriteOk, favoriteMessage) = await Accounts.SetCustomerAccountFavoritesAsync(model, AuthState.CurrentUser);
+                Snackbar.Add(favoriteMessage, favoriteOk ? Severity.Success : Severity.Error);
+                await Reload();
+                return;
+            }
+
+            Snackbar.Add(message, Severity.Error);
         }
     }
 
     private async Task OpenEdit(CustomerAccount account)
     {
+        var favoriteIds = await Accounts.GetFavoriteServiceIdsAsync(account.Id, account.CustomerId);
         var parameters = new DialogParameters<CustomerAccountDialog>
         {
             { x => x.Source, account },
-            { x => x.Customers, _customers }
+            { x => x.Customers, _customers },
+            { x => x.Services, _services },
+            { x => x.FavoriteServiceIds, favoriteIds }
         };
         var dialog = await DialogService.ShowAsync<CustomerAccountDialog>("Chỉnh sửa tài khoản", parameters);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is CustomerAccount model)
         {
             var (ok, message) = await Accounts.SaveCustomerAccountAsync(model);
-            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
-            if (ok) await Reload();
+            if (ok)
+            {
+                var (favoriteOk, favoriteMessage) = await Accounts.SetCustomerAccountFavoritesAsync(model, AuthState.CurrentUser);
+                Snackbar.Add(favoriteMessage, favoriteOk ? Severity.Success : Severity.Error);
+                await Reload();
+                return;
+            }
+
+            Snackbar.Add(message, Severity.Error);
         }
     }
 

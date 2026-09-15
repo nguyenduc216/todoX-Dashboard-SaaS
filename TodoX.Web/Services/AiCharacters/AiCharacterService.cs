@@ -15,7 +15,31 @@ public interface IAiCharacterService
     Task DisableCharacterAsync(long id, CurrentUserSession user, CancellationToken ct = default);
     Task<GenerateCharacterImageResponse> GenerateImageAsync(GenerateCharacterImageRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<GenerateCharacterImageResponse> UploadMasterImageAsync(long characterId, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
+    Task<CharacterDetailDto> UploadReferenceImageAsync(long characterId, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
+    Task<CharacterDetailDto> RemoveReferenceImageAsync(long characterId, CurrentUserSession user, CancellationToken ct = default);
     Task SetMasterImageAsync(long characterId, long renderId, CurrentUserSession user, CancellationToken ct = default);
+}
+
+public static class CharacterUploadValidation
+{
+    public static readonly IReadOnlySet<string> AllowedImageMimeTypes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/jpg", "image/png", "image/webp" };
+
+    public static void ValidateImage(byte[] content, string? contentType, long maxBytes)
+    {
+        var detectedMime = ImageUploadValidation.DetectMime(content);
+        var fileName = detectedMime switch
+        {
+            "image/png" => "upload.png",
+            "image/jpeg" => "upload.jpg",
+            "image/webp" => "upload.webp",
+            _ => "upload"
+        };
+        ImageUploadValidation.Validate(content, fileName, contentType, maxBytes);
+    }
+
+    public static void ValidateImage(byte[] content, string? fileName, string? contentType, long maxBytes)
+        => ImageUploadValidation.Validate(content, fileName, contentType, maxBytes);
 }
 
 public sealed class AiCharacterService : IAiCharacterService
@@ -320,12 +344,7 @@ public sealed class AiCharacterService : IAiCharacterService
         var character = await _repo.GetAsync(scope, characterId, ct)
             ?? throw new InvalidOperationException("Không tìm thấy Character hoặc bạn không có quyền truy cập.");
 
-        if (content.Length == 0) throw new InvalidOperationException("File ảnh đang rỗng.");
-        if (content.Length > 12 * 1024 * 1024) throw new InvalidOperationException("File ảnh tối đa 12MB.");
-        if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Chỉ hỗ trợ upload file hình ảnh.");
-        }
+        ImageUploadValidation.Validate(content, fileName, contentType, GetMaxImageBytes());
 
         var category = BuildStorageCategory(scope, character.CharacterCode);
         var media = await _media.SaveAsync(content, fileName, contentType, category, user.UserId, user.CustomerId, _tenant.TenantId, ct);
@@ -367,6 +386,36 @@ public sealed class AiCharacterService : IAiCharacterService
             ModelName = "upload_file",
             Status = "success"
         };
+    }
+
+    public async Task<CharacterDetailDto> UploadReferenceImageAsync(long characterId, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        var scope = Scope(user);
+        var character = await _repo.GetAsync(scope, characterId, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy Character hoặc bạn không có quyền truy cập.");
+
+        ImageUploadValidation.Validate(content, fileName, contentType, GetMaxImageBytes());
+        var media = await _media.SaveAsync(content, fileName, contentType,
+            BuildStorageCategory(scope, character.CharacterCode), user.UserId, user.CustomerId, _tenant.TenantId, ct);
+        var imageUrl = media.PublicUrl ?? media.FileUrl
+            ?? throw new InvalidOperationException("Đã lưu ảnh nhưng không tạo được URL hiển thị.");
+
+        await _repo.ReplaceReferencesAsync(scope, characterId, imageUrl, media.ObjectKey, user.UserId.ToString(), ct);
+        _logger.LogInformation("AI_CHARACTER_REFERENCE_UPLOADED userId={UserId} characterId={CharacterId} objectKey={ObjectKey}",
+            user.UserId, characterId, media.ObjectKey);
+        return await _repo.GetAsync(scope, characterId, ct)
+            ?? throw new InvalidOperationException("Đã lưu ảnh tham chiếu nhưng không đọc lại được Character.");
+    }
+
+    public async Task<CharacterDetailDto> RemoveReferenceImageAsync(long characterId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var scope = Scope(user);
+        _ = await _repo.GetAsync(scope, characterId, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy Character hoặc bạn không có quyền truy cập.");
+        await _repo.ClearReferencesAsync(scope, characterId, user.UserId.ToString(), ct);
+        return await _repo.GetAsync(scope, characterId, ct)
+            ?? throw new InvalidOperationException("Đã xóa ảnh tham chiếu nhưng không đọc lại được Character.");
     }
 
     private CharacterScope Scope(CurrentUserSession user)
@@ -448,6 +497,9 @@ public sealed class AiCharacterService : IAiCharacterService
             }
         }
     }
+
+    private long GetMaxImageBytes()
+        => _config.GetValue("MediaStorage:MaxImageBytes", 20L * 1024 * 1024);
 
     private static string? FriendlyError(string? error)
         => string.IsNullOrWhiteSpace(error) ? "Provider render chua tao duoc anh. Vui long thu lai." : error;

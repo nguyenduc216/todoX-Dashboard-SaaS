@@ -1,10 +1,15 @@
 @page "/jobs/timelapse/{JobId:guid}"
 @implements IDisposable
+@using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Models.Timelapse
 @using TodoX.Web.Services.Timelapse
+@using TodoX.Web.Services.Render
+@using TodoX.Web.Services
 @using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Components.Timelapse
 @inject AuthStateService AuthState
 @inject ITimelapseJobService Jobs
+@inject ITimelapseProfileRepository Profiles
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -51,6 +56,22 @@
                 <MudText Typo="Typo.body1" Class="todox-page-subtitle">@_job.Snapshot.ServiceCode · @_job.Workflow.CurrentStep</MudText>
             </div>
             <MudSpacer />
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.History"
+                       Disabled="@_busy"
+                       OnClick="OpenHistoryAsync">
+                LỊCH SỬ
+            </MudButton>
+            @if (CanCancelJob)
+            {
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.StopCircle"
+                           Disabled="@_busy"
+                           OnClick="CancelJobAsync">
+                    DỪNG TOÀN BỘ
+                </MudButton>
+            }
             <MudChip T="string" Color="@StatusColor(_job.Workflow.ParentStatus)">@TimelapseStatusText.Parent(_job.Workflow.ParentStatus)</MudChip>
         </MudStack>
 
@@ -80,22 +101,179 @@
                 <MudGrid Class="mt-3">
                     <MudItem xs="12" lg="8">
                         <MudPaper Class="todox-card pa-4" rounded="true">
+                            @if (_editingRequest)
+                            {
+                                <MudStack Spacing="3" Class="timelapse-edit-form">
+                                    <MudTextField T="string" Label="Tên job" Value="@_editRequest.Title" ValueChanged="SetEditTitle" Variant="Variant.Outlined" />
+
+                                    <MudGrid>
+                                    <MudItem xs="12" md="6">
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Ảnh ban đầu / 0% - Không bắt buộc</MudText>
+                                        <label class="timelapse-upload-card @(_editStartImageFile is not null ? "has-file" : string.Empty)">
+                                            <InputFile OnChange="OnEditStartImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                            @if (!string.IsNullOrWhiteSpace(_editStartPreviewUrl))
+                                            {
+                                                <img src="@_editStartPreviewUrl" alt="Ảnh ban đầu 0%" />
+                                            }
+                                            else
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                            }
+                                            <span class="upload-primary">Chọn ảnh ban đầu</span>
+                                            <span class="upload-secondary">Không bắt buộc</span>
+                                            <span class="upload-helper">Làm mốc khởi đầu thật của tiến trình.</span>
+                                        </label>
+                                        @if (_editStartImageFile is not null)
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Success">@_editStartImageFile.Name</MudText>
+                                        }
+                                        else if (_job.Snapshot.StartImage is not null)
+                                        {
+                                            <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveEditStartImage">
+                                                Xóa ảnh ban đầu
+                                            </MudButton>
+                                        }
+                                    </MudStack>
+                                    </MudItem>
+                                    <MudItem xs="12" md="6">
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / 100% - Bắt buộc</MudText>
+                                        <label class="timelapse-upload-card @(_editImageFile is not null ? "has-file" : string.Empty)">
+                                            <InputFile OnChange="OnEditImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                            @if (!string.IsNullOrWhiteSpace(_editPreviewUrl))
+                                            {
+                                                <img src="@_editPreviewUrl" alt="Ảnh tham chiếu đã chọn" />
+                                            }
+                                            else
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                            }
+                                            <span class="upload-primary">Chọn ảnh thay thế</span>
+                                            <span class="upload-secondary">Bấm để tải ảnh lên</span>
+                                            <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB</span>
+                                        </label>
+                                        @if (_editImageFile is not null)
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Success">@_editImageFile.Name</MudText>
+                                        }
+                                    </MudStack>
+                                    </MudItem>
+                                    </MudGrid>
+
+                                    <MudSelect T="string" Label="Cấu hình dựng" Value="@_editRequest.ProfileCode" ValueChanged="SetEditProfile" Variant="Variant.Outlined" Required="true">
+                                        @foreach (var profile in _profiles)
+                                        {
+                                            <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
+                                        }
+                                    </MudSelect>
+
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Số scene</MudText>
+                                        <div class="timelapse-option-grid scene-options">
+                                            @foreach (var count in TimelapseRequestRules.AllowedSceneCounts)
+                                            {
+                                                <button type="button" class="timelapse-option @(IsEditSceneSelected(count) ? "selected" : string.Empty)" @onclick="() => SelectEditSceneCount(count)">
+                                                    <strong>@count scene</strong>
+                                                </button>
+                                            }
+                                        </div>
+                                    </MudStack>
+
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Chất lượng</MudText>
+                                        <div class="timelapse-option-grid quality-options">
+                                            <button type="button" class="timelapse-option @(IsEditModeSelected(StandardModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(StandardModeValue)">
+                                                <strong>TIÊU CHUẨN</strong>
+                                                <span>Tối ưu chi phí, tốc độ xử lý nhanh</span>
+                                            </button>
+                                            <button type="button" class="timelapse-option @(IsEditModeSelected(PremiumModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(PremiumModeValue)">
+                                                <strong>CAO CẤP</strong>
+                                                <span>Chất lượng xử lý cao hơn</span>
+                                            </button>
+                                        </div>
+                                    </MudStack>
+
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Tỷ lệ</MudText>
+                                        <div class="timelapse-option-grid ratio-options">
+                                            <button type="button" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.LandscapeRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.LandscapeRatio)">
+                                                <strong>16:9</strong>
+                                                <span>Ngang</span>
+                                            </button>
+                                            <button type="button" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.PortraitRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.PortraitRatio)">
+                                                <strong>9:16</strong>
+                                                <span>Dọc</span>
+                                            </button>
+                                        </div>
+                                    </MudStack>
+
+                                    <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_editRequest.AutoFinish" Disabled="@(!_editingRequest || !CanEditFullRequest)">
+                                        Tự động hoàn thành
+                                    </MudSwitch>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        Hệ thống sẽ tự động tạo ảnh trung gian, tạo các video scene và ghép video hoàn chỉnh khi dữ liệu sẵn sàng.
+                                    </MudText>
+
+                                    <MudStack Row="true" Spacing="2" Class="timelapse-action-row">
+                                        <MudButton Variant="Variant.Outlined"
+                                                   StartIcon="@Icons.Material.Filled.Close"
+                                                   Disabled="@_busy"
+                                                   OnClick="CancelEditRequestAsync">
+                                            Hủy
+                                        </MudButton>
+                                        <MudButton Class="todox-primary-btn"
+                                                   Variant="Variant.Filled"
+                                                   StartIcon="@Icons.Material.Filled.Save"
+                                                   Disabled="@_busy"
+                                                   OnClick="SaveRequestEditsAsync">
+                                            Lưu thay đổi
+                                        </MudButton>
+                                    </MudStack>
+                                </MudStack>
+                            }
+                            else
+                            {
                             <MudStack Spacing="3">
                                 <MudTextField T="string" Label="Tên job" Value="@_job.Snapshot.Title" Variant="Variant.Outlined" Disabled="true" />
 
-                                <MudStack Spacing="1">
-                                    <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
-                                    <div class="timelapse-detail-image">
-                                        @if (!string.IsNullOrWhiteSpace(_job.Snapshot.OriginalImage.PublicUrl))
-                                        {
-                                            <img src="@_job.Snapshot.OriginalImage.PublicUrl" alt="Ảnh tham chiếu Timelapse" />
-                                        }
-                                        else
-                                        {
-                                            <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                        }
-                                    </div>
-                                </MudStack>
+                                <MudGrid>
+                                    @if (_job.Snapshot.HasStartImage)
+                                    {
+                                        <MudItem xs="12" md="6">
+                                            <MudStack Spacing="1">
+                                                <MudText Typo="Typo.subtitle2">Ảnh ban đầu / 0%</MudText>
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh nguồn do khách hàng tải lên</MudText>
+                                                <div class="timelapse-detail-image">
+                                                    @if (!string.IsNullOrWhiteSpace(_job.Snapshot.StartImage?.PublicUrl))
+                                                    {
+                                                        <img src="@_job.Snapshot.StartImage.PublicUrl" alt="Ảnh ban đầu Timelapse 0%" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                                    }
+                                                </div>
+                                            </MudStack>
+                                        </MudItem>
+                                    }
+                                    <MudItem xs="12" md="@(_job.Snapshot.HasStartImage ? 6 : 12)">
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / 100%</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh nguồn do khách hàng tải lên</MudText>
+                                            <div class="timelapse-detail-image">
+                                                @if (!string.IsNullOrWhiteSpace(_job.Snapshot.OriginalImage.PublicUrl))
+                                                {
+                                                    <img src="@_job.Snapshot.OriginalImage.PublicUrl" alt="Ảnh thành phẩm Timelapse 100%" />
+                                                }
+                                                else
+                                                {
+                                                    <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                                }
+                                            </div>
+                                        </MudStack>
+                                    </MudItem>
+                                </MudGrid>
 
                                 <MudGrid>
                                     <MudItem xs="12" md="6">
@@ -123,6 +301,7 @@
                                     </MudAlert>
                                 }
                             </MudStack>
+                            }
                         </MudPaper>
                     </MudItem>
 
@@ -133,24 +312,30 @@
                                 <div class="price-row"><span>Chất lượng</span><strong>@TimelapseSellPricing.CustomerQualityLabel(_job.Snapshot.VideoMode)</strong></div>
                                 <div class="price-row"><span>Số scene</span><strong>@_job.Snapshot.SceneCount</strong></div>
                                 <div class="price-row"><span>Ảnh khách tải lên</span><strong>Miễn phí</strong></div>
+                                <div class="price-row"><span>Tự động hoàn thành</span><strong>@(_job.Snapshot.AutoFinish ? "Bật" : "Tắt")</strong></div>
                                 @if (_job.Snapshot.SellPrice is not null)
                                 {
-                                    <div class="price-row"><span>Đơn giá video</span><strong>@FormatPoints(_job.Snapshot.SellPrice.VideoSceneSellPoints) / scene</strong></div>
-                                    <div class="price-row"><span>Video</span><strong>@($"{_job.Snapshot.SellPrice.SceneCount} x {FormatPoints(_job.Snapshot.SellPrice.VideoSceneSellPoints)} = {FormatPoints(_job.Snapshot.SellPrice.VideoSubtotal)}")</strong></div>
                                     <MudDivider />
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh AI trung gian chưa tính trong giai đoạn này. Số ảnh AI dự kiến: @_job.Workflow.GeneratedImageCount.</MudText>
-                                    <div class="timelapse-total">
-                                        <span>TỔNG DỰ KIẾN</span>
-                                        <strong>@FormatPoints(_job.Snapshot.SellPrice.TotalPoints) todoX</strong>
-                                    </div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Định giá khách hàng hiện không hiển thị trong luồng này. Số ảnh AI dự kiến: @_job.Workflow.GeneratedImageCount.</MudText>
                                 }
-                                <MudButton Class="todox-primary-btn"
-                                           Variant="Variant.Filled"
-                                           StartIcon="@Icons.Material.Filled.MovieCreation"
-                                           Disabled="@(!_job.Workflow.CanStartRender || _busy)"
-                                           OnClick="StartOrResumeAsync">
-                                    @StartButtonLabel
-                                </MudButton>
+                                <MudStack Row="true" Spacing="2" Class="timelapse-action-row">
+                                    @if (CanEditFullRequest)
+                                    {
+                                        <MudButton Variant="Variant.Outlined"
+                                                   StartIcon="@Icons.Material.Filled.EditNote"
+                                                   Disabled="@_busy"
+                                                   OnClick="StartEditRequestAsync">
+                                            CHỈNH SỬA YÊU CẦU
+                                        </MudButton>
+                                    }
+                                    <MudButton Class="todox-primary-btn"
+                                               Variant="Variant.Filled"
+                                               StartIcon="@Icons.Material.Filled.MovieCreation"
+                                               Disabled="@(!_job.Workflow.CanStartRender || _busy || _editingRequest)"
+                                               OnClick="StartOrResumeAsync">
+                                        @StartButtonLabel
+                                    </MudButton>
+                                </MudStack>
                             </MudStack>
                         </MudPaper>
                     </MudItem>
@@ -159,6 +344,16 @@
 
             <MudTabPanel Text="SCENE">
                 <MudStack Spacing="3" Class="mt-3">
+                    @if (CanShowFloatingRenderAction)
+                    {
+                        <MudButton Class="timelapse-floating-create todox-primary-btn"
+                                   Variant="Variant.Filled"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow"
+                                   Disabled="@_busy"
+                                   OnClick="StartOrResumeAsync">
+                            @FloatingRenderActionLabel
+                        </MudButton>
+                    }
                     <MudPaper Class="todox-card pa-4" rounded="true">
                         <MudStack Spacing="2">
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
@@ -187,55 +382,49 @@
                                             </MudChip>
                                         </div>
                                         <div class="@PreviewClass("image-preview", image.Status)">
-                                            @if (!string.IsNullOrWhiteSpace(image.PublicUrl))
-                                            {
-                                                <img src="@image.PublicUrl" alt="@($"{image.ProgressPercent}%")" />
-                                            }
-                                            else if (image.IsOriginal)
-                                            {
-                                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                                <span>Ảnh thành phẩm chưa sẵn sàng</span>
-                                            }
-                                            else if (IsPendingOperation(image.Status))
-                                            {
-                                                <div class="tl-loading-content" role="status" aria-live="polite">
-                                                    <span class="tl-loading-icon">
-                                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                                    </span>
-                                                    <strong>@ImageLoadingTitle(image)</strong>
-                                                    <span>@ImagePlaceholderText(image)</span>
-                                                    @if (IsRenderingOperation(image.Status))
-                                                    {
-                                                        <span class="tl-image-scan" aria-hidden="true"></span>
-                                                    }
-                                                </div>
-                                                @if (IsRenderingOperation(image.Status))
-                                                {
-                                                    <span class="tl-active-scanline tl-image-scanline" aria-hidden="true"></span>
-                                                }
-                                            }
-                                            else
-                                            {
-                                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                                <span>@ImagePlaceholderText(image)</span>
-                                            }
+                                            <RenderMediaFrame IsVideo="false"
+                                                              MediaUrl="@image.PublicUrl"
+                                                              ThumbnailUrl="@image.PublicUrl"
+                                                              AspectRatio="@FormatRatio(_job.Snapshot.Ratio)"
+                                                              State="@ResolveImageMediaState(image)"
+                                                              LoadingLabel="@ImageLoadingTitle(image)"
+                                                              EmptyText="@ImagePlaceholderText(image)"
+                                                              FailedText="Lỗi render ảnh"
+                                                              ReadyText="Hoàn tất"
+                                                              ImageAriaLabel="@($"Xem ảnh {image.ProgressPercent}%")"
+                                                              OnClick="@(() => OpenImagePreviewAsync(image))" />
                                         </div>
                                         <div class="tl-image-card-footer">
                                             <div class="tl-image-meta-row">
                                                 @if (!image.IsOriginal)
                                                 {
-                                                    <MudTooltip Text="Xem / chỉnh sửa prompt">
-                                                        <MudIconButton Icon="@Icons.Material.Filled.EditNote"
-                                                                       Size="Size.Small"
-                                                                       Color="Color.Warning"
-                                                                       Disabled="@(!CanOpenPrompt(image) || _busy)"
-                                                                       OnClick="@(() => OpenImagePromptAsync(image))"
-                                                                       aria-label="@($"Xem hoặc chỉnh sửa prompt ảnh {image.ProgressPercent}%")" />
-                                                    </MudTooltip>
+                                                    <div class="tl-image-meta-actions">
+                                                        <MudTooltip Text="Xem / chỉnh sửa prompt">
+                                                            <MudIconButton Icon="@Icons.Material.Filled.EditNote"
+                                                                           Size="Size.Small"
+                                                                           Color="Color.Warning"
+                                                                           Disabled="@(!CanOpenPrompt(image) || _busy)"
+                                                                           OnClick="@(() => OpenImagePromptAsync(image))"
+                                                                           aria-label="@($"Xem hoặc chỉnh sửa prompt ảnh {image.ProgressPercent}%")" />
+                                                        </MudTooltip>
+                                                        @if (image.Attempt > 0)
+                                                        {
+                                                            <MudTooltip Text="Xem các lần render ảnh trước">
+                                                                <MudIconButton Icon="@Icons.Material.Filled.History"
+                                                                               Size="Size.Small"
+                                                                               Color="Color.Warning"
+                                                                               Disabled="@_busy"
+                                                                               OnClick="@(() => OpenSceneImageHistoryAsync(image))"
+                                                                               aria-label="@($"Xem lịch sử ảnh {image.ProgressPercent}%")" />
+                                                            </MudTooltip>
+                                                        }
+                                                    </div>
                                                 }
                                                 else
                                                 {
-                                                    <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" />
+                                                    <div class="tl-image-meta-actions">
+                                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" />
+                                                    </div>
                                                 }
                                                 <div class="tl-image-meta-copy">
                                                     <MudText Typo="Typo.body2">@(image.IsOriginal ? "Ảnh gốc / thành phẩm" : $"Ảnh AI {image.ProgressPercent}%")</MudText>
@@ -245,12 +434,15 @@
                                                     }
                                                     else
                                                     {
-                                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatStartedAt(image)</MudText>
-                                                        @if (image.CompletedAt.HasValue)
+                                                        @if (!IsRenderNotStarted)
+                                                        {
+                                                            <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatStartedAt(image)</MudText>
+                                                        }
+                                                        @if (!IsRenderNotStarted && image.CompletedAt.HasValue)
                                                         {
                                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatCompletedAt(image.CompletedAt.Value)</MudText>
                                                         }
-                                                        @if (image.Attempt > 0)
+                                                        @if (!IsRenderNotStarted && image.Attempt > 0)
                                                         {
                                                             <MudText Typo="Typo.caption" Color="Color.Secondary">Lần render @image.Attempt</MudText>
                                                         }
@@ -258,22 +450,44 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        @if (!image.IsOriginal && image.DependsOnProgressPercent.HasValue && image.Status == TimelapseOperationStatuses.Waiting)
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && image.DependsOnProgressPercent.HasValue && image.Status == TimelapseOperationStatuses.Waiting)
                                         {
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">Đang chờ ảnh @image.DependsOnProgressPercent% hoàn thành</MudText>
                                         }
-                                        @if (!string.IsNullOrWhiteSpace(image.ErrorMessage))
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && TimelapseImageExecutionPhase.IsWaitingForWorker(image))
                                         {
-                                            <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(image.ErrorMessage, "ảnh")</MudAlert>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @(TimelapseImageExecutionPhase.IsStuckWaitingForWorker(image, DateTime.UtcNow, TimeSpan.FromMinutes(2))
+                                                    ? "Đang chờ hệ thống xử lý lâu hơn bình thường."
+                                                    : "Đang chờ xử lý")
+                                            </MudText>
                                         }
-                                        @if (!image.IsOriginal && CanRetryImage(image.Status))
+                                        @{
+                                            var friendlyError = FriendlyOperationError(image.ErrorMessage, image.ProgressPercent, "ảnh");
+                                        }
+                                        @if (image.Status != TimelapseOperationStatuses.Cancelled && !string.IsNullOrWhiteSpace(friendlyError))
+                                        {
+                                            <MudAlert Severity="Severity.Error" Dense="true">@friendlyError</MudAlert>
+                                        }
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && CanRetryImage(image.Status))
                                         {
                                             <MudButton Size="Size.Small"
                                                        Variant="Variant.Outlined"
                                                        StartIcon="@Icons.Material.Filled.Refresh"
                                                        Disabled="@_busy"
                                                        OnClick="@(() => RetryImageAsync(image))">
-                                                Render lại
+                                                @(image.Status == TimelapseOperationStatuses.Cancelled ? "TẠO LẠI" : "Render lại")
+                                            </MudButton>
+                                        }
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && CanCancelOperation(image.Status))
+                                        {
+                                            <MudButton Size="Size.Small"
+                                                       Variant="Variant.Text"
+                                                       Color="Color.Error"
+                                                       StartIcon="@Icons.Material.Filled.StopCircle"
+                                                       Disabled="@_busy"
+                                                       OnClick="@(() => CancelImageAsync(image))">
+                                                DỪNG
                                             </MudButton>
                                         }
                                     </div>
@@ -298,14 +512,17 @@
                                            StartIcon="@Icons.Material.Filled.MovieCreation"
                                            Disabled="@_busy"
                                            OnClick="ConfirmVideoRenderAsync">
-                                    Bắt đầu tạo video
+                                    DUYỆT ẢNH & TẠO VIDEO
                                 </MudButton>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    Toàn bộ ảnh đã hoàn thành. Hãy kiểm tra các ảnh trước khi bắt đầu tạo video.
+                                </MudText>
                             }
                             else if (_job.Workflow.RequiresVideoConfirmation && !_job.Snapshot.VideoRenderConfirmed)
                             {
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                    Video sẽ chờ xác nhận khi có phân cảnh đủ ảnh đầu-cuối.
-                                </MudText>
+                                <MudAlert Severity="Severity.Info" Dense="true">
+                                    Đang chờ hoàn thành toàn bộ ảnh trước khi duyệt.
+                                </MudAlert>
                             }
                             <div class="timelapse-stage-grid">
                                 @foreach (var clip in VideoCards)
@@ -322,46 +539,17 @@
                                             </MudChip>
                                         </div>
                                         <div class="@PreviewClass("video-preview", clip.Status)">
-                                            @if (TimelapseVideoOrchestration.HasCompletedPreview(clip))
-                                            {
-                                                <video src="@clip.PublicUrl" controls playsinline preload="metadata"></video>
-                                            }
-                                            else if (IsPendingOperation(clip.Status))
-                                            {
-                                                <div class="tl-loading-content" role="status" aria-live="polite">
-                                                    <span class="tl-loading-icon">
-                                                        <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
-                                                    </span>
-                                                    <strong>@VideoLoadingTitle(clip)</strong>
-                                                    <span>@VideoPlaceholderText(clip)</span>
-                                                    @if (IsRenderingOperation(clip.Status))
-                                                    {
-                                                        <span class="tl-video-wave" aria-hidden="true">
-                                                            <i></i><i></i><i></i><i></i><i></i>
-                                                        </span>
-                                                    }
-                                                </div>
-                                                @if (IsRenderingOperation(clip.Status))
-                                                {
-                                                    <span class="tl-active-scanline tl-video-scanline" aria-hidden="true"></span>
-                                                }
-                                            }
-                                            else
-                                            {
-                                                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
-                                                <span>@VideoPlaceholderText(clip)</span>
-                                            }
-                                        </div>
-                                        <div class="clip-input-thumbnails" aria-label="Ảnh tham chiếu đầu và cuối">
-                                            <div class="clip-input-reference">
-                                                @RenderImageThumb(clip.StartProgressPercent)
-                                                <span class="clip-input-label">Ảnh đầu @clip.StartProgressPercent%</span>
-                                            </div>
-                                            <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" Class="clip-input-arrow" />
-                                            <div class="clip-input-reference">
-                                                @RenderImageThumb(clip.EndProgressPercent)
-                                                <span class="clip-input-label">Ảnh cuối @clip.EndProgressPercent%</span>
-                                            </div>
+                                            <RenderMediaFrame IsVideo="true"
+                                                              MediaUrl="@((TimelapseVideoOrchestration.HasCompletedPreview(clip) || IsRenderingOperation(clip.Status)) ? clip.PublicUrl : null)"
+                                                              ThumbnailUrl="@clip.PublicUrl"
+                                                              AspectRatio="@FormatRatio(_job.Snapshot.Ratio)"
+                                                              State="@ResolveTimelapseMediaState(clip.Status)"
+                                                              LoadingLabel="@VideoLoadingTitle(clip)"
+                                                              EmptyText="@VideoPlaceholderText(clip)"
+                                                              FailedText="Lỗi render video"
+                                                              ReadyText="Hoàn tất"
+                                                              VideoAriaLabel="@($"Phát video {clip.StartProgressPercent}% đến {clip.EndProgressPercent}%")"
+                                                              OnClick="@(() => OpenVideoPreviewAsync(clip))" />
                                         </div>
                                         <div class="tl-video-card-footer">
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatClipStartedAt(clip)</MudText>
@@ -375,26 +563,43 @@
                                             }
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@TimelapseRequestRules.RuntimeClipDurationSeconds giây · @TimelapseSellPricing.CustomerQualityLabel(_job.Snapshot.VideoMode) · @FormatRatio(_job.Snapshot.Ratio)</MudText>
                                         </div>
-                                        @if (!string.IsNullOrWhiteSpace(clip.ErrorMessage))
+                                        @{
+                                            var friendlyError = FriendlyOperationError(clip.ErrorMessage, null, "video");
+                                        }
+                                        @if (clip.Status != TimelapseOperationStatuses.Cancelled && !string.IsNullOrWhiteSpace(friendlyError))
                                         {
-                                            <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(clip.ErrorMessage, "video")</MudAlert>
+                                            <MudAlert Severity="Severity.Error" Dense="true">@friendlyError</MudAlert>
+                                        }
+                                        @if (clip.Attempt > 0)
+                                        {
+                                            <MudButton Size="Size.Small"
+                                                       Variant="Variant.Outlined"
+                                                       StartIcon="@Icons.Material.Filled.History"
+                                                       Disabled="@_busy"
+                                                       OnClick="@(() => OpenSceneVideoHistoryAsync(clip))">
+                                                LỊCH SỬ
+                                            </MudButton>
                                         }
                                         @if (CanRetry(clip.Status))
                                         {
                                             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_busy" OnClick="@(() => RetryVideoAsync(clip.ClipIndex))">
-                                                Render lại
+                                                @(clip.Status == TimelapseOperationStatuses.Cancelled ? "RENDER LẠI" : "Render lại")
+                                            </MudButton>
+                                        }
+                                        @if (CanCancelOperation(clip.Status))
+                                        {
+                                            <MudButton Size="Size.Small"
+                                                       Variant="Variant.Text"
+                                                       Color="Color.Error"
+                                                       StartIcon="@Icons.Material.Filled.StopCircle"
+                                                       Disabled="@_busy"
+                                                       OnClick="@(() => CancelVideoAsync(clip.ClipIndex))">
+                                                DỪNG
                                             </MudButton>
                                         }
                                     </div>
                                 }
                             </div>
-                            <MudButton Variant="Variant.Filled"
-                                       Color="Color.Warning"
-                                       StartIcon="@Icons.Material.Filled.MovieFilter"
-                                       Disabled="@(!_job.Workflow.CanFinalize || _busy)"
-                                       OnClick="StartFinalizerAsync">
-                                Hoàn thành video
-                            </MudButton>
                         </MudStack>
                     </MudPaper>
                 </MudStack>
@@ -404,14 +609,7 @@
                 <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
                     @if (IsFinalOutputLoading)
                     {
-                        <div class="tl-final-loading tl-loading-skeleton tl-loading-shimmer tl-pulse tl-flash-soft" role="status" aria-live="polite">
-                            <span class="tl-loading-icon tl-final-icon">
-                                <MudIcon Icon="@Icons.Material.Filled.MovieFilter" Size="Size.Large" />
-                            </span>
-                            <MudText Typo="Typo.h6">@FinalLoadingTitle</MudText>
-                            <MudText Typo="Typo.body2" Color="Color.Secondary">Hệ thống tiếp tục xử lý kể cả khi bạn rời trang.</MudText>
-                            <span class="tl-final-progress" aria-hidden="true"></span>
-                        </div>
+                        <TimelapseFinalizingOverlay Title="@FinalLoadingTitle" Subtitle="@FinalLoadingSubtitle" />
                     }
                     else if (_job.Workflow.FinalOutput?.Status == TimelapseOperationStatuses.Completed && !string.IsNullOrWhiteSpace(_job.Workflow.FinalOutput.PublicUrl))
                     {
@@ -421,6 +619,12 @@
                             <MudText Typo="Typo.caption" Color="Color.Secondary">Phiên bản @_job.Workflow.FinalOutput.Version · @_job.Workflow.FinalOutput.CompletedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
                             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Href="@_job.Workflow.FinalOutput.PublicUrl" Target="_blank">
                                 Tải video
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined"
+                                       StartIcon="@Icons.Material.Filled.History"
+                                       Disabled="@_busy"
+                                       OnClick="OpenFinalVideoHistoryAsync">
+                                LỊCH SỬ VIDEO
                             </MudButton>
                         </MudStack>
                     }
@@ -440,6 +644,12 @@
                                        OnClick="StartFinalizerAsync">
                                 Hoàn thiện lại
                             </MudButton>
+                            <MudButton Variant="Variant.Outlined"
+                                       StartIcon="@Icons.Material.Filled.History"
+                                       Disabled="@_busy"
+                                       OnClick="OpenFinalVideoHistoryAsync">
+                                LỊCH SỬ VIDEO
+                            </MudButton>
                         </MudStack>
                     }
                     else
@@ -458,12 +668,31 @@
 @code {
     [Parameter] public Guid JobId { get; set; }
 
+    private const long MaxImageBytes = 10 * 1024 * 1024;
+    private const string StandardModeValue = "fast";
+    private const string PremiumModeValue = "professional";
+    private static readonly HashSet<string> AllowedImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    };
+
     private TimelapseJobView? _job;
     private PeriodicTimer? _pollTimer;
     private CancellationTokenSource? _pollCts;
+    private TimelapseCreateRequest _editRequest = new();
+    private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
+    private IBrowserFile? _editImageFile;
+    private string? _editPreviewUrl;
+    private IBrowserFile? _editStartImageFile;
+    private string? _editStartPreviewUrl;
+    private bool _removeEditStartImage;
     private bool _initialLoading = true;
     private bool _busy;
     private bool _refreshing;
+    private bool _editingRequest;
+    private bool _requestDirty;
     private string? _refreshError;
     private string? _loadError;
     private int _activeTabIndex;
@@ -477,19 +706,69 @@
         => EnsureVideoCards();
     private int ImageFailureCount => ImageCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
     private int VideoFailureCount => VideoCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
+    private bool IsRenderNotStarted
+        => _job is not null
+           && string.Equals(_job.Workflow.ParentStatus, TimelapseParentStatuses.Draft, StringComparison.OrdinalIgnoreCase)
+           && !_job.Workflow.HasActiveOperations
+           && _job.Workflow.Images.All(x => x.IsOriginal || x.Attempt == 0)
+           && _job.Workflow.Videos.All(x => x.Attempt == 0)
+           && _job.Workflow.FinalOutput is null;
+    private bool CanShowFloatingRenderAction
+        => _job is not null
+           && _job.Workflow.CanStartRender
+           && !_job.Workflow.HasActiveOperations
+           && !_busy
+           && !_editingRequest
+           && !string.Equals(_job.Workflow.ParentStatus, TimelapseParentStatuses.Completed, StringComparison.OrdinalIgnoreCase);
+    private bool IsInitialFloatingRenderAction
+        => _job is not null
+           && string.Equals(_job.Workflow.ParentStatus, TimelapseParentStatuses.Draft, StringComparison.OrdinalIgnoreCase)
+           && _job.Workflow.Images.All(x => x.IsOriginal || x.Attempt == 0)
+           && _job.Workflow.Videos.All(x => x.Attempt == 0)
+           && _job.Workflow.FinalOutput is null;
+    private string FloatingRenderActionLabel
+        => IsInitialFloatingRenderAction ? "TẠO VIDEO" : "TIẾP TỤC TẠO VIDEO";
+    private string DisplayServiceName
+        => !string.IsNullOrWhiteSpace(_job?.Snapshot.ServiceName)
+            ? _job.Snapshot.ServiceName
+            : TimelapseServiceCatalog.TryGet(_job?.Snapshot.ServiceCode, out var service)
+                ? service.DisplayName
+                : _job?.Snapshot.ServiceCode ?? "Timelapse";
+    private string DisplayServiceCategory
+        => TimelapseServiceCatalog.TryGet(_job?.Snapshot.ServiceCode, out var service)
+            ? service.CategoryLabel
+            : _profiles.FirstOrDefault(x => string.Equals(x.ProfileCode, _job?.Snapshot.ProfileCode, StringComparison.OrdinalIgnoreCase))?.Category
+              ?? _job?.Snapshot.ServiceCategory
+              ?? _job?.Snapshot.ProfileName
+              ?? "Timelapse";
+    private bool CanCancelJob
+        => _job?.Workflow.HasActiveOperations == true
+           || _job?.Workflow.ParentStatus is TimelapseParentStatuses.GeneratingImages
+               or TimelapseParentStatuses.GeneratingVideos
+               or TimelapseParentStatuses.Finalizing;
+    private bool CanEditFullRequest
+        => _job is not null
+           && _job.Workflow.CanEditRequest
+           && string.Equals(_job.Status, RenderJobStatuses.Draft, StringComparison.OrdinalIgnoreCase)
+           && _job.Workflow.Images.Count == 0
+           && _job.Workflow.Videos.Count == 0
+           && _job.Workflow.FinalOutput is null;
     private bool IsFinalOutputLoading
         => _job?.Workflow.FinalOutput?.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering
            || string.Equals(_job?.Workflow.FinalOutput?.Status, TimelapseParentStatuses.Finalizing, StringComparison.OrdinalIgnoreCase)
            || _job?.Workflow.ParentStatus == TimelapseParentStatuses.Finalizing;
     private string FinalLoadingTitle
         => _job?.Workflow.ParentStatus == TimelapseParentStatuses.Finalizing
-            ? "Đang ghép video cuối cùng..."
+            ? "Đang hoàn thiện video..."
             : "Đang chờ hoàn thiện kết quả...";
+    private const string FinalLoadingSubtitle = "Hệ thống tiếp tục xử lý kể cả khi bạn rời trang.";
     private string StartButtonLabel => _job?.Workflow.HasActiveOperations == true
         ? "Đang xử lý..."
         : _job?.Workflow.ParentStatus is TimelapseParentStatuses.Paused or TimelapseParentStatuses.Failed
             ? "Tiếp tục tạo video"
-            : "Bắt đầu tạo video";
+            : _job?.Workflow.RequiresVideoConfirmation == true && !_job.Snapshot.VideoRenderConfirmed
+                ? "Duyệt ảnh & tạo video"
+                : "Bắt đầu tạo video";
 
     protected override void OnInitialized()
     {
@@ -595,6 +874,249 @@
         });
     }
 
+    private async Task StartEditRequestAsync()
+    {
+        if (_job is null || !CanEditFullRequest)
+        {
+            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            _profiles = string.IsNullOrWhiteSpace(_job.Snapshot.ServiceCategory)
+                ? await Profiles.GetEnabledProfilesAsync()
+                : await Profiles.GetEnabledProfilesByCategoryAsync(_job.Snapshot.ServiceCategory);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được profile Timelapse: {ex.Message}", Severity.Error);
+            return;
+        }
+
+        _editRequest = new TimelapseCreateRequest
+        {
+            ServiceId = _job.Snapshot.ServiceId,
+            ServiceCode = _job.Snapshot.ServiceCode,
+            ServiceCategory = _job.Snapshot.ServiceCategory,
+            Title = _job.Snapshot.Title,
+            ProfileCode = _job.Snapshot.ProfileCode,
+            SceneCount = _job.Snapshot.SceneCount,
+            VideoMode = _job.Snapshot.VideoMode,
+            Ratio = _job.Snapshot.Ratio,
+            RequireVideoConfirmation = _job.Snapshot.RequireVideoConfirmation,
+            AutoFinish = _job.Snapshot.AutoFinish
+        };
+        _editImageFile = null;
+        _editPreviewUrl = _job.Snapshot.OriginalImage.PublicUrl;
+        _editStartImageFile = null;
+        _editStartPreviewUrl = _job.Snapshot.StartImage?.PublicUrl;
+        _removeEditStartImage = false;
+        _requestDirty = false;
+        _editingRequest = true;
+        _activeTabIndex = 0;
+    }
+
+    private async Task OnEditImageSelected(InputFileChangeEventArgs args)
+    {
+        _editImageFile = args.File;
+        if (!ValidateEditImage(showSnackbar: true))
+        {
+            _editImageFile = null;
+            return;
+        }
+
+        await using var stream = _editImageFile!.OpenReadStream(MaxImageBytes);
+        await using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        _editPreviewUrl = $"data:{_editImageFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        _requestDirty = true;
+    }
+
+    private async Task OnEditStartImageSelected(InputFileChangeEventArgs args)
+    {
+        _editStartImageFile = args.File;
+        _editStartPreviewUrl = null;
+        _removeEditStartImage = false;
+        if (!ValidateEditImage(_editStartImageFile, showSnackbar: true))
+        {
+            _editStartImageFile = null;
+            return;
+        }
+
+        await using var stream = _editStartImageFile.OpenReadStream(MaxImageBytes);
+        await using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        _editStartPreviewUrl = $"data:{_editStartImageFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        _requestDirty = true;
+    }
+
+    private bool ValidateEditImage(bool showSnackbar)
+        => ValidateEditImage(_editImageFile, showSnackbar);
+
+    private bool ValidateEditImage(IBrowserFile? file, bool showSnackbar)
+    {
+        if (file is null)
+        {
+            return false;
+        }
+
+        if (file.Size <= 0 || file.Size > MaxImageBytes)
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Ảnh phải có dung lượng tối đa 10MB.", Severity.Warning);
+            }
+            return false;
+        }
+
+        if (!AllowedImageContentTypes.Contains(file.ContentType))
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Chỉ hỗ trợ JPG, PNG hoặc WebP.", Severity.Warning);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task SaveRequestEditsAsync()
+    {
+        if (_job is null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        if (!CanEditFullRequest)
+        {
+            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.", Severity.Warning);
+            return;
+        }
+
+        if (_editImageFile is not null && !ValidateEditImage(showSnackbar: true))
+        {
+            return;
+        }
+
+        var errors = TimelapseRequestRules.Validate(_editRequest, _editImageFile is not null || _job.Snapshot.OriginalImage.MediaId != Guid.Empty);
+        if (errors.Count > 0)
+        {
+            Snackbar.Add(errors[0], Severity.Warning);
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            byte[]? imageBytes = null;
+            if (_editImageFile is not null)
+            {
+                await using var stream = _editImageFile.OpenReadStream(MaxImageBytes);
+                await using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer);
+                imageBytes = buffer.ToArray();
+            }
+            byte[]? startImageBytes = null;
+            if (_editStartImageFile is not null)
+            {
+                await using var startStream = _editStartImageFile.OpenReadStream(MaxImageBytes);
+                await using var startBuffer = new MemoryStream();
+                await startStream.CopyToAsync(startBuffer);
+                startImageBytes = startBuffer.ToArray();
+            }
+
+            _job = await Jobs.UpdateDraftAsync(
+                JobId,
+                _editRequest,
+                imageBytes,
+                _editImageFile?.Name,
+                _editImageFile?.ContentType,
+                AuthState.CurrentUser,
+                startImageBytes,
+                _editStartImageFile?.Name,
+                _editStartImageFile?.ContentType,
+                _removeEditStartImage);
+            _editingRequest = false;
+            _requestDirty = false;
+            _editImageFile = null;
+            _editStartImageFile = null;
+            _removeEditStartImage = false;
+            _editPreviewUrl = _job.Snapshot.OriginalImage.PublicUrl;
+            _editStartPreviewUrl = _job.Snapshot.StartImage?.PublicUrl;
+            _activeTabIndex = 0;
+            Snackbar.Add("Đã cập nhật yêu cầu Timelapse.", Severity.Success);
+        });
+    }
+
+    private async Task CancelEditRequestAsync()
+    {
+        if (_requestDirty)
+        {
+            var confirmed = await DialogService.ShowMessageBoxAsync(
+                "Bỏ các thay đổi chưa lưu?",
+                "Yêu cầu sẽ quay lại phiên bản đã lưu gần nhất.",
+                yesText: "BỎ THAY ĐỔI",
+                cancelText: "TIẾP TỤC CHỈNH");
+            if (confirmed != true)
+            {
+                return;
+            }
+        }
+
+        _editingRequest = false;
+        _requestDirty = false;
+        _editImageFile = null;
+        _editStartImageFile = null;
+        _removeEditStartImage = false;
+        _editPreviewUrl = null;
+        _editStartPreviewUrl = null;
+    }
+
+    private void RemoveEditStartImage()
+    {
+        _editStartImageFile = null;
+        _editStartPreviewUrl = null;
+        _removeEditStartImage = true;
+        _requestDirty = true;
+    }
+
+    private void SetEditTitle(string? title)
+    {
+        _editRequest.Title = title;
+        _requestDirty = true;
+    }
+
+    private void SetEditProfile(string? profileCode)
+    {
+        _editRequest.ProfileCode = profileCode ?? string.Empty;
+        _requestDirty = true;
+    }
+
+    private void SelectEditSceneCount(int sceneCount)
+    {
+        _editRequest.SceneCount = sceneCount;
+        _requestDirty = true;
+    }
+
+    private void SelectEditMode(string mode)
+    {
+        _editRequest.VideoMode = mode;
+        _requestDirty = true;
+    }
+
+    private void SelectEditRatio(string ratio)
+    {
+        _editRequest.Ratio = ratio;
+        _requestDirty = true;
+    }
+
+    private bool IsEditSceneSelected(int sceneCount) => _editRequest.SceneCount == sceneCount;
+
+    private bool IsEditModeSelected(string mode) => string.Equals(_editRequest.VideoMode, mode, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsEditRatioSelected(string ratio) => string.Equals(_editRequest.Ratio, ratio, StringComparison.OrdinalIgnoreCase);
+
     private async Task OpenImagePromptAsync(TimelapseStageImage image)
     {
         if (!CanOpenPrompt(image) || AuthState.CurrentUser is null)
@@ -635,7 +1157,8 @@
                 image.Id,
                 edit.Prompt,
                 edit.Rerender,
-                AuthState.CurrentUser);
+                AuthState.CurrentUser,
+                edit.Rerender ? Guid.NewGuid() : null);
             _activeTabIndex = 1;
             Snackbar.Add(
                 edit.Rerender
@@ -647,6 +1170,150 @@
         });
     }
 
+    private Task OpenImagePreviewAsync(TimelapseStageImage image)
+    {
+        if (string.IsNullOrWhiteSpace(image.PublicUrl))
+        {
+            return Task.CompletedTask;
+        }
+
+        var title = image.IsOriginal ? "Ảnh gốc / thành phẩm" : $"Ảnh AI {image.ProgressPercent}%";
+        var parameters = new DialogParameters
+        {
+            [nameof(Components.Dialogs.ReferenceImageLightboxDialog.Title)] = title,
+            [nameof(Components.Dialogs.ReferenceImageLightboxDialog.ImageUrl)] = image.PublicUrl,
+            [nameof(Components.Dialogs.ReferenceImageLightboxDialog.FileName)] = title
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
+        _ = DialogService.ShowAsync<Components.Dialogs.ReferenceImageLightboxDialog>(title, parameters, options);
+        return Task.CompletedTask;
+    }
+
+    private Task OpenVideoPreviewAsync(TimelapseVideoClip clip)
+    {
+        if (string.IsNullOrWhiteSpace(clip.PublicUrl))
+        {
+            return Task.CompletedTask;
+        }
+
+        var title = $"Video {clip.StartProgressPercent}% đến {clip.EndProgressPercent}%";
+        var parameters = new DialogParameters
+        {
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.Title)] = title,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.VideoUrl)] = clip.PublicUrl,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AspectRatio)] = FormatRatio(_job!.Snapshot.Ratio)
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
+        _ = DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(title, parameters, options);
+        return Task.CompletedTask;
+    }
+
+    private async Task OpenHistoryAsync()
+    {
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null) return;
+
+        var history = await Jobs.ListHistoryAsync(JobId, currentUser);
+        await OpenHistoryDialogAsync("Lịch sử Timelapse", history, false);
+    }
+
+    private async Task OpenSceneVideoHistoryAsync(TimelapseVideoClip clip)
+    {
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null)
+        {
+            return;
+        }
+
+        var history = await Jobs.ListSceneVideoHistoryAsync(JobId, clip.ClipIndex, currentUser);
+        await OpenHistoryDialogAsync($"Lịch sử video {clip.StartProgressPercent}% → {clip.EndProgressPercent}%", history, true);
+    }
+
+    private async Task OpenSceneImageHistoryAsync(TimelapseStageImage image)
+    {
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null)
+        {
+            return;
+        }
+
+        var history = await Jobs.ListSceneImageHistoryAsync(JobId, image.ProgressPercent, currentUser);
+        await OpenHistoryDialogAsync($"Lịch sử ảnh {image.ProgressPercent}%", history, false);
+    }
+
+    private async Task OpenFinalVideoHistoryAsync()
+    {
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null)
+        {
+            return;
+        }
+
+        var history = await Jobs.ListFinalVideoHistoryAsync(JobId, currentUser);
+        await OpenHistoryDialogAsync("Lịch sử video hoàn chỉnh", history, true);
+    }
+
+    private async Task OpenHistoryDialogAsync(string title, IReadOnlyList<TimelapseHistoryItem> history, bool isSceneVideo)
+    {
+        var items = history.Select(item => new MediaHistoryItem
+        {
+            Key = $"{item.Kind}:{item.EntityId:N}:{item.Version}",
+            VersionLabel = $"Lần {item.Version}",
+            Title = item.Label,
+            Status = item.Status,
+            StatusColor = HistoryStatusColor(item.Status),
+            CreatedAt = item.CreatedAt.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(item.CreatedAt.Value, DateTimeKind.Utc)) : DateTimeOffset.UtcNow,
+            IsSelected = item.IsSelected,
+            CanSelect = item.Status == TimelapseOperationStatuses.Completed && !item.IsSelected && !string.IsNullOrWhiteSpace(item.PublicUrl),
+            IsVideo = isSceneVideo || item.Kind is "video" or "final",
+            MediaUrl = item.PublicUrl,
+            Metadata = string.IsNullOrWhiteSpace(item.ProviderCode) && string.IsNullOrWhiteSpace(item.ProviderModel)
+                ? null
+                : $"{item.ProviderCode ?? "provider"} / {item.ProviderModel ?? "model"}",
+            Error = item.ErrorMessage
+        }).ToList();
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>(title, new DialogParameters<MediaHistoryDialog>
+        {
+            { x => x.Title, title }, { x => x.Items, items }
+        }, new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+        var result = await dialog.Result;
+        if (result?.Canceled != false || result.Data is not string key)
+        {
+            return;
+        }
+
+        var parts = key.Split(':');
+        if (parts.Length != 3 || !Guid.TryParse(parts[1], out var entityId) || !int.TryParse(parts[2], out var version))
+        {
+            return;
+        }
+
+        var selected = history.FirstOrDefault(x => x.Kind == parts[0] && x.EntityId == entityId && x.Version == version);
+        if (selected is null)
+        {
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            var currentUser = AuthState.CurrentUser;
+            if (currentUser is null)
+            {
+                return;
+            }
+
+            _job = await Jobs.SelectHistoryAsync(JobId, selected, currentUser);
+            Snackbar.Add("Đã chọn lại phiên bản Timelapse.", Severity.Success);
+        });
+    }
+
+    private static Color HistoryStatusColor(string status)
+        => status == TimelapseOperationStatuses.Completed
+            ? Color.Success
+            : status == TimelapseOperationStatuses.Failed
+                ? Color.Error
+                : Color.Warning;
+
     private async Task RetryImageAsync(TimelapseStageImage image)
     {
         if (AuthState.CurrentUser is null || !await ConfirmImageRerenderAsync(image.ProgressPercent))
@@ -656,7 +1323,7 @@
 
         await RunActionAsync(async () =>
         {
-            _job = await Jobs.RetryImageAsync(JobId, image.ProgressPercent, AuthState.CurrentUser);
+            _job = await Jobs.RetryImageAsync(JobId, image.ProgressPercent, AuthState.CurrentUser, Guid.NewGuid());
             _activeTabIndex = 1;
             Snackbar.Add("Đã bắt đầu render lại chuỗi ảnh và video phụ thuộc.", Severity.Success);
         });
@@ -698,7 +1365,7 @@
 
         await RunActionAsync(async () =>
         {
-            _job = await Jobs.RetryVideoAsync(JobId, clipIndex, AuthState.CurrentUser);
+            _job = await Jobs.RetryVideoAsync(JobId, clipIndex, AuthState.CurrentUser, Guid.NewGuid());
             _activeTabIndex = 1;
         });
     }
@@ -730,6 +1397,60 @@
             _job = await Jobs.StartFinalizerAsync(JobId, AuthState.CurrentUser);
             _activeTabIndex = 2;
         });
+    }
+
+    private async Task CancelJobAsync()
+    {
+        if (AuthState.CurrentUser is null || !await ConfirmCancelJobAsync())
+        {
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.CancelJobAsync(JobId, AuthState.CurrentUser);
+            Snackbar.Add("Đã dừng toàn bộ tác vụ Timelapse.", Severity.Warning);
+        });
+    }
+
+    private async Task CancelImageAsync(TimelapseStageImage image)
+    {
+        if (AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.CancelImageAsync(JobId, image.ProgressPercent, AuthState.CurrentUser);
+            _activeTabIndex = 1;
+            Snackbar.Add($"Đã dừng ảnh {image.ProgressPercent}%.", Severity.Warning);
+        });
+    }
+
+    private async Task CancelVideoAsync(int clipIndex)
+    {
+        if (AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.CancelVideoAsync(JobId, clipIndex, AuthState.CurrentUser);
+            _activeTabIndex = 1;
+            Snackbar.Add($"Đã dừng video clip {clipIndex}.", Severity.Warning);
+        });
+    }
+
+    private async Task<bool> ConfirmCancelJobAsync()
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Dừng toàn bộ tác vụ?",
+            "Các ảnh/video đã hoàn thành vẫn được giữ lại. Tác vụ đã gửi sang nhà cung cấp có thể vẫn tiếp tục xử lý và phát sinh chi phí.",
+            yesText: "DỪNG TẤT CẢ",
+            cancelText: "HỦY");
+        return confirmed == true;
     }
 
     private async Task RunActionAsync(Func<Task> action)
@@ -792,25 +1513,6 @@
         }
     }
 
-    private RenderFragment RenderImageThumb(int progress) => builder =>
-    {
-        var image = ImageCards.FirstOrDefault(x => x.ProgressPercent == progress);
-        if (!string.IsNullOrWhiteSpace(image?.PublicUrl))
-        {
-            builder.OpenElement(0, "img");
-            builder.AddAttribute(1, "src", image.PublicUrl);
-            builder.AddAttribute(2, "alt", $"{progress}%");
-            builder.AddAttribute(3, "class", "clip-input-image");
-            builder.CloseElement();
-            return;
-        }
-
-        builder.OpenElement(4, "span");
-        builder.AddAttribute(5, "class", "clip-input-placeholder");
-        builder.AddContent(6, $"{progress}%");
-        builder.CloseElement();
-    };
-
     private IReadOnlyList<TimelapseStageImage> EnsureImageCards()
     {
         if (_job is null)
@@ -827,7 +1529,7 @@
                     return image;
                 }
 
-                var isOriginal = progress == 100;
+                var isOriginal = progress == 100 || (_job.Snapshot.HasStartImage && progress == 0);
                 var dependency = isOriginal
                     ? (int?)null
                     : _job.Snapshot.ProgressMapping.Where(x => x > progress).OrderBy(x => x).FirstOrDefault();
@@ -839,8 +1541,12 @@
                     IsOriginal = isOriginal,
                     DependsOnProgressPercent = dependency,
                     Status = isOriginal ? TimelapseOperationStatuses.Completed : TimelapseOperationStatuses.Waiting,
-                    PublicUrl = isOriginal ? _job.Snapshot.OriginalImage.PublicUrl : null,
-                    MediaId = isOriginal ? _job.Snapshot.OriginalImage.MediaId : null
+                    PublicUrl = progress == 100
+                        ? _job.Snapshot.OriginalImage.PublicUrl
+                        : isOriginal ? _job.Snapshot.StartImage?.PublicUrl : null,
+                    MediaId = progress == 100
+                        ? _job.Snapshot.OriginalImage.MediaId
+                        : isOriginal ? _job.Snapshot.StartImage?.MediaId : null
                 };
             })
             .ToList();
@@ -868,12 +1574,18 @@
             .ToList();
     }
 
-    private static string ImagePlaceholderText(TimelapseStageImage image)
-        => image.Status == TimelapseOperationStatuses.Failed
+    private string ImagePlaceholderText(TimelapseStageImage image)
+        => image.IsOriginal
+            ? image.ProgressPercent == 0 && _job?.Snapshot.HasStartImage == true
+                ? "Ảnh khách hàng / mốc ban đầu 0%"
+                : "Ảnh khách hàng / thành phẩm 100%"
+            : IsRenderNotStarted
+                ? "Chờ tạo video"
+            : image.Status == TimelapseOperationStatuses.Failed
             ? "Lỗi render ảnh"
             : image.DependsOnProgressPercent.HasValue
                 ? $"Đang chờ ảnh {image.DependsOnProgressPercent}% hoàn thành"
-                : "Đang chờ render...";
+                : "Chờ tạo video";
 
     private static string VideoPlaceholderText(TimelapseVideoClip clip)
         => clip.Status == TimelapseOperationStatuses.Failed
@@ -884,7 +1596,9 @@
 
     private static string ImageLoadingTitle(TimelapseStageImage image)
         => image.Status == TimelapseOperationStatuses.Rendering
-            ? "Đang tạo ảnh..."
+            ? TimelapseImageExecutionPhase.IsWaitingForWorker(image)
+                ? "Đang chờ xử lý..."
+                : "Đang tạo ảnh..."
             : $"Đang chờ ảnh {image.ProgressPercent}%";
 
     private static string VideoLoadingTitle(TimelapseVideoClip clip)
@@ -898,6 +1612,24 @@
     private static bool IsRenderingOperation(string? status)
         => status == TimelapseOperationStatuses.Rendering;
 
+    private static MediaRenderState ResolveTimelapseMediaState(string? status)
+        => status switch
+        {
+            TimelapseOperationStatuses.Waiting => MediaRenderState.Queued,
+            TimelapseOperationStatuses.Rendering => MediaRenderState.Rendering,
+            TimelapseOperationStatuses.Completed => MediaRenderState.Ready,
+            TimelapseOperationStatuses.Failed => MediaRenderState.Failed,
+            _ => MediaRenderState.Empty
+        };
+
+    private MediaRenderState ResolveImageMediaState(TimelapseStageImage image)
+        => IsRenderNotStarted && !image.IsOriginal
+            ? MediaRenderState.Empty
+            : ResolveTimelapseMediaState(image.Status);
+
+    private static bool CanCancelOperation(string? status)
+        => status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering;
+
     private static string OperationStateClass(string? status)
         => status switch
         {
@@ -906,19 +1638,12 @@
             TimelapseOperationStatuses.Completed => "is-completed",
             TimelapseOperationStatuses.Failed => "is-failed",
             TimelapseOperationStatuses.Invalidated => "is-invalidated",
+            TimelapseOperationStatuses.Cancelled => "is-cancelled",
             _ => "is-unknown"
         };
 
     private static string PreviewClass(string baseClass, string? status)
-    {
-        var classes = $"stage-preview {baseClass} {OperationStateClass(status)}";
-        return status switch
-        {
-            TimelapseOperationStatuses.Rendering => $"{classes} tl-loading-skeleton tl-active-render",
-            TimelapseOperationStatuses.Waiting => $"{classes} tl-loading-skeleton tl-loading-shimmer",
-            _ => classes
-        };
-    }
+        => $"stage-preview {baseClass} {OperationStateClass(status)}";
 
     private static string SafeRefreshError(Exception ex)
         => ex is UnauthorizedAccessException
@@ -926,11 +1651,13 @@
             : "Không thể cập nhật trạng thái mới nhất. Hệ thống sẽ thử lại.";
 
     private static bool CanRetry(string status)
-        => status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Invalidated;
+        => status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Invalidated or TimelapseOperationStatuses.Cancelled;
 
     private bool CanRetryImage(string status)
-        => _job?.Workflow.HasActiveOperations != true
-           && status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed;
+        => status is TimelapseOperationStatuses.Failed
+            or TimelapseOperationStatuses.Completed
+            or TimelapseOperationStatuses.Invalidated
+            or TimelapseOperationStatuses.Cancelled;
 
     private static bool CanOpenPrompt(TimelapseStageImage image)
         => !image.IsOriginal
@@ -950,6 +1677,7 @@
         {
             TimelapseParentStatuses.Completed => Color.Success,
             TimelapseParentStatuses.Failed => Color.Error,
+            TimelapseParentStatuses.Cancelled => Color.Warning,
             TimelapseParentStatuses.GeneratingImages or TimelapseParentStatuses.GeneratingVideos or TimelapseParentStatuses.Finalizing => Color.Warning,
             _ => Color.Default
         };
@@ -961,6 +1689,7 @@
             TimelapseOperationStatuses.Failed => Color.Error,
             TimelapseOperationStatuses.Rendering => Color.Warning,
             TimelapseOperationStatuses.Invalidated => Color.Info,
+            TimelapseOperationStatuses.Cancelled => Color.Warning,
             _ => Color.Default
         };
 
@@ -972,13 +1701,23 @@
             ? $"Bắt đầu: {clip.StartedAt.Value.ToLocalTime():HH:mm dd/MM}"
             : "Chưa bắt đầu";
 
-    private static string FriendlyOperationError(string? message, string mediaType)
-        => $"Không thể tạo {mediaType}. Vui lòng bấm Render lại để thử lại.";
+    private static string? FriendlyOperationError(string? message, int? progressPercent, string mediaType)
+    {
+        if (LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, message))
+        {
+            return null;
+        }
+
+        return mediaType == "video"
+            ? "Có lỗi xảy ra khi tạo video."
+            : progressPercent is > 0
+                ? $"Không thể tạo ảnh AI tại mốc {progressPercent}%."
+                : "Không thể tạo ảnh AI.";
+    }
 
     private static string FormatRatio(string ratio)
         => string.Equals(ratio, TimelapseRequestRules.PortraitRatio, StringComparison.OrdinalIgnoreCase)
             ? "9:16"
             : "16:9";
 
-    private static string FormatPoints(decimal value) => $"{value:0.##} điểm";
 }

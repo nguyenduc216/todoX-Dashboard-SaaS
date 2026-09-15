@@ -5,6 +5,13 @@ using System.Text.Json;
 
 namespace TodoX.Web.Services.AiCharacters;
 
+public enum AiProviderExecutionState
+{
+    Pending,
+    Success,
+    Failed
+}
+
 public sealed class OpenRouterImageRequest
 {
     public Guid? UserId { get; set; }
@@ -20,6 +27,9 @@ public sealed class OpenRouterImageRequest
     public string FileCategory { get; set; } = "ai_character";
     public string[] ReferenceImageUrls { get; set; } = Array.Empty<string>();
     public Guid[] ReferenceMediaIds { get; set; } = Array.Empty<Guid>();
+    public string? ProviderTaskId { get; set; }
+    public string? RequestedModel { get; set; }
+    public string? ReferenceImageBase64 { get; set; }
 
     /// <summary>Overrides OpenRouter:BaseUrl when the provider row supplies its own base_url.</summary>
     public string? BaseUrlOverride { get; set; }
@@ -35,11 +45,13 @@ public sealed class OpenRouterImageRequest
 
     /// <summary>Raw capability config JSON from todox_ai_provider_capability.config_json.</summary>
     public string? CapabilityConfigJson { get; set; }
+    public Func<string, object, Task>? ProgressCallback { get; set; }
 }
 
 public sealed class OpenRouterImageResponse
 {
     public bool Success { get; set; }
+    public AiProviderExecutionState ExecutionState { get; set; } = AiProviderExecutionState.Failed;
     public byte[]? ImageBytes { get; set; }
     public string? ImageUrl { get; set; }
     public string? ObjectKey { get; set; }

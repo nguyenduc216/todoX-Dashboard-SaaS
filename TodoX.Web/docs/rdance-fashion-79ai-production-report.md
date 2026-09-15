@@ -31,10 +31,13 @@
 - Motion primary provider/model: `79ai / kling_video_motion`
 - Business-facing model name: `Kling Motion Control`
 - Motion backup provider/model: `kie / kling-2.6/motion-control`
-- Reference primary provider/model: `local_composite / local_composite`
-- Reference backup provider/model: existing KIE route remains available but is no longer the primary default
+- Reference primary provider/model: `79ai / seedream_5_0`
+- Reference route output: real AI-generated fashion reference image, not a side-by-side local composite
+- Reference backup provider/model: existing KIE route may remain available but is not the primary default
 
-The repository has verified `kling_video_motion` in `docs/79ai-video-catalog-audit.md`. No verified 79AI image-edit model contract was found for the fashion reference step, so the implementation keeps the existing local composite route instead of inventing a provider/model id.
+The repository uses the existing 79AI `/generateImage` contract shared with the Timelapse image runtime for the fashion reference step. The manual route seed disables the old `local_composite` default for `dance_sell.reference_image` and enables `79ai / seedream_5_0` with `base64Image` for the character edit base and `subjects` for the product reference, plus `editImage=true`, `project_id=default`, `ratio=9:16`, `mode=vip`, and `resolution=2k`. No `image_2` field is sent for image generation.
+
+The repository has no non-empty `subjects` example or object-item schema. The DanceSell adapter uses a JSON-stringified array of product image data URI strings and records that provisional transport explicitly. The unexecuted manual switch script `database/manual/rdance-fashion/02_switch_reference_route_to_gpt_image_2.sql` prepares `79ai / imagegen_2_0` with `mode=medium`, `resolution=2k`, and `ratio=9:16` after live payload verification.
 
 ## Workflow
 
@@ -51,6 +54,7 @@ The page displays estimated TodoX points via the existing `IDanceSellCostEstimat
 - Stop: calls the existing render job cancel mechanism through `IDanceSellPhase2Service.CancelAsync`.
 - Retry: reuses the existing DanceSell retry path and existing approved reference/video assets.
 - Rerender does not force reference regeneration.
+- Reference input changes invalidate the previous selected reference and auto-trigger a new AI reference generation attempt.
 
 ## Validation
 
@@ -68,5 +72,5 @@ Publish output:
 ## Remaining Gaps
 
 - The 79AI motion submit path uses the existing generic 79AI task client and route-configurable field names. A live provider render should be smoke-tested after the manual route seed is reviewed/applied.
-- No verified 79AI fashion image-edit/reference model was present in the repository, so reference generation intentionally stays on `local_composite` until a verified provider contract is added.
 - SQL seed was generated only and not executed.
+- Before live retry, manually apply/review `database/manual/rdance-fashion/01_seed_79ai_kling_motion_routes.sql` so production no longer defaults `dance_sell.reference_image` to `local_composite`.

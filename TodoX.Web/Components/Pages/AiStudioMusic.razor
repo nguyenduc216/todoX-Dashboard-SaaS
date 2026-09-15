@@ -1,0 +1,225 @@
+@page "/admin/ai-studio/music"
+@using TodoX.Web.Models
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject IDialogService DialogService
+@inject IAiStudioCatalogService Catalog
+@inject ISnackbar Snackbar
+
+<PageTitle>AI Studio - Nhạc nền</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Nhạc nền</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Catalog music dùng chung cho các workflow video.</MudText>
+        </div>
+        @if (IsAdmin)
+        {
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="NewMusic">Thêm nhạc</MudButton>
+        }
+    </MudStack>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!IsAdmin)
+    {
+        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị AI Studio để mở trang này.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="todox-card pa-4">
+            <MudGrid>
+                <MudItem xs="12" md="5"><MudTextField @bind-Value="_filter.Search" Label="Search" Variant="Variant.Outlined" Immediate="true" /></MudItem>
+                <MudItem xs="12" md="3">
+                    <MudSelect T="string" @bind-Value="_filter.Category" Label="Category" Variant="Variant.Outlined" Clearable="true">
+                        @foreach (var category in AiStudioCatalogRules.MusicCategories)
+                        {
+                            <MudSelectItem T="string" Value="@category">@category</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudSelect T="bool?" @bind-Value="_filter.IsActive" Label="Status" Variant="Variant.Outlined">
+                        <MudSelectItem T="bool?" Value="null">Tất cả</MudSelectItem>
+                        <MudSelectItem T="bool?" Value="true">Active</MudSelectItem>
+                        <MudSelectItem T="bool?" Value="false">Inactive</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="1" Class="d-flex align-center">
+                    <MudIconButton Icon="@Icons.Material.Filled.Search" OnClick="Reload" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+            }
+            else
+            {
+                <MudTable Items="_music" Dense="true" Hover="true" T="AiStudioMusicDto">
+                    <HeaderContent>
+                        <MudTh>Tên</MudTh>
+                        <MudTh>Mã</MudTh>
+                        <MudTh>Category</MudTh>
+                        <MudTh>Duration</MudTh>
+                        <MudTh>File</MudTh>
+                        <MudTh>Volume</MudTh>
+                        <MudTh>Loop</MudTh>
+                        <MudTh>Status</MudTh>
+                        <MudTh>Default</MudTh>
+                        <MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate Context="m">
+                        <MudTd DataLabel="Tên">@m.Name</MudTd>
+                        <MudTd DataLabel="Mã">@m.Code</MudTd>
+                        <MudTd DataLabel="Category">@m.Category</MudTd>
+                        <MudTd DataLabel="Duration">@(m.DurationSeconds is null ? "-" : $"{m.DurationSeconds}s")</MudTd>
+                        <MudTd DataLabel="File">
+                            @if (!string.IsNullOrWhiteSpace(m.FileUrl))
+                            {
+                                <audio controls src="@m.FileUrl" class="ai-audio-player"></audio>
+                                <MudText Typo="Typo.caption">@m.FileName</MudText>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Volume">@($"{m.DefaultVolume:P0}")</MudTd>
+                        <MudTd DataLabel="Loop">@(m.LoopAllowed ? "Yes" : "-")</MudTd>
+                        <MudTd DataLabel="Status">
+                            <MudChip T="string" Size="Size.Small" Color="@(m.IsActive ? Color.Success : Color.Default)">@(m.IsActive ? "Active" : "Inactive")</MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Default">@(m.IsDefault ? "Yes" : "-")</MudTd>
+                        <MudTd>
+                            <MudTooltip Text="Edit"><MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(m))" /></MudTooltip>
+                            <MudTooltip Text="Enable / Disable"><MudIconButton Icon="@(m.IsActive ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)" Size="Size.Small" OnClick="@(() => Toggle(m))" /></MudTooltip>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+<style>
+    .ai-audio-player { width: 180px; max-width: 100%; height: 34px; }
+</style>
+
+@code {
+    private readonly AiStudioCatalogFilter _filter = new();
+    private IReadOnlyList<AiStudioMusicDto> _music = Array.Empty<AiStudioMusicDto>();
+    private bool _loading = true;
+
+    private bool IsAdmin => AuthState.CurrentUser?.IsAuthenticated == true
+                            && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        await Reload();
+        StateHasChanged();
+    }
+
+    private async Task Reload()
+    {
+        if (!IsAdmin) return;
+        _loading = true;
+        try
+        {
+            _music = await Catalog.ListMusicAsync(_filter);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task NewMusic()
+    {
+        var result = await OpenDialogAsync(new AiStudioMusicDto { Category = "other", DefaultVolume = 0.8m, LoopAllowed = true, IsActive = false }, false);
+        if (result)
+        {
+            await Reload();
+        }
+    }
+
+    private async Task Edit(AiStudioMusicDto music)
+    {
+        var clone = new AiStudioMusicDto
+        {
+            Id = music.Id,
+            Name = music.Name,
+            Code = music.Code,
+            Description = music.Description,
+            Category = music.Category,
+            FileName = music.FileName,
+            StorageKey = music.StorageKey,
+            FileUrl = music.FileUrl,
+            DurationSeconds = music.DurationSeconds,
+            MimeType = music.MimeType,
+            FileSize = music.FileSize,
+            DefaultVolume = music.DefaultVolume,
+            LoopAllowed = music.LoopAllowed,
+            IsActive = music.IsActive,
+            IsDefault = music.IsDefault,
+            SortOrder = music.SortOrder
+        };
+
+        var result = await OpenDialogAsync(clone, true);
+        if (result)
+        {
+            await Reload();
+        }
+    }
+
+    private async Task<bool> OpenDialogAsync(AiStudioMusicDto model, bool editing)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Model"] = model,
+            ["IsEditing"] = editing
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            CloseOnEscapeKey = true,
+            BackdropClick = false
+        };
+
+        var dialog = await DialogService.ShowAsync<Components.Dialogs.AiStudioMusicDialog>(editing ? "Sửa nhạc" : "Thêm nhạc", parameters, options);
+        var result = await dialog.Result;
+        return result is { Canceled: false };
+    }
+
+    private async Task Toggle(AiStudioMusicDto music)
+    {
+        try
+        {
+            if (music.IsActive)
+            {
+                await Catalog.DisableMusicAsync(music.Id, AuthState.CurrentUser!);
+            }
+            else
+            {
+                music.IsActive = true;
+                await Catalog.SaveMusicAsync(music, AuthState.CurrentUser!);
+            }
+
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

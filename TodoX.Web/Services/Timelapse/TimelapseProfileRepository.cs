@@ -7,8 +7,11 @@ namespace TodoX.Web.Services.Timelapse;
 public interface ITimelapseProfileRepository
 {
     Task<IReadOnlyList<TimelapseProfileDto>> GetEnabledProfilesAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseProfileDto>> GetEnabledProfilesByCategoryAsync(string category, CancellationToken ct = default);
     Task<TimelapseProfileDto?> GetEnabledProfileAsync(string profileCode, CancellationToken ct = default);
+    Task<TimelapseProfileDto?> GetEnabledProfileByCategoryAsync(string profileCode, string category, CancellationToken ct = default);
     Task<TimelapseRenderProfileDto?> GetRenderProfileAsync(string profileCode, CancellationToken ct = default);
+    Task<TimelapseRenderProfileDto?> GetRenderProfileByCategoryAsync(string profileCode, string category, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -31,11 +34,35 @@ public sealed class TimelapseProfileRepository : ITimelapseProfileRepository
             """
             SELECT profile_code AS ProfileCode,
                    profile_name AS ProfileName,
-                   enabled AS Enabled
+                   enabled AS Enabled,
+                   category AS Category
               FROM public.todox_timelapse_prompt_profiles
              WHERE enabled = true
              ORDER BY profile_name, profile_code;
             """);
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<TimelapseProfileDto>> GetEnabledProfilesByCategoryAsync(string category, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(category))
+        {
+            return Array.Empty<TimelapseProfileDto>();
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<TimelapseProfileDto>(
+            """
+            SELECT profile_code AS ProfileCode,
+                   profile_name AS ProfileName,
+                   enabled AS Enabled,
+                   category AS Category
+              FROM public.todox_timelapse_prompt_profiles
+             WHERE enabled = true
+               AND lower(category) = lower(@category)
+             ORDER BY select_no, profile_name, profile_code;
+            """,
+            new { category = category.Trim() });
         return rows.ToList();
     }
 
@@ -51,13 +78,37 @@ public sealed class TimelapseProfileRepository : ITimelapseProfileRepository
             """
             SELECT profile_code AS ProfileCode,
                    profile_name AS ProfileName,
-                   enabled AS Enabled
+                   enabled AS Enabled,
+                   category AS Category
               FROM public.todox_timelapse_prompt_profiles
              WHERE profile_code = @profileCode
                AND enabled = true
              LIMIT 1;
             """,
             new { profileCode = profileCode.Trim() });
+    }
+
+    public async Task<TimelapseProfileDto?> GetEnabledProfileByCategoryAsync(string profileCode, string category, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(profileCode) || string.IsNullOrWhiteSpace(category))
+        {
+            return null;
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<TimelapseProfileDto>(
+            """
+            SELECT profile_code AS ProfileCode,
+                   profile_name AS ProfileName,
+                   enabled AS Enabled,
+                   category AS Category
+              FROM public.todox_timelapse_prompt_profiles
+             WHERE profile_code = @profileCode
+               AND enabled = true
+               AND lower(category) = lower(@category)
+             LIMIT 1;
+            """,
+            new { profileCode = profileCode.Trim(), category = category.Trim() });
     }
 
     public async Task<TimelapseRenderProfileDto?> GetRenderProfileAsync(string profileCode, CancellationToken ct = default)
@@ -73,12 +124,37 @@ public sealed class TimelapseProfileRepository : ITimelapseProfileRepository
             SELECT profile_code AS ProfileCode,
                    profile_name AS ProfileName,
                    enabled AS Enabled,
-                   to_jsonb(p)::text AS ProfileJson
+                   to_jsonb(p)::text AS ProfileJson,
+                   category AS Category
               FROM public.todox_timelapse_prompt_profiles p
              WHERE profile_code = @profileCode
                AND enabled = true
              LIMIT 1;
             """,
             new { profileCode = profileCode.Trim() });
+    }
+
+    public async Task<TimelapseRenderProfileDto?> GetRenderProfileByCategoryAsync(string profileCode, string category, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(profileCode) || string.IsNullOrWhiteSpace(category))
+        {
+            return null;
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<TimelapseRenderProfileDto>(
+            """
+            SELECT profile_code AS ProfileCode,
+                   profile_name AS ProfileName,
+                   enabled AS Enabled,
+                   to_jsonb(p)::text AS ProfileJson,
+                   category AS Category
+              FROM public.todox_timelapse_prompt_profiles p
+             WHERE profile_code = @profileCode
+               AND enabled = true
+               AND lower(category) = lower(@category)
+             LIMIT 1;
+            """,
+            new { profileCode = profileCode.Trim(), category = category.Trim() });
     }
 }

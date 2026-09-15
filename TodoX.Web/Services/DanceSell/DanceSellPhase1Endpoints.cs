@@ -10,10 +10,11 @@ public static class DanceSellPhase1Endpoints
 {
     public static void MapDanceSellPhase1Endpoints(this WebApplication app)
     {
-        app.MapPost("/api/admin/kie/test-motion-control", CreateTestMotionControlAsync)
+        var admin = app.MapGroup("/api/admin").RequireTodoXAdmin();
+        admin.MapPost("/kie/test-motion-control", CreateTestMotionControlAsync)
             .DisableAntiforgery();
 
-        app.MapGet("/api/admin/kie/test-motion-control/{jobId:guid}", GetTestMotionControlAsync);
+        admin.MapGet("/kie/test-motion-control/{jobId:guid}", GetTestMotionControlAsync);
 
         app.MapPost("/api/providers/kie/callback", HandleCallbackAsync)
             .DisableAntiforgery();

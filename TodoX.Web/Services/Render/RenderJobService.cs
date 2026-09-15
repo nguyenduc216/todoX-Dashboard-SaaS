@@ -2,6 +2,7 @@
 using Dapper;
 using Npgsql;
 using TodoX.Web.Data;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.Render;
 
@@ -17,12 +18,16 @@ public interface IRenderJobService
     /// </summary>
     Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default);
 
+    Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default);
+    Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default);
+
     Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default);
     Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task<IReadOnlyList<RenderJobEventDto>> GetEventsAsync(Guid jobId, CancellationToken ct = default);
     Task<IReadOnlyList<RenderJobEventDto>> GetEventsByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task AddEventAsync(Guid jobId, string eventType, string message, object? data = null, string level = "info", CancellationToken ct = default);
+    Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default);
     Task<bool> CancelAsync(Guid jobId, string reason, Guid? userId = null, CancellationToken ct = default);
     Task<RenderJobDto?> RetryAsync(Guid jobId, Guid? userId = null, CancellationToken ct = default);
     Task<RenderJobDto?> ClaimNextAsync(string workerKey, TimeSpan lockFor, CancellationToken ct = default);
@@ -30,20 +35,34 @@ public interface IRenderJobService
     Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default);
     Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default);
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
+    Task<bool> ScheduleProviderPollAsync(
+        Guid jobId,
+        TimeSpan delay,
+        string reasonCode,
+        string reasonMessage,
+        CancellationToken ct = default,
+        bool enforceReconciliationLimit = true,
+        bool enforceProviderPollTimeout = false);
+    Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default);
+    Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default);
+    Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default);
 }
 
 public sealed class RenderJobService : IRenderJobService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string LegacyStorageCollisionErrorCode = "RenderJobTerminalFailureException";
 
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly ILogger<RenderJobService> _logger;
+    private readonly IConfiguration _configuration;
 
-    public RenderJobService(TodoXConnectionFactory factory, TenantContext tenant, ILogger<RenderJobService> logger)
+    public RenderJobService(TodoXConnectionFactory factory, TenantContext tenant, IConfiguration configuration, ILogger<RenderJobService> logger)
     {
         _factory = factory;
         _tenant = tenant;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -59,6 +78,8 @@ public sealed class RenderJobService : IRenderJobService
         var inputJson = ToJson(model.Input ?? new { });
         var promptJson = ToJson(model.Prompt ?? new { });
         var referenceJson = ToJson(model.References ?? Array.Empty<object>());
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
 
         using var conn = await _factory.OpenAsync(ct);
         // customer_id must stay nullable for system/admin jobs (CurrentUser.CustomerId == null). We never
@@ -82,8 +103,8 @@ public sealed class RenderJobService : IRenderJobService
                 prompt = promptJson,
                 refs = referenceJson,
                 logCode = model.LogCode,
-                pointCost = model.PointCostEstimate,
-                pointStatus = model.PointStatus,
+                pointCost = pointCostEstimate,
+                pointStatus,
                 provider = model.ProviderCode,
                 model = model.ModelCode,
                 maxAttempts = Math.Max(1, model.MaxAttempts)
@@ -125,6 +146,8 @@ public sealed class RenderJobService : IRenderJobService
         await _tenant.EnsureLoadedAsync(ct);
         var jobType = model.JobType.Trim();
         var initialStatus = NormalizeInitialStatus(model.InitialStatus);
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
 
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -175,8 +198,8 @@ public sealed class RenderJobService : IRenderJobService
                     prompt = promptJson,
                     refs = referenceJson,
                     logCode = model.LogCode,
-                    pointCost = model.PointCostEstimate,
-                    pointStatus = model.PointStatus,
+                    pointCost = pointCostEstimate,
+                    pointStatus,
                     provider = model.ProviderCode,
                     model = model.ModelCode,
                     maxAttempts = Math.Max(1, model.MaxAttempts)
@@ -205,6 +228,206 @@ public sealed class RenderJobService : IRenderJobService
             job.Priority,
             job.PointCostEstimate,
             job.PointStatus
+        }, ct: ct);
+
+        return (job, false);
+    }
+
+    public async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(model.JobType))
+        {
+            throw new ArgumentException("Job type is required.", nameof(model));
+        }
+
+        if (string.IsNullOrWhiteSpace(logCode))
+        {
+            throw new ArgumentException("Log code is required.", nameof(logCode));
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        var jobType = model.JobType.Trim();
+        var uniqueLogCode = logCode.Trim();
+        var initialStatus = NormalizeInitialStatus(model.InitialStatus);
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
+
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = BuildLogCodeJobLockName(jobType, uniqueLogCode) },
+            tx);
+
+        var active = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
+            SelectJobSql +
+            """
+             WHERE job_type = @jobType
+               AND log_code = @logCode
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation')
+             ORDER BY queued_at DESC, created_at DESC
+             LIMIT 1;
+            """,
+            new { jobType, logCode = uniqueLogCode }, tx);
+
+        if (active is not null)
+        {
+            tx.Commit();
+            return (active, true);
+        }
+
+        var inputJson = ToJson(model.Input ?? new { });
+        var promptJson = ToJson(model.Prompt ?? new { });
+        var referenceJson = ToJson(model.References ?? Array.Empty<object>());
+        var customerScope = model.CustomerId is null ? "system" : "customer";
+
+        RenderJobDto job;
+        try
+        {
+            job = await conn.QuerySingleAsync<RenderJobDto>(
+                InsertJobSql,
+                new
+                {
+                    tenant = _tenant.TenantId,
+                    user = model.UserId,
+                    customer = model.CustomerId,
+                    type = jobType,
+                    status = initialStatus,
+                    priority = model.Priority,
+                    input = inputJson,
+                    prompt = promptJson,
+                    refs = referenceJson,
+                    logCode = uniqueLogCode,
+                    pointCost = pointCostEstimate,
+                    pointStatus,
+                    provider = model.ProviderCode,
+                    model = model.ModelCode,
+                    maxAttempts = Math.Max(1, model.MaxAttempts)
+                }, tx);
+        }
+        catch (PostgresException ex) when (IsRenderJobsCustomerIdNotNullViolation(ex))
+        {
+            tx.Rollback();
+            _logger.LogError(ex,
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} customerId={CustomerId} tenantId={TenantId} customerScope={CustomerScope} logCode={LogCode} sqlState={SqlState} schema={Schema} table={Table} column={Column}",
+                jobType, model.UserId, model.CustomerId, _tenant.TenantId, customerScope, uniqueLogCode,
+                ex.SqlState, ex.SchemaName, ex.TableName, ex.ColumnName);
+            throw new InvalidOperationException(
+                "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
+                + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
+        }
+
+        tx.Commit();
+
+        var eventType = initialStatus == RenderJobStatuses.Draft ? "JOB_CREATED" : "JOB_QUEUED";
+        var eventMessage = initialStatus == RenderJobStatuses.Draft ? "Render job draft saved." : "Render job queued.";
+        await AddEventAsync(job.Id, eventType, eventMessage, new
+        {
+            job.JobType,
+            job.Status,
+            job.Priority,
+            job.PointCostEstimate,
+            job.PointStatus,
+            logCode = uniqueLogCode
+        }, ct: ct);
+
+        return (job, false);
+    }
+
+    public async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(model.JobType))
+        {
+            throw new ArgumentException("Job type is required.", nameof(model));
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        var jobType = model.JobType.Trim();
+        var requestId = logicalRequestId?.Trim();
+        var initialStatus = NormalizeInitialStatus(model.InitialStatus);
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
+
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = BuildSceneJobLockName(jobType, sceneId, requestId) },
+            tx);
+
+        var active = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
+            SelectJobSql +
+            """
+             WHERE job_type = @jobType
+               AND status IN ('queued', 'preparing', 'rendering', 'processing', 'post_processing', 'pending_reconciliation')
+               AND COALESCE(input_json->>'sceneId', input_json->>'scene_id') = @sceneId
+               AND (@logicalRequestId IS NULL
+                    OR COALESCE(input_json->>'logicalRequestId', input_json->>'logical_request_id') = @logicalRequestId)
+             ORDER BY queued_at DESC, created_at DESC
+             LIMIT 1;
+            """,
+            new { jobType, sceneId = sceneId.ToString(), logicalRequestId = requestId }, tx);
+
+        if (active is not null)
+        {
+            tx.Commit();
+            return (active, true);
+        }
+
+        var inputJson = ToJson(model.Input ?? new { });
+        var promptJson = ToJson(model.Prompt ?? new { });
+        var referenceJson = ToJson(model.References ?? Array.Empty<object>());
+        var customerScope = model.CustomerId is null ? "system" : "customer";
+
+        RenderJobDto job;
+        try
+        {
+            job = await conn.QuerySingleAsync<RenderJobDto>(
+                InsertJobSql,
+                new
+                {
+                    tenant = _tenant.TenantId,
+                    user = model.UserId,
+                    customer = model.CustomerId,
+                    type = jobType,
+                    status = initialStatus,
+                    priority = model.Priority,
+                    input = inputJson,
+                    prompt = promptJson,
+                    refs = referenceJson,
+                    logCode = model.LogCode,
+                    pointCost = pointCostEstimate,
+                    pointStatus,
+                    provider = model.ProviderCode,
+                    model = model.ModelCode,
+                    maxAttempts = Math.Max(1, model.MaxAttempts)
+                }, tx);
+        }
+        catch (PostgresException ex) when (IsRenderJobsCustomerIdNotNullViolation(ex))
+        {
+            tx.Rollback();
+            _logger.LogError(ex,
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} customerId={CustomerId} tenantId={TenantId} customerScope={CustomerScope} logCode={LogCode} sceneId={SceneId} logicalRequestId={LogicalRequestId} sqlState={SqlState} schema={Schema} table={Table} column={Column}",
+                jobType, model.UserId, model.CustomerId, _tenant.TenantId, customerScope, model.LogCode, sceneId, requestId,
+                ex.SqlState, ex.SchemaName, ex.TableName, ex.ColumnName);
+            throw new InvalidOperationException(
+                "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
+                + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
+        }
+
+        tx.Commit();
+
+        var eventType = initialStatus == RenderJobStatuses.Draft ? "JOB_CREATED" : "JOB_QUEUED";
+        var eventMessage = initialStatus == RenderJobStatuses.Draft ? "Render job draft saved." : "Render job queued.";
+        await AddEventAsync(job.Id, eventType, eventMessage, new
+        {
+            job.JobType,
+            job.Status,
+            job.Priority,
+            job.PointCostEstimate,
+            job.PointStatus,
+            sceneId,
+            logicalRequestId = requestId
         }, ct: ct);
 
         return (job, false);
@@ -328,7 +551,7 @@ public sealed class RenderJobService : IRenderJobService
     public async Task<RenderJobDto?> RetryAsync(Guid jobId, Guid? userId = null, CancellationToken ct = default)
     {
         var current = await GetAsync(jobId, ct);
-        if (current is null || current.Status != RenderJobStatuses.Failed)
+        if (current is null || current.Status is not (RenderJobStatuses.Failed or RenderJobStatuses.Cancelled))
         {
             return null;
         }
@@ -343,8 +566,8 @@ public sealed class RenderJobService : IRenderJobService
             Prompt = JsonSerializer.Deserialize<object>(current.PromptJson),
             References = JsonSerializer.Deserialize<object>(current.ReferenceJson),
             LogCode = current.LogCode,
-            PointCostEstimate = current.PointCostEstimate,
-            PointStatus = current.PointCostEstimate > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
+            PointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, current.PointCostEstimate),
+            PointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, current.PointStatus, current.PointCostEstimate),
             ProviderCode = current.ProviderCode,
             ModelCode = current.ModelCode,
             MaxAttempts = current.MaxAttempts
@@ -385,8 +608,21 @@ public sealed class RenderJobService : IRenderJobService
 
         var sql = SelectJobSql +
                   """
-                   WHERE status='queued'
-                     AND (retry_after IS NULL OR retry_after <= now())
+                   WHERE (
+                         (status='queued'
+                          AND (retry_after IS NULL OR retry_after <= now())
+                          AND (COALESCE(input_json->>'providerPoll', 'false') = 'true'
+                               OR (attempt_count <= max_attempts AND attempt_count < max_attempts)))
+                         OR (
+                              job_type='core_service'
+                              AND status='rendering'
+                              AND attempt_count=0
+                              AND worker_key IS NULL
+                              AND lock_owner IS NULL
+                              AND lock_until IS NULL
+                              AND started_at IS NULL
+                         )
+                   )
                   """;
         object parameters;
         if (includeJobTypes is not null && includeJobTypes.Count > 0)
@@ -404,39 +640,123 @@ public sealed class RenderJobService : IRenderJobService
             parameters = new { };
         }
 
-        sql += """
-                ORDER BY priority ASC, queued_at ASC
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1;
-               """;
+        sql += ResolveClaimOrderSql(includeJobTypes);
 
         var job = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(sql, parameters, tx);
 
         if (job is null)
         {
+            _logger.LogDebug(
+                "RENDER_JOB_CLAIM_RESULT workerKey={WorkerKey} claimResult=none includeJobTypes={IncludeJobTypes} excludeJobTypes={ExcludeJobTypes}",
+                workerKey,
+                includeJobTypes is null ? null : string.Join(",", includeJobTypes),
+                excludeJobTypes is null ? null : string.Join(",", excludeJobTypes));
             tx.Commit();
             return null;
         }
 
-        await conn.ExecuteAsync(
+        var isCoreServiceRecoveryClaim =
+            string.Equals(job.JobType, RenderJobTypes.CoreService, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(job.Status, RenderJobStatuses.Rendering, StringComparison.OrdinalIgnoreCase)
+            && job.AttemptCount == 0
+            && string.IsNullOrWhiteSpace(job.WorkerKey)
+            && job.StartedAt is null;
+        _logger.LogInformation(
+            "RENDER_JOB_CLAIM_SELECTED jobId={JobId} jobType={JobType} currentStatus={CurrentStatus} attemptCount={AttemptCount} workerKey={CurrentWorkerKey} claimResult=selected coreServiceRecovery={CoreServiceRecovery}",
+            job.Id,
+            job.JobType,
+            job.Status,
+            job.AttemptCount,
+            job.WorkerKey,
+            isCoreServiceRecoveryClaim);
+
+        var claimedRows = await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
                SET status='preparing',
                    worker_key=@workerKey,
                    lock_owner=@workerKey,
                    lock_until=now() + (@lockSeconds || ' seconds')::interval,
-                   attempt_count=attempt_count + 1,
+                   input_json=input_json - 'providerPoll',
+                   attempt_count=attempt_count + CASE
+                       WHEN COALESCE(input_json->>'providerPoll', 'false') = 'true' THEN 0
+                       ELSE 1
+                   END,
                    started_at=COALESCE(started_at, now()),
                    updated_at=now()
-             WHERE id=@id;
+             WHERE id=@id
+               AND attempt_count <= max_attempts
+               AND (COALESCE(input_json->>'providerPoll', 'false') = 'true'
+                    OR attempt_count < max_attempts);
             """,
             new { id = job.Id, workerKey, lockSeconds = Math.Max(1, (int)lockFor.TotalSeconds) },
             tx);
 
+        if (claimedRows == 0)
+        {
+            _logger.LogWarning(
+                "RENDER_JOB_CLAIM_RESULT jobId={JobId} jobType={JobType} currentStatus={CurrentStatus} attemptCount={AttemptCount} workerKey={WorkerKey} claimResult=attempt_budget_rejected",
+                job.Id,
+                job.JobType,
+                job.Status,
+                job.AttemptCount,
+                workerKey);
+            tx.Commit();
+            return null;
+        }
+
         tx.Commit();
         await AddEventAsync(job.Id, "WORKER_CLAIMED", "Worker claimed render job.", new { workerKey }, ct: ct);
-        return await GetAsync(job.Id, ct);
+        var claimed = await GetAsync(job.Id, ct);
+        _logger.LogInformation(
+            "RENDER_JOB_CLAIM_RESULT jobId={JobId} jobType={JobType} currentStatus={PreviousStatus} attemptCountBefore={AttemptCountBefore} workerKey={WorkerKey} claimResult={ClaimResult} claimedStatus={ClaimedStatus} attemptCountAfter={AttemptCountAfter} startedAtSet={StartedAtSet}",
+            job.Id,
+            job.JobType,
+            job.Status,
+            job.AttemptCount,
+            workerKey,
+            claimed is null ? "missing_after_update" : "claimed",
+            claimed?.Status,
+            claimed?.AttemptCount,
+            claimed?.StartedAt is not null);
+        return claimed;
     }
+
+    internal static string ResolveClaimOrderSql(IReadOnlyCollection<string>? includeJobTypes)
+        => IsSceneVideoOnlyClaim(includeJobTypes)
+            ? """
+                   ORDER BY
+                       priority ASC,
+                       CASE
+                           WHEN retry_after IS NULL THEN queued_at
+                           ELSE GREATEST(queued_at, retry_after)
+                       END ASC,
+                       queued_at ASC
+                   FOR UPDATE SKIP LOCKED
+                   LIMIT 1;
+                  """
+            : """
+                   ORDER BY priority ASC, queued_at ASC
+                   FOR UPDATE SKIP LOCKED
+                   LIMIT 1;
+                  """;
+
+    internal static DateTime ResolveEffectiveClaimReadyTime(RenderJobDto job)
+        => job.RetryAfter is null || job.RetryAfter <= job.QueuedAt
+            ? job.QueuedAt
+            : job.RetryAfter.Value;
+
+    internal static IReadOnlyList<RenderJobDto> OrderForSceneVideoClaimFairness(IEnumerable<RenderJobDto> jobs)
+        => jobs
+            .OrderBy(job => job.Priority)
+            .ThenBy(ResolveEffectiveClaimReadyTime)
+            .ThenBy(job => job.QueuedAt)
+            .ToArray();
+
+    private static bool IsSceneVideoOnlyClaim(IReadOnlyCollection<string>? includeJobTypes)
+        => includeJobTypes is not null
+           && includeJobTypes.Count == 1
+           && includeJobTypes.Any(jobType => string.Equals(jobType, RenderJobTypes.RenderSceneVideo, StringComparison.OrdinalIgnoreCase));
 
     public async Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default)
     {
@@ -449,6 +769,12 @@ public sealed class RenderJobService : IRenderJobService
                    output_json = CASE WHEN @output IS NULL THEN output_json ELSE CAST(@output AS jsonb) END,
                    error_code=@errorCode,
                    error_message=@errorMessage,
+                   point_status = CASE
+                       WHEN job_type='dance_sell'
+                            AND @status='completed'
+                            AND point_status='pending' THEN 'charged'
+                       ELSE point_status
+                   END,
                    completed_at = CASE
                        WHEN @status IN ('completed', 'failed', 'cancelled') THEN now()
                        WHEN @status='pending_reconciliation' THEN NULL
@@ -489,6 +815,14 @@ public sealed class RenderJobService : IRenderJobService
     public static string BuildProjectJobLockName(string jobType, long projectId)
         => $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:{projectId}";
 
+    public static string BuildLogCodeJobLockName(string jobType, string logCode)
+        => $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:log:{logCode.Trim().ToLowerInvariant()}";
+
+    public static string BuildSceneJobLockName(string jobType, long sceneId, string? logicalRequestId = null)
+        => logicalRequestId is null
+            ? $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:scene:{sceneId}"
+            : $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:scene:{sceneId}:logical:{logicalRequestId.Trim().ToLowerInvariant()}";
+
     public static bool IsRenderJobsCustomerIdNotNullViolation(PostgresException ex)
         => ex.SqlState == PostgresErrorCodes.NotNullViolation
            && string.Equals(ex.SchemaName, "render", StringComparison.OrdinalIgnoreCase)
@@ -522,7 +856,7 @@ public sealed class RenderJobService : IRenderJobService
     public async Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
+        var changed = await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
                SET status='queued',
@@ -538,8 +872,212 @@ public sealed class RenderJobService : IRenderJobService
             """,
             new { jobId, delaySeconds = Math.Max(1, (int)delay.TotalSeconds), errorCode, errorMessage });
 
-        await AddEventAsync(jobId, "JOB_RETRY_SCHEDULED", "Render job retry scheduled.",
+        if (changed > 0)
+        {
+            await AddEventAsync(jobId, "JOB_RETRY_SCHEDULED", "Render job retry scheduled.",
+                new { retryAfterSeconds = Math.Max(1, (int)delay.TotalSeconds), errorCode, errorMessage }, "warning", ct);
+            return;
+        }
+
+        await AddEventAsync(jobId, "JOB_RETRY_NOT_SCHEDULED",
+            "Render job retry was not scheduled because the retry budget or current status blocked the update.",
             new { retryAfterSeconds = Math.Max(1, (int)delay.TotalSeconds), errorCode, errorMessage }, "warning", ct);
+    }
+
+    public async Task<bool> ScheduleProviderPollAsync(
+        Guid jobId,
+        TimeSpan delay,
+        string reasonCode,
+        string reasonMessage,
+        CancellationToken ct = default,
+        bool enforceReconciliationLimit = true,
+        bool enforceProviderPollTimeout = false)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        var delaySeconds = Math.Max(1, (int)delay.TotalSeconds);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status='queued',
+                   input_json=jsonb_set(
+                       jsonb_set(
+                           COALESCE(input_json, '{}'::jsonb) || '{"providerPoll": true}'::jsonb,
+                           '{providerPollCount}',
+                           to_jsonb(COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) + 1),
+                           true),
+                       '{providerPollStartedAt}',
+                       COALESCE(input_json->'providerPollStartedAt', to_jsonb(now())),
+                       true),
+                   retry_after=now() + (@delaySeconds || ' seconds')::interval,
+                   error_code=@reasonCode,
+                   error_message=@reasonMessage,
+                   lock_owner=NULL,
+                   lock_until=NULL,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
+               AND (@enforceReconciliationLimit = false
+                    OR COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) < @maxReconciliationRetries)
+               AND (@enforceProviderPollTimeout = false
+                    OR input_json->>'providerPollStartedAt' IS NULL
+                    OR (input_json->>'providerPollStartedAt')::timestamptz
+                       + (@providerPollTimeoutMinutes || ' minutes')::interval > now());
+            """,
+            new
+            {
+                jobId,
+                delaySeconds,
+                reasonCode,
+                reasonMessage,
+                maxReconciliationRetries = GetMaxProviderPolls(),
+                providerPollTimeoutMinutes = GetProviderPollTimeoutMinutes(),
+                enforceReconciliationLimit,
+                enforceProviderPollTimeout
+            });
+
+        if (changed <= 0)
+        {
+            await AddEventAsync(jobId, "JOB_PROVIDER_POLL_NOT_SCHEDULED",
+                "Provider poll was not scheduled because the render job is no longer active.",
+                new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "warning", ct);
+            return false;
+        }
+
+        await AddEventAsync(jobId, "JOB_PROVIDER_POLL_SCHEDULED",
+            "Provider poll scheduled without consuming the application retry budget.",
+            new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
+        return true;
+    }
+
+    public async Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET provider_task_id=@providerTaskId,
+                   provider_video_id_base=@providerVideoIdBase,
+                   updated_at=now()
+             WHERE id=@jobId;
+            """,
+            new { jobId, providerTaskId, providerVideoIdBase });
+    }
+
+    public async Task<bool> MarkRecoveredCompletedAsync(
+        Guid jobId,
+        long projectId,
+        long sceneId,
+        Guid sceneVideoVersionId,
+        string logicalRequestId,
+        CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs j
+               SET status='completed',
+                   completed_at=now(),
+                   lock_owner=NULL,
+                   lock_until=NULL,
+                   updated_at=now()
+             WHERE j.id=@jobId
+               AND j.tenant_id=@tenant
+               AND j.job_type='render_scene_video'
+               AND j.status IN ('failed','pending_reconciliation')
+               AND (
+                    j.status='pending_reconciliation'
+                    OR j.error_code IN (
+                        'RVIDEO_VIDEO_PERSIST_FAILED',
+                        'PROVIDER_SUCCESS_RECONCILIATION_FAILED',
+                        'MEDIA_STORAGE_FAILED'
+                    )
+                    OR (
+                        j.error_code = 'RenderJobTerminalFailureException'
+                        AND j.error_message ILIKE '%Storage key%'
+                        AND (
+                            j.error_message ILIKE U&'%kh\00f4ng ghi \0111\00e8%'
+                            OR j.error_message ILIKE U&'%kh\00c3\00b4ng ghi \00c4\2018\00c3\00a8%'
+                            OR j.error_message ILIKE U&'%kh\00c3\0192\00c2\00b4ng ghi \00c3\201e\00e2\20ac\02dc\00c3\0192\00c2\00a8%'
+                        )
+                    )
+               )
+               AND (j.input_json->>'projectId')=@projectId
+               AND (j.input_json->>'sceneId')=@sceneId
+               AND (j.input_json->>'logicalRequestId')=@logicalRequestId
+               AND EXISTS (
+                   SELECT 1
+                     FROM video_render.scene_video_versions v
+                    WHERE v.id=@sceneVideoVersionId
+                      AND v.tenant_id=@tenant
+                      AND v.render_job_id=j.id
+                      AND v.project_id=@projectId::bigint
+                      AND v.scene_id=@sceneId::bigint
+                      AND v.logical_request_id=@logicalRequestId
+                      AND v.status='completed'
+               )
+               AND EXISTS (
+                   SELECT 1
+                     FROM billing.ai_image_billing_records b
+                    WHERE b.tenant_id=@tenant
+                      AND b.logical_request_id=@logicalRequestId
+                      AND replace(b.render_job_id, '-', '') = replace(j.id::text, '-', '')
+                      AND b.feature_code='render_job_scene_video'
+                      AND b.capability_code='rvideo_scene_video_generation'
+                      AND b.provider_task_id IS NOT NULL
+                      AND btrim(b.provider_task_id) <> ''
+                      AND b.status IN ('pending_reconciliation', 'completed')
+               );
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                projectId = projectId.ToString(),
+                sceneId = sceneId.ToString(),
+                sceneVideoVersionId,
+                logicalRequestId
+            });
+
+        if (changed > 0)
+        {
+            await AddEventAsync(
+                jobId,
+                "RVIDEO_VIDEO_RECOVERY_COMPLETED",
+                "Recovered a previously failed scene-video job after local persistence succeeded.",
+                new { projectId, sceneId, sceneVideoVersionId, logicalRequestId },
+                ct: ct);
+        }
+
+        return changed > 0;
+    }
+
+    private static bool IsLegacyStorageCollision(string? errorCode, string? errorMessage)
+    {
+        if (!string.Equals(errorCode, LegacyStorageCollisionErrorCode, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(errorMessage)
+            && errorMessage.Contains("Storage key", StringComparison.OrdinalIgnoreCase)
+            && (errorMessage.Contains("kh\u00f4ng ghi \u0111\u00e8", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("kh\u00c3\u00b4ng ghi \u00c4\u2018\u00c3\u00a8", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("\u00c3\u0192\u00c2\u00b4ng ghi \u00c3\u201e\u00e2\u20ac\u02dc\u00c3\u0192\u00c2\u00a8", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public async Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(*)::int
+              FROM render.render_job_events
+             WHERE job_id=@jobId
+               AND event_type='JOB_PROVIDER_POLL_SCHEDULED'
+               AND COALESCE(data_json->>'reasonCode', '')='SCENE_VIDEO_RECONCILIATION_RETRY';
+            """,
+            new { jobId });
     }
 
     private const string SelectJobSql =
@@ -552,7 +1090,8 @@ public sealed class RenderJobService : IRenderJobService
                cancel_reason AS CancelReason, retry_of_job_id AS RetryOfJobId,
                attempt_count AS AttemptCount, max_attempts AS MaxAttempts, retry_after AS RetryAfter,
                point_cost_estimate AS PointCostEstimate, point_cost_charged AS PointCostCharged,
-               point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
+                point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
+               provider_task_id AS ProviderTaskId, provider_video_id_base AS ProviderVideoIdBase,
                queued_at AS QueuedAt, started_at AS StartedAt, completed_at AS CompletedAt,
                cancelled_at AS CancelledAt, created_at AS CreatedAt, updated_at AS UpdatedAt
           FROM render.render_jobs
@@ -579,9 +1118,16 @@ public sealed class RenderJobService : IRenderJobService
                   attempt_count AS AttemptCount, max_attempts AS MaxAttempts, retry_after AS RetryAfter,
                   point_cost_estimate AS PointCostEstimate, point_cost_charged AS PointCostCharged,
                   point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
+                  provider_task_id AS ProviderTaskId, provider_video_id_base AS ProviderVideoIdBase,
                   queued_at AS QueuedAt, started_at AS StartedAt, completed_at AS CompletedAt,
                   cancelled_at AS CancelledAt, created_at AS CreatedAt, updated_at AS UpdatedAt;
         """;
 
     private static string ToJson(object value) => JsonSerializer.Serialize(value, JsonOptions);
+
+    private int GetMaxProviderPolls()
+        => Math.Max(1, _configuration.GetValue("VideoRender:MaxReconciliationRetries", 3));
+
+    private int GetProviderPollTimeoutMinutes()
+        => Math.Max(1, _configuration.GetValue("VideoRender:MaxPollDurationMinutes", 30));
 }

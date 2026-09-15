@@ -17,14 +17,37 @@ public interface ITimelapseJobService
         string originalImageFileName,
         string originalImageContentType,
         CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
         CancellationToken ct = default);
 
     Task<TimelapseJobView?> GetOwnedAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneImageHistoryAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListFinalVideoHistoryAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> SelectHistoryAsync(Guid jobId, TimelapseHistoryItem item, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseJobView>> ListOwnedAsync(CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> UpdateDraftAsync(
+        Guid jobId,
+        TimelapseCreateRequest request,
+        byte[]? originalImageContent,
+        string? originalImageFileName,
+        string? originalImageContentType,
+        CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
+        bool removeStartImage = false,
+        CancellationToken ct = default);
     Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
-    Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
-    Task<TimelapseJobView> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, CurrentUserSession currentUser, CancellationToken ct = default);
-    Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default);
+    Task<TimelapseJobView> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default);
+    Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default);
+    Task<TimelapseJobView> CancelJobAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> CancelImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> CancelVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> ConfirmVideoRenderAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> StartFinalizerAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
 }
@@ -40,7 +63,9 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private readonly ITimelapseProfileRepository _profiles;
     private readonly IMediaFileService _media;
     private readonly IRenderJobService _renderJobs;
-    private readonly IServiceSellPriceResolver _sellPrices;
+    private readonly IPointPricingService _pointPricing;
+    private readonly TokenSettingsService _tokenSettings;
+    private readonly WalletService _wallets;
     private readonly ITimelapseWorkflowService _workflow;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
@@ -51,7 +76,9 @@ public sealed class TimelapseJobService : ITimelapseJobService
         ITimelapseProfileRepository profiles,
         IMediaFileService media,
         IRenderJobService renderJobs,
-        IServiceSellPriceResolver sellPrices,
+        IPointPricingService pointPricing,
+        TokenSettingsService tokenSettings,
+        WalletService wallets,
         ITimelapseWorkflowService workflow,
         TodoXConnectionFactory factory,
         TenantContext tenant,
@@ -61,7 +88,9 @@ public sealed class TimelapseJobService : ITimelapseJobService
         _profiles = profiles;
         _media = media;
         _renderJobs = renderJobs;
-        _sellPrices = sellPrices;
+        _pointPricing = pointPricing;
+        _tokenSettings = tokenSettings;
+        _wallets = wallets;
         _workflow = workflow;
         _factory = factory;
         _tenant = tenant;
@@ -74,6 +103,9 @@ public sealed class TimelapseJobService : ITimelapseJobService
         string originalImageFileName,
         string originalImageContentType,
         CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
         CancellationToken ct = default)
     {
         EnsureCustomer(currentUser);
@@ -111,23 +143,18 @@ public sealed class TimelapseJobService : ITimelapseJobService
             throw new InvalidOperationException("Dịch vụ đã chọn không khớp với mã dịch vụ.");
         }
 
-        var qualityTier = TimelapseSellPricing.QualityTierForMode(request.VideoMode);
-        var sellPrice = await _sellPrices.ResolveVideoScenePriceAsync(
-            service.Id,
-            qualityTier,
-            TimelapseRequestRules.RuntimeClipDurationSeconds,
-            ct);
-        if (!sellPrice.Found || sellPrice.Price is null)
-        {
-            throw new InvalidOperationException(sellPrice.Message ?? "Chưa cấu hình giá cho lựa chọn này.");
-        }
+        var serviceDefinition = TimelapseServiceCatalog.TryGet(service.ServiceCode, out var definition)
+            ? definition
+            : null;
 
-        var videoSubtotal = TimelapseSellPricing.EstimateVideoSubtotal(sellPrice.Price.SellPoints, request.SceneCount);
+        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, startImageContent is not null, ct);
 
-        var profile = await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct);
+        var profile = serviceDefinition is null
+            ? await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
+            : await _profiles.GetEnabledProfileByCategoryAsync(request.ProfileCode, serviceDefinition.Category, ct);
         if (profile is null)
         {
-            throw new InvalidOperationException("Loại công trình không hợp lệ hoặc đã bị tắt.");
+            throw new InvalidOperationException("TIMELAPSE_PROFILE_SERVICE_MISMATCH: Cấu hình Timelapse không phù hợp với loại dịch vụ đã chọn.");
         }
 
         await _tenant.EnsureLoadedAsync(ct);
@@ -140,11 +167,23 @@ public sealed class TimelapseJobService : ITimelapseJobService
             currentUser.CustomerId,
             _tenant.TenantId,
             ct);
+        var startImage = await SaveOptionalStartImageAsync(
+            startImageContent,
+            startImageFileName,
+            startImageContentType,
+            currentUser,
+            ct);
+        if (startImage is not null && startImage.MediaId == media.Id)
+        {
+            throw new InvalidOperationException("Ảnh ban đầu / 0% phải khác ảnh thành phẩm / 100%.");
+        }
 
         var snapshot = new TimelapseJobSnapshot
         {
             ServiceId = service.Id,
             ServiceCode = service.ServiceCode,
+            ServiceName = service.DisplayName,
+            ServiceCategory = serviceDefinition?.Category ?? profile.Category,
             ProfileCode = profile.ProfileCode,
             ProfileName = profile.ProfileName,
             SceneCount = request.SceneCount,
@@ -152,23 +191,18 @@ public sealed class TimelapseJobService : ITimelapseJobService
             VideoMode = request.VideoMode.Trim().ToLowerInvariant(),
             Ratio = request.Ratio.Trim().ToLowerInvariant(),
             Title = NormalizeTitle(request.Title),
-            RequireVideoConfirmation = request.RequireVideoConfirmation,
-            SellPrice = new TimelapseSellPriceSnapshot
-            {
-                QualityTier = qualityTier,
-                RuntimeClipDurationSeconds = TimelapseRequestRules.RuntimeClipDurationSeconds,
-                SceneCount = request.SceneCount,
-                VideoSceneSellPoints = sellPrice.Price.SellPoints,
-                VideoSubtotal = videoSubtotal,
-                TotalPoints = videoSubtotal
-            },
+            RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
+            AutoFinish = request.AutoFinish,
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount,
+                TimelapseStageGraphBuilder.Build(request.SceneCount, startImage is not null).VideoClips.Select(x => x.DurationSeconds).ToArray()),
             OriginalImage = new TimelapseOriginalImageSnapshot
             {
                 MediaId = media.Id,
                 ObjectKey = media.ObjectKey,
                 PublicUrl = media.PublicUrl ?? media.FileUrl,
                 MimeType = media.MimeType
-            }
+            },
+            StartImage = startImage
         };
 
         var job = await _renderJobs.EnqueueAsync(
@@ -179,18 +213,9 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 JobType = RenderJobTypes.Timelapse,
                 InitialStatus = RenderJobStatuses.Draft,
                 Input = snapshot,
-                References = new[]
-                {
-                    new
-                    {
-                        role = "original_image",
-                        mediaId = media.Id,
-                        media.ObjectKey,
-                        url = media.PublicUrl ?? media.FileUrl,
-                        media.MimeType
-                    }
-                },
-                PointStatus = RenderPointStatuses.NotRequired,
+                References = BuildReferenceJson(snapshot),
+                PointCostEstimate = pointEstimate.TotalPoints,
+                PointStatus = RenderPointStatuses.Pending,
                 MaxAttempts = 1
             },
             ct);
@@ -199,7 +224,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             job.Id,
             "TIMELAPSE_DRAFT_CREATED",
             "Timelapse draft saved. Rendering has not started.",
-            new { snapshot.ProfileCode, snapshot.SceneCount, snapshot.VideoMode, snapshot.Ratio },
+            new { snapshot.ProfileCode, snapshot.SceneCount, snapshot.VideoMode, snapshot.Ratio, hasStartAnchor = snapshot.HasStartImage },
             ct: ct);
 
         return new TimelapseJobView
@@ -253,6 +278,39 @@ public sealed class TimelapseJobService : ITimelapseJobService
         return view;
     }
 
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        _ = await RequireOwnedAsync(jobId, currentUser, ct);
+        return await _workflow.ListHistoryAsync(jobId, ct);
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneImageHistoryAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        _ = await RequireOwnedAsync(jobId, currentUser, ct);
+        return await _workflow.ListSceneImageHistoryAsync(jobId, progressPercent, ct);
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        _ = await RequireOwnedAsync(jobId, currentUser, ct);
+        return await _workflow.ListSceneVideoHistoryAsync(jobId, clipIndex, ct);
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListFinalVideoHistoryAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        _ = await RequireOwnedAsync(jobId, currentUser, ct);
+        return await _workflow.ListFinalVideoHistoryAsync(jobId, ct);
+    }
+
+    public async Task<TimelapseJobView> SelectHistoryAsync(Guid jobId, TimelapseHistoryItem item, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.SelectHistoryAsync(jobId, item.Kind, item.EntityId, item.Version, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
     public async Task<IReadOnlyList<TimelapseJobView>> ListOwnedAsync(CurrentUserSession currentUser, CancellationToken ct = default)
     {
         EnsureCustomer(currentUser);
@@ -274,18 +332,239 @@ public sealed class TimelapseJobService : ITimelapseJobService
         return rows.Select(row => ToView(row, currentUser)).ToList();
     }
 
+    public async Task<TimelapseJobView> UpdateDraftAsync(
+        Guid jobId,
+        TimelapseCreateRequest request,
+        byte[]? originalImageContent,
+        string? originalImageFileName,
+        string? originalImageContentType,
+        CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
+        bool removeStartImage = false,
+        CancellationToken ct = default)
+    {
+        var current = await RequireOwnedAsync(jobId, currentUser, ct);
+        var hasReplacementImage = originalImageContent is { Length: > 0 };
+        var errors = TimelapseRequestRules.Validate(request, hasReplacementImage || current.Snapshot.OriginalImage.MediaId != Guid.Empty);
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(" ", errors));
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));", new { lockName = $"timelapse:{jobId:N}" }, tx);
+
+        var graphStarted = await conn.QuerySingleAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM timelapse.timelapse_image_stages WHERE job_id=@jobId)
+                OR EXISTS (SELECT 1 FROM timelapse.timelapse_video_clips WHERE job_id=@jobId)
+                OR EXISTS (SELECT 1 FROM timelapse.timelapse_final_outputs WHERE job_id=@jobId);
+            """,
+            new { jobId }, tx);
+        if (graphStarted || !string.Equals(current.Status, RenderJobStatuses.Draft, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.");
+        }
+
+        if (!request.ServiceId.HasValue || request.ServiceId.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException("Vui lòng chọn dịch vụ trước khi tạo video.");
+        }
+
+        var service = await _catalog.GetServiceByIdAsync(request.ServiceId.Value, ct)
+            ?? throw new InvalidOperationException("Dịch vụ đã chọn không tồn tại.");
+        if (!service.Enabled)
+        {
+            throw new InvalidOperationException("Dịch vụ này đang tạm ngưng.");
+        }
+
+        if (!string.Equals(service.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Dịch vụ đã chọn không thuộc nhóm Timelapse.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ServiceCode)
+            && !string.Equals(request.ServiceCode, service.ServiceCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Dịch vụ đã chọn không khớp với mã dịch vụ.");
+        }
+
+        var serviceDefinition = TimelapseServiceCatalog.TryGet(service.ServiceCode, out var definition)
+            ? definition
+            : null;
+
+        var profile = serviceDefinition is null
+            ? await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
+            : await _profiles.GetEnabledProfileByCategoryAsync(request.ProfileCode, serviceDefinition.Category, ct);
+        if (profile is null)
+        {
+            throw new InvalidOperationException("TIMELAPSE_PROFILE_SERVICE_MISMATCH: Cấu hình Timelapse không phù hợp với loại dịch vụ đã chọn.");
+        }
+
+        var original = current.Snapshot.OriginalImage;
+        if (hasReplacementImage)
+        {
+            var media = await _media.SaveAsync(
+                originalImageContent!,
+                string.IsNullOrWhiteSpace(originalImageFileName) ? "timelapse-reference.png" : originalImageFileName,
+                string.IsNullOrWhiteSpace(originalImageContentType) ? "image/png" : originalImageContentType,
+                "timelapse_original_image",
+                currentUser.UserId,
+                currentUser.CustomerId,
+                _tenant.TenantId,
+                ct);
+            original = new TimelapseOriginalImageSnapshot
+            {
+                MediaId = media.Id,
+                ObjectKey = media.ObjectKey,
+                PublicUrl = media.PublicUrl ?? media.FileUrl,
+                MimeType = media.MimeType
+            };
+        }
+        var startImage = removeStartImage ? null : current.Snapshot.StartImage;
+        if (startImageContent is { Length: > 0 })
+        {
+            startImage = await SaveOptionalStartImageAsync(
+                startImageContent,
+                startImageFileName,
+                startImageContentType,
+                currentUser,
+                ct);
+        }
+
+        if (startImage is not null && startImage.MediaId == original.MediaId)
+        {
+            throw new InvalidOperationException("Ảnh ban đầu / 0% phải khác ảnh thành phẩm / 100%.");
+        }
+        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, startImage is not null, ct);
+
+        var snapshot = new TimelapseJobSnapshot
+        {
+            ServiceId = service.Id,
+            ServiceCode = service.ServiceCode,
+            ServiceName = service.DisplayName,
+            ServiceCategory = serviceDefinition?.Category ?? profile.Category,
+            ProfileCode = profile.ProfileCode,
+            ProfileName = profile.ProfileName,
+            SceneCount = request.SceneCount,
+            ProgressMapping = TimelapseRequestRules.GetProgressMapping(request.SceneCount),
+            VideoMode = request.VideoMode.Trim().ToLowerInvariant(),
+            Ratio = request.Ratio.Trim().ToLowerInvariant(),
+            Title = NormalizeTitle(request.Title),
+            RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
+            AutoFinish = request.AutoFinish,
+            VideoRenderConfirmed = request.AutoFinish,
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount,
+                TimelapseStageGraphBuilder.Build(request.SceneCount, startImage is not null).VideoClips.Select(x => x.DurationSeconds).ToArray()),
+            OriginalImage = original,
+            StartImage = startImage
+        };
+
+        var updatedRows = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET input_json=CAST(@inputJson AS jsonb),
+                   reference_json=CAST(@referenceJson AS jsonb),
+                   point_cost_estimate=@pointCostEstimate,
+                   point_status=@pointStatus,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant
+               AND status=@status;
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                status = RenderJobStatuses.Draft,
+                pointCostEstimate = pointEstimate.TotalPoints,
+                pointStatus = pointEstimate.TotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
+                inputJson = JsonSerializer.Serialize(snapshot, JsonOptions),
+                referenceJson = JsonSerializer.Serialize(BuildReferenceJson(snapshot), JsonOptions)
+            }, tx);
+        if (updatedRows != 1)
+        {
+            throw new InvalidOperationException("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.");
+        }
+
+        tx.Commit();
+
+        await _renderJobs.AddEventAsync(
+            jobId,
+            "TIMELAPSE_DRAFT_UPDATED",
+            "Customer updated the Timelapse draft before rendering.",
+            new
+            {
+                snapshot.ProfileCode,
+                snapshot.SceneCount,
+                snapshot.VideoMode,
+                snapshot.Ratio,
+                replacedOriginalImage = hasReplacementImage,
+                replacedStartImage = startImageContent is { Length: > 0 },
+                removedStartImage = removeStartImage,
+                hasStartAnchor = snapshot.HasStartImage
+            },
+            ct: ct);
+
+        return await RequireOwnedAsync(jobId, currentUser, ct);
+    }
+
     public async Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        var clipDurations = view.Snapshot.SellPrice?.ClipDurationsSeconds ?? Array.Empty<int>();
+        if (clipDurations.Count == 0 || clipDurations.Any(x => x <= 0))
+        {
+            await MarkBillingBlockedAsync(jobId, "VIDEO_SCENE_DURATION_REQUIRED", ct);
+            throw new InvalidOperationException("VIDEO_SCENE_DURATION_REQUIRED");
+        }
+        var required = view.Snapshot.SellPrice?.TotalPoints ?? 0m;
+        if (required > 0)
+        {
+            var charge = await _wallets.ChargeAsync(
+                currentUser.CustomerId,
+                currentUser.UserId,
+                required,
+                1,
+                "timelapse_render",
+                "todox",
+                "point_pricing",
+                "timelapse",
+                referenceId: jobId,
+                referenceType: "timelapse_job");
+            if (!charge.Ok)
+            {
+                await MarkBillingBlockedAsync(jobId, charge.Error ?? "Insufficient points.", ct);
+                throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
+            }
+
+            await MarkChargedAsync(jobId, required, ct);
+        }
+
         view.Workflow = await _workflow.StartOrResumeAsync(jobId, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);
         return view;
     }
 
-    public async Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
+    public async Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
+            PointPricingResourceTypes.Image,
+            TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+        var imageCount = ResolveImageRerenderBillingCount(view.Snapshot.SceneCount, progressPercent);
+        var requiredPoints = ResolveImageRerenderPoints(rate.Rate, imageCount);
+        var charge = await _wallets.ChargeAsync(
+            currentUser.CustomerId, currentUser.UserId, requiredPoints, imageCount,
+            "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
+            "point", PointBillingReference.ForRerender(jobId, "image", progressPercent.ToString(), rerenderOperationId ?? Guid.NewGuid()),
+            "timelapse_user_rerender");
+        if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
         view.Workflow = await _workflow.RetryImageAsync(jobId, progressPercent, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);
@@ -298,9 +577,26 @@ public sealed class TimelapseJobService : ITimelapseJobService
         string prompt,
         bool rerender,
         CurrentUserSession currentUser,
+        Guid? rerenderOperationId = null,
         CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        if (rerender)
+        {
+            var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
+                PointPricingResourceTypes.Image,
+                TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+            var stage = view.Workflow.Images.FirstOrDefault(x => x.Id == imageStageId)
+                ?? throw new InvalidOperationException("Không tìm thấy ảnh Timelapse thuộc job này.");
+            var imageCount = ResolveImageRerenderBillingCount(view.Snapshot.SceneCount, stage.ProgressPercent);
+            var requiredPoints = ResolveImageRerenderPoints(rate.Rate, imageCount);
+            var charge = await _wallets.ChargeAsync(
+                currentUser.CustomerId, currentUser.UserId, requiredPoints, imageCount,
+                "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
+                "point", PointBillingReference.ForRerender(jobId, "image", imageStageId.ToString("N"), rerenderOperationId ?? Guid.NewGuid()),
+                "timelapse_user_rerender");
+            if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
+        }
         view.Workflow = await _workflow.UpdateImagePromptAsync(
             jobId,
             imageStageId,
@@ -314,10 +610,48 @@ public sealed class TimelapseJobService : ITimelapseJobService
         return view;
     }
 
-    public async Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
+    public async Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        var duration = view.Snapshot.SellPrice?.ClipDurationsSeconds.ElementAtOrDefault(clipIndex - 1);
+        if (duration is not > 0) throw new InvalidOperationException("TIMELAPSE_CLIP_DURATION_REQUIRED");
+        var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
+            PointPricingResourceTypes.Video,
+            TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+        var charge = await _wallets.ChargeAsync(
+            currentUser.CustomerId, currentUser.UserId, duration.Value * rate.Rate, 1,
+            "timelapse_user_rerender_video", "todox", "point_pricing", "timelapse",
+            "point", PointBillingReference.ForRerender(jobId, "video", clipIndex.ToString(), rerenderOperationId ?? Guid.NewGuid()),
+            "timelapse_user_rerender");
+        if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
         view.Workflow = await _workflow.RetryVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<TimelapseJobView> CancelJobAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.CancelJobAsync(jobId, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<TimelapseJobView> CancelImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.CancelImageAsync(jobId, progressPercent, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<TimelapseJobView> CancelVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.CancelVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);
         return view;
@@ -381,6 +715,114 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
     private static string NormalizeTitle(string? title)
         => string.IsNullOrWhiteSpace(title) ? "Video Timelapse" : title.Trim();
+
+    private async Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, bool hasStartImage, CancellationToken ct)
+    {
+        var quality = TimelapseSellPricing.QualityTierForMode(videoMode);
+        var graph = TimelapseStageGraphBuilder.Build(sceneCount, hasStartImage);
+        var imageCount = await _tokenSettings.GetChargeStaticImagePointsAsync()
+            ? sceneCount
+            : graph.GeneratedImageOrder.Count;
+        var plan = new PreRenderUsagePlan(serviceId, imageCount, quality,
+            graph.VideoClips.Select(x => new PreRenderVideoScene(x.ClipIndex, x.DurationSeconds)).ToArray(),
+            quality, 0, quality, false).Validate();
+        return await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
+    }
+
+    internal static int ResolveImageRerenderBillingCount(int sceneCount, int progressPercent)
+        => TimelapseRerenderImpactPlanner.Plan(sceneCount, progressPercent).ImageProgressesToInvalidate.Count;
+
+    internal static decimal ResolveImageRerenderPoints(decimal imageRate, int imageCount)
+        => Math.Max(0m, imageRate) * Math.Max(0, imageCount);
+
+    private async Task MarkBillingBlockedAsync(Guid jobId, string message, CancellationToken ct)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET point_status=@pointStatus,
+                   error_code='insufficient_points',
+                   error_message=@message,
+                   updated_at=now()
+             WHERE id=@jobId AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId, pointStatus = RenderPointStatuses.Insufficient, message });
+    }
+
+    private async Task MarkChargedAsync(Guid jobId, decimal points, CancellationToken ct)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET point_cost_charged=@points,
+                   point_status=@pointStatus,
+                   error_code=NULL,
+                   error_message=NULL,
+                   updated_at=now()
+             WHERE id=@jobId AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId, points, pointStatus = RenderPointStatuses.Charged });
+    }
+
+    private async Task<TimelapseOriginalImageSnapshot?> SaveOptionalStartImageAsync(
+        byte[]? content,
+        string? fileName,
+        string? contentType,
+        CurrentUserSession currentUser,
+        CancellationToken ct)
+    {
+        if (content is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        var media = await _media.SaveAsync(
+            content,
+            string.IsNullOrWhiteSpace(fileName) ? "timelapse-start.png" : fileName,
+            string.IsNullOrWhiteSpace(contentType) ? "image/png" : contentType,
+            "timelapse_start_image",
+            currentUser.UserId,
+            currentUser.CustomerId,
+            _tenant.TenantId,
+            ct);
+
+        return new TimelapseOriginalImageSnapshot
+        {
+            MediaId = media.Id,
+            ObjectKey = media.ObjectKey,
+            PublicUrl = media.PublicUrl ?? media.FileUrl,
+            MimeType = media.MimeType
+        };
+    }
+
+    private static object[] BuildReferenceJson(TimelapseJobSnapshot snapshot)
+    {
+        var references = new List<object>();
+        if (snapshot.StartImage is not null)
+        {
+            references.Add(new
+            {
+                role = "start_image_0_percent",
+                mediaId = snapshot.StartImage.MediaId,
+                snapshot.StartImage.ObjectKey,
+                url = snapshot.StartImage.PublicUrl,
+                snapshot.StartImage.MimeType
+            });
+        }
+
+        references.Add(new
+        {
+            role = "original_image",
+            semanticRole = "final_image_100_percent",
+            mediaId = snapshot.OriginalImage.MediaId,
+            snapshot.OriginalImage.ObjectKey,
+            url = snapshot.OriginalImage.PublicUrl,
+            snapshot.OriginalImage.MimeType
+        });
+        return references.ToArray();
+    }
 
     private static void HydrateImagePrompts(TimelapseJobView view)
     {

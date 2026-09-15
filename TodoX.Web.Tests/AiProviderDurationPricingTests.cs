@@ -8,6 +8,42 @@ namespace TodoX.Web.Tests;
 
 public sealed class AiProviderDurationPricingTests
 {
+    [Theory]
+    [InlineData(4)]
+    [InlineData(6)]
+    [InlineData(8)]
+    public void CapabilityDurationsRemainSupportedWhenPriceDurationIsGeneric(int requestedDuration)
+    {
+        var options = AiProviderModelOptionsNormalizer.Normalize(
+            explicitModes: null,
+            explicitDurations: null,
+            explicitResolutions: null,
+            explicitRatios: null,
+            prices:
+            [
+                new AiModelPriceDto { Mode = "fast", Resolution = "720p", DurationSeconds = null, Active = true }
+            ],
+            rawJson: null,
+            capabilityConfigJsons:
+            ["""{ "supported_modes": ["fast", "lite", "quality"], "supported_durations": [4, 6, 8], "supported_resolutions": ["720p", "1080p", "4k"] }"""]);
+
+        Assert.Equal([4, 6, 8], options.Durations);
+        Assert.Contains(requestedDuration, options.Durations);
+        Assert.Contains("fast", options.Modes);
+    }
+
+    [Fact]
+    public void CapabilityDurationsRejectUnsupportedDurationWhenPriceDurationIsGeneric()
+    {
+        var options = AiProviderModelOptionsNormalizer.Normalize(
+            null, null, null, null,
+            [new AiModelPriceDto { Mode = "fast", Resolution = "720p", DurationSeconds = null, Active = true }],
+            null,
+            ["""{ "supported_durations": [4, 6, 8] }"""]);
+
+        Assert.DoesNotContain(10, options.Durations);
+    }
+
     [Fact]
     public async Task CatalogClient_NormalizesVeoOmniDurationsAndVerifiedPrices()
     {

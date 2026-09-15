@@ -1,5 +1,8 @@
 using System.Text.Json;
 using Npgsql;
+using TodoX.Web.Services.Media;
+using TodoX.Web.Services.VideoRender;
+using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.AiProviders;
 
@@ -59,6 +62,11 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var billing = scope.ServiceProvider.GetRequiredService<IAiImageBillingService>();
         var tasks = scope.ServiceProvider.GetRequiredService<IYEScaleTaskClient>();
+        var videoService = scope.ServiceProvider.GetRequiredService<IRVideo79AiVideoService>();
+        var versions = scope.ServiceProvider.GetRequiredService<ISceneMediaVersioningService>();
+        var completion = scope.ServiceProvider.GetRequiredService<IRVideoSceneVideoCompletionService>();
+        var projects = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
+        var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
 
         var batchSize = Math.Clamp(_config.GetValue("AiImageBilling:ReconciliationBatchSize", 10), 1, 100);
         var lockMinutes = Math.Clamp(_config.GetValue("AiImageBilling:ReconciliationLockMinutes", 5), 1, 60);
@@ -73,13 +81,66 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
 
         foreach (var item in claimed)
         {
-            await ReconcileItemAsync(billing, tasks, item, maxAttempts, ct);
+            try
+            {
+                await ReconcileItemAsync(billing, tasks, versions, completion, videoService, projects, tenant, item, maxAttempts, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                var safeErrorMessage = ToSafeErrorMessage(ex);
+                _logger.LogError(
+                    ex,
+                    "AI_IMAGE_RECONCILIATION_ITEM_FAILED logicalRequestId={LogicalRequestId} providerCode={ProviderCode} providerTaskId={ProviderTaskId} capabilityCode={CapabilityCode} attemptCount={AttemptCount} exceptionType={ExceptionType} safeErrorMessage={SafeErrorMessage}",
+                    item.LogicalRequestId,
+                    item.ProviderCode,
+                    item.ProviderTaskId,
+                    item.CapabilityCode,
+                    item.ReconciliationAttemptCount,
+                    ex.GetType().Name,
+                    safeErrorMessage);
+
+                try
+                {
+                    await billing.RescheduleReconciliationAsync(
+                        item.LogicalRequestId,
+                        $"Reconciliation failed: {ex.GetType().Name}: {safeErrorMessage}",
+                        TimeSpan.FromMinutes(Math.Min(30, Math.Max(1, item.ReconciliationAttemptCount * 2))),
+                        ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception rescheduleException)
+                {
+                    var safeRescheduleErrorMessage = ToSafeErrorMessage(rescheduleException);
+                    _logger.LogError(
+                        rescheduleException,
+                        "AI_IMAGE_RECONCILIATION_ITEM_RESCHEDULE_FAILED logicalRequestId={LogicalRequestId} providerCode={ProviderCode} providerTaskId={ProviderTaskId} capabilityCode={CapabilityCode} attemptCount={AttemptCount} exceptionType={ExceptionType} safeErrorMessage={SafeErrorMessage}",
+                        item.LogicalRequestId,
+                        item.ProviderCode,
+                        item.ProviderTaskId,
+                        item.CapabilityCode,
+                        item.ReconciliationAttemptCount,
+                        rescheduleException.GetType().Name,
+                        safeRescheduleErrorMessage);
+                }
+            }
         }
     }
 
     private async Task ReconcileItemAsync(
         IAiImageBillingService billing,
         IYEScaleTaskClient tasks,
+        ISceneMediaVersioningService versions,
+        IRVideoSceneVideoCompletionService completion,
+        IRVideo79AiVideoService videoService,
+        VideoRenderRepository projects,
+        TenantContext tenant,
         AiImageBillingReconciliationItem item,
         int maxAttempts,
         CancellationToken ct)
@@ -91,6 +152,13 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
                 "Image billing reconciliation cannot verify provider state because provider_task_id is missing.",
                 ct);
             _logger.LogWarning("AI_IMAGE_RECONCILIATION_MANUAL_REVIEW logicalRequestId={LogicalRequestId} reason=missing_task_id", item.LogicalRequestId);
+            return;
+        }
+
+        if (string.Equals(item.ProviderCode, "79ai", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(item.CapabilityCode, "rvideo_scene_video_generation", StringComparison.OrdinalIgnoreCase))
+        {
+            await Reconcile79AiVideoAsync(billing, versions, completion, videoService, projects, tenant, item, ct);
             return;
         }
 
@@ -162,6 +230,96 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         }
     }
 
+    private async Task Reconcile79AiVideoAsync(
+        IAiImageBillingService billing,
+        ISceneMediaVersioningService versions,
+        IRVideoSceneVideoCompletionService completion,
+        IRVideo79AiVideoService videoService,
+        VideoRenderRepository projects,
+        TenantContext tenant,
+        AiImageBillingReconciliationItem item,
+        CancellationToken ct)
+    {
+        var version = await versions.GetSceneVideoVersionByLogicalRequestIdAsync(item.LogicalRequestId, ct);
+        if (version is null)
+        {
+            await billing.MarkManualReviewAsync(item.LogicalRequestId, "79AI video reconciliation could not locate a recoverable scene video version.", ct);
+            return;
+        }
+
+        var scene = await projects.GetSceneAsync(version.SceneId, ct);
+        if (scene is null)
+        {
+            await billing.MarkManualReviewAsync(item.LogicalRequestId, "79AI video reconciliation could not locate the scene for the recoverable scene video version.", ct);
+            return;
+        }
+
+        var runtime = await videoService.ResolveRuntimeAsync(item.ProviderId, item.ProviderCapabilityId, item.ProviderCode!, ct);
+        var poll = await videoService.PollAsync(runtime, item.ProviderTaskId!, ct);
+
+        if (string.Equals(poll.NormalizedStatus, Ai79TaskStatusNormalizer.Running, StringComparison.OrdinalIgnoreCase))
+        {
+            await billing.RescheduleReconciliationAsync(item.LogicalRequestId, $"79AI video task still pending: {poll.NormalizedStatus}", TimeSpan.FromMinutes(Math.Min(30, item.ReconciliationAttemptCount * 2)), ct);
+            return;
+        }
+
+        if (string.Equals(poll.NormalizedStatus, Ai79TaskStatusNormalizer.Failed, StringComparison.OrdinalIgnoreCase))
+        {
+            await billing.CompleteAsync(new AiImageBillingCompleteRequest
+            {
+                LogicalRequestId = item.LogicalRequestId,
+                Success = false,
+                ActualModel = item.ActualModel ?? item.RequestedModel,
+                ProviderTaskId = item.ProviderTaskId,
+                ProviderUsageJson = poll.SanitizedResponseJson,
+                TariffSnapshotJson = item.TariffSnapshotJson,
+                ErrorMessage = poll.ErrorMessage ?? "79AI video task failed during reconciliation."
+            }, ct);
+            if (!string.IsNullOrWhiteSpace(version.Status))
+            {
+                await versions.FailSceneVideoVersionAsync(version.Id, poll.ErrorCode ?? "provider_failure", poll.ErrorMessage ?? "79AI video task failed during reconciliation.", ct);
+            }
+            return;
+        }
+
+        var outputUrl = poll.OutputUrl;
+        if (string.IsNullOrWhiteSpace(outputUrl))
+        {
+            await billing.MarkManualReviewAsync(item.LogicalRequestId, "79AI video task succeeded but did not return an output URL.", ct);
+            return;
+        }
+
+        await completion.CompleteProviderVideoAsync(new RVideoSceneVideoCompletionRequest(
+            version.ProjectId,
+            version.SceneId,
+            scene.SceneIndex,
+            version.Id,
+            version.RenderJobId,
+            version.StorageKey,
+            item.LogicalRequestId,
+            item.ProviderTaskId!,
+            outputUrl,
+            item.ProviderCode,
+            item.ActualModel ?? item.RequestedModel,
+            item.ProviderCapabilityId,
+            poll.SanitizedResponseJson,
+            item.TariffSnapshotJson,
+            CustomerPointRate: version.DurationSeconds is decimal duration && duration > 0
+                ? item.CustomerChargedPoints / duration
+                : item.CustomerChargedPoints,
+            version.EstimatedUsd,
+            version.CostSource,
+            version.AspectRatio,
+            version.PosterUrl,
+            version.DurationSeconds,
+            UserId: null,
+            CustomerId: null,
+            BillingIntent: PointBillingIntent.SystemRetry,
+            BillingOperationId: version.RenderJobId,
+            IsRecovery: true), ct);
+        _logger.LogInformation("AI_IMAGE_RECONCILIATION_COMPLETED logicalRequestId={LogicalRequestId} taskId={TaskId}", item.LogicalRequestId, item.ProviderTaskId);
+    }
+
     private static bool IsMissingBillingTable(Exception ex)
     {
         for (var current = ex; current is not null; current = current.InnerException)
@@ -174,5 +332,16 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         }
 
         return false;
+    }
+
+    private static string ToSafeErrorMessage(Exception ex)
+    {
+        var message = ex.Message.ReplaceLineEndings(" ").Trim();
+        if (message.Length > 500)
+        {
+            message = message[..500];
+        }
+
+        return message;
     }
 }

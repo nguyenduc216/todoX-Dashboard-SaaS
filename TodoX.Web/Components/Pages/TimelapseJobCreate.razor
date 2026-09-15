@@ -7,7 +7,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @inject AuthStateService AuthState
 @inject CatalogRepository Catalog
-@inject IServiceSellPriceResolver SellPrices
+@inject IPointPricingService PointPricing
 @inject ITimelapseProfileRepository Profiles
 @inject ITimelapseJobService Jobs
 @inject NavigationManager Navigation
@@ -55,12 +55,56 @@
                 <MudItem xs="12" lg="8">
                     <MudPaper Class="todox-card timelapse-form-card pa-4" rounded="true">
                         <MudStack Spacing="3">
-                            <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" Variant="Variant.Outlined" />
+                            <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" @bind-Value:after="ScheduleAutoSave" Variant="Variant.Outlined" />
 
+                            @if (_serviceDefinition is not null)
+                            {
+                                <MudGrid>
+                                    <MudItem xs="12" md="6">
+                                        <MudText Typo="Typo.subtitle2">Dịch vụ</MudText>
+                                        <MudText>@_serviceDefinition.DisplayName</MudText>
+                                    </MudItem>
+                                    <MudItem xs="12" md="6">
+                                        <MudText Typo="Typo.subtitle2">Loại công trình</MudText>
+                                        <MudText>@_serviceDefinition.CategoryLabel</MudText>
+                                    </MudItem>
+                                </MudGrid>
+                            }
+
+                            <MudGrid>
+                                <MudItem xs="12" md="6">
                             <MudStack Spacing="1">
-                                <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
+                                <MudText Typo="Typo.subtitle2">Ảnh ban đầu / 0% - Không bắt buộc</MudText>
+                                <label class="timelapse-upload-card @(_selectedStartFile is not null ? "has-file" : string.Empty)">
+                                    <InputFile OnChange="OnStartImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                    @if (!string.IsNullOrWhiteSpace(_startPreviewDataUrl))
+                                    {
+                                        <img src="@_startPreviewDataUrl" alt="Ảnh ban đầu đã chọn" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                    }
+                                    <span class="upload-primary">Chọn ảnh ban đầu</span>
+                                    <span class="upload-secondary">Không bắt buộc</span>
+                                    <span class="upload-helper">Nếu có ảnh ban đầu, todoX sẽ giữ trạng thái này làm mốc khởi đầu và tạo quá trình tiến triển tới ảnh thành phẩm.</span>
+                                </label>
+                                @if (_selectedStartFile is not null)
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                        <MudText Typo="Typo.caption" Color="Color.Success">@_selectedStartFile.Name</MudText>
+                                        <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveStartImage">
+                                            Xóa ảnh
+                                        </MudButton>
+                                    </MudStack>
+                                }
+                            </MudStack>
+                                </MudItem>
+                                <MudItem xs="12" md="6">
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / 100% - Bắt buộc</MudText>
                                 <label class="timelapse-upload-card @(_selectedFile is not null ? "has-file" : string.Empty)">
-                                    <InputFile OnChange="OnImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                    <InputFile OnChange="OnFinalImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
                                     @if (!string.IsNullOrWhiteSpace(_previewDataUrl))
                                     {
                                         <img src="@_previewDataUrl" alt="Ảnh đã chọn" />
@@ -71,7 +115,7 @@
                                     }
                                     <span class="upload-primary">Chọn ảnh thành phẩm</span>
                                     <span class="upload-secondary">Bấm để tải ảnh lên</span>
-                                    <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB</span>
+                                    <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB. Ảnh thành phẩm là mốc kết thúc bắt buộc của video Timelapse.</span>
                                 </label>
                                 @if (_selectedFile is not null)
                                 {
@@ -83,13 +127,25 @@
                                     </MudStack>
                                 }
                             </MudStack>
+                                </MudItem>
+                            </MudGrid>
 
-                            <MudSelect T="string" Label="Loại công trình" @bind-Value="_request.ProfileCode" Variant="Variant.Outlined" Required="true">
-                                @foreach (var profile in _profiles)
-                                {
-                                    <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
-                                }
-                            </MudSelect>
+                            @if (_profiles.Count == 1)
+                            {
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.subtitle2">Cấu hình dựng</MudText>
+                                    <MudText>@_profiles[0].ProfileName</MudText>
+                                </MudStack>
+                            }
+                            else
+                            {
+                                <MudSelect T="string" Label="Cấu hình dựng" @bind-Value="_request.ProfileCode" @bind-Value:after="ScheduleAutoSave" Variant="Variant.Outlined" Required="true">
+                                    @foreach (var profile in _profiles)
+                                    {
+                                        <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            }
 
                             <MudStack Spacing="1">
                                 <MudText Typo="Typo.subtitle2">Số scene</MudText>
@@ -130,6 +186,16 @@
                                     </button>
                                 </div>
                             </MudStack>
+                            <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_request.AutoFinish" @bind-Value:after="ScheduleAutoSave">
+                                Tự động hoàn thành
+                            </MudSwitch>
+                            <MudText Typo="Typo.caption" Class="timelapse-auto-finish-help">
+                                Hệ thống sẽ tự động tạo ảnh trung gian, tạo các video scene và ghép video hoàn chỉnh khi dữ liệu sẵn sàng.
+                            </MudText>
+                            @if (!string.IsNullOrWhiteSpace(_saveStatus))
+                            {
+                                <MudText Typo="Typo.caption" Color="@(_saveError is null ? Color.Secondary : Color.Error)">@_saveStatus</MudText>
+                            }
 
                             @if (_profiles.Count == 0)
                             {
@@ -151,12 +217,12 @@
                             {
                                 <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
                             }
-                            else if (_priceEstimate?.Success == true && _priceEstimate.VideoScenePrice is not null)
+                            else if (_priceEstimate is not null)
                             {
-                                <div class="price-row"><span>Đơn giá video</span><strong>@FormatPoints(_priceEstimate.VideoScenePrice.SellPoints) / scene</strong></div>
-                                <div class="price-row"><span>Video</span><strong>@($"{_request.SceneCount} x {FormatPoints(_priceEstimate.VideoScenePrice.SellPoints)} = {FormatPoints(_priceEstimate.VideoSubtotal)}")</strong></div>
+                                <div class="price-row"><span>Images</span><strong>@($"{_priceEstimate.Image.Count} x {FormatPoints(_priceEstimate.Image.Rate)} = {FormatPoints(_priceEstimate.Image.Points)}")</strong></div>
+                                <div class="price-row"><span>Video</span><strong>@($"{_priceEstimate.Video.Count} sec x {FormatPoints(_priceEstimate.Video.Rate)} = {FormatPoints(_priceEstimate.Video.Points)}")</strong></div>
+                                <div class="price-row"><span>Voice</span><strong>@(_priceEstimate.Voice.Count == 0 ? "Not used = 0" : $"{_priceEstimate.Voice.Count} x {FormatPoints(_priceEstimate.Voice.Rate)} = {FormatPoints(_priceEstimate.Voice.Points)}")</strong></div>
                                 <MudDivider />
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh AI trung gian chưa tính trong phase UI này.</MudText>
                                 <div class="timelapse-total">
                                     <span>TỔNG DỰ KIẾN</span>
                                     <strong>@FormatPoints(_priceEstimate.TotalPoints) todoX</strong>
@@ -194,25 +260,40 @@
     private TimelapseCreateRequest _request = new();
     private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
     private CatalogServiceView? _selectedService;
-    private ServiceSellPriceEstimate? _priceEstimate;
+    private TimelapseServiceDefinition? _serviceDefinition;
+    private PointPricingEstimate? _priceEstimate;
     private IBrowserFile? _selectedFile;
+    private IBrowserFile? _selectedStartFile;
     private string? _previewDataUrl;
+    private string? _startPreviewDataUrl;
+    private bool _removeStartImage;
     private string? _serviceWarning;
     private string? _priceError;
     private bool _busy;
     private bool _loadingService = true;
     private bool _priceLoading;
     private int _priceLoadVersion;
+    private Guid? _draftJobId;
+    private CancellationTokenSource? _autoSaveCts;
+    private readonly SemaphoreSlim _autoSaveGate = new(1, 1);
+    private string? _saveStatus;
+    private string? _saveError;
 
     private string PageHeading => _selectedService?.DisplayName ?? "Tạo video Timelapse AI";
     private string PageSubtitle => _selectedService is null
         ? "Tạo video Timelapse AI từ ảnh thành phẩm."
         : "Tạo video Timelapse AI từ ảnh thành phẩm.";
-    private string PriceMessage => _priceError ?? _priceEstimate?.Message ?? "Chưa cấu hình giá cho lựa chọn này.";
+    private string PriceMessage => _priceError ?? "Chưa cấu hình giá cho lựa chọn này.";
     private bool HasValidImage => _selectedFile is not null && ValidateSelectedImage(showSnackbar: false);
-    private bool HasValidPrice => _priceEstimate is { Success: true, VideoScenePrice: not null };
+    private bool HasValidPrice => _priceEstimate is not null;
     private bool ServiceReady => _selectedService is { Enabled: true } && string.Equals(_selectedService.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase);
-    private bool SubmitDisabled => _busy || _priceLoading || _profiles.Count == 0 || !ServiceReady || !HasValidImage || !HasValidPrice;
+    private bool CanStartWorkflow
+        => AuthState.CurrentUser is { IsCustomer: true }
+           && !_priceLoading
+           && ServiceReady
+           && HasValidPrice
+           && TimelapseRequestRules.Validate(_request, HasValidImage).Count == 0;
+    private bool SubmitDisabled => _busy || !CanStartWorkflow;
 
     protected override async Task OnInitializedAsync()
     {
@@ -221,7 +302,13 @@
         await LoadPageAsync();
     }
 
-    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChange;
+        _autoSaveCts?.Cancel();
+        _autoSaveCts?.Dispose();
+        _autoSaveGate.Dispose();
+    }
 
     private void HandleAuthChange() => _ = InvokeAsync(async () =>
     {
@@ -233,6 +320,7 @@
     {
         _serviceWarning = null;
         _selectedService = null;
+        _serviceDefinition = null;
         _priceEstimate = null;
         _priceError = null;
         _loadingService = true;
@@ -246,12 +334,14 @@
         try
         {
             await LoadSelectedServiceAsync();
+            ApplyServiceDefaults();
             await LoadProfilesAsync();
             await RefreshPriceEstimateAsync();
         }
         finally
         {
             _loadingService = false;
+            ScheduleAutoSave();
         }
     }
 
@@ -272,6 +362,14 @@
 
         _request.ServiceCode = service.ServiceCode;
         _selectedService = service;
+        if (!TimelapseServiceCatalog.TryGet(service.ServiceCode, out var definition))
+        {
+            _serviceWarning = "Dịch vụ Timelapse đã chọn chưa được cấu hình loại công trình.";
+            return;
+        }
+
+        _serviceDefinition = definition;
+        _request.ServiceCategory = definition.Category;
 
         if (!service.Enabled)
         {
@@ -295,8 +393,17 @@
 
         try
         {
-            _profiles = await Profiles.GetEnabledProfilesAsync();
+            if (_serviceDefinition is null)
+            {
+                return;
+            }
+
+            _profiles = await Profiles.GetEnabledProfilesByCategoryAsync(_serviceDefinition.Category);
             if (string.IsNullOrWhiteSpace(_request.ProfileCode))
+            {
+                _request.ProfileCode = _profiles.FirstOrDefault()?.ProfileCode ?? string.Empty;
+            }
+            else if (!_profiles.Any(x => string.Equals(x.ProfileCode, _request.ProfileCode, StringComparison.OrdinalIgnoreCase)))
             {
                 _request.ProfileCode = _profiles.FirstOrDefault()?.ProfileCode ?? string.Empty;
             }
@@ -307,7 +414,7 @@
         }
     }
 
-    private async Task OnImageSelected(InputFileChangeEventArgs args)
+    private async Task OnFinalImageSelected(InputFileChangeEventArgs args)
     {
         _selectedFile = args.File;
         _previewDataUrl = null;
@@ -322,6 +429,26 @@
         await using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer);
         _previewDataUrl = $"data:{_selectedFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        ScheduleAutoSave();
+    }
+
+    private async Task OnStartImageSelected(InputFileChangeEventArgs args)
+    {
+        _selectedStartFile = args.File;
+        _startPreviewDataUrl = null;
+        _removeStartImage = false;
+
+        if (!ValidateSelectedStartImage(showSnackbar: true))
+        {
+            _selectedStartFile = null;
+            return;
+        }
+
+        await using var stream = _selectedStartFile!.OpenReadStream(MaxImageBytes);
+        await using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        _startPreviewDataUrl = $"data:{_selectedStartFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        ScheduleAutoSave();
     }
 
     private bool ValidateSelectedImage(bool showSnackbar)
@@ -352,10 +479,47 @@
         return true;
     }
 
+    private bool ValidateSelectedStartImage(bool showSnackbar)
+    {
+        if (_selectedStartFile is null)
+        {
+            return true;
+        }
+
+        if (_selectedStartFile.Size <= 0 || _selectedStartFile.Size > MaxImageBytes)
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Ảnh phải có dung lượng tối đa 10MB.", Severity.Warning);
+            }
+            return false;
+        }
+
+        if (!AllowedImageContentTypes.Contains(_selectedStartFile.ContentType))
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Chỉ hỗ trợ JPG, PNG hoặc WebP.", Severity.Warning);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
     private void RemoveImage()
     {
         _selectedFile = null;
         _previewDataUrl = null;
+        ScheduleAutoSave();
+    }
+
+    private void RemoveStartImage()
+    {
+        _selectedStartFile = null;
+        _startPreviewDataUrl = null;
+        _removeStartImage = true;
+        ScheduleAutoSave();
     }
 
     private void ApplySelectedServiceFromQuery()
@@ -378,21 +542,57 @@
     {
         _request.SceneCount = sceneCount;
         await RefreshPriceEstimateAsync();
+        ScheduleAutoSave();
     }
 
     private async Task SelectMode(string mode)
     {
         _request.VideoMode = mode;
         await RefreshPriceEstimateAsync();
+        ScheduleAutoSave();
     }
 
-    private void SelectRatio(string ratio) => _request.Ratio = ratio;
+    private void SelectRatio(string ratio)
+    {
+        _request.Ratio = ratio;
+        ScheduleAutoSave();
+    }
 
     private bool IsSceneSelected(int sceneCount) => _request.SceneCount == sceneCount;
 
     private bool IsModeSelected(string mode) => string.Equals(_request.VideoMode, mode, StringComparison.OrdinalIgnoreCase);
 
     private bool IsRatioSelected(string ratio) => string.Equals(_request.Ratio, ratio, StringComparison.OrdinalIgnoreCase);
+
+    private void ApplyServiceDefaults()
+    {
+        if (_selectedService is null)
+        {
+            return;
+        }
+
+        var defaults = ServiceJobDefaultsCodec.FromJson(_selectedService.JobDefaultsJson);
+        if (!string.IsNullOrWhiteSpace(defaults.ProfileCode))
+        {
+            _request.ProfileCode = defaults.ProfileCode.Trim();
+        }
+        if (defaults.SceneCount is > 0)
+        {
+            _request.SceneCount = defaults.SceneCount.Value;
+        }
+        if (TimelapseRequestRules.IsSupportedMode(defaults.VideoMode))
+        {
+            _request.VideoMode = defaults.VideoMode!;
+        }
+        if (TimelapseRequestRules.IsSupportedRatio(defaults.Ratio))
+        {
+            _request.Ratio = defaults.Ratio!;
+        }
+        if (defaults.AutoFinish.HasValue)
+        {
+            _request.AutoFinish = defaults.AutoFinish.Value;
+        }
+    }
 
     private async Task RefreshPriceEstimateAsync()
     {
@@ -408,12 +608,15 @@
         _priceLoading = true;
         try
         {
-            var estimate = await SellPrices.EstimateAsync(new ServiceSellPriceEstimateRequest(
+            var estimate = await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
                 _selectedService.Id,
+                Math.Max(0, _request.SceneCount - (_selectedStartFile is not null ? 1 : 0)),
                 TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
-                TimelapseRequestRules.RuntimeClipDurationSeconds,
-                _request.SceneCount,
-                ImageCount: 0));
+                _request.SceneCount * TimelapseRequestRules.RuntimeClipDurationSeconds,
+                TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
+                0,
+                TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
+                false));
 
             if (version == _priceLoadVersion)
             {
@@ -439,45 +642,27 @@
 
     private async Task CreateDraftAsync()
     {
-        if (!ServiceReady)
+        if (!CanStartWorkflow)
         {
-            Snackbar.Add(_serviceWarning ?? "Dịch vụ Timelapse hiện chưa khả dụng.", Severity.Warning);
+            Snackbar.Add(FirstWorkflowReadinessError(), Severity.Warning);
             return;
         }
 
-        if (!ValidateSelectedImage(showSnackbar: true) || AuthState.CurrentUser is null)
+        if (AuthState.CurrentUser is not { IsCustomer: true } user)
         {
-            Snackbar.Add("Vui lòng chọn ảnh thành phẩm / ảnh tham chiếu.", Severity.Warning);
-            return;
-        }
-
-        if (!HasValidPrice)
-        {
-            Snackbar.Add(PriceMessage, Severity.Warning);
-            return;
-        }
-
-        var errors = TimelapseRequestRules.Validate(_request, true);
-        if (errors.Count > 0)
-        {
-            Snackbar.Add(errors[0], Severity.Warning);
+            Snackbar.Add("Vui lòng đăng nhập bằng tài khoản khách hàng.", Severity.Warning);
             return;
         }
 
         _busy = true;
         try
         {
-            await using var stream = _selectedFile!.OpenReadStream(MaxImageBytes);
-            await using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer);
+            var job = await EnsureDraftSavedAsync(CancellationToken.None);
 
-            var job = await Jobs.CreateDraftAsync(
-                _request,
-                buffer.ToArray(),
-                _selectedFile.Name,
-                _selectedFile.ContentType,
-                AuthState.CurrentUser);
-
+            if (_request.AutoFinish)
+            {
+                job = await Jobs.StartOrResumeAsync(job.Id, user);
+            }
             Navigation.NavigateTo($"/jobs/timelapse/{job.Id}");
         }
         catch (Exception ex)
@@ -490,5 +675,129 @@
         }
     }
 
+    private void ScheduleAutoSave()
+    {
+        if (!CanAutoSave)
+        {
+            return;
+        }
+
+        _autoSaveCts?.Cancel();
+        _autoSaveCts?.Dispose();
+        _autoSaveCts = new CancellationTokenSource();
+        var token = _autoSaveCts.Token;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await Task.Delay(700, token);
+                await EnsureDraftSavedAsync(token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _saveError = ex.Message;
+                _saveStatus = "Không thể tự lưu bản nháp. Vui lòng thử lại.";
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+    }
+
+    private bool CanAutoSave
+        => AuthState.CurrentUser is { IsCustomer: true }
+           && CanStartWorkflow;
+
+    private async Task<TimelapseJobView> EnsureDraftSavedAsync(CancellationToken ct)
+    {
+        if (!CanAutoSave || AuthState.CurrentUser is not { IsCustomer: true } user || _selectedFile is null)
+        {
+            throw new InvalidOperationException("Vui lòng hoàn tất các thông tin bắt buộc trước khi lưu.");
+        }
+
+        await _autoSaveGate.WaitAsync(ct);
+        try
+        {
+            _saveError = null;
+            _saveStatus = "Đang lưu...";
+            await InvokeAsync(StateHasChanged);
+
+            await using var stream = _selectedFile.OpenReadStream(MaxImageBytes);
+            await using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, ct);
+            byte[]? startBytes = null;
+            if (_selectedStartFile is not null)
+            {
+                await using var startStream = _selectedStartFile.OpenReadStream(MaxImageBytes);
+                await using var startBuffer = new MemoryStream();
+                await startStream.CopyToAsync(startBuffer, ct);
+                startBytes = startBuffer.ToArray();
+            }
+
+            TimelapseJobView job;
+            if (_draftJobId is Guid draftId)
+            {
+                job = await Jobs.UpdateDraftAsync(
+                    draftId,
+                    _request,
+                    buffer.ToArray(),
+                    _selectedFile.Name,
+                    _selectedFile.ContentType,
+                    user,
+                    startBytes,
+                    _selectedStartFile?.Name,
+                    _selectedStartFile?.ContentType,
+                    removeStartImage: _removeStartImage,
+                    ct);
+            }
+            else
+            {
+                job = await Jobs.CreateDraftAsync(
+                    _request,
+                    buffer.ToArray(),
+                    _selectedFile.Name,
+                    _selectedFile.ContentType,
+                    user,
+                    startBytes,
+                    _selectedStartFile?.Name,
+                    _selectedStartFile?.ContentType,
+                    ct);
+                _draftJobId = job.Id;
+            }
+
+            _saveStatus = "Đã lưu bản nháp";
+            await InvokeAsync(StateHasChanged);
+            return job;
+        }
+        catch (Exception ex)
+        {
+            _saveError = ex.Message;
+            _saveStatus = "Không thể tự lưu bản nháp. Vui lòng thử lại.";
+            await InvokeAsync(StateHasChanged);
+            throw;
+        }
+        finally
+        {
+            _autoSaveGate.Release();
+        }
+    }
+
     private static string FormatPoints(decimal value) => $"{value:0.##} điểm";
+
+    private string FirstWorkflowReadinessError()
+    {
+        if (!ServiceReady)
+        {
+            return _serviceWarning ?? "Dịch vụ Timelapse hiện chưa khả dụng.";
+        }
+
+        if (!HasValidPrice)
+        {
+            return PriceMessage;
+        }
+
+        return TimelapseRequestRules.Validate(_request, ValidateSelectedImage(showSnackbar: true)).FirstOrDefault()
+            ?? "Vui lòng hoàn tất các thông tin bắt buộc trước khi tạo video.";
+    }
 }

@@ -31,6 +31,7 @@ public enum ScenePromptKind
 public sealed class VideoProjectDto
 {
     public long Id { get; set; }
+    public Guid? CoreJobId { get; set; }
     public Guid TenantId { get; set; }
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
@@ -42,6 +43,7 @@ public sealed class VideoProjectDto
     public bool ThinkScenes { get; set; }
     public long? CharacterId { get; set; }
     public string? UploadedCharacterUrl { get; set; }
+    public string? SourceImageUrl { get; set; }
     public string StorageRoot { get; set; } = string.Empty;
     public string PublicBase { get; set; } = string.Empty;
     public string JobFolder { get; set; } = string.Empty;
@@ -70,6 +72,11 @@ public sealed class VideoProjectSceneDto
     public string? StaticImageUrl { get; set; }
     public string? SceneVideoPath { get; set; }
     public string? SceneVideoUrl { get; set; }
+    public bool VoiceEnabled { get; set; }
+    public string? SpeakerKey { get; set; }
+    public string? VoiceText { get; set; }
+    public string? VoiceInstruction { get; set; }
+    public Guid? SelectedAudioVersionId { get; set; }
     public string Status { get; set; } = VideoSceneStatuses.Draft;
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -113,6 +120,7 @@ public sealed class VideoProjectCreateRequest
     public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
     public string? UploadedCharacterUrl { get; set; }
+    public string? SourceImageUrl { get; set; }
     public bool ThinkScenes { get; set; } = true;
     public int TotalSeconds { get; set; } = 16;
     public int SceneSeconds { get; set; } = 8;
@@ -129,6 +137,10 @@ public sealed class VideoProjectSceneCreateRequest
     public string ScenePrompt { get; set; } = string.Empty;
     public string? ImagePrompt { get; set; }
     public string? VideoPrompt { get; set; }
+    public bool VoiceEnabled { get; set; }
+    public string? SpeakerKey { get; set; }
+    public string? VoiceText { get; set; }
+    public string? VoiceInstruction { get; set; }
 }
 
 public sealed class VideoProjectAddSceneRequest
@@ -177,6 +189,7 @@ public sealed class VideoProjectUpdateRequest
     public string? Title { get; set; }
     public string OriginalPrompt { get; set; } = string.Empty;
     public long? CharacterId { get; set; }
+    public string? SourceImageUrl { get; set; }
     public int TotalSeconds { get; set; }
     public int SceneSeconds { get; set; }
     public bool ThinkScenes { get; set; }

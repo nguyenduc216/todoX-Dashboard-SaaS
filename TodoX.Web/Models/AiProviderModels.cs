@@ -311,7 +311,8 @@ public static class ProviderCodeMap
         var factoryKey = ToFactoryKey(providerCode);
         return factoryKey.Equals("todox_image", StringComparison.OrdinalIgnoreCase)
                || factoryKey.Equals("openrouter_image", StringComparison.OrdinalIgnoreCase)
-               || factoryKey.Equals("yescale_task_image", StringComparison.OrdinalIgnoreCase);
+               || factoryKey.Equals("yescale_task_image", StringComparison.OrdinalIgnoreCase)
+               || factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase);
     }
 
     public static string ToFactoryKey(string? providerCode)
@@ -322,6 +323,7 @@ public static class ProviderCodeMap
         {
             "openrouter" or "openrouter_image" => "openrouter_image",
             "yescale" or "yescale_task" or "yescale_task_image" => "yescale_task_image",
+            "79ai" or "79ai_image" or "79ai_task_image" or "gommo_image" => "79ai_task_image",
             "yescale_task_video" => "yescale_task_video",
             "image_ai_creative_render" or "todox_image" or "todox" => "todox_image",
             _ => providerCode.Trim()

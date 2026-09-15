@@ -360,6 +360,35 @@ public sealed class AiCharacterRepository
         }
     }
 
+    public async Task ReplaceReferencesAsync(CharacterScope scope, long characterId, string imageUrl, string? objectKey, string userId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        using var transaction = conn.BeginTransaction();
+        await conn.ExecuteAsync(
+            """
+            DELETE FROM public.todox_ai_character_reference
+             WHERE character_id=@characterId AND customer_id=@customerId;
+            """, new { characterId, customerId = scope.CustomerId }, transaction);
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO public.todox_ai_character_reference
+                (character_id, customer_id, image_url, object_key, reference_type, note, created_by, created_at)
+            VALUES
+                (@characterId, @customerId, @imageUrl, @objectKey, 'uploaded', NULL, @userId, now());
+            """, new { characterId, customerId = scope.CustomerId, imageUrl, objectKey, userId }, transaction);
+        transaction.Commit();
+    }
+
+    public async Task ClearReferencesAsync(CharacterScope scope, long characterId, string userId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            DELETE FROM public.todox_ai_character_reference
+             WHERE character_id=@characterId AND customer_id=@customerId;
+            """, new { characterId, customerId = scope.CustomerId });
+    }
+
     // Chỉ để bảo vệ dữ liệu cũ (status NULL/rỗng/hoa-thường/khoảng trắng). Không thay thế việc map đúng cột.
     private static string NormalizeStoredStatus(string? status)
         => string.Equals(status?.Trim(), "inactive", StringComparison.OrdinalIgnoreCase)

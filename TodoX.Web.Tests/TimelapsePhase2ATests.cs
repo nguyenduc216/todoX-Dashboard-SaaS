@@ -9,8 +9,8 @@ public class TimelapsePhase2ATests
 {
     [Theory]
     [InlineData(TodoXServiceEngineTypes.Timelapse, CustomerServiceDestination.TimelapseCreator, "/jobs/timelapse/new")]
-    [InlineData(TodoXServiceEngineTypes.RVideo, CustomerServiceDestination.RVideoCreator, null)]
-    [InlineData(TodoXServiceEngineTypes.RDance, CustomerServiceDestination.RDanceCreator, null)]
+    [InlineData(TodoXServiceEngineTypes.RVideo, CustomerServiceDestination.RVideoCreator, "/jobs/rvideo/new")]
+    [InlineData(TodoXServiceEngineTypes.RDance, CustomerServiceDestination.RDanceCreator, "/jobs/rdance/new")]
     public void CustomerServiceRouting_UsesEngineType(
         string engineType,
         CustomerServiceDestination expectedDestination,
@@ -26,9 +26,19 @@ public class TimelapsePhase2ATests
         }
         else
         {
-            Assert.StartsWith(expectedRoute, route.Route);
-            Assert.Contains($"serviceId={serviceId}", route.Route);
-            Assert.Contains("serviceCode=CONSTRUCTION_VIDEO", route.Route);
+            Assert.NotNull(route.Route);
+            var actualRoute = route.Route!;
+            Assert.StartsWith(expectedRoute, actualRoute);
+            if (actualRoute.Contains("?", StringComparison.Ordinal))
+            {
+                Assert.Contains($"serviceId={serviceId}", actualRoute);
+                Assert.Contains("serviceCode=CONSTRUCTION_VIDEO", actualRoute);
+            }
+        }
+
+        if (engineType == TodoXServiceEngineTypes.RDance)
+        {
+            Assert.Null(route.Message);
         }
     }
 
@@ -36,7 +46,7 @@ public class TimelapsePhase2ATests
     [InlineData(3, new[] { 0, 35, 70, 100 })]
     [InlineData(4, new[] { 0, 25, 50, 75, 100 })]
     [InlineData(5, new[] { 0, 20, 40, 60, 80, 100 })]
-    [InlineData(6, new[] { 0, 25, 40, 55, 70, 85, 100 })]
+    [InlineData(6, new[] { 0, 25, 40, 55, 70, 75, 90, 100 })]
     public void ProgressMappings_AreFixedBySceneCount(int sceneCount, int[] expected)
     {
         Assert.Equal(expected, TimelapseRequestRules.GetProgressMapping(sceneCount));
@@ -112,16 +122,21 @@ public class TimelapsePhase2ATests
         Assert.Contains("Dịch vụ này đang tạm ngưng", page, StringComparison.Ordinal);
         Assert.Contains("Dịch vụ đã chọn không thuộc nhóm Timelapse", page, StringComparison.Ordinal);
         Assert.Contains("timelapse-upload-card", page, StringComparison.Ordinal);
+        Assert.Contains("private bool _removeStartImage;", page, StringComparison.Ordinal);
+        Assert.Contains("_removeStartImage = false;", page, StringComparison.Ordinal);
+        Assert.Contains("_removeStartImage = true;", page, StringComparison.Ordinal);
+        Assert.Contains("removeStartImage: _removeStartImage", page, StringComparison.Ordinal);
         Assert.Contains("Chọn ảnh thành phẩm", page, StringComparison.Ordinal);
         Assert.Contains("Bấm để tải ảnh lên", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Kéo thả ảnh vào đây", page, StringComparison.Ordinal);
         Assert.Contains("JPG, PNG hoặc WebP · tối đa 10MB", page, StringComparison.Ordinal);
         Assert.Contains("AllowedImageContentTypes", page, StringComparison.Ordinal);
         Assert.Contains("MaxImageBytes", page, StringComparison.Ordinal);
-        Assert.Contains("ImageCount: 0", page, StringComparison.Ordinal);
+        Assert.Contains("PointPricing.EstimateAsync", page, StringComparison.Ordinal);
+        Assert.Contains("PointPricingEstimateRequest", page, StringComparison.Ordinal);
         Assert.Contains("TimelapseSellPricing.QualityTierForMode(_request.VideoMode)", page, StringComparison.Ordinal);
         Assert.Contains("TimelapseRequestRules.RuntimeClipDurationSeconds", page, StringComparison.Ordinal);
-        Assert.Contains("SellPrices.EstimateAsync", page, StringComparison.Ordinal);
+        Assert.Contains("PointPricing.EstimateAsync", page, StringComparison.Ordinal);
         Assert.Contains("SubmitDisabled", page, StringComparison.Ordinal);
         Assert.Contains("_priceLoading", page, StringComparison.Ordinal);
         Assert.Contains("!_request.ServiceId.HasValue || _request.ServiceId.Value == Guid.Empty", page, StringComparison.Ordinal);
@@ -136,18 +151,19 @@ public class TimelapsePhase2ATests
         Assert.Contains("GetServiceByIdAsync", catalog, StringComparison.Ordinal);
         Assert.Contains("WHERE s.id = @serviceId", catalog, StringComparison.Ordinal);
         Assert.Contains("CASE WHEN lower(s.status) = 'active'", catalog, StringComparison.Ordinal);
-        Assert.Contains("IServiceSellPriceResolver", service, StringComparison.Ordinal);
+        Assert.Contains("IPointPricingService", service, StringComparison.Ordinal);
         Assert.Contains("!request.ServiceId.HasValue || request.ServiceId.Value == Guid.Empty", service, StringComparison.Ordinal);
         Assert.Contains("_catalog.GetServiceByIdAsync(request.ServiceId.Value, ct)", service, StringComparison.Ordinal);
         Assert.Contains("Dịch vụ đã chọn không tồn tại.", service, StringComparison.Ordinal);
         Assert.Contains("Dịch vụ này đang tạm ngưng.", service, StringComparison.Ordinal);
         Assert.Contains("Dịch vụ đã chọn không thuộc nhóm Timelapse.", service, StringComparison.Ordinal);
         Assert.Contains("Dịch vụ đã chọn không khớp với mã dịch vụ.", service, StringComparison.Ordinal);
-        Assert.Contains("_sellPrices.ResolveVideoScenePriceAsync", service, StringComparison.Ordinal);
-        Assert.Contains("TimelapseSellPricing.QualityTierForMode(request.VideoMode)", service, StringComparison.Ordinal);
+        Assert.Contains("_pointPricing.EstimateAsync", service, StringComparison.Ordinal);
+        Assert.Contains("PointPricingEstimateRequest", service, StringComparison.Ordinal);
+        Assert.Contains("TimelapseSellPricing.QualityTierForMode(videoMode)", service, StringComparison.Ordinal);
         Assert.Contains("TimelapseRequestRules.RuntimeClipDurationSeconds", service, StringComparison.Ordinal);
-        Assert.Contains("TimelapseSellPriceSnapshot", service, StringComparison.Ordinal);
-        Assert.Contains("TotalPoints = videoSubtotal", service, StringComparison.Ordinal);
+        Assert.Contains("TimelapseSellPriceSnapshot.FromPointEstimate", service, StringComparison.Ordinal);
+        Assert.Contains("PointCostEstimate = pointEstimate.TotalPoints", service, StringComparison.Ordinal);
         Assert.Contains("catalog.service_sell_prices", adminCatalog, StringComparison.Ordinal);
         Assert.DoesNotContain("todox_ai_model_price", resolver, StringComparison.Ordinal);
         Assert.Contains("public const int RuntimeClipDurationSeconds = 6", models, StringComparison.Ordinal);

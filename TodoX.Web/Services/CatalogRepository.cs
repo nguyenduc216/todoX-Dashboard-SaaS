@@ -50,6 +50,7 @@ public sealed class CatalogRepository
                    s.workflow_code AS WorkflowCode,
                    s.thumbnail_url AS ThumbnailUrl,
                    s.cover_image_url AS CoverImageUrl,
+                   COALESCE(s.default_options->'job_defaults', '{}'::jsonb)::text AS JobDefaultsJson,
                    (
                        SELECT string_agg(summary_text, ' · ' ORDER BY sort_key)
                        FROM (
@@ -91,6 +92,7 @@ public sealed class CatalogRepository
                        s.workflow_code AS WorkflowCode,
                        s.thumbnail_url AS ThumbnailUrl,
                        s.cover_image_url AS CoverImageUrl,
+                       COALESCE(s.default_options->'job_defaults', '{}'::jsonb)::text AS JobDefaultsJson,
                        NULL::text AS StartingPriceSummary,
                        CASE WHEN lower(s.status) = 'active' THEN true ELSE false END AS Enabled,
                        s.sort_order AS SortOrder

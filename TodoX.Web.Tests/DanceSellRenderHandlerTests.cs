@@ -106,6 +106,8 @@ public sealed class DanceSellRenderHandlerTests
         Assert.True(result.CompletedNow);
         Assert.Equal(1, repo.UpdateCompletedCallCount);
         Assert.Equal(DanceSellJobStatuses.Completed, repo.Job.Status);
+        Assert.Equal("https://cdn.example/result.mp4", result.Job?.ResultVideoUrl);
+        Assert.NotNull(result.Job?.CompletedAt);
         Assert.Equal(1, renderJobs.MarkStatusCallCount);
         Assert.Equal(1, renderJobs.AddEventCallCount);
         Assert.Equal(1, providers.LogUsageCallCount);
@@ -218,18 +220,27 @@ public sealed class DanceSellRenderHandlerTests
         public Task<IReadOnlyList<DanceSellJobDto>> ListAsync(Guid? customerId = null, int limit = 20, int offset = 0, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellJobDto?> GetByRenderJobIdAsync(Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetRenderJobIdAsync(Guid id, Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task ResetMotionRenderStateAsync(Guid id, Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task QueueForRenderAsync(Guid id, Guid renderJobId, string logicalRequestId, string preparedReferenceUrl, string motionVideoUrl, DanceSellProviderRouteDto motionRoute, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateCharacterAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task ClearProductAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task RemoveProductAndUseCharacterReferenceAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task PersistMotionDurationAsync(Guid id, int durationSeconds, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellReferenceVersionDto?> GetReferenceVersionAsync(Guid versionId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellReferenceVersionDto> CreateReferenceVersionAsync(DanceSellReferenceVersionDto version, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateReferenceVersionScoreAsync(Guid versionId, string scoreJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UnapproveReferenceAsync(Guid danceSellJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default)
@@ -249,6 +260,7 @@ public sealed class DanceSellRenderHandlerTests
             return Task.FromResult(true);
         }
         public Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> SelectHistoricalRenderResultAsync(Guid jobId, Guid operationId, string resultVideoUrl, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
     private sealed class FakeOperationRepository : IDanceSellOperationRepository
@@ -259,9 +271,24 @@ public sealed class DanceSellRenderHandlerTests
         public Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
             => Task.FromResult(1);
 
+        public Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+            => Task.FromResult<DanceSellProviderOperationDto?>(null);
+        public Task<DanceSellProviderOperationDto?> GetLatestOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+            => Task.FromResult<DanceSellProviderOperationDto?>(null);
+
+        public Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+            => Task.FromResult(false);
+
         public Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkBillingAsync(Guid operationId, decimal estimatedPoints, decimal chargedPoints, decimal balanceBefore, decimal balanceAfter, string billingStatus, string pricingSnapshotJson, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> BeginMotionSubmitAttemptAsync(Guid operationId, string requestJson, CancellationToken ct = default) => Task.FromResult(1);
+        public Task ResetMotionForRetryAsync(Guid operationId, Guid renderJobId, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)
+            => Task.FromResult<AiOperationAssetDto?>(null);
+        public Task<AiOperationAssetDto?> GetLatestAssetForRenderJobAsync(Guid renderJobId, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)
+            => Task.FromResult<AiOperationAssetDto?>(null);
         public Task UpsertAssetAsync(AiOperationAssetDto asset, CancellationToken ct = default) => Task.CompletedTask;
         public Task<PagedResult<DanceSellOperationLogItemDto>> SearchLogsAsync(DanceSellOperationLogFilter filter, CancellationToken ct = default)
             => Task.FromResult(new PagedResult<DanceSellOperationLogItemDto>(Array.Empty<DanceSellOperationLogItemDto>(), filter.Page, filter.PageSize, 0));
@@ -288,6 +315,8 @@ public sealed class DanceSellRenderHandlerTests
 
         public Task<RenderJobDto> EnqueueAsync(RenderJobCreateModel model, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default) => throw new NotImplementedException();
@@ -299,6 +328,18 @@ public sealed class DanceSellRenderHandlerTests
         public Task<RenderJobDto?> ClaimNextByJobTypeAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> jobTypes, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> ScheduleProviderPollAsync(
+            Guid jobId,
+            TimeSpan delay,
+            string reasonCode,
+            string reasonMessage,
+            CancellationToken ct = default,
+            bool enforceReconciliationLimit = true,
+            bool enforceProviderPollTimeout = false) => throw new NotImplementedException();
+        public Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult(0);
+        public Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class CapturingProviderService : IAiProviderService

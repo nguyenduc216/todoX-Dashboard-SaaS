@@ -57,6 +57,7 @@ public sealed class CustomerAccount
     public TodoXUserRole Role { get; set; } = TodoXUserRole.CustomerOwner;
     public TodoXAccountStatus Status { get; set; } = TodoXAccountStatus.Active;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public List<Guid> FavoriteServiceIds { get; set; } = [];
 }
 
 public sealed class CustomerRegistration

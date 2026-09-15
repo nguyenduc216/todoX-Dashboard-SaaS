@@ -7,6 +7,12 @@ namespace TodoX.Web.Services.AiProviders;
 public interface IAi79TaskClient
 {
     Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default);
+    Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default);
+    Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default);
+    Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default);
+    Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default);
+    Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default);
+    Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default);
     Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default);
 }
 
@@ -35,30 +41,148 @@ public sealed record Ai79TaskStatusRequest(
     string AccessToken,
     string Domain,
     string TaskId,
+    Ai79TaskOperation Operation,
+    string? TaskIdField = null,
+    bool UseBearerAuth = false,
+    string? ProjectId = null);
+
+public sealed record Ai79TaskSubmitResult(
+    string TaskId,
+    string SanitizedResponseJson,
+    string? ProviderTaskId = null,
+    string? ProviderVideoIdBase = null,
+    HttpStatusCode? HttpStatusCode = null);
+
+public sealed record Ai79MultipartFilePart(
+    string FieldName,
+    string FileName,
+    string MimeType,
+    long SizeBytes,
+    Func<CancellationToken, Task<Stream?>> OpenReadAsync);
+
+public sealed record Ai79MultipartTaskSubmitRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string Model,
+    string Prompt,
+    IReadOnlyDictionary<string, string?> Fields,
+    IReadOnlyList<Ai79MultipartFilePart> Files,
     Ai79TaskOperation Operation);
 
-public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
+public sealed record Ai79MediaUploadRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string ProjectId,
+    string FieldName,
+    Ai79MultipartFilePart File);
+
+public sealed record Ai79MediaUploadResult(
+    string Url,
+    string? IdBase,
+    string? ProjectId,
+    string? FileName,
+    string SanitizedResponseJson);
+
+public sealed record Ai79ProviderMediaListRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string ProjectId,
+    IReadOnlyDictionary<string, string?>? OptionalFields = null);
+
+public sealed record Ai79ProviderMediaItem(
+    string? IdBase,
+    string? Url,
+    string? Status,
+    string? DownloadUrl,
+    string? ThumbnailUrl);
+
+public sealed record Ai79ProviderMediaListResult(
+    IReadOnlyList<Ai79ProviderMediaItem> Items,
+    string SanitizedResponseJson);
+
+public sealed record Ai79MotionControlSubmitRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string ProjectId,
+    string Model,
+    string Prompt,
+    string ImageUrl,
+    string VideoUrl,
+    string Mode,
+    string Ratio,
+    string SubType,
+    string BackgroundSource,
+    bool IncludeImagesZeroUrl = true);
+
+public sealed record Ai79ImageUploadRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string DataBase64,
+    string ProjectId,
+    string FileName,
+    long SizeBytes);
+
+public sealed record Ai79ImageUploadResult(
+    string IdBase,
+    string Url,
+    string ProjectId,
+    string FileName,
+    string SanitizedResponseJson);
 
 public sealed class Ai79TaskSubmitException : InvalidOperationException
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public Ai79TaskSubmitException(
         string errorMessage,
         string sanitizedResponseJson,
         HttpStatusCode? httpStatusCode = null,
         string? errorCode = null,
-        Exception? innerException = null)
+        Exception? innerException = null,
+        string? sanitizedRequestMetadataJson = null)
         : base(errorMessage, innerException)
     {
         ErrorMessage = errorMessage;
         SanitizedResponseJson = sanitizedResponseJson;
+        SanitizedRequestMetadataJson = sanitizedRequestMetadataJson ?? JsonSerializer.Serialize(string.Empty, JsonOptions);
         HttpStatusCode = httpStatusCode;
         ErrorCode = errorCode;
     }
 
     public string SanitizedResponseJson { get; }
+    public string SanitizedRequestMetadataJson { get; }
     public HttpStatusCode? HttpStatusCode { get; }
     public string? ErrorCode { get; }
     public string ErrorMessage { get; }
+}
+
+public sealed class Ai79TaskPollException : InvalidOperationException
+{
+    public Ai79TaskPollException(
+        string errorMessage,
+        HttpStatusCode? httpStatusCode = null,
+        string? sanitizedResponseJson = null,
+        Exception? innerException = null)
+        : base(errorMessage, innerException)
+    {
+        HttpStatusCode = httpStatusCode;
+        SanitizedResponseJson = sanitizedResponseJson ?? JsonSerializer.Serialize(string.Empty, JsonOptions);
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public HttpStatusCode? HttpStatusCode { get; }
+    public string SanitizedResponseJson { get; }
 }
 
 public sealed record Ai79TaskStatusResult(
@@ -66,7 +190,8 @@ public sealed record Ai79TaskStatusResult(
     string SanitizedResponseJson,
     string? OutputUrl,
     string? ErrorCode,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? ProviderStatus = null);
 
 public static class Ai79TaskStatusNormalizer
 {
@@ -84,8 +209,10 @@ public static class Ai79TaskStatusNormalizer
 
         return value.ToUpperInvariant() switch
         {
-            "SUCCESS" or "SUCCEEDED" or "COMPLETED" or "COMPLETE" or "DONE" or "FINISHED" => Success,
-            "FAILURE" or "FAILED" or "ERROR" or "CANCELLED" or "CANCELED" => Failed,
+            "SUCCESS" or "SUCCEEDED" or "COMPLETED" or "COMPLETE" or "DONE" or "FINISHED"
+                or "MEDIA_GENERATION_STATUS_SUCCESSFUL" or "MEDIA_GENERATION_COMPLETED" => Success,
+            "FAILURE" or "FAILED" or "ERROR" or "CANCELLED" or "CANCELED" or "REJECTED"
+                or "MEDIA_GENERATION_STATUS_FAILED" or "MEDIA_GENERATION_FAILED" => Failed,
             _ => Running
         };
     }
@@ -94,16 +221,31 @@ public static class Ai79TaskStatusNormalizer
 public sealed class Ai79TaskClient : IAi79TaskClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan DefaultMotionControlSubmitTimeout = TimeSpan.FromSeconds(120);
 
     private readonly HttpClient _httpClient;
+    private readonly TimeSpan _motionControlSubmitTimeout;
 
-    public Ai79TaskClient(HttpClient httpClient)
+    public Ai79TaskClient(HttpClient httpClient, TimeSpan? motionControlSubmitTimeout = null)
     {
         _httpClient = httpClient;
+        _motionControlSubmitTimeout = motionControlSubmitTimeout ?? DefaultMotionControlSubmitTimeout;
     }
 
     public async Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
     {
+        EnsureGenerateImageContract(request);
+        var sanitizedRequestMetadata = BuildSubmitRequestMetadata(
+            request.BaseUrl,
+            request.EndpointPath,
+            request.Domain,
+            request.Model,
+            request.Operation,
+            fields: request.Options,
+            images: request.Images,
+            firstImageField: request.FirstImageField,
+            secondImageField: request.SecondImageField);
+
         var form = new Dictionary<string, string>
         {
             ["access_token"] = request.AccessToken,
@@ -138,11 +280,118 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         using var body = new FormUrlEncodedContent(form);
         using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, sanitizedRequestMetadata, ct);
+    }
+
+    public async Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default)
+    {
+        var sanitizedRequestMetadata = BuildSubmitRequestMetadata(
+            request.BaseUrl,
+            request.EndpointPath,
+            request.Domain,
+            request.Model,
+            request.Operation,
+            fields: request.Fields,
+            fileCount: request.Files.Count);
+        using var body = new MultipartFormDataContent();
+        var form = new Dictionary<string, string?>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["model"] = request.Model,
+            ["prompt"] = request.Prompt
+        };
+
+        foreach (var pair in request.Fields)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Value) && !form.ContainsKey(pair.Key))
+            {
+                form[pair.Key] = pair.Value;
+            }
+        }
+
+        foreach (var pair in form)
+        {
+            body.Add(new StringContent(pair.Value ?? string.Empty), pair.Key);
+        }
+
+        foreach (var file in request.Files)
+        {
+            var stream = await file.OpenReadAsync(ct)
+                ?? throw new Ai79TaskSubmitException(
+                    $"79AI multipart file '{file.FieldName}' could not be opened.",
+                    JsonSerializer.Serialize(new { error = "missing_file", field = file.FieldName }, JsonOptions),
+                    errorCode: "missing_file");
+            var content = new StreamContent(stream);
+            content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.MimeType);
+            body.Add(content, file.FieldName, file.FileName);
+        }
+
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, sanitizedRequestMetadata, ct);
+    }
+
+    public async Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default)
+    {
+        using var body = new MultipartFormDataContent();
+        body.Add(CreateMultipartTextPart("domain", request.Domain));
+        body.Add(CreateMultipartTextPart("project_id", request.ProjectId));
+
+        var file = request.File;
+        var stream = await file.OpenReadAsync(ct)
+            ?? throw new Ai79TaskSubmitException(
+                $"79AI upload file '{request.FieldName}' could not be opened.",
+                JsonSerializer.Serialize(new { error = "missing_file", field = request.FieldName }, JsonOptions),
+                errorCode: "missing_file");
+        if (stream.CanSeek)
+        {
+            stream.Position = 0;
+            if (stream.Length == 0)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI upload file '{request.FieldName}' was empty.",
+                    JsonSerializer.Serialize(new { error = "empty_file", field = request.FieldName }, JsonOptions),
+                    errorCode: "empty_file");
+            }
+        }
+        else if (file.SizeBytes == 0)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI upload file '{request.FieldName}' was empty.",
+                JsonSerializer.Serialize(new { error = "empty_file", field = request.FieldName }, JsonOptions),
+                errorCode: "empty_file");
+        }
+
+        var content = new StreamContent(stream);
+        content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.MimeType);
+        content.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
+        {
+            Name = QuoteMultipartValue(request.FieldName),
+            FileName = QuoteMultipartValue(file.FileName)
+        };
+        body.Add(content);
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
+        httpRequest.Content = body;
+
+        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI media upload returned HTTP {(int)response.StatusCode}.",
+                string.IsNullOrWhiteSpace(json)
+                    ? JsonSerializer.Serialize(string.Empty, JsonOptions)
+                    : JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
+                response.StatusCode,
+                $"http_{(int)response.StatusCode}");
+        }
+
         if (string.IsNullOrWhiteSpace(json))
         {
             throw new Ai79TaskSubmitException(
-                "79AI submit response was empty.",
+                "79AI media upload response was empty.",
                 JsonSerializer.Serialize(string.Empty, JsonOptions),
                 response.StatusCode,
                 response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}");
@@ -156,7 +405,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         catch (JsonException ex)
         {
             throw new Ai79TaskSubmitException(
-                "79AI submit response was not valid JSON.",
+                "79AI media upload response was not valid JSON.",
                 JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
                 response.StatusCode,
                 response.IsSuccessStatusCode ? "invalid_json" : $"http_{(int)response.StatusCode}",
@@ -166,24 +415,241 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         using (document)
         {
             var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-            var taskId = FindTaskId(document.RootElement, request.Operation);
-            var providerError = FindSubmitError(document.RootElement, string.IsNullOrWhiteSpace(taskId), request.AccessToken);
+            var providerError = FindSubmitError(document.RootElement, taskIdMissing: false, request.AccessToken);
+            if (providerError is not null)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI media upload failed: {providerError.ErrorMessage}",
+                    sanitized,
+                    response.StatusCode,
+                    providerError.ErrorCode ?? "provider_error");
+            }
+
+            var url = FindUploadAssetUrl(document.RootElement);
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                throw new Ai79TaskSubmitException(
+                    "79AI media upload response missing asset URL.",
+                    sanitized,
+                    response.StatusCode,
+                    "missing_asset_url");
+            }
+
+            return new Ai79MediaUploadResult(
+                url!,
+                FirstNonBlank(FindImageInfoString(document.RootElement, "id_base"), FindString(document.RootElement, "id_base", "idBase")),
+                FirstNonBlank(FindImageInfoString(document.RootElement, "project_id"), FindString(document.RootElement, "project_id", "projectId"), request.ProjectId),
+                FirstNonBlank(FindImageInfoString(document.RootElement, "file_name"), FindString(document.RootElement, "file_name", "fileName"), file.FileName),
+                sanitized);
+        }
+    }
+
+    public Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+        => ListProviderMediaAsync(request, Ai79TaskOperation.Image, ct);
+
+    public Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+        => ListProviderMediaAsync(request, Ai79TaskOperation.Video, ct);
+
+    private async Task<Ai79ProviderMediaListResult> ListProviderMediaAsync(
+        Ai79ProviderMediaListRequest request,
+        Ai79TaskOperation operation,
+        CancellationToken ct)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["project_id"] = request.ProjectId
+        };
+        if (request.OptionalFields is not null)
+        {
+            foreach (var pair in request.OptionalFields)
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    form[pair.Key] = pair.Value!;
+                }
+            }
+        }
+
+        using var body = new FormUrlEncodedContent(form);
+        var endpointPath = NormalizeProviderMediaListPath(request.BaseUrl, request.EndpointPath);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, endpointPath), body, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var sanitized = string.IsNullOrWhiteSpace(json)
+            ? JsonSerializer.Serialize(string.Empty, JsonOptions)
+            : JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list returned HTTP {(int)response.StatusCode}.",
+                sanitized,
+                response.StatusCode,
+                $"http_{(int)response.StatusCode}");
+        }
+
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list response was empty.",
+                sanitized,
+                response.StatusCode,
+                "empty_response");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var providerError = FindSubmitError(document.RootElement, taskIdMissing: false, request.AccessToken);
+            if (providerError is not null)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list failed: {providerError.ErrorMessage}",
+                    sanitized,
+                    response.StatusCode,
+                    providerError.ErrorCode ?? "provider_error");
+            }
+
+            var items = FindProviderMediaItems(document.RootElement, operation);
+            return new Ai79ProviderMediaListResult(items, sanitized);
+        }
+        catch (JsonException ex)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list response was not valid JSON.",
+                sanitized,
+                response.StatusCode,
+                "invalid_json",
+                ex);
+        }
+    }
+
+    public async Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["domain"] = request.Domain,
+            ["project_id"] = request.ProjectId,
+            ["model"] = request.Model,
+            ["prompt"] = request.Prompt,
+            ["image_url"] = request.ImageUrl,
+            ["video_url"] = request.VideoUrl,
+            ["subType"] = request.SubType,
+            ["background_source"] = request.BackgroundSource,
+            ["mode"] = request.Mode,
+            ["ratio"] = request.Ratio
+        };
+
+        if (request.IncludeImagesZeroUrl)
+        {
+            form["images[0][url]"] = request.ImageUrl;
+        }
+
+        using var body = new FormUrlEncodedContent(form);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
+        httpRequest.Content = body;
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(_motionControlSubmitTimeout);
+        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+        return await ReadSubmitResultAsync(
+            response,
+            request.AccessToken,
+            request.EndpointPath,
+            Ai79TaskOperation.Video,
+            BuildSubmitRequestMetadata(
+                request.BaseUrl,
+                request.EndpointPath,
+                request.Domain,
+                request.Model,
+                Ai79TaskOperation.Video,
+                mode: request.Mode,
+                ratio: request.Ratio,
+                type: request.SubType,
+                projectId: request.ProjectId,
+                fields: new Dictionary<string, string?>
+                {
+                    ["background_source"] = request.BackgroundSource
+                }),
+            timeoutCts.Token);
+    }
+
+    private static async Task<Ai79TaskSubmitResult> ReadSubmitResultAsync(
+        HttpResponseMessage response,
+        string accessToken,
+        string endpointPath,
+        Ai79TaskOperation operation,
+        string sanitizedRequestMetadataJson,
+        CancellationToken ct)
+    {
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI submit response was empty.",
+                JsonSerializer.Serialize(string.Empty, JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}",
+                sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI submit returned HTTP {(int)response.StatusCode}.",
+                    JsonSerializer.Serialize(SanitizeText(json, accessToken), JsonOptions),
+                    response.StatusCode,
+                    $"http_{(int)response.StatusCode}",
+                    ex,
+                    sanitizedRequestMetadataJson);
+            }
+
+            throw new Ai79TaskSubmitException(
+                "79AI submit response was not valid JSON.",
+                JsonSerializer.Serialize(SanitizeText(json, accessToken), JsonOptions),
+                response.StatusCode,
+                "invalid_json",
+                ex,
+                sanitizedRequestMetadataJson);
+        }
+
+        using (document)
+        {
+            var sanitized = SanitizeSecretJson(document.RootElement, accessToken);
+            var providerVideoIdBase = operation == Ai79TaskOperation.Video
+                ? FindVideoIdBase(document.RootElement)
+                : null;
+            var taskId = providerVideoIdBase ?? FindTaskId(document.RootElement, operation);
+            var providerTaskId = operation == Ai79TaskOperation.Video
+                ? FindTaskIdAlias(document.RootElement)
+                : null;
+            var providerError = FindSubmitError(document.RootElement, string.IsNullOrWhiteSpace(taskId), accessToken);
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorCode = providerError?.ErrorCode ?? $"http_{(int)response.StatusCode}";
                 var errorMessage = providerError?.ErrorMessage
                     ?? $"79AI submit returned HTTP {(int)response.StatusCode}.";
-                throw new Ai79TaskSubmitException(errorMessage, sanitized, response.StatusCode, errorCode);
+                throw new Ai79TaskSubmitException(errorMessage, sanitized, response.StatusCode, errorCode, sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
             if (providerError is not null)
             {
                 throw new Ai79TaskSubmitException(
-                    $"79AI {ResolveOperationName(request.EndpointPath)} submit failed: {providerError.ErrorMessage}",
+                    $"79AI {ResolveOperationName(endpointPath)} submit failed: {providerError.ErrorMessage}",
                     sanitized,
                     response.StatusCode,
-                    providerError.ErrorCode ?? "provider_error");
+                    providerError.ErrorCode ?? "provider_error",
+                    sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
             if (string.IsNullOrWhiteSpace(taskId))
@@ -192,10 +658,217 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                     "79AI submit response missing async task identifier.",
                     sanitized,
                     response.StatusCode,
-                    "missing_task_id");
+                    "missing_task_id",
+                    sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
-            return new Ai79TaskSubmitResult(taskId!, sanitized);
+            return new Ai79TaskSubmitResult(taskId!, sanitized, providerTaskId, providerVideoIdBase, response.StatusCode);
+        }
+    }
+
+    private static string BuildSubmitRequestMetadata(
+        string baseUrl,
+        string endpointPath,
+        string domain,
+        string model,
+        Ai79TaskOperation operation,
+        string? mode = null,
+        string? duration = null,
+        string? ratio = null,
+        string? aspectRatio = null,
+        string? resolution = null,
+        string? type = null,
+        string? projectId = null,
+        string? privacy = null,
+        string? translateToEn = null,
+        IReadOnlyList<string>? images = null,
+        string? firstImageField = null,
+        string? secondImageField = null,
+        IReadOnlyDictionary<string, string?>? fields = null,
+        int fileCount = 0)
+    {
+        var effectiveFields = fields ?? new Dictionary<string, string?>();
+        var effectiveMode = FirstNonBlank(mode, GetFieldValue(effectiveFields, "mode"));
+        var effectiveDuration = FirstNonBlank(duration, GetFieldValue(effectiveFields, "duration", "duration_seconds", "durationSeconds"));
+        var effectiveRatio = FirstNonBlank(ratio, GetFieldValue(effectiveFields, "ratio"));
+        var effectiveAspectRatio = FirstNonBlank(aspectRatio, GetFieldValue(effectiveFields, "aspect_ratio", "aspectRatio"));
+        var effectiveResolution = FirstNonBlank(resolution, GetFieldValue(effectiveFields, "resolution"));
+        var effectiveType = FirstNonBlank(type, GetFieldValue(effectiveFields, "type"));
+        var effectiveProjectId = FirstNonBlank(projectId, GetFieldValue(effectiveFields, "project_id", "projectId"));
+        var effectivePrivacy = FirstNonBlank(privacy, GetFieldValue(effectiveFields, "privacy"));
+        var effectiveTranslateToEn = FirstNonBlank(translateToEn, GetFieldValue(effectiveFields, "translate_to_en", "translateToEn"));
+
+        return JsonSerializer.Serialize(new
+        {
+            baseUrl,
+            endpointPath,
+            domain,
+            model,
+            operation = operation.ToString().ToLowerInvariant(),
+            fileCount,
+            mode = effectiveMode,
+            duration = effectiveDuration,
+            ratio = effectiveRatio,
+            aspect_ratio = effectiveAspectRatio,
+            resolution = effectiveResolution,
+            type = effectiveType,
+            project_id = effectiveProjectId,
+            privacy = effectivePrivacy,
+            translate_to_en = effectiveTranslateToEn,
+            imageCount = images?.Count ?? 0,
+            images = BuildImageMetadata(images, firstImageField, secondImageField),
+            extraFieldNames = effectiveFields.Keys
+                .Where(key => !string.IsNullOrWhiteSpace(key) && !IsSensitiveRequestField(key))
+                .OrderBy(key => key)
+                .ToArray()
+        }, JsonOptions);
+    }
+
+    private static bool IsSensitiveRequestField(string key)
+        => key.Equals("access_token", StringComparison.OrdinalIgnoreCase)
+           || key.Equals("authorization", StringComparison.OrdinalIgnoreCase)
+           || key.Equals("credential", StringComparison.OrdinalIgnoreCase)
+           || key.Equals("ciphertext", StringComparison.OrdinalIgnoreCase);
+
+    private static string? GetFieldValue(IReadOnlyDictionary<string, string?> fields, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (fields.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static object[] BuildImageMetadata(IReadOnlyList<string>? images, string? firstImageField, string? secondImageField)
+    {
+        if (images is null || images.Count == 0)
+        {
+            return Array.Empty<object>();
+        }
+
+        var metadata = new object[images.Count];
+        for (var i = 0; i < images.Count; i++)
+        {
+            var url = images[i];
+            var fieldName = i switch
+            {
+                0 => firstImageField ?? "image",
+                1 => secondImageField ?? "image_2",
+                _ => $"image_{i + 1}"
+            };
+            metadata[i] = BuildImageMetadata(fieldName, url, i > 0 && string.Equals(url, images[i - 1], StringComparison.Ordinal));
+        }
+
+        return metadata;
+    }
+
+    private static object BuildImageMetadata(string fieldName, string? url, bool duplicateOfPrevious)
+    {
+        string? sanitizedUrl = null;
+        string? urlHost = null;
+        string? urlPath = null;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absolute)
+            && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+        {
+            urlHost = absolute.Host;
+            urlPath = absolute.AbsolutePath;
+            sanitizedUrl = $"{absolute.Scheme}://{absolute.Host}{absolute.AbsolutePath}";
+        }
+
+        return new
+        {
+            fieldName,
+            present = !string.IsNullOrWhiteSpace(url),
+            isImage2 = string.Equals(fieldName, "image_2", StringComparison.Ordinal),
+            duplicateOfPrevious,
+            urlHost,
+            urlPath,
+            sanitizedUrl
+        };
+    }
+
+    public async Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["data"] = request.DataBase64,
+            ["project_id"] = request.ProjectId,
+            ["file_name"] = request.FileName,
+            ["size"] = request.SizeBytes.ToString()
+        };
+
+        using var body = new FormUrlEncodedContent(form);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI image upload response was empty.",
+                JsonSerializer.Serialize(string.Empty, JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}");
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI image upload response was not valid JSON.",
+                JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "invalid_json" : $"http_{(int)response.StatusCode}",
+                ex);
+        }
+
+        using (document)
+        {
+            var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
+            var providerError = FindSubmitError(document.RootElement, taskIdMissing: false, request.AccessToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Ai79TaskSubmitException(
+                    providerError?.ErrorMessage ?? $"79AI image upload returned HTTP {(int)response.StatusCode}.",
+                    sanitized,
+                    response.StatusCode,
+                    providerError?.ErrorCode ?? $"http_{(int)response.StatusCode}");
+            }
+
+            if (providerError is not null)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI image upload failed: {providerError.ErrorMessage}",
+                    sanitized,
+                    response.StatusCode,
+                    providerError.ErrorCode ?? "provider_error");
+            }
+
+            var idBase = FindImageInfoString(document.RootElement, "id_base");
+            var url = FindImageInfoString(document.RootElement, "url");
+            if (string.IsNullOrWhiteSpace(idBase) || string.IsNullOrWhiteSpace(url))
+            {
+                throw new Ai79TaskSubmitException(
+                    "79AI image upload response missing imageInfo.id_base or imageInfo.url.",
+                    sanitized,
+                    response.StatusCode,
+                    "missing_image_info");
+            }
+
+            return new Ai79ImageUploadResult(
+                idBase!,
+                url!,
+                FirstNonBlank(FindImageInfoString(document.RootElement, "project_id"), request.ProjectId)!,
+                FirstNonBlank(FindImageInfoString(document.RootElement, "file_name"), request.FileName)!,
+                sanitized);
         }
     }
 
@@ -203,40 +876,264 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         var path = request.EndpointPath.Replace("{task_id}", Uri.EscapeDataString(request.TaskId), StringComparison.OrdinalIgnoreCase)
             .Replace("{taskId}", Uri.EscapeDataString(request.TaskId), StringComparison.OrdinalIgnoreCase);
-        var form = new Dictionary<string, string>
-        {
-            ["access_token"] = request.AccessToken,
-            ["domain"] = request.Domain,
-            [request.Operation == Ai79TaskOperation.Image ? "id_base" : "task_id"] = request.TaskId
-        };
+        var form = request.UseBearerAuth
+            ? new Dictionary<string, string>
+            {
+                ["domain"] = request.Domain,
+                ["project_id"] = request.ProjectId ?? "default"
+            }
+            : new Dictionary<string, string>
+            {
+                ["access_token"] = request.AccessToken,
+                ["domain"] = request.Domain,
+                [request.TaskIdField ?? (request.Operation == Ai79TaskOperation.Image ? "id_base" : "videoId")] = request.TaskId
+            };
 
         using var body = new FormUrlEncodedContent(form);
-        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, path), body, ct);
-        var json = await ReadJsonAsync(response, ct);
-        using var document = JsonDocument.Parse(json);
-        var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-        var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(document.RootElement));
-        var outputUrl = FindUrl(document.RootElement);
-        var errorCode = FindErrorValue(document.RootElement, "error_code", "errorCode", "code");
-        var errorMessage = FindErrorValue(document.RootElement, "error_message", "errorMessage", "message", "msg");
+        HttpResponseMessage response;
+        if (request.UseBearerAuth)
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, path));
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
+            httpRequest.Content = body;
+            response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        else
+        {
+            response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, path), body, ct);
+        }
 
-        return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
+        using (response)
+        {
+            var json = await ReadJsonAsync(response, request.AccessToken, ct);
+            using var document = JsonDocument.Parse(json);
+            JsonElement statusRoot = document.RootElement;
+            JsonDocument? fallbackDocument = null;
+            if (request.Operation == Ai79TaskOperation.Video
+                && TryFindVideoInfoById(statusRoot, request.TaskId, out var primaryMatchedInfo))
+            {
+                statusRoot = primaryMatchedInfo;
+            }
+            else if (!request.UseBearerAuth && request.Operation == Ai79TaskOperation.Video && !HasSingleVideoInfo(statusRoot))
+            {
+                var fallbackPath = NormalizeProviderMediaListPath(request.BaseUrl, ResolveVideosListPath(path));
+                using var fallbackBody = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["access_token"] = request.AccessToken,
+                    ["domain"] = request.Domain,
+                    ["project_id"] = request.ProjectId ?? "default"
+                });
+                using var fallbackResponse = await _httpClient.PostAsync(BuildUri(request.BaseUrl, fallbackPath), fallbackBody, ct);
+                var fallbackJson = await ReadJsonAsync(fallbackResponse, request.AccessToken, ct);
+                fallbackDocument = JsonDocument.Parse(fallbackJson);
+                if (TryFindVideoInfoById(fallbackDocument.RootElement, request.TaskId, out var matchedInfo))
+                {
+                    statusRoot = matchedInfo;
+                }
+                else
+                {
+                    statusRoot = fallbackDocument.RootElement;
+                }
+            }
+
+            // 79AI can report SUCCESSFUL before the CDN URL is attached to /video.
+            // Reconcile that known id_base through /videos; a missing URL remains pending.
+            if (!request.UseBearerAuth
+                && request.Operation == Ai79TaskOperation.Video
+                && fallbackDocument is null
+                && Ai79TaskStatusNormalizer.Normalize(FindStatus(statusRoot)) == Ai79TaskStatusNormalizer.Success
+                && string.IsNullOrWhiteSpace(FindVideoOutputUrl(statusRoot)))
+            {
+                var fallbackPath = NormalizeProviderMediaListPath(request.BaseUrl, ResolveVideosListPath(path));
+                using var fallbackBody = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["access_token"] = request.AccessToken,
+                    ["domain"] = request.Domain,
+                    ["project_id"] = request.ProjectId ?? "default"
+                });
+                using var fallbackResponse = await _httpClient.PostAsync(BuildUri(request.BaseUrl, fallbackPath), fallbackBody, ct);
+                var fallbackJson = await ReadJsonAsync(fallbackResponse, request.AccessToken, ct);
+                var listDocument = JsonDocument.Parse(fallbackJson);
+                if (TryFindVideoInfoById(listDocument.RootElement, request.TaskId, out var matchedInfo))
+                {
+                    fallbackDocument = listDocument;
+                    statusRoot = matchedInfo;
+                }
+                else
+                {
+                    listDocument.Dispose();
+                }
+            }
+
+            using (fallbackDocument)
+            {
+                var sanitized = SanitizeSecretJson(statusRoot, request.AccessToken);
+                var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(statusRoot));
+                var outputUrl = request.Operation == Ai79TaskOperation.Video
+                    ? FindVideoOutputUrl(statusRoot)
+                    : FindUrl(statusRoot);
+                var errorCode = FindErrorValue(statusRoot, "error_code", "errorCode", "code");
+                var errorMessage = FindErrorValue(statusRoot, "error_message", "errorMessage", "message", "msg");
+
+                return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage, FindStatus(statusRoot));
+            }
+        }
     }
 
     private static Uri BuildUri(string baseUrl, string path)
         => new(new Uri(baseUrl.TrimEnd('/') + "/"), path.TrimStart('/'));
 
-    private static async Task<string> ReadJsonAsync(HttpResponseMessage response, CancellationToken ct)
+    private static string NormalizeProviderMediaListPath(string baseUrl, string path)
+    {
+        var normalizedBasePath = new Uri(baseUrl.TrimEnd('/') + "/", UriKind.Absolute).AbsolutePath.TrimEnd('/');
+        var normalizedPath = "/" + path.Trim('/');
+        if (string.Equals(normalizedBasePath, "/ai", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(normalizedPath, "/ai", StringComparison.OrdinalIgnoreCase)
+                || normalizedPath.StartsWith("/ai/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return normalizedPath["/ai".Length..];
+        }
+
+        return normalizedPath;
+    }
+
+    private static StringContent CreateMultipartTextPart(string name, string value)
+    {
+        var content = new StringContent(value);
+        content.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
+        {
+            Name = QuoteMultipartValue(name)
+        };
+        content.Headers.ContentType = null;
+        return content;
+    }
+
+    private static string QuoteMultipartValue(string value)
+        => $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+
+    private static IReadOnlyList<Ai79ProviderMediaItem> FindProviderMediaItems(JsonElement root, Ai79TaskOperation operation)
+    {
+        var items = new List<Ai79ProviderMediaItem>();
+        foreach (var element in EnumerateProviderMediaElements(root, operation))
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            items.Add(new Ai79ProviderMediaItem(
+                FindString(element, "id_base", "idBase"),
+                FindString(element, "url"),
+                FindString(element, "status", "state", "provider_status"),
+                FindString(element, "download_url", "downloadUrl"),
+                FindString(element, "thumbnail_url", "thumbnailUrl")));
+        }
+
+        return items;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateProviderMediaElements(JsonElement root, Ai79TaskOperation operation)
+    {
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        foreach (var propertyName in operation == Ai79TaskOperation.Image
+                     ? new[] { "data", "images", "items" }
+                     : new[] { "data", "videos", "items" })
+        {
+            if (!root.TryGetProperty(propertyName, out var child))
+            {
+                continue;
+            }
+
+            if (child.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in child.EnumerateArray())
+                {
+                    yield return item;
+                }
+
+                yield break;
+            }
+
+            foreach (var item in EnumerateProviderMediaElements(child, operation))
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+    }
+
+    private static string NormalizeBearerToken(string accessToken)
+    {
+        var value = (accessToken ?? string.Empty).Trim();
+        while (value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value["Bearer ".Length..].Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException("79AI bearer token is empty.");
+        }
+
+        return value;
+    }
+
+    private static void EnsureGenerateImageContract(Ai79TaskSubmitRequest request)
+    {
+        if (request.Operation != Ai79TaskOperation.Image
+            || !request.EndpointPath.Contains("generateImage", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (request.Images.Count > 1)
+        {
+            throw new InvalidOperationException("79AI /generateImage supports one base edit image; pass additional references through subjects.");
+        }
+
+        var firstImageField = request.FirstImageField ?? "image";
+        if (request.Images.Count > 0 && !firstImageField.Equals("base64Image", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("79AI /generateImage base edit image field must be base64Image.");
+        }
+
+        if (request.SecondImageField is not null)
+        {
+            throw new InvalidOperationException("79AI /generateImage does not support a second image field; pass additional references through subjects.");
+        }
+    }
+
+    private static async Task<string> ReadJsonAsync(HttpResponseMessage response, string accessToken, CancellationToken ct)
     {
         var text = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"79AI task API returned HTTP {(int)response.StatusCode}.");
+            throw new Ai79TaskPollException(
+                $"79AI task API returned HTTP {(int)response.StatusCode}.",
+                response.StatusCode,
+                string.IsNullOrWhiteSpace(text)
+                    ? JsonSerializer.Serialize(string.Empty, JsonOptions)
+                    : JsonSerializer.Serialize(SanitizeText(text, accessToken), JsonOptions));
         }
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidOperationException("79AI task API returned an empty response.");
+            throw new Ai79TaskPollException("79AI task API returned an empty response.", response.StatusCode);
         }
 
         return text;
@@ -296,8 +1193,49 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 return imageId;
             }
         }
+        else
+        {
+            var videoId = FindVideoIdBase(element);
+            if (!string.IsNullOrWhiteSpace(videoId))
+            {
+                return videoId;
+            }
+        }
 
-        return FindTaskIdAlias(element);
+        return operation == Ai79TaskOperation.Video
+            ? FindTaskIdAlias(element)
+            : null;
+    }
+
+    private static string? FindVideoIdBase(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (element.TryGetProperty("id_base", out var directId))
+        {
+            var value = ScalarString(directId);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        foreach (var containerName in new[] { "videoInfo", "data" })
+        {
+            if (element.TryGetProperty(containerName, out var child))
+            {
+                var found = FindVideoIdBase(child);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? FindImageIdBase(JsonElement element)
@@ -334,7 +1272,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
-            foreach (var name in new[] { "task_id", "taskId", "request_id", "requestId" })
+            foreach (var name in new[] { "task_id", "taskId", "videoId", "video_id" })
             {
                 if (element.TryGetProperty(name, out var value))
                 {
@@ -346,7 +1284,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 }
             }
 
-            foreach (var containerName in new[] { "task", "data", "result", "response" })
+            foreach (var containerName in new[] { "videoInfo", "task", "data", "result", "response" })
             {
                 if (element.TryGetProperty(containerName, out var child))
                 {
@@ -377,7 +1315,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
-            foreach (var name in new[] { "status", "state", "task_status", "taskStatus" })
+            foreach (var name in new[] { "status", "state", "task_status", "taskStatus", "generation_status", "generationStatus" })
             {
                 if (element.TryGetProperty(name, out var value))
                 {
@@ -389,7 +1327,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 }
             }
 
-            foreach (var containerName in new[] { "imageInfo", "task", "data", "result", "response" })
+            foreach (var containerName in new[] { "imageInfo", "videoInfo", "task", "data", "raw", "result", "response", "body" })
             {
                 if (element.TryGetProperty(containerName, out var child))
                 {
@@ -527,7 +1465,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         if (element.ValueKind == JsonValueKind.Object)
         {
-            foreach (var name in new[] { "url", "video_url", "videoUrl", "image_url", "imageUrl", "output_url", "outputUrl" })
+            foreach (var name in new[] { "url", "download_url", "downloadUrl", "result_url", "resultUrl", "video_url", "videoUrl", "image_url", "imageUrl", "output_url", "outputUrl" })
             {
                 if (element.TryGetProperty(name, out var value))
                 {
@@ -563,22 +1501,274 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         return null;
     }
 
+    private static string? FindUploadAssetUrl(JsonElement element)
+    {
+        foreach (var path in new[]
+                 {
+                     new[] { "url" },
+                     new[] { "download_url" },
+                     new[] { "downloadUrl" },
+                     new[] { "assetUrl" },
+                     new[] { "asset_url" },
+                     new[] { "image_url" },
+                     new[] { "video_url" },
+                     new[] { "imageInfo", "url" },
+                     new[] { "videoInfo", "url" },
+                     new[] { "videoInfo", "download_url" },
+                     new[] { "videoInfo", "downloadUrl" },
+                     new[] { "fileInfo", "url" },
+                     new[] { "data", "url" },
+                     new[] { "data", "download_url" },
+                     new[] { "data", "downloadUrl" },
+                     new[] { "data", "assetUrl" },
+                     new[] { "data", "asset_url" },
+                     new[] { "data", "image_url" },
+                     new[] { "data", "video_url" },
+                     new[] { "data", "imageInfo", "url" },
+                     new[] { "data", "videoInfo", "url" },
+                     new[] { "data", "videoInfo", "download_url" },
+                     new[] { "data", "videoInfo", "downloadUrl" },
+                     new[] { "data", "fileInfo", "url" },
+                     new[] { "body", "url" },
+                     new[] { "body", "download_url" },
+                     new[] { "body", "downloadUrl" },
+                     new[] { "body", "data", "url" },
+                     new[] { "body", "data", "download_url" },
+                     new[] { "body", "data", "downloadUrl" },
+                     new[] { "body", "data", "assetUrl" },
+                     new[] { "body", "data", "asset_url" },
+                     new[] { "body", "data", "imageInfo", "url" },
+                     new[] { "body", "data", "videoInfo", "url" },
+                     new[] { "body", "data", "videoInfo", "download_url" },
+                     new[] { "body", "data", "videoInfo", "downloadUrl" },
+                     new[] { "body", "data", "fileInfo", "url" }
+                 })
+        {
+            if (TryGetPath(element, path, out var value))
+            {
+                var found = FindUrl(value);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return FindUrl(element);
+    }
+
+    private static string? FindVideoOutputUrl(JsonElement root)
+    {
+        foreach (var path in new[]
+                 {
+                     new[] { "data" },
+                     new[] { "data", "videoInfo" },
+                     new[] { "raw", "videoInfo" },
+                     new[] { "videoInfo" },
+                     Array.Empty<string>()
+                 })
+        {
+            if (TryGetPath(root, path, out var container))
+            {
+                var aliases = path.Length == 0
+                    ? new[] { "result_url", "resultUrl", "download_url", "downloadUrl", "video_url", "videoUrl", "source_url", "sourceUrl", "file_url", "fileUrl", "output_url", "outputUrl", "url" }
+                    : new[] { "result_url", "resultUrl", "download_url", "downloadUrl", "video_url", "videoUrl", "url" };
+                var found = FindFirstDirectUrl(container, aliases);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<JsonElement> VideoStatusContainers(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        foreach (var path in new[]
+                 {
+                     new[] { "videoInfo" },
+                     new[] { "data", "videoInfo" },
+                     new[] { "body", "videoInfo" },
+                     new[] { "body", "data", "videoInfo" }
+                 })
+        {
+            if (TryGetPath(root, path, out var value))
+            {
+                yield return value;
+            }
+        }
+
+        if (LooksLikeVideoInfo(root))
+        {
+            yield return root;
+        }
+    }
+
+    private static bool HasSingleVideoInfo(JsonElement root)
+    {
+        foreach (var path in new[] { new[] { "videoInfo" }, new[] { "body", "videoInfo" }, new[] { "data", "videoInfo" }, new[] { "body", "data", "videoInfo" } })
+        {
+            if (TryGetPath(root, path, out var info)
+                && ((info.ValueKind == JsonValueKind.Object && info.EnumerateObject().Any())
+                    || (info.ValueKind == JsonValueKind.Array && info.GetArrayLength() > 0)))
+            {
+                return true;
+            }
+        }
+
+        return LooksLikeVideoInfo(root);
+    }
+
+    private static bool TryFindVideoInfoById(JsonElement root, string taskId, out JsonElement matched)
+    {
+        var target = taskId.Trim();
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                if (VideoObjectId(item) == target)
+                {
+                    matched = item;
+                    return true;
+                }
+            }
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "videoInfo", "data", "videos", "items", "rows", "list", "results" })
+            {
+                if (root.TryGetProperty(name, out var child) && TryFindVideoInfoById(child, target, out matched))
+                {
+                    return true;
+                }
+            }
+
+            if (VideoObjectId(root) == target)
+            {
+                matched = root;
+                return true;
+            }
+        }
+
+        matched = default;
+        return false;
+    }
+
+    private static string? VideoObjectId(JsonElement element)
+        => element.ValueKind == JsonValueKind.Object
+            ? FirstNonBlank(
+                element.TryGetProperty("id_base", out var idBase) ? ScalarString(idBase) : null,
+                element.TryGetProperty("id", out var id) ? ScalarString(id) : null,
+                element.TryGetProperty("videoId", out var videoId) ? ScalarString(videoId) : null,
+                element.TryGetProperty("video_id", out var videoIdSnake) ? ScalarString(videoIdSnake) : null,
+                element.TryGetProperty("task_id", out var taskId) ? ScalarString(taskId) : null)
+            : null;
+
+    private static bool LooksLikeVideoInfo(JsonElement element)
+        => element.ValueKind == JsonValueKind.Object
+           && (!string.IsNullOrWhiteSpace(VideoObjectId(element))
+               || element.TryGetProperty("download_url", out _)
+               || element.TryGetProperty("downloadUrl", out _)
+               || element.TryGetProperty("video_url", out _)
+               || element.TryGetProperty("videoUrl", out _));
+
+    private static string ResolveVideosListPath(string videoPath)
+    {
+        var trimmed = videoPath.Trim();
+        return trimmed.EndsWith("/video", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[..^"/video".Length] + "/videos"
+            : "/videos";
+    }
+
+    private static string? FindImageInfoString(JsonElement element, string fieldName)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var path in new[]
+                 {
+                     new[] { "imageInfo" },
+                     new[] { "body", "imageInfo" },
+                     new[] { "data", "imageInfo" },
+                     new[] { "body", "data", "imageInfo" }
+                 })
+        {
+            if (TryGetPath(element, path, out var imageInfo)
+                && imageInfo.ValueKind == JsonValueKind.Object
+                && imageInfo.TryGetProperty(fieldName, out var value))
+            {
+                var found = ScalarString(value);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetPath(JsonElement element, IReadOnlyList<string> path, out JsonElement value)
+    {
+        value = element;
+        foreach (var segment in path)
+        {
+            if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(segment, out value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string? FindFirstDirectUrl(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out var value))
+            {
+                var text = ScalarString(value);
+                if (IsHttpUrl(text))
+                {
+                    return text;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static bool IsHttpUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri)
            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     private static string SanitizeSecretJson(JsonElement root, string accessToken)
-        => JsonSerializer.Serialize(Sanitize(root, accessToken), JsonOptions);
+        => JsonSerializer.Serialize(Sanitize(root, GetSensitiveTokenValues(accessToken)), JsonOptions);
 
-    private static object? Sanitize(JsonElement element, string accessToken)
+    private static object? Sanitize(JsonElement element, IReadOnlySet<string> sensitiveTokens)
         => element.ValueKind switch
         {
             JsonValueKind.Object => element.EnumerateObject().ToDictionary(
                 x => x.Name,
-                x => IsSecretName(x.Name) ? "***" : Sanitize(x.Value, accessToken),
+                x => IsSecretName(x.Name) ? "***" : Sanitize(x.Value, sensitiveTokens),
                 StringComparer.OrdinalIgnoreCase),
-            JsonValueKind.Array => element.EnumerateArray().Select(x => Sanitize(x, accessToken)).ToArray(),
-            JsonValueKind.String => string.Equals(element.GetString(), accessToken, StringComparison.Ordinal) ? "***" : element.GetString(),
+            JsonValueKind.Array => element.EnumerateArray().Select(x => Sanitize(x, sensitiveTokens)).ToArray(),
+            JsonValueKind.String => sensitiveTokens.Contains(element.GetString() ?? string.Empty) ? "***" : element.GetString(),
             JsonValueKind.Number when element.TryGetDecimal(out var number) => number,
             JsonValueKind.True => true,
             JsonValueKind.False => false,
@@ -596,9 +1786,35 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             : "task";
 
     private static string SanitizeText(string value, string accessToken)
-        => string.IsNullOrEmpty(accessToken)
-            ? value
-            : value.Replace(accessToken, "***", StringComparison.Ordinal);
+    {
+        foreach (var token in GetSensitiveTokenValues(accessToken))
+        {
+            value = value.Replace(token, "***", StringComparison.Ordinal);
+        }
+
+        return value;
+    }
+
+    private static IReadOnlySet<string> GetSensitiveTokenValues(string accessToken)
+    {
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return tokens;
+        }
+
+        tokens.Add(accessToken);
+        try
+        {
+            tokens.Add(NormalizeBearerToken(accessToken));
+        }
+        catch (InvalidOperationException)
+        {
+            // The raw configured value is still redacted even when it cannot form a bearer token.
+        }
+
+        return tokens;
+    }
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();

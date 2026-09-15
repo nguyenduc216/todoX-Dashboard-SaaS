@@ -1,7 +1,10 @@
-@page "/settings"
+﻿@page "/settings"
+@using TodoX.Web.Models
 @inject CatalogRepository Catalog
 @inject MrTodoXAvatarService MrTodoXAvatar
 @inject SystemImageStorage SystemImageStorage
+@inject AuthStateService AuthState
+@inject TokenSettingsService TokenSettings
 @inject ISnackbar Snackbar
 
 <PageTitle>Cài đặt hệ thống</PageTitle>
@@ -158,6 +161,39 @@
                 </MudText>
             </MudPaper>
         </MudItem>
+            @if (IsAdmin)
+        {
+            <MudItem xs="12">
+                <MudPaper Class="todox-card pa-5" rounded="true">
+                    <MudStack Spacing="2">
+                        <MudText Typo="Typo.h6">Trừ điểm ảnh tĩnh</MudText>
+                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">
+                            Khi bật, RDance và Timelapse tính điểm cho toàn bộ ảnh tĩnh đầu vào. Khi tắt, phần ảnh tĩnh không bị tính điểm.
+                        </MudText>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-3">
+                            <MudSwitch T="bool"
+                                       Color="Color.Warning"
+                                       Value="@_chargeStaticImagePoints"
+                                       ValueChanged="OnChargeStaticImagePointsChanged"
+                                       Disabled="@_settingsBusy">
+                                Trừ điểm ảnh tĩnh
+                            </MudSwitch>
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Warning"
+                                       StartIcon="@Icons.Material.Filled.Save"
+                                       Disabled="@(_settingsBusy || !_settingsLoaded)"
+                                       OnClick="SaveStaticImageBillingAsync">
+                                Lưu cài đặt
+                            </MudButton>
+                        </MudStack>
+                        @if (_settingsBusy)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        }
     </MudGrid>
 </MudStack>
 
@@ -166,6 +202,12 @@
     private string? _mrTodoXAvatarUrl;
     private string _mrTodoXPrompt = string.Empty;
     private bool _mrTodoXBusy;
+    private bool _chargeStaticImagePoints = true;
+    private bool _settingsLoaded;
+    private bool _settingsBusy;
+
+    private bool IsAdmin => AuthState.CurrentUser?.IsRoot == true
+        || AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator;
 
     protected override async Task OnInitializedAsync()
     {
@@ -173,6 +215,11 @@
         var mrTodoX = await MrTodoXAvatar.GetAsync();
         _mrTodoXAvatarUrl = mrTodoX.AvatarUrl;
         _mrTodoXPrompt = mrTodoX.PromptDescription;
+        if (IsAdmin)
+        {
+            _chargeStaticImagePoints = await TokenSettings.GetChargeStaticImagePointsAsync();
+            _settingsLoaded = true;
+        }
     }
 
     private async Task UploadMrTodoXAvatar(InputFileChangeEventArgs e)
@@ -229,6 +276,40 @@
         finally
         {
             _mrTodoXBusy = false;
+        }
+    }
+
+    private Task OnChargeStaticImagePointsChanged(bool value)
+    {
+        _chargeStaticImagePoints = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveStaticImageBillingAsync()
+    {
+        if (!IsAdmin)
+        {
+            return;
+        }
+
+        _settingsBusy = true;
+        try
+        {
+            await TokenSettings.SetBoolAsync(
+                TokenSettingsService.KeyChargeStaticImagePoints,
+                _chargeStaticImagePoints,
+                "billing",
+                "Trừ điểm ảnh tĩnh cho RDance và Timelapse");
+            _settingsLoaded = true;
+            Snackbar.Add("Đã lưu cài đặt trừ điểm ảnh tĩnh.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lưu cài đặt trừ điểm ảnh tĩnh lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _settingsBusy = false;
         }
     }
 

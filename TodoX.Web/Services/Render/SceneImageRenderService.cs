@@ -27,6 +27,7 @@ public sealed record SceneImageRenderOutcome(
     public decimal RefundedPoints { get; init; }
     public string? CostSource { get; init; }
     public string? ProviderUsageJson { get; init; }
+    public AiProviderExecutionState ExecutionState { get; init; } = AiProviderExecutionState.Failed;
 }
 
 public enum ProviderImageSourceType
@@ -134,6 +135,9 @@ public sealed record ProviderImageOutputClassification(
 /// <summary>Everything needed to render one scene image, independent of the chosen provider.</summary>
 public sealed class SceneImageRenderContext
 {
+    public const string DefaultCapabilityCode = "scene_image_generation";
+    public const string RVideoCapabilityCode = "rvideo_scene_image_generation";
+
     public long ProjectId { get; init; }
     public long SceneId { get; init; }
     public int SceneIndex { get; init; }
@@ -147,6 +151,7 @@ public sealed class SceneImageRenderContext
     public Guid? RenderJobId { get; init; }
     public string? LogicalRequestId { get; init; }
     public string? OutputObjectKey { get; init; }
+    public bool SkipCustomerCharge { get; init; }
 
     /// <summary>Media id of the character reference (Vertex path passes references by media id).</summary>
     public Guid? CharacterReferenceMediaId { get; init; }
@@ -156,15 +161,20 @@ public sealed class SceneImageRenderContext
 
     /// <summary>Character reference image URL (OpenRouter path passes references by URL).</summary>
     public string? CharacterReferenceUrl { get; init; }
+    public string? ProviderTaskId { get; init; }
+    public string? RequestedModel { get; init; }
+    public string CapabilityCode { get; init; } = DefaultCapabilityCode;
+    public Func<string, object, Task>? ProgressCallback { get; init; }
 }
 
 public interface ISceneImageRenderService
 {
     /// <summary>
-    /// Resolves a character's master image into a media id usable as a Vertex reference. Downloads the
-    /// image into media storage when needed. Returns null when the character has no usable master image.
+    /// Resolves a character's master image into a media id. Legacy callers may continue without a
+    /// reference; native RVIDEO callers set <paramref name="requireReference"/> and fail closed.
     /// </summary>
-    Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey, Guid userId, Guid? customerId, CancellationToken ct = default);
+    Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey,
+        Guid userId, Guid? customerId, bool requireReference = false, CancellationToken ct = default);
 
     /// <summary>Legacy direct ImageAICreativeRender path; normal scene rendering resolves the configured provider.</summary>
     Task<SceneImageRenderOutcome> RenderSceneImageWithVertexAsync(SceneImageRenderContext context, int attempt, CancellationToken ct = default);
@@ -212,11 +222,16 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         _logger = logger;
     }
 
-    public async Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey, Guid userId, Guid? customerId, CancellationToken ct = default)
+    public async Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey,
+        Guid userId, Guid? customerId, bool requireReference = false, CancellationToken ct = default)
     {
         var classification = ProviderImageOutputClassification.Classify(null, null, masterImageObjectKey, masterImageUrl);
         if (classification.SourceType == ProviderImageSourceType.Invalid)
         {
+            if (requireReference)
+            {
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
             return null;
         }
 
@@ -244,6 +259,10 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 _logger.LogWarning(
                     "SCENE_IMAGE_CHARACTER_REFERENCE_UNAVAILABLE projectId={ProjectId} sourceType={SourceType} objectKey={ObjectKey} hasUrl={HasUrl}",
                     projectId, classification.SourceType, classification.ObjectKey, !string.IsNullOrWhiteSpace(masterImageUrl));
+                if (requireReference)
+                {
+                    throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+                }
                 return null;
             }
 
@@ -254,10 +273,15 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         }
         catch (Exception ex)
         {
-            // A missing/broken reference must not abort the whole batch; render without it and log.
             _logger.LogWarning(ex,
                 "SCENE_IMAGE_CHARACTER_REFERENCE_FAILED projectId={ProjectId} sourceType={SourceType} objectKey={ObjectKey} hasUrl={HasUrl}",
                 projectId, classification.SourceType, classification.ObjectKey, !string.IsNullOrWhiteSpace(masterImageUrl));
+            if (requireReference)
+            {
+                throw ex is InvalidOperationException { Message: "RVIDEO_REFERENCE_IMAGE_UNAVAILABLE" }
+                    ? ex
+                    : new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE", ex);
+            }
             return null;
         }
     }
@@ -324,12 +348,19 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         ProviderOptionDto option;
         try
         {
-            option = await _providers.ResolveProviderForCapabilityAsync(CapabilityCode, providerCapabilityId: null, fromUser: false, ct);
+            option = await _providers.ResolveProviderForCapabilityAsync(context.CapabilityCode, providerCapabilityId: null, fromUser: false, ct);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "SCENE_IMAGE_PROVIDER_RESOLVE_FAILED projectId={ProjectId} sceneId={SceneId}", context.ProjectId, context.SceneId);
             throw new InvalidOperationException("Chưa cấu hình provider ảnh mặc định để render lại ảnh scene.");
+        }
+
+        var factoryKey = ProviderCodeMap.ToFactoryKey(option.ProviderCode);
+        if (string.Equals(context.CapabilityCode, SceneImageRenderContext.RVideoCapabilityCode, StringComparison.OrdinalIgnoreCase)
+            && !factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("RVIDEO_IMAGE_PROVIDER_MUST_BE_79AI");
         }
 
         if (!ProviderCodeMap.IsRoutedImageProvider(option.ProviderCode))
@@ -352,7 +383,30 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 context.ProjectId, context.SceneId, option.ProviderCode, option.ModelName, context.CharacterReferenceMediaId);
         }
 
+        var referenceRequested = context.CharacterId is not null
+            || context.CharacterReferenceMediaId is not null
+            || !string.IsNullOrWhiteSpace(context.CharacterReferenceObjectKey)
+            || !string.IsNullOrWhiteSpace(context.CharacterReferenceUrl);
         var hasReference = references.Length > 0 || referenceMediaIds.Length > 0;
+        string? referenceImageBase64 = null;
+        if (referenceRequested && factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        {
+            var media = context.CharacterReferenceMediaId is Guid mediaId
+                ? await _media.GetAsync(mediaId, ct)
+                : !string.IsNullOrWhiteSpace(context.CharacterReferenceObjectKey)
+                    ? await _media.GetByObjectKeyAsync(context.CharacterReferenceObjectKey!, ct)
+                    : !string.IsNullOrWhiteSpace(context.CharacterReferenceUrl)
+                        ? await _media.GetByPublicUrlAsync(context.CharacterReferenceUrl!, ct)
+                        : null;
+            var mime = NormalizeReferenceMime(media?.MimeType);
+            var bytes = media is null ? null : await _media.ReadBytesAsync(media.Id, ct);
+            if (media is null || bytes is null || bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024 || mime is null)
+            {
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
+
+            referenceImageBase64 = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+        }
 
         _logger.LogInformation(
             "SCENE_IMAGE_PROVIDER_RERENDER_START projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} characterId={CharacterId} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} hasReference={HasReference}",
@@ -373,18 +427,22 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             UserId = context.UserId,
             TrustedPayerContext = context.TrustedPayerContext,
             FeatureCode = featureCode,
-            CapabilityCode = CapabilityCode,
+            CapabilityCode = context.CapabilityCode,
             ProviderCapabilityId = option.ProviderCapabilityId,
             FromUser = false,
             Prompt = context.Prompt,
             ReferenceImageUrls = references,
             ReferenceMediaIds = referenceMediaIds,
+            ReferenceImageBase64 = referenceImageBase64,
+            ProviderTaskId = context.ProviderTaskId,
+            RequestedModel = context.RequestedModel,
             AspectRatio = NormalizeAspectRatio(context.AspectRatio),
             OutputFormat = "png",
             Quality = "high",
             Resolution = "4K",
             FileCategory = "video_scene_image",
             RequestId = requestId,
+            SkipCustomerCharge = context.SkipCustomerCharge,
             LogicalRequestId = requestId,
             RenderJobId = context.RenderJobId?.ToString("N"),
             Metadata = new
@@ -396,7 +454,8 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 characterId = context.CharacterId,
                 renderJobId = context.RenderJobId
             },
-            CreatedBy = context.CreatedBy ?? context.UserId.ToString()
+            CreatedBy = context.CreatedBy ?? context.UserId.ToString(),
+            ProgressCallback = context.ProgressCallback
         }, ct);
 
         if (!render.Success)
@@ -406,7 +465,19 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 context.ProjectId, context.SceneId, context.SceneIndex, render.ProviderCapabilityId, render.ProviderCode, render.ModelName, render.ErrorMessage);
             return new SceneImageRenderOutcome(false, null, null, render.ProviderCode,
                 render.ModelName, render.ProviderCapabilityId, null,
-                render.ErrorMessage ?? "Render lại ảnh scene thất bại.", QuotaError: false);
+                render.ErrorMessage ?? "Render lại ảnh scene thất bại.", QuotaError: false)
+            {
+                ProviderTaskId = render.ProviderTaskId,
+                ResultMediaId = render.ResultMediaId,
+                BillingLogicalRequestId = render.BillingLogicalRequestId,
+                EstimatedUsd = render.EstimatedUsd,
+                ActualUsd = render.ActualUsd,
+                ChargedPoints = render.ChargedPoints,
+                RefundedPoints = render.RefundedPoints,
+                CostSource = render.CostSource,
+                ProviderUsageJson = render.UsageJson,
+                ExecutionState = render.ExecutionState
+            };
         }
 
         var source = ProviderImageOutputClassification.Classify(render.ImageBytes, render.ResultMediaId, render.ObjectKey, render.ImageUrl);
@@ -447,6 +518,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         return new SceneImageRenderOutcome(true, persisted.ImageUrl, persisted.ObjectKey, render.ProviderCode,
             render.ModelName, render.ProviderCapabilityId, null, null, QuotaError: false)
         {
+            ExecutionState = AiProviderExecutionState.Success,
             ProviderTaskId = render.ProviderTaskId,
             ResultMediaId = persisted.MediaId,
             BillingLogicalRequestId = render.BillingLogicalRequestId,
@@ -526,6 +598,15 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
 
     public static string NormalizeAspectRatio(string? aspectRatio)
         => string.Equals(aspectRatio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
+
+    private static string? NormalizeReferenceMime(string? mime)
+        => mime?.Trim().ToLowerInvariant() switch
+        {
+            "image/jpeg" or "image/jpg" => "image/jpeg",
+            "image/png" => "image/png",
+            "image/webp" => "image/webp",
+            _ => null
+        };
 
     public static string BuildLogicalRequestId(string featureCode, long sceneId, Guid? renderJobId)
         => string.Equals(featureCode, "render_job_scene_image_rerender", StringComparison.OrdinalIgnoreCase)

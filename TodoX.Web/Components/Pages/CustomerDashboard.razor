@@ -1,0 +1,275 @@
+@using TodoX.Web.Models.Catalog
+@using TodoX.Web.Models.Timelapse
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject ICustomerDashboardService Dashboard
+@inject NavigationManager Navigation
+@inject ILogger<CustomerDashboard> Logger
+@implements IDisposable
+
+<MudStack Spacing="4">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Xin chào, @CustomerName 👋</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Hôm nay bạn muốn tạo nội dung gì?</MudText>
+    </div>
+
+    @if (_state == DashboardLoadState.Loading)
+    {
+        <MudPaper Class="todox-card pa-6 d-flex flex-column align-items-center" Elevation="1">
+            <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+            <MudText Class="mt-3">Đang tải trang chủ...</MudText>
+        </MudPaper>
+    }
+    else if (_state == DashboardLoadState.Error)
+    {
+        <MudPaper Class="todox-card pa-6 d-flex flex-column align-items-center" Elevation="1">
+            <MudAlert Severity="Severity.Error" Class="w-100">@_error</MudAlert>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RetryAsync">
+                Thử lại
+            </MudButton>
+        </MudPaper>
+    }
+    else
+    {
+        @if (_state == DashboardLoadState.PartialSuccess)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">Một số dữ liệu phụ chưa tải được. Bạn vẫn có thể sử dụng trang chủ.</MudAlert>
+        }
+
+        @if (_services.Count == 0)
+        {
+            <MudPaper Class="todox-card pa-6" rounded="true">
+                <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                    <MudText>Chưa có dịch vụ nào trong danh sách của bạn.</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Vào Kho dịch vụ video để chọn dịch vụ muốn hiển thị trên Dashboard.</MudText>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="/create">Vào Kho dịch vụ video</MudButton>
+                </MudStack>
+            </MudPaper>
+        }
+        else
+        {
+            <MudGrid Class="todox-service-grid">
+                @foreach (var service in _services)
+                {
+                    <MudItem xs="12" sm="6" lg="4">
+                        <ServiceCatalogCard Service="service"
+                                            ShowFavorite="false"
+                                            PrimaryActionLabel="Tạo ngay"
+                                            OnPrimaryAction="OpenServiceAsync" />
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+
+        <MudGrid>
+            <MudItem xs="12" sm="6" lg="4">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.subtitle2">Video đang xử lý</MudText>
+                    <div class="todox-stat-value">@_processingCount</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="4">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.subtitle2">Hoàn thành tháng này</MudText>
+                    <div class="todox-stat-value">@_completedThisMonthCount</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="4">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.subtitle2">Characters</MudText>
+                    <div class="todox-stat-value">@_characterCount</div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-card pa-4" rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-3">
+                <MudText Typo="Typo.h6">Video gần đây</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Warning" Href="/jobs" EndIcon="@Icons.Material.Filled.ArrowForward">Xem tất cả</MudButton>
+            </MudStack>
+
+            @if (_recentJobs.Count == 0)
+            {
+                <MudStack AlignItems="AlignItems.Center" Spacing="2" Class="pa-4">
+                    <MudText>Bạn chưa có video nào.</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Hãy bắt đầu tạo video đầu tiên của bạn.</MudText>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="/create">Tạo video</MudButton>
+                </MudStack>
+            }
+            else
+            {
+                <MudList T="string" Dense="true">
+                    @foreach (var job in _recentJobs)
+                    {
+                        <MudListItem T="string">
+                            <MudStack Spacing="1" Class="w-100">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-3 flex-wrap">
+                                    <MudText Typo="Typo.subtitle2">@job.Title</MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(job.Status)" Variant="Variant.Filled">@job.StatusLabel</MudChip>
+                                </MudStack>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                    @job.Workflow
+                                    @if (job.ProgressPercent is int progress)
+                                    {
+                                        <span> · @progress%</span>
+                                    }
+                                </MudText>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@job.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                                    <MudButton Variant="Variant.Text" Color="Color.Warning" Href="@job.DetailRoute">Xem chi tiết</MudButton>
+                                </MudStack>
+                            </MudStack>
+                        </MudListItem>
+                        <MudDivider />
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private IReadOnlyList<CatalogServiceView> _services = Array.Empty<CatalogServiceView>();
+    private IReadOnlyList<CustomerRecentJobDto> _recentJobs = Array.Empty<CustomerRecentJobDto>();
+    private DashboardLoadState _state = DashboardLoadState.Loading;
+    private string? _error;
+    private int _processingCount;
+    private int _completedThisMonthCount;
+    private int _characterCount;
+    private Task? _loadTask;
+    private CancellationTokenSource? _loadCancellation;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuthChange;
+        await EnsureLoadedAsync();
+    }
+
+    private string CustomerName => AuthState.CurrentUser?.DisplayName ?? "bạn";
+
+    private Task EnsureLoadedAsync()
+    {
+        if (_loadTask is null && AuthState.IsInitialized && AuthState.CurrentUser is { IsCustomer: true } user)
+        {
+            _loadTask = LoadAsync(user);
+        }
+
+        return _loadTask ?? Task.CompletedTask;
+    }
+
+    private async Task LoadAsync(CurrentUserSession user)
+    {
+        _state = DashboardLoadState.Loading;
+        _error = null;
+        _loadCancellation?.Dispose();
+        _loadCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ct = _loadCancellation.Token;
+
+        try
+        {
+            if (!AuthState.IsInitialized || !user.IsCustomer || user.CustomerId is null)
+            {
+                _state = DashboardLoadState.Empty;
+                return;
+            }
+
+            Logger.LogInformation("CUSTOMER_DASHBOARD_AUTH_READY userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
+            var dashboard = await Dashboard.GetDashboardAsync(user, ct: ct).WaitAsync(ct);
+
+            IReadOnlyList<CatalogServiceView> services;
+            try
+            {
+                services = await Accounts.GetFavoriteServicesAsync(user.UserId, user.CustomerId.Value).WaitAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "CUSTOMER_DASHBOARD_FAVORITES_FAILED userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
+                services = Array.Empty<CatalogServiceView>();
+            }
+
+            _services = services
+                .OrderBy(x => x.SortOrder)
+                .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _recentJobs = dashboard.RecentJobs;
+            _processingCount = dashboard.ProcessingCount;
+            _completedThisMonthCount = dashboard.CompletedThisMonthCount;
+            _characterCount = dashboard.CharacterCount;
+            _state = services.Count == 0 ? DashboardLoadState.PartialSuccess : DashboardLoadState.Success;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _state = DashboardLoadState.Error;
+            _error = "Không thể tải dữ liệu trang chủ. Vui lòng thử lại.";
+            Logger.LogWarning("CUSTOMER_DASHBOARD_LOAD_FAILED reason=timeout userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
+        }
+        catch (Exception ex)
+        {
+            _state = DashboardLoadState.Error;
+            Logger.LogError(ex, "CUSTOMER_DASHBOARD_LOAD_FAILED userId={UserId} customerId={CustomerId}", AuthState.CurrentUser?.UserId, AuthState.CurrentUser?.CustomerId);
+            _error = "Không thể tải dữ liệu trang chủ. Vui lòng thử lại.";
+        }
+        finally
+        {
+            _loadCancellation?.Dispose();
+            _loadCancellation = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        _loadTask = null;
+        await EnsureLoadedAsync();
+    }
+
+    private void HandleAuthChange()
+        => _ = InvokeAsync(async () =>
+        {
+            if (!AuthState.IsInitialized || AuthState.CurrentUser is not { IsCustomer: true } || _loadTask is not null)
+            {
+                return;
+            }
+
+            await EnsureLoadedAsync();
+            StateHasChanged();
+        });
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChange;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+    }
+
+    private async Task OpenServiceAsync(CatalogServiceView service)
+    {
+        var route = CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode);
+        if (!string.IsNullOrWhiteSpace(route.Route))
+        {
+            Navigation.NavigateTo(route.Route);
+        }
+    }
+
+    private static Color GetStatusColor(string status)
+        => status switch
+        {
+            var value when CustomerDashboardStatusRules.IsCompletedStatus(value) => Color.Success,
+            var value when CustomerDashboardStatusRules.IsFailedStatus(value) => Color.Error,
+            var value when CustomerDashboardStatusRules.IsProcessingStatus(value) => Color.Warning,
+            _ => Color.Default
+        };
+
+    private enum DashboardLoadState
+    {
+        Loading,
+        Success,
+        PartialSuccess,
+        Error,
+        Empty
+    }
+}

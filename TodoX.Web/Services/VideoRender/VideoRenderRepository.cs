@@ -40,14 +40,15 @@ public sealed class VideoRenderRepository
                 """
                 INSERT INTO video_render.video_projects
                     (tenant_id, user_id, customer_id, title, original_prompt, total_seconds, scene_seconds, scene_count,
-                     think_scenes, character_id, uploaded_character_url, storage_root, public_base, job_folder, status, created_at, updated_at)
+                     think_scenes, character_id, uploaded_character_url, source_image_url, storage_root, public_base, job_folder, status, created_at, updated_at)
                 VALUES
                     (@tenant, @user, @customer, @title, @prompt, @total, @sceneSeconds, @sceneCount,
-                     @think, @character, @uploaded, @storageRoot, @publicBase, @jobFolder, @status, now(), now())
+                     @think, @character, @uploaded, @sourceImageUrl, @storageRoot, @publicBase, @jobFolder, @status, now(), now())
                 RETURNING id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                           original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                           scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
-                          uploaded_character_url AS UploadedCharacterUrl, storage_root AS StorageRoot, public_base AS PublicBase,
+                          uploaded_character_url AS UploadedCharacterUrl, source_image_url AS SourceImageUrl,
+                          storage_root AS StorageRoot, public_base AS PublicBase,
                           job_folder AS JobFolder, status AS Status, final_video_url AS FinalVideoUrl,
                           final_video_path AS FinalVideoPath, error_message AS ErrorMessage, created_at AS CreatedAt,
                           updated_at AS UpdatedAt;
@@ -65,6 +66,7 @@ public sealed class VideoRenderRepository
                     think = request.ThinkScenes,
                     character = request.CharacterId,
                     uploaded = request.UploadedCharacterUrl,
+                    sourceImageUrl = request.SourceImageUrl,
                     storageRoot,
                     publicBase,
                     jobFolder,
@@ -81,15 +83,21 @@ public sealed class VideoRenderRepository
                         : sceneSeconds;
                 var aspectRatio = NormalizeAspectRatio(request.AspectRatio);
                 var scenePrompt = sceneData?.ScenePrompt ?? BuildScenePrompt(request.Prompt, index, sceneCount, duration, request.ThinkScenes, aspectRatio);
+                var sceneVoiceText = FirstNonBlank(sceneData?.VoiceText, ScenePromptMetadata.Parse(scenePrompt).Voice);
+                var sceneVoiceInstruction = FirstNonBlank(sceneData?.VoiceInstruction, ScenePromptMetadata.Parse(scenePrompt).VoiceInstruction);
 
                 await conn.ExecuteAsync(
                     """
                     INSERT INTO video_render.video_project_scenes
                         (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
-                         static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                         static_image_path, static_image_url, scene_video_path, scene_video_url,
+                         voice_enabled, speaker_key, voice_text, voice_instruction,
+                         status, error_message, created_at, updated_at)
                     VALUES
                         (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
-                         NULL, NULL, NULL, NULL, @status, NULL, now(), now());
+                         NULL, NULL, NULL, NULL,
+                         @voiceEnabled, @speakerKey, @voiceText, @voiceInstruction,
+                         @status, NULL, now(), now());
                     """,
                     new
                     {
@@ -101,6 +109,10 @@ public sealed class VideoRenderRepository
                         scenePrompt,
                         imagePrompt = sceneData?.ImagePrompt ?? $"Static preview for scene {index}. {scenePrompt}",
                         videoPrompt = sceneData?.VideoPrompt ?? $"{AspectRatioLabel(aspectRatio)} video, {duration} seconds. {scenePrompt}",
+                        voiceEnabled = sceneData?.VoiceEnabled == true || !string.IsNullOrWhiteSpace(sceneVoiceText),
+                        speakerKey = sceneData?.SpeakerKey,
+                        voiceText = sceneVoiceText,
+                        voiceInstruction = sceneVoiceInstruction,
                         status = VideoSceneStatuses.Draft
                     }, tx);
             }
@@ -135,10 +147,11 @@ public sealed class VideoRenderRepository
             using var conn = await _factory.OpenAsync(ct);
             var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
                 """
-                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
+                SELECT id AS Id, core_job_id AS CoreJobId, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                        original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                        scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
-                       uploaded_character_url AS UploadedCharacterUrl, storage_root AS StorageRoot, public_base AS PublicBase,
+                       uploaded_character_url AS UploadedCharacterUrl, source_image_url AS SourceImageUrl,
+                       storage_root AS StorageRoot, public_base AS PublicBase,
                        job_folder AS JobFolder, status AS Status, final_video_url AS FinalVideoUrl,
                        final_video_path AS FinalVideoPath, error_message AS ErrorMessage, created_at AS CreatedAt,
                        updated_at AS UpdatedAt
@@ -155,12 +168,50 @@ public sealed class VideoRenderRepository
                        title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                        image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                        static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                       voice_enabled AS VoiceEnabled, speaker_key AS SpeakerKey, voice_text AS VoiceText,
+                       voice_instruction AS VoiceInstruction,
+                       selected_audio_version_id AS SelectedAudioVersionId,
                        status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt
                   FROM video_render.video_project_scenes
                  WHERE project_id=@projectId AND tenant_id=@tenant
                  ORDER BY scene_index;
                 """,
                 new { projectId, tenant = _tenant.TenantId })).ToList();
+
+            var selectedVideoProjections = (await conn.QueryAsync<SceneVersionProjection>(
+                """
+                SELECT scene_id AS SceneId,
+                       public_url AS PublicUrl,
+                       source_file_path AS SourceFilePath,
+                       storage_key AS StorageKey,
+                       id AS Id
+                  FROM video_render.scene_video_versions
+                 WHERE project_id=@projectId
+                   AND tenant_id=@tenant
+                   AND is_selected=true
+                   AND status='completed';
+                """,
+                new { projectId, tenant = _tenant.TenantId })).ToDictionary(x => x.SceneId, x => x);
+
+            foreach (var scene in project.Scenes)
+            {
+                if (!selectedVideoProjections.TryGetValue(scene.Id, out var selected))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(scene.SceneVideoUrl))
+                {
+                    scene.SceneVideoUrl = selected.PublicUrl ?? selected.SourceFilePath;
+                }
+
+                if (string.IsNullOrWhiteSpace(scene.SceneVideoPath))
+                {
+                    scene.SceneVideoPath = selected.SourceFilePath ?? selected.StorageKey;
+                }
+
+                scene.Status = VideoSceneStatuses.VideoReady;
+            }
 
             project.Events = (await conn.QueryAsync<VideoProjectEventDto>(
                 """
@@ -189,6 +240,92 @@ public sealed class VideoRenderRepository
         }
 
         return null;
+    }
+
+    public async Task<bool> HydrateSceneVoiceMetadataAsync(
+        VideoProjectDto project,
+        RVideoJobSettingsDto settings,
+        CancellationToken ct = default)
+    {
+        var voiceMode = RVideoRules.ResolveVoiceMode(settings);
+        if (voiceMode == RVideoVoiceModes.None)
+        {
+            return false;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var changed = false;
+        foreach (var scene in project.Scenes)
+        {
+            var metadata = ScenePromptMetadata.FromScene(scene);
+            var derivedText = metadata.Voice?.Trim();
+            var derivedInstruction = metadata.VoiceInstruction?.Trim();
+            var speakerKey = voiceMode == RVideoVoiceModes.Library ? settings.VoiceCatalogCode?.Trim() : null;
+            var voiceEnabled = scene.VoiceEnabled || !string.IsNullOrWhiteSpace(scene.VoiceText) || !string.IsNullOrWhiteSpace(derivedText);
+            var rows = await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_project_scenes
+                   SET voice_enabled=@voiceEnabled,
+                       speaker_key=COALESCE(NULLIF(speaker_key, ''), NULLIF(@speakerKey, '')),
+                       voice_text=COALESCE(NULLIF(voice_text, ''), NULLIF(@voiceText, '')),
+                       voice_instruction=COALESCE(NULLIF(voice_instruction, ''), NULLIF(@voiceInstruction, '')),
+                       updated_at=CASE WHEN voice_enabled IS DISTINCT FROM @voiceEnabled
+                                            OR (NULLIF(speaker_key, '') IS NULL AND NULLIF(@speakerKey, '') IS NOT NULL)
+                                            OR (NULLIF(voice_text, '') IS NULL AND NULLIF(@voiceText, '') IS NOT NULL)
+                                            OR (NULLIF(voice_instruction, '') IS NULL AND NULLIF(@voiceInstruction, '') IS NOT NULL)
+                                       THEN now() ELSE updated_at END
+                 WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant
+                   AND (voice_enabled IS DISTINCT FROM @voiceEnabled
+                        OR (NULLIF(speaker_key, '') IS NULL AND NULLIF(@speakerKey, '') IS NOT NULL)
+                        OR (NULLIF(voice_text, '') IS NULL AND NULLIF(@voiceText, '') IS NOT NULL)
+                        OR (NULLIF(voice_instruction, '') IS NULL AND NULLIF(@voiceInstruction, '') IS NOT NULL));
+                """,
+                new
+                {
+                    sceneId = scene.Id,
+                    projectId = project.Id,
+                    tenant = _tenant.TenantId,
+                    voiceEnabled,
+                    speakerKey,
+                    voiceText = derivedText,
+                    voiceInstruction = derivedInstruction
+                }, tx);
+
+            var existingText = !string.IsNullOrWhiteSpace(scene.VoiceText);
+            var hasDerived = !string.IsNullOrWhiteSpace(derivedText) || !string.IsNullOrWhiteSpace(derivedInstruction);
+            if (rows > 0 && (hasDerived || !string.IsNullOrWhiteSpace(speakerKey) || (scene.VoiceEnabled != voiceEnabled)))
+            {
+                changed = true;
+                await conn.ExecuteAsync(
+                    """
+                    INSERT INTO video_render.video_project_events
+                        (project_id, tenant_id, event_type, level, message, data_json, created_at)
+                    VALUES
+                        (@projectId, @tenant, 'RVIDEO_VOICE_METADATA_READY', 'info', 'Legacy scene voice metadata hydrated.', CAST(@data AS jsonb), now());
+                    """,
+                    new
+                    {
+                        projectId = project.Id,
+                        tenant = _tenant.TenantId,
+                        data = JsonSerializer.Serialize(new
+                        {
+                            projectId = project.Id,
+                            sceneId = scene.Id,
+                            sceneIndex = scene.SceneIndex,
+                            voiceMode,
+                            voiceEnabled,
+                            hadExistingVoiceText = existingText,
+                            derivedVoiceText = !string.IsNullOrWhiteSpace(derivedText),
+                            derivedVoiceInstruction = !string.IsNullOrWhiteSpace(derivedInstruction)
+                        }, JsonOptions)
+                    }, tx);
+            }
+        }
+
+        tx.Commit();
+        return changed;
     }
 
     public async Task<IReadOnlyList<VideoProjectListItemDto>> ListProjectsAsync(CurrentUserSession user, int skip = 0, int take = 30, CancellationToken ct = default)
@@ -262,7 +399,7 @@ public sealed class VideoRenderRepository
 
             var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
                 """
-                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
+                SELECT id AS Id, core_job_id AS CoreJobId, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                        original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                        scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
                        status AS Status, created_at AS CreatedAt, updated_at AS UpdatedAt
@@ -284,6 +421,7 @@ public sealed class VideoRenderRepository
                    SET title=@title,
                        original_prompt=@prompt,
                        character_id=@characterId,
+                       source_image_url=@sourceImageUrl,
                        total_seconds=@totalSeconds,
                        scene_seconds=@sceneSeconds,
                        scene_count=@sceneCount,
@@ -298,6 +436,7 @@ public sealed class VideoRenderRepository
                     title = request.Title,
                     prompt = request.OriginalPrompt,
                     characterId = request.CharacterId,
+                    sourceImageUrl = request.SourceImageUrl,
                     totalSeconds = Math.Max(1, request.TotalSeconds),
                     sceneSeconds = Math.Max(1, request.SceneSeconds),
                     sceneCount = scenes.Count,
@@ -315,6 +454,10 @@ public sealed class VideoRenderRepository
                            scene_prompt=@scenePrompt,
                            image_prompt=@imagePrompt,
                            video_prompt=@videoPrompt,
+                           voice_enabled=@voiceEnabled,
+                           speaker_key=@speakerKey,
+                           voice_text=@voiceText,
+                           voice_instruction=@voiceInstruction,
                            status=@status,
                            error_message=@errorMessage,
                            updated_at=now()
@@ -333,6 +476,10 @@ public sealed class VideoRenderRepository
                         scenePrompt = scene.ScenePrompt,
                         imagePrompt = scene.ImagePrompt,
                         videoPrompt = scene.VideoPrompt,
+                        voiceEnabled = ResolveVoiceEnabled(scene),
+                        speakerKey = scene.SpeakerKey,
+                        voiceText = ResolveVoiceText(scene),
+                        voiceInstruction = ResolveVoiceInstruction(scene),
                         status = string.IsNullOrWhiteSpace(scene.Status) ? VideoSceneStatuses.Draft : scene.Status,
                         errorMessage = scene.ErrorMessage
                     }, tx);
@@ -380,6 +527,9 @@ public sealed class VideoRenderRepository
                        title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                        image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                        static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                       voice_enabled AS VoiceEnabled, speaker_key AS SpeakerKey, voice_text AS VoiceText,
+                       voice_instruction AS VoiceInstruction,
+                       selected_audio_version_id AS SelectedAudioVersionId,
                        status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt
                   FROM video_render.video_project_scenes
                  WHERE id=@sceneId AND tenant_id=@tenant;
@@ -537,6 +687,10 @@ public sealed class VideoRenderRepository
                        scene_prompt=@scenePrompt,
                        image_prompt=@imagePrompt,
                        video_prompt=@videoPrompt,
+                       voice_enabled=voice_enabled OR @voiceEnabled,
+                       speaker_key=COALESCE(NULLIF(@speakerKey, ''), speaker_key),
+                       voice_text=COALESCE(NULLIF(@voiceText, ''), voice_text),
+                       voice_instruction=COALESCE(NULLIF(@voiceInstruction, ''), voice_instruction),
                        static_image_url=COALESCE(@imageUrl, static_image_url),
                        static_image_path=COALESCE(@imagePath, static_image_path),
                        scene_video_url=COALESCE(@videoUrl, scene_video_url),
@@ -556,6 +710,10 @@ public sealed class VideoRenderRepository
                     scenePrompt = request.ScenePrompt,
                     imagePrompt = request.ImagePrompt,
                     videoPrompt = request.VideoPrompt,
+                    speakerKey = (string?)null,
+                    voiceText = ScenePromptMetadata.Parse(request.ScenePrompt).Voice,
+                    voiceInstruction = ScenePromptMetadata.Parse(request.ScenePrompt).VoiceInstruction,
+                    voiceEnabled = !string.IsNullOrWhiteSpace(ScenePromptMetadata.Parse(request.ScenePrompt).Voice),
                     imageUrl = request.ImageUrl,
                     imagePath = request.ImagePath,
                     videoUrl = request.VideoUrl,
@@ -646,14 +804,21 @@ public sealed class VideoRenderRepository
                 """
                 INSERT INTO video_render.video_project_scenes
                     (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
-                     static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                     static_image_path, static_image_url, scene_video_path, scene_video_url,
+                     voice_enabled, speaker_key, voice_text, voice_instruction,
+                     status, error_message, created_at, updated_at)
                 VALUES
                     (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
-                     NULL, NULL, NULL, NULL, @status, NULL, now(), now())
+                     NULL, NULL, NULL, NULL,
+                     @voiceEnabled, @speakerKey, @voiceText, @voiceInstruction,
+                     @status, NULL, now(), now())
                 RETURNING id AS Id, project_id AS ProjectId, tenant_id AS TenantId, scene_index AS SceneIndex,
                           title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                           image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                           static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                          voice_enabled AS VoiceEnabled, speaker_key AS SpeakerKey, voice_text AS VoiceText,
+                          voice_instruction AS VoiceInstruction,
+                          selected_audio_version_id AS SelectedAudioVersionId,
                           status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt;
                 """,
                 new
@@ -666,6 +831,10 @@ public sealed class VideoRenderRepository
                     scenePrompt = metadata.Serialize(),
                     imagePrompt = request.ImagePrompt,
                     videoPrompt = request.VideoPrompt,
+                    voiceEnabled = !string.IsNullOrWhiteSpace(request.Voice),
+                    speakerKey = (string?)null,
+                    voiceText = request.Voice,
+                    voiceInstruction = request.VoiceInstruction,
                     status = VideoSceneStatuses.Draft
                 }, tx);
 
@@ -711,11 +880,13 @@ public sealed class VideoRenderRepository
             SELECT public_url AS PublicUrl,
                    source_file_path AS SourceFilePath,
                    storage_key AS StorageKey,
+                   result_media_id AS ResultMediaId,
                    id AS Id
               FROM video_render.scene_image_versions
              WHERE scene_id=@sceneId
                AND tenant_id=@tenant
                AND is_selected=true
+               AND status='completed'
              LIMIT 1;
             """,
             new { sceneId, tenant = _tenant.TenantId });
@@ -888,10 +1059,14 @@ public sealed class VideoRenderRepository
                     """
                     INSERT INTO video_render.video_project_scenes
                         (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
-                         static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                         static_image_path, static_image_url, scene_video_path, scene_video_url,
+                         voice_enabled, speaker_key, voice_text, voice_instruction,
+                         status, error_message, created_at, updated_at)
                     VALUES
                         (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
-                         @staticImagePath, @staticImageUrl, @sceneVideoPath, @sceneVideoUrl, @status, @errorMessage, now(), now());
+                     @staticImagePath, @staticImageUrl, @sceneVideoPath, @sceneVideoUrl,
+                     @voiceEnabled, @speakerKey, @voiceText, @voiceInstruction,
+                     @status, @errorMessage, now(), now());
                     """,
                     new
                     {
@@ -907,10 +1082,24 @@ public sealed class VideoRenderRepository
                         staticImageUrl = scene.StaticImageUrl,
                         sceneVideoPath = scene.SceneVideoPath,
                         sceneVideoUrl = scene.SceneVideoUrl,
+                        voiceEnabled = scene.VoiceEnabled,
+                        speakerKey = scene.SpeakerKey,
+                        voiceText = FirstNonBlank(scene.VoiceText, ScenePromptMetadata.FromScene(scene).Voice),
+                        voiceInstruction = FirstNonBlank(scene.VoiceInstruction, ScenePromptMetadata.FromScene(scene).VoiceInstruction),
                         status = string.IsNullOrWhiteSpace(scene.Status) ? VideoSceneStatuses.Draft : scene.Status,
                         errorMessage = scene.ErrorMessage
                     }, tx);
             }
+
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_projects
+                   SET scene_count=(SELECT count(*)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       total_seconds=(SELECT COALESCE(sum(duration_seconds), 0)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       updated_at=now()
+                 WHERE id=@projectId AND tenant_id=@tenant;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
 
             tx.Commit();
             return list;
@@ -949,12 +1138,48 @@ public sealed class VideoRenderRepository
            || user.Can("render.video.manage")
            || user.Can("ai.video.version.manage");
 
+    private static bool ResolveVoiceEnabled(VideoProjectSceneDto scene)
+        => scene.VoiceEnabled || !string.IsNullOrWhiteSpace(ResolveVoiceText(scene));
+
+    private static string? ResolveVoiceText(VideoProjectSceneDto scene)
+        => FirstNonBlank(scene.VoiceText, ScenePromptMetadata.FromScene(scene).Voice);
+
+    private static string? ResolveVoiceInstruction(VideoProjectSceneDto scene)
+        => FirstNonBlank(scene.VoiceInstruction, ScenePromptMetadata.FromScene(scene).VoiceInstruction);
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
+
     public sealed class SceneVersionProjection
     {
+        public long SceneId { get; init; }
         public Guid Id { get; init; }
         public string? PublicUrl { get; init; }
         public string? SourceFilePath { get; init; }
         public string? StorageKey { get; init; }
         public Guid? SourceImageVersionId { get; init; }
+        public Guid? ResultMediaId { get; init; }
+    }
+
+    public async Task<IReadOnlyList<Guid>> ListPersistentSceneVideoReconciliationJobsAsync(CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var jobs = await conn.QueryAsync<Guid>(
+            """
+            SELECT DISTINCT v.render_job_id
+              FROM video_render.scene_video_versions v
+              JOIN render.render_jobs j ON j.id=v.render_job_id AND j.tenant_id=v.tenant_id
+             WHERE v.tenant_id=@tenant
+               AND v.provider_task_id IS NOT NULL
+               AND btrim(v.provider_task_id) <> ''
+               AND v.provider_video_id_base IS NOT NULL
+               AND btrim(v.provider_video_id_base) <> ''
+               AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
+               AND j.job_type='render_scene_video'
+               AND j.status NOT IN ('completed', 'cancelled');
+            """,
+            new { tenant = _tenant.TenantId });
+        return jobs.ToList();
     }
 }

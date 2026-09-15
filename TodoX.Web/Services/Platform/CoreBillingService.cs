@@ -1,0 +1,934 @@
+using System.Data;
+using System.Text.Json;
+using Dapper;
+using TodoX.Web.Data;
+using TodoX.Web.Models.Catalog;
+using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services.Render;
+using TodoX.Web.Services;
+
+namespace TodoX.Web.Services.Platform;
+
+public sealed record CoreBillingEstimate(
+    decimal EstimatedPoints,
+    bool ChargeRequired,
+    string QualityTier,
+    int ImageCount,
+    int SceneCount,
+    int? DurationSeconds,
+    string? Message,
+    PointPricingEstimate? Pricing = null,
+    int VideoSeconds = 0,
+    int VoiceCount = 0,
+    bool VoiceEnabled = true);
+
+public sealed record CoreBillingReservation(
+    bool Success,
+    string PointStatus,
+    decimal ReservedPoints,
+    string? ErrorMessage);
+
+public sealed record CoreBillingCompletion(
+    bool Success,
+    string PointStatus,
+    decimal ChargedPoints,
+    string? ErrorMessage);
+
+public sealed record CoreBillingCompletionRequest(
+    Guid JobId,
+    JsonElement? Output = null,
+    string? Message = null);
+
+public sealed record CoreBillingFailureRequest(
+    Guid JobId,
+    string ErrorCode,
+    string ErrorMessage,
+    CoreFailureBillingPolicy BillingPolicy);
+
+public sealed record CoreBillingState(
+    Guid JobId,
+    decimal EstimatedPoints,
+    decimal ChargedPoints,
+    string PointStatus);
+
+public interface ICoreBillingService
+{
+    Task<CoreBillingEstimate> EstimateAsync(
+        CoreRequestContext context,
+        CoreServiceView service,
+        JsonElement input,
+        CancellationToken ct = default);
+
+    Task<CoreBillingReservation> ReserveAsync(
+        Guid jobId,
+        CoreRequestContext context,
+        CoreBillingEstimate estimate,
+        CancellationToken ct = default);
+
+    Task<CoreBillingCompletion> CompleteAsync(Guid jobId, CancellationToken ct = default);
+
+    Task<CoreBillingCompletion> CompleteAsync(
+        CoreBillingCompletionRequest request,
+        CancellationToken ct = default);
+
+    Task<CoreBillingCompletion> FailAsync(
+        CoreBillingFailureRequest request,
+        CancellationToken ct = default);
+
+    Task<CoreBillingCompletion> RefundOrReleaseAsync(
+        Guid jobId,
+        string reason,
+        bool markCancelled,
+        CancellationToken ct = default);
+
+    Task<CoreBillingState?> GetBillingStateAsync(Guid jobId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Provider-neutral billing lifecycle for canonical Core jobs. The canonical render job row owns
+/// billing state; wallet balance changes and job point_status transitions occur in one transaction.
+/// </summary>
+public sealed class CoreBillingService : ICoreBillingService
+{
+    private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
+    private readonly IPointPricingService _prices;
+    private readonly WalletService _wallets;
+    private readonly IConfiguration _configuration;
+
+    public CoreBillingService(
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
+        IPointPricingService prices,
+        WalletService wallets,
+        IConfiguration configuration)
+    {
+        _factory = factory;
+        _tenant = tenant;
+        _prices = prices;
+        _wallets = wallets;
+        _configuration = configuration;
+    }
+
+    public async Task<CoreBillingEstimate> EstimateAsync(
+        CoreRequestContext context,
+        CoreServiceView service,
+        JsonElement input,
+        CancellationToken ct = default)
+    {
+        var qualityTier = ResolveQualityTier(input);
+        var imageCount = ReadInt(input, "imageCount", "image_count") ?? 0;
+        var sceneCount = ReadInt(input, "sceneCount", "scene_count") ?? 0;
+        var durationSeconds = ReadInt(input, "durationSeconds", "duration_seconds", "sceneDurationSeconds", "scene_duration_seconds");
+        var videoSeconds = ReadInt(input, "videoSeconds", "video_seconds") ?? (sceneCount * (durationSeconds ?? 0));
+        var voiceEnabled = ReadBool(input, "voiceEnabled", "voice_enabled") ?? true;
+        var voiceCount = ReadInt(input, "voiceCount", "voice_count") ?? 0;
+
+        if (imageCount <= 0 && videoSeconds <= 0 && (!voiceEnabled || voiceCount <= 0))
+        {
+            throw new InvalidOperationException(
+                "Billable service input must include image_count, video_seconds, or enabled voice_count.");
+        }
+
+        var estimate = await _prices.EstimateAsync(new PointPricingEstimateRequest(
+            service.Id,
+            imageCount,
+            qualityTier,
+            videoSeconds,
+            qualityTier,
+            voiceCount,
+            qualityTier,
+            voiceEnabled), ct);
+
+        var trustedNoCharge = context.IsTrustedInternal
+            && context.NormalizedChannel == CoreChannelCodes.System;
+        return new CoreBillingEstimate(
+            estimate.TotalPoints,
+            !trustedNoCharge && context.CustomerId is not null && estimate.TotalPoints > 0,
+            qualityTier,
+            imageCount,
+            sceneCount,
+            durationSeconds,
+            trustedNoCharge ? "Trusted internal job is billing-exempt." : null,
+            estimate,
+            videoSeconds,
+            voiceEnabled ? voiceCount : 0,
+            voiceEnabled);
+    }
+
+    public async Task<CoreBillingReservation> ReserveAsync(
+        Guid jobId,
+        CoreRequestContext context,
+        CoreBillingEstimate estimate,
+        CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+
+        if (!estimate.ChargeRequired || estimate.EstimatedPoints <= 0)
+        {
+            using var noChargeConn = await _factory.OpenAsync(ct);
+            using var noChargeTx = noChargeConn.BeginTransaction();
+            await LockJobAsync(noChargeConn, noChargeTx, _tenant.TenantId, jobId);
+            await noChargeConn.ExecuteAsync(
+                """
+                UPDATE render.render_jobs
+                   SET status='queued',
+                       current_step='queued',
+                       point_status='not_required',
+                       updated_at=now()
+                 WHERE id=@jobId
+                   AND tenant_id=@tenant
+                   AND job_type=@jobType
+                   AND status='draft';
+                """,
+                new { jobId, tenant = _tenant.TenantId, jobType = RenderJobTypes.CoreService },
+                noChargeTx);
+            await AddBillingEventAsync(
+                noChargeConn,
+                noChargeTx,
+                jobId,
+                "CORE_BILLING_NOT_REQUIRED",
+                "Core job does not require a customer charge.",
+                new { estimate.EstimatedPoints, context.NormalizedChannel });
+            noChargeTx.Commit();
+            return new CoreBillingReservation(true, RenderPointStatuses.NotRequired, 0, null);
+        }
+
+        if (context.CustomerId is not Guid customerId)
+        {
+            return new CoreBillingReservation(false, RenderPointStatuses.Insufficient, 0, "Customer wallet identity is required.");
+        }
+
+        var walletId = await _wallets.EnsureWalletAsync(customerId);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, _tenant.TenantId, jobId);
+
+        var job = await GetJobForUpdateAsync(conn, tx, _tenant.TenantId, jobId);
+        if (job is null || job.CustomerId != customerId)
+        {
+            tx.Commit();
+            return new CoreBillingReservation(false, RenderPointStatuses.Insufficient, 0, "Core job billing scope is invalid.");
+        }
+
+        if (job.PointStatus == RenderPointStatuses.Charged
+            || (job.PointStatus == RenderPointStatuses.Pending && job.Status == RenderJobStatuses.Queued))
+        {
+            tx.Commit();
+            return new CoreBillingReservation(true, job.PointStatus, job.PointCostEstimate, null);
+        }
+
+        if (job.PointStatus == RenderPointStatuses.Insufficient)
+        {
+            tx.Commit();
+            return new CoreBillingReservation(false, job.PointStatus, 0, job.ErrorMessage ?? "Insufficient points.");
+        }
+
+        var wallet = await conn.QuerySingleAsync<WalletRow>(
+            """
+            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance
+              FROM billing.token_wallets
+             WHERE id=@walletId
+               AND customer_id=@customerId
+               AND tenant_id=@tenant
+             FOR UPDATE;
+            """,
+            new { walletId, customerId, tenant = _tenant.TenantId },
+            tx);
+
+        if (wallet.Balance < estimate.EstimatedPoints)
+        {
+            var message = AiImageBillingMessageFormatter.FormatInsufficientPoints(
+                estimate.EstimatedPoints,
+                wallet.Balance,
+                "tạo video");
+            await conn.ExecuteAsync(
+                """
+                UPDATE render.render_jobs
+                   SET status='failed',
+                       current_step='billing',
+                       point_status='insufficient',
+                       error_code='insufficient_points',
+                       error_message=@message,
+                       completed_at=now(),
+                       updated_at=now()
+                 WHERE id=@jobId
+                   AND tenant_id=@tenant;
+                """,
+                new { jobId, tenant = _tenant.TenantId, message },
+                tx);
+            await AddBillingEventAsync(conn, tx, jobId, "CORE_BILLING_INSUFFICIENT", message,
+                new { required = estimate.EstimatedPoints, available = wallet.Balance });
+            tx.Commit();
+            return new CoreBillingReservation(false, RenderPointStatuses.Insufficient, 0, message);
+        }
+
+        await conn.ExecuteAsync(
+            """
+            UPDATE billing.token_wallets
+               SET balance=balance-@amount,
+                   locked_balance=locked_balance+@amount,
+                   updated_at=now()
+             WHERE id=@walletId;
+
+            UPDATE render.render_jobs
+               SET status='queued',
+                   current_step='queued',
+                   point_status='pending',
+                   error_code=NULL,
+                   error_message=NULL,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new { amount = estimate.EstimatedPoints, walletId, jobId, tenant = _tenant.TenantId },
+            tx);
+        await AddBillingEventAsync(conn, tx, jobId, "CORE_BILLING_RESERVED", "Core job points reserved.",
+            new { points = estimate.EstimatedPoints });
+        tx.Commit();
+        return new CoreBillingReservation(true, RenderPointStatuses.Pending, estimate.EstimatedPoints, null);
+    }
+
+    public Task<CoreBillingCompletion> CompleteAsync(Guid jobId, CancellationToken ct = default)
+        => CompleteAsync(new CoreBillingCompletionRequest(jobId), ct);
+
+    public async Task<CoreBillingCompletion> CompleteAsync(
+        CoreBillingCompletionRequest request,
+        CancellationToken ct = default)
+    {
+        var jobId = request.JobId;
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, _tenant.TenantId, jobId);
+
+        var job = await GetJobForUpdateAsync(conn, tx, _tenant.TenantId, jobId);
+        if (job is null)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(false, "missing", 0, "Core job was not found.");
+        }
+
+        if (job.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(
+                false,
+                job.PointStatus,
+                job.PointCostCharged,
+                $"Terminal Core job '{job.Status}' cannot be completed.");
+        }
+
+        if (job.Status == RenderJobStatuses.Completed)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(true, job.PointStatus, job.PointCostCharged, null);
+        }
+
+        var outputJson = request.Output?.GetRawText();
+        if (job.PointStatus == RenderPointStatuses.Charged)
+        {
+            await MarkJobCompletedAsync(
+                conn,
+                tx,
+                _tenant.TenantId,
+                jobId,
+                job.PointCostCharged,
+                RenderPointStatuses.Charged,
+                outputJson);
+            await AddBillingEventAsync(
+                conn,
+                tx,
+                jobId,
+                "CORE_JOB_COMPLETED",
+                request.Message ?? "Core service job completed.",
+                new { pointStatus = RenderPointStatuses.Charged });
+            tx.Commit();
+            return new CoreBillingCompletion(true, job.PointStatus, job.PointCostCharged, null);
+        }
+
+        if (job.PointStatus == RenderPointStatuses.NotRequired)
+        {
+            await MarkJobCompletedAsync(
+                conn,
+                tx,
+                _tenant.TenantId,
+                jobId,
+                chargedPoints: 0,
+                RenderPointStatuses.NotRequired,
+                outputJson);
+            await AddBillingEventAsync(
+                conn,
+                tx,
+                jobId,
+                "CORE_JOB_COMPLETED",
+                request.Message ?? "Core service job completed.",
+                new { pointStatus = RenderPointStatuses.NotRequired });
+            tx.Commit();
+            return new CoreBillingCompletion(true, RenderPointStatuses.NotRequired, 0, null);
+        }
+
+        if (job.PointStatus != RenderPointStatuses.Pending || job.CustomerId is not Guid customerId)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(false, job.PointStatus, job.PointCostCharged,
+                $"Core job cannot complete billing from point status '{job.PointStatus}'.");
+        }
+
+        var wallet = await GetWalletForUpdateAsync(conn, tx, customerId);
+        var release = Math.Min(wallet.LockedBalance, job.PointCostEstimate);
+        await conn.ExecuteAsync(
+            "UPDATE billing.token_wallets SET locked_balance=locked_balance-@release, updated_at=now() WHERE id=@walletId;",
+            new { release, walletId = wallet.Id },
+            tx);
+
+        var transactionId = Guid.NewGuid();
+        await InsertWalletTransactionAsync(
+            conn,
+            tx,
+            transactionId,
+            wallet,
+            "debit",
+            job.PointCostEstimate,
+            wallet.Balance + job.PointCostEstimate,
+            wallet.Balance,
+            job.Id,
+            job.UserId,
+            "Core service job charge.");
+        await MarkJobCompletedAsync(
+            conn,
+            tx,
+            _tenant.TenantId,
+            jobId,
+            job.PointCostEstimate,
+            RenderPointStatuses.Charged,
+            outputJson);
+        await AddBillingEventAsync(conn, tx, jobId, "CORE_BILLING_CHARGED", "Core job points charged.",
+            new { points = job.PointCostEstimate, transactionId });
+        await AddBillingEventAsync(
+            conn,
+            tx,
+            jobId,
+            "CORE_JOB_COMPLETED",
+            request.Message ?? "Core service job completed.",
+            new { pointStatus = RenderPointStatuses.Charged });
+        tx.Commit();
+        return new CoreBillingCompletion(true, RenderPointStatuses.Charged, job.PointCostEstimate, null);
+    }
+
+    public async Task<CoreBillingCompletion> FailAsync(
+        CoreBillingFailureRequest request,
+        CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, _tenant.TenantId, request.JobId);
+
+        var job = await GetJobForUpdateAsync(conn, tx, _tenant.TenantId, request.JobId);
+        if (job is null)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(false, "missing", 0, "Core job was not found.");
+        }
+
+        if (job.Status == RenderJobStatuses.Failed)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(true, job.PointStatus, job.PointCostCharged, null);
+        }
+
+        if (job.Status is RenderJobStatuses.Completed or RenderJobStatuses.Cancelled)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(
+                false,
+                job.PointStatus,
+                job.PointCostCharged,
+                $"Terminal Core job '{job.Status}' cannot be failed.");
+        }
+
+        var nextPointStatus = job.PointStatus;
+        var chargedPoints = job.PointCostCharged;
+        Guid? transactionId = null;
+        if (job.CustomerId is Guid customerId && job.PointCostEstimate > 0)
+        {
+            var wallet = await GetWalletForUpdateAsync(conn, tx, customerId);
+            if (job.PointStatus == RenderPointStatuses.Pending)
+            {
+                var release = Math.Min(wallet.LockedBalance, job.PointCostEstimate);
+                if (request.BillingPolicy == CoreFailureBillingPolicy.KeepCharge)
+                {
+                    await conn.ExecuteAsync(
+                        "UPDATE billing.token_wallets SET locked_balance=locked_balance-@release, updated_at=now() WHERE id=@walletId;",
+                        new { release, walletId = wallet.Id },
+                        tx);
+                    transactionId = Guid.NewGuid();
+                    await InsertWalletTransactionAsync(
+                        conn,
+                        tx,
+                        transactionId.Value,
+                        wallet,
+                        "debit",
+                        job.PointCostEstimate,
+                        wallet.Balance + job.PointCostEstimate,
+                        wallet.Balance,
+                        job.Id,
+                        job.UserId,
+                        "Core service job charge retained after terminal failure.");
+                    nextPointStatus = RenderPointStatuses.Charged;
+                    chargedPoints = job.PointCostEstimate;
+                }
+                else
+                {
+                    await conn.ExecuteAsync(
+                        """
+                        UPDATE billing.token_wallets
+                           SET balance=balance+@release,
+                               locked_balance=locked_balance-@release,
+                               updated_at=now()
+                         WHERE id=@walletId;
+                        """,
+                        new { release, walletId = wallet.Id },
+                        tx);
+                    nextPointStatus = RenderPointStatuses.Cancelled;
+                }
+            }
+            else if (job.PointStatus == RenderPointStatuses.Charged
+                     && request.BillingPolicy == CoreFailureBillingPolicy.RefundCharge)
+            {
+                var balanceBefore = wallet.Balance;
+                var balanceAfter = balanceBefore + job.PointCostCharged;
+                await conn.ExecuteAsync(
+                    "UPDATE billing.token_wallets SET balance=@balanceAfter, updated_at=now() WHERE id=@walletId;",
+                    new { balanceAfter, walletId = wallet.Id },
+                    tx);
+                transactionId = Guid.NewGuid();
+                await InsertWalletTransactionAsync(
+                    conn,
+                    tx,
+                    transactionId.Value,
+                    wallet,
+                    "credit",
+                    job.PointCostCharged,
+                    balanceBefore,
+                    balanceAfter,
+                    job.Id,
+                    job.UserId,
+                    "Core service job explicit trusted refund after terminal failure.");
+                nextPointStatus = RenderPointStatuses.Refunded;
+            }
+        }
+
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status='failed',
+                   current_step='failed',
+                   point_cost_charged=@chargedPoints,
+                   point_status=@pointStatus,
+                   error_code=@errorCode,
+                   error_message=@errorMessage,
+                   lock_owner=NULL,
+                   lock_until=NULL,
+                   completed_at=COALESCE(completed_at, now()),
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new
+            {
+                jobId = request.JobId,
+                tenant = _tenant.TenantId,
+                chargedPoints,
+                pointStatus = nextPointStatus,
+                request.ErrorCode,
+                request.ErrorMessage
+            },
+            tx);
+        await AddBillingEventAsync(
+            conn,
+            tx,
+            request.JobId,
+            "CORE_JOB_FAILED",
+            request.ErrorMessage,
+            new
+            {
+                request.ErrorCode,
+                billingPolicy = request.BillingPolicy.ToString(),
+                pointStatus = nextPointStatus,
+                transactionId
+            });
+        tx.Commit();
+        return new CoreBillingCompletion(true, nextPointStatus, chargedPoints, null);
+    }
+
+    public async Task<CoreBillingCompletion> RefundOrReleaseAsync(
+        Guid jobId,
+        string reason,
+        bool markCancelled,
+        CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, _tenant.TenantId, jobId);
+
+        var job = await GetJobForUpdateAsync(conn, tx, _tenant.TenantId, jobId);
+        if (job is null)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(false, "missing", 0, "Core job was not found.");
+        }
+
+        if (markCancelled && job.Status is RenderJobStatuses.Completed or RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(false, job.PointStatus, job.PointCostCharged,
+                $"Terminal job '{job.Status}' cannot be cancelled.");
+        }
+
+        if (job.PointStatus is RenderPointStatuses.Cancelled or RenderPointStatuses.Refunded)
+        {
+            tx.Commit();
+            return new CoreBillingCompletion(true, job.PointStatus, job.PointCostCharged, null);
+        }
+
+        var nextPointStatus = job.PointStatus;
+        if (job.CustomerId is Guid customerId && job.PointCostEstimate > 0)
+        {
+            var wallet = await GetWalletForUpdateAsync(conn, tx, customerId);
+            if (job.PointStatus == RenderPointStatuses.Pending)
+            {
+                var release = Math.Min(wallet.LockedBalance, job.PointCostEstimate);
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE billing.token_wallets
+                       SET balance=balance+@release,
+                           locked_balance=locked_balance-@release,
+                           updated_at=now()
+                     WHERE id=@walletId;
+                    """,
+                    new { release, walletId = wallet.Id },
+                    tx);
+                nextPointStatus = RenderPointStatuses.Cancelled;
+            }
+            else if (job.PointStatus == RenderPointStatuses.Charged)
+            {
+                var balanceBefore = wallet.Balance;
+                var balanceAfter = balanceBefore + job.PointCostCharged;
+                await conn.ExecuteAsync(
+                    "UPDATE billing.token_wallets SET balance=@balanceAfter, updated_at=now() WHERE id=@walletId;",
+                    new { balanceAfter, walletId = wallet.Id },
+                    tx);
+                await InsertWalletTransactionAsync(
+                    conn,
+                    tx,
+                    Guid.NewGuid(),
+                    wallet,
+                    "credit",
+                    job.PointCostCharged,
+                    balanceBefore,
+                    balanceAfter,
+                    job.Id,
+                    job.UserId,
+                    "Core service job refund.");
+                nextPointStatus = RenderPointStatuses.Refunded;
+            }
+        }
+
+        var nextStatus = markCancelled ? RenderJobStatuses.Cancelled : job.Status;
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status=@status,
+                   current_step=CASE WHEN @markCancelled THEN 'cancelled' ELSE current_step END,
+                   point_status=@pointStatus,
+                   cancel_reason=CASE WHEN @markCancelled THEN @reason ELSE cancel_reason END,
+                   cancelled_at=CASE WHEN @markCancelled THEN now() ELSE cancelled_at END,
+                   completed_at=CASE WHEN @markCancelled THEN COALESCE(completed_at, now()) ELSE completed_at END,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                status = nextStatus,
+                pointStatus = nextPointStatus,
+                reason,
+                markCancelled
+            },
+            tx);
+        await AddBillingEventAsync(
+            conn,
+            tx,
+            jobId,
+            nextPointStatus == RenderPointStatuses.Refunded ? "CORE_BILLING_REFUNDED" : "CORE_BILLING_RELEASED",
+            reason,
+            new { pointStatus = nextPointStatus, markCancelled });
+        tx.Commit();
+        return new CoreBillingCompletion(true, nextPointStatus, job.PointCostCharged, null);
+    }
+
+    public async Task<CoreBillingState?> GetBillingStateAsync(Guid jobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<CoreBillingState>(
+            """
+            SELECT id AS JobId,
+                   point_cost_estimate AS EstimatedPoints,
+                   point_cost_charged AS ChargedPoints,
+                   point_status AS PointStatus
+             FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenant
+               AND job_type=@jobType;
+            """,
+            new { jobId, tenant = _tenant.TenantId, jobType = RenderJobTypes.CoreService });
+    }
+
+    internal static string ResolveQualityTier(JsonElement input)
+    {
+        var explicitTier = ReadString(input, "qualityTier", "quality_tier");
+        if (ServiceSellPriceQualityTiers.IsValid(explicitTier))
+        {
+            return explicitTier!.Trim().ToLowerInvariant();
+        }
+
+        var mode = ReadString(input, "videoMode", "video_mode", "mode");
+        return mode?.Trim().ToLowerInvariant() is "professional" or "premium"
+            ? ServiceSellPriceQualityTiers.Premium
+            : ServiceSellPriceQualityTiers.Standard;
+    }
+
+    private async Task<WalletRow> GetWalletForUpdateAsync(IDbConnection conn, IDbTransaction tx, Guid customerId)
+        => await conn.QuerySingleAsync<WalletRow>(
+            """
+            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance
+              FROM billing.token_wallets
+             WHERE tenant_id=@tenant
+               AND customer_id=@customerId
+             LIMIT 1
+             FOR UPDATE;
+            """,
+            new { tenant = _tenant.TenantId, customerId },
+            tx);
+
+    private async Task AddBillingEventAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        Guid jobId,
+        string eventType,
+        string message,
+        object data)
+        => await conn.ExecuteAsync(
+            """
+            INSERT INTO render.render_job_events
+                (job_id, tenant_id, event_type, level, message, data_json, created_at)
+            VALUES
+                (@jobId, @tenant, @eventType, 'info', @message, CAST(@data AS jsonb), now());
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                eventType,
+                message,
+                data = JsonSerializer.Serialize(data)
+            },
+            tx);
+
+    private static Task LockJobAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        Guid tenantId,
+        Guid jobId)
+        => conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = $"core-billing:{tenantId:N}:{jobId:N}" },
+            tx);
+
+    private static Task<CoreBillingJobRow?> GetJobForUpdateAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        Guid tenantId,
+        Guid jobId)
+        => conn.QuerySingleOrDefaultAsync<CoreBillingJobRow>(
+            """
+            SELECT id AS Id,
+                   customer_id AS CustomerId,
+                   user_id AS UserId,
+                   status AS Status,
+                   point_cost_estimate AS PointCostEstimate,
+                   point_cost_charged AS PointCostCharged,
+                   point_status AS PointStatus,
+                   error_message AS ErrorMessage
+             FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenantId
+               AND job_type=@jobType
+             FOR UPDATE;
+            """,
+            new { jobId, tenantId, jobType = RenderJobTypes.CoreService },
+            tx);
+
+    private static Task MarkJobCompletedAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        Guid tenantId,
+        Guid jobId,
+        decimal chargedPoints,
+        string pointStatus,
+        string? outputJson)
+        => conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status='completed',
+                   current_step='completed',
+                   progress_percent=100,
+                   output_json=CASE WHEN @outputJson IS NULL THEN output_json ELSE CAST(@outputJson AS jsonb) END,
+                   point_cost_charged=@chargedPoints,
+                   point_status=@pointStatus,
+                   completed_at=COALESCE(completed_at, now()),
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenantId;
+            """,
+            new { jobId, tenantId, chargedPoints, pointStatus, outputJson },
+            tx);
+
+    private async Task InsertWalletTransactionAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        Guid transactionId,
+        WalletRow wallet,
+        string transactionType,
+        decimal amount,
+        decimal balanceBefore,
+        decimal balanceAfter,
+        Guid jobId,
+        Guid? userId,
+        string description)
+        => await conn.ExecuteAsync(
+            """
+            INSERT INTO billing.token_transactions
+                (id, tenant_id, wallet_id, transaction_type, amount, balance_before, balance_after,
+                 reference_type, reference_id, description, created_at, created_by)
+            VALUES
+                (@transactionId, @tenant, @walletId, @transactionType, @amount, @balanceBefore, @balanceAfter,
+                 'core_service_job', @jobId, @description, now(), @userId);
+            """,
+            new
+            {
+                transactionId,
+                tenant = _tenant.TenantId,
+                walletId = wallet.Id,
+                transactionType,
+                amount,
+                balanceBefore,
+                balanceAfter,
+                jobId,
+                description,
+                userId
+            },
+            tx);
+
+    private static string? ReadString(JsonElement input, params string[] names)
+    {
+        if (input.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var property in input.EnumerateObject())
+        {
+            if (names.Any(name => string.Equals(name, property.Name, StringComparison.OrdinalIgnoreCase))
+                && property.Value.ValueKind == JsonValueKind.String)
+            {
+                return property.Value.GetString();
+            }
+        }
+
+        return null;
+    }
+
+    private static int? ReadInt(JsonElement input, params string[] names)
+    {
+        if (input.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var property in input.EnumerateObject())
+        {
+            if (!names.Any(name => string.Equals(name, property.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (property.Value.TryGetInt32(out var number))
+            {
+                return Math.Max(0, number);
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.String
+                && int.TryParse(property.Value.GetString(), out number))
+            {
+                return Math.Max(0, number);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool? ReadBool(JsonElement input, params string[] names)
+    {
+        if (input.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var property in input.EnumerateObject())
+        {
+            if (!names.Any(name => string.Equals(name, property.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                return property.Value.GetBoolean();
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.String
+                && bool.TryParse(property.Value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private sealed class WalletRow
+    {
+        public Guid Id { get; init; }
+        public decimal Balance { get; init; }
+        public decimal LockedBalance { get; init; }
+    }
+
+    private sealed class CoreBillingJobRow
+    {
+        public Guid Id { get; init; }
+        public Guid? CustomerId { get; init; }
+        public Guid? UserId { get; init; }
+        public string Status { get; init; } = string.Empty;
+        public decimal PointCostEstimate { get; init; }
+        public decimal PointCostCharged { get; init; }
+        public string PointStatus { get; init; } = RenderPointStatuses.NotRequired;
+        public string? ErrorMessage { get; init; }
+    }
+}

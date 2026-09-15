@@ -1,0 +1,312 @@
+@page "/admin/system/diagnostics"
+@using TodoX.Web.Services.DanceSell
+@using TodoX.Web.Services.SystemDiagnostics
+@inject ISystemDiagnosticsService Diagnostics
+@inject AccountService Accounts
+@inject AuthStateService AuthState
+@inject ISnackbar Snackbar
+
+<PageTitle>System diagnostics</PageTitle>
+
+@if (!_initialized)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else if (!_admin)
+{
+    <MudAlert Severity="Severity.Error">Admin permission required.</MudAlert>
+}
+else
+{
+    <MudStack Spacing="3">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+            <div>
+                <MudText Typo="Typo.h4" Class="todox-page-title">System diagnostics</MudText>
+                <MudText Class="todox-page-subtitle">Runtime build, database schema, and RDance job load checks.</MudText>
+            </div>
+            <MudStack Row="true" Spacing="2">
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadBuildInfo">Refresh</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.HealthAndSafety" OnClick="RunFullDiagnosticAsync" Disabled="_runningFull">Run Full Diagnostic</MudButton>
+            </MudStack>
+        </MudStack>
+
+        <MudGrid>
+            <MudItem xs="12" lg="6">
+                <MudPaper Class="todox-panel pa-4" Elevation="0">
+                    <MudText Typo="Typo.h6">Application Runtime</MudText>
+                    @foreach (var item in BuildInfoRows)
+                    {
+                        <MudStack Row="true" Justify="Justify.SpaceBetween" Class="gap-3 py-1">
+                            <MudText Color="Color.Secondary">@item.Key</MudText>
+                            <MudText Align="Align.Right">@item.Value</MudText>
+                        </MudStack>
+                    }
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" lg="6">
+                <MudPaper Class="todox-panel pa-4" Elevation="0">
+                    <MudText Typo="Typo.h6">Deployment Status</MudText>
+                    <MudStack Row="true" Justify="Justify.SpaceBetween" Class="gap-3 py-1">
+                        <MudText Color="Color.Secondary">Running commit</MudText>
+                        <MudText Align="Align.Right">@_build.CommitSha</MudText>
+                    </MudStack>
+                    <MudStack Row="true" Justify="Justify.SpaceBetween" Class="gap-3 py-1">
+                        <MudText Color="Color.Secondary">Expected branch</MudText>
+                        <MudText Align="Align.Right">@_build.Branch</MudText>
+                    </MudStack>
+                    <MudStack Row="true" Justify="Justify.SpaceBetween" Class="gap-3 py-1">
+                        <MudText Color="Color.Secondary">Build time</MudText>
+                        <MudText Align="Align.Right">@_build.BuildTimeUtc</MudText>
+                    </MudStack>
+                    <MudStack Row="true" Justify="Justify.SpaceBetween" Class="gap-3 py-1">
+                        <MudText Color="Color.Secondary">Publish time</MudText>
+                        <MudText Align="Align.Right">@_build.PublishTimeUtc</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        @if (_snapshot is not null)
+        {
+            <MudGrid>
+                <MudItem xs="12" md="5">
+                    <MudPaper Class="todox-panel pa-4" Elevation="0">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.h6">Database</MudText>
+                            <MudChip T="string" Color="@StatusColor(_snapshot.Database.Status)" Size="Size.Small">@StatusText(_snapshot.Database.Status)</MudChip>
+                        </MudStack>
+                        <MudText Class="mt-2">@_snapshot.Database.Message</MudText>
+                        <MudDivider Class="my-3" />
+                        <MudText Color="Color.Secondary">Server/version</MudText>
+                        <MudText Typo="Typo.body2">@Display(_snapshot.Database.ServerVersion)</MudText>
+                        <MudText Color="Color.Secondary" Class="mt-2">Current tenant</MudText>
+                        <MudText Typo="Typo.body2">@Display(_snapshot.Database.TenantId) (@Display(_snapshot.Database.TenantCode))</MudText>
+                        @if (_snapshot.Database.Exception is not null)
+                        {
+                            @RenderException(_snapshot.Database.Exception)
+                        }
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12" md="7">
+                    <MudPaper Class="todox-panel pa-4" Elevation="0">
+                        <MudText Typo="Typo.h6">RDance Schema Compatibility</MudText>
+                        <MudSimpleTable Dense="true" Class="mt-2">
+                            <thead>
+                                <tr>
+                                    <th>Column</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var column in _snapshot.Database.RDanceColumns)
+                                {
+                                    <tr>
+                                        <td>@column.ColumnName</td>
+                                        <td><MudChip T="string" Color="@StatusColor(column.Status)" Size="Size.Small">@ColumnStatus(column)</MudChip></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            <MudPaper Class="todox-panel pa-4" Elevation="0">
+                <MudText Typo="Typo.h6">Health Check</MudText>
+                <MudSimpleTable Dense="true" Class="mt-2">
+                    <thead>
+                        <tr>
+                            <th>Check</th>
+                            <th>Status</th>
+                            <th>Message</th>
+                            <th>Timestamp UTC</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var check in _snapshot.Checks)
+                        {
+                            <tr>
+                                <td>@check.Name</td>
+                                <td><MudChip T="string" Color="@StatusColor(check.Status)" Size="Size.Small">@StatusText(check.Status)</MudChip></td>
+                                <td>@check.Message</td>
+                                <td>@check.CheckedAtUtc.ToString("o")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        }
+
+        <MudPaper Class="todox-panel pa-4" Elevation="0">
+            <MudText Typo="Typo.h6">RDance Job Diagnostic</MudText>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="gap-3 mt-2 flex-wrap">
+                <MudTextField T="string" @bind-Value="_rdanceJobIdText" Label="Job ID" Variant="Variant.Outlined" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Tag" Style="min-width: 320px;" />
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Search" OnClick="DiagnoseRDanceJobAsync" Disabled="_runningJob">Check RDance Job</MudButton>
+            </MudStack>
+
+            @if (_jobDiagnostic is not null)
+            {
+                <MudDivider Class="my-3" />
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudChip T="string" Color="@StatusColor(_jobDiagnostic.Status)" Size="Size.Small">@StatusText(_jobDiagnostic.Status)</MudChip>
+                    <MudText>@_jobDiagnostic.Message</MudText>
+                </MudStack>
+
+                @if (_jobDiagnostic.Job is not null)
+                {
+                    <MudSimpleTable Dense="true" Class="mt-2">
+                        <tbody>
+                            @foreach (var item in JobRows(_jobDiagnostic.Job))
+                            {
+                                <tr>
+                                    <td>@item.Key</td>
+                                    <td>@item.Value</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+
+                @if (_jobDiagnostic.Exception is not null)
+                {
+                    @RenderException(_jobDiagnostic.Exception)
+                }
+            }
+        </MudPaper>
+    </MudStack>
+}
+
+@code {
+    private bool _initialized;
+    private bool _admin;
+    private bool _runningFull;
+    private bool _runningJob;
+    private RuntimeBuildInfo _build = new();
+    private SystemDiagnosticsSnapshot? _snapshot;
+    private RDanceJobDiagnosticResult? _jobDiagnostic;
+    private string _rdanceJobIdText = "bdb30808-6098-48ab-a47c-fbd6fe29aaa7";
+
+    private IEnumerable<KeyValuePair<string, string>> BuildInfoRows =>
+    [
+        new("Application", _build.ApplicationName),
+        new("Environment", _build.Environment),
+        new("Branch", _build.Branch),
+        new("Commit SHA", _build.CommitSha),
+        new("Commit short SHA", _build.CommitShortSha),
+        new("Commit message", _build.CommitMessage),
+        new("Build time", _build.BuildTimeUtc),
+        new("Publish time", _build.PublishTimeUtc),
+        new("Assembly version", _build.AssemblyVersion),
+        new("Informational version", _build.InformationalVersion),
+        new(".NET runtime", _build.RuntimeVersion),
+        new("Machine", _build.MachineName),
+        new("Process start time", _build.ProcessStartTimeUtc)
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized)
+        {
+            await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        }
+
+        _admin = AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
+        _initialized = true;
+        LoadBuildInfo();
+    }
+
+    private void LoadBuildInfo()
+    {
+        _build = Diagnostics.GetBuildInfo();
+    }
+
+    private async Task RunFullDiagnosticAsync()
+    {
+        if (!_admin) return;
+        _runningFull = true;
+        try
+        {
+            _snapshot = await Diagnostics.RunFullDiagnosticAsync();
+        }
+        finally
+        {
+            _runningFull = false;
+        }
+    }
+
+    private async Task DiagnoseRDanceJobAsync()
+    {
+        if (!_admin) return;
+        if (!Guid.TryParse(_rdanceJobIdText, out var jobId))
+        {
+            Snackbar.Add("Invalid job ID.", Severity.Warning);
+            return;
+        }
+
+        _runningJob = true;
+        try
+        {
+            _jobDiagnostic = await Diagnostics.DiagnoseRDanceJobAsync(jobId, AuthState.CurrentUser!);
+        }
+        finally
+        {
+            _runningJob = false;
+        }
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> JobRows(DanceSellJobDto job) =>
+    [
+        new("Job exists", "YES"),
+        new("User", Display(job.UserId)),
+        new("Customer", Display(job.CustomerId)),
+        new("Tenant", Display(job.TenantId)),
+        new("Status", Display(job.Status)),
+        new("RenderJobId", Display(job.RenderJobId)),
+        new("Motion media", Display(job.MotionVideoMediaId)),
+        new("Motion URL", Display(job.MotionVideoUrl)),
+        new("Motion source", Display(job.MotionSourceType)),
+        new("Reference status", Display(job.PreparedReferenceStatus)),
+        new("PreparedReferenceUrl", Display(job.PreparedReferenceUrl)),
+        new("ResultVideoUrl", Display(job.ResultVideoUrl))
+    ];
+
+    private static string ColumnStatus(RDanceSchemaColumnCheck column)
+        => column.Exists ? "exists" : "does not exist";
+
+    private static string Display(object? value)
+        => value is null || string.IsNullOrWhiteSpace(value.ToString()) ? "-" : value.ToString()!;
+
+    private static string StatusText(DiagnosticStatus status) => status switch
+    {
+        DiagnosticStatus.Pass => "PASS",
+        DiagnosticStatus.Warning => "WARNING",
+        DiagnosticStatus.Fail => "FAIL",
+        _ => "UNKNOWN"
+    };
+
+    private static Color StatusColor(DiagnosticStatus status) => status switch
+    {
+        DiagnosticStatus.Pass => Color.Success,
+        DiagnosticStatus.Warning => Color.Warning,
+        DiagnosticStatus.Fail => Color.Error,
+        _ => Color.Default
+    };
+
+    private RenderFragment RenderException(ExceptionDiagnostic exception) => @<MudExpansionPanels Class="mt-3">
+        <MudExpansionPanel Text="Exception details">
+            <MudSimpleTable Dense="true">
+                <tbody>
+                    <tr><td>Exception type</td><td>@exception.Type</td></tr>
+                    <tr><td>PostgreSQL error code</td><td>@Display(exception.SqlState)</td></tr>
+                    <tr><td>Message</td><td>@exception.Message</td></tr>
+                    <tr><td>Repository/method</td><td>@Display(exception.RepositoryOrMethod)</td></tr>
+                    <tr><td>Inner exception</td><td>@Display(exception.InnerException)</td></tr>
+                </tbody>
+            </MudSimpleTable>
+            <MudText Typo="Typo.subtitle2" Class="mt-3">Stack trace</MudText>
+            <pre style="white-space: pre-wrap; overflow:auto;">@exception.StackTrace</pre>
+        </MudExpansionPanel>
+    </MudExpansionPanels>;
+}

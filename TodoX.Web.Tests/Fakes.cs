@@ -19,10 +19,16 @@ internal sealed class FakeMediaService : IMediaFileService
     public Task<MediaFileDto?> GetByObjectKeyAsync(string objectKey, CancellationToken ct = default)
         => throw new NotImplementedException();
 
+    public Task<MediaFileDto?> GetByObjectKeyAsync(Guid tenantId, string objectKey, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
     public Task<MediaFileDto?> GetByPublicUrlAsync(string publicUrl, CancellationToken ct = default)
         => throw new NotImplementedException();
 
     public Task<byte[]?> ReadBytesAsync(Guid id, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    public Task<Stream?> OpenReadAsync(Guid id, CancellationToken ct = default)
         => throw new NotImplementedException();
 
     public Task<MediaFileDto> ReplaceContentAsync(Guid mediaId, byte[] content, string mimeType, Guid userId, CancellationToken ct = default)

@@ -1,0 +1,635 @@
+using System.Net;
+using System.Reflection;
+using System.Runtime.Serialization;
+using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services.Render;
+using TodoX.Web.Services.VideoRender;
+using Xunit;
+
+namespace TodoX.Web.Tests;
+
+public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
+{
+    private static readonly BindingFlags NonPublicStatic = BindingFlags.NonPublic | BindingFlags.Static;
+
+    [Fact]
+    public async Task RVideoSubmitContinuesWhenRequestDiagnosticCallbackFails()
+    {
+        var client = new SubmitClient();
+        var service = CreateRVideoService(client);
+        var callbackCalls = 0;
+
+        var result = await service.SubmitAsync(CreateSubmitRequest((_, _) =>
+        {
+            callbackCalls++;
+            if (callbackCalls == 1)
+                throw new InvalidOperationException("diagnostic sink failed");
+            return Task.CompletedTask;
+        }));
+
+        Assert.Equal(1, client.SubmitCalls);
+        Assert.Equal("video-base-1", result.TaskId);
+        Assert.Equal("task-1", result.ProviderTaskId);
+        Assert.Equal("video-base-1", result.ProviderVideoIdBase);
+        Assert.Equal(2, callbackCalls);
+    }
+
+    [Fact]
+    public async Task RVideoSubmitContinuesWhenResponseDiagnosticCallbackFails()
+    {
+        var client = new SubmitClient();
+        var service = CreateRVideoService(client);
+        var stages = new List<VideoProviderHttpSubmitDiagnosticStage>();
+
+        var result = await service.SubmitAsync(CreateSubmitRequest((diagnostic, _) =>
+        {
+            stages.Add(diagnostic.Stage);
+            if (diagnostic.Stage == VideoProviderHttpSubmitDiagnosticStage.Response)
+                throw new InvalidOperationException("diagnostic sink failed");
+            return Task.CompletedTask;
+        }));
+
+        Assert.Equal("video-base-1", result.TaskId);
+        Assert.Equal(new[] { VideoProviderHttpSubmitDiagnosticStage.Request, VideoProviderHttpSubmitDiagnosticStage.Response }, stages);
+    }
+
+    [Fact]
+    public async Task RVideoSubmitPreservesOriginalAi79ExceptionWhenResponseDiagnosticFails()
+    {
+        var expected = new Ai79TaskSubmitException(
+            "provider failed",
+            """{"error":"unavailable"}""",
+            System.Net.HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable");
+        var client = new SubmitClient { Exception = expected };
+        var service = CreateRVideoService(client);
+
+        var actual = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => service.SubmitAsync(CreateSubmitRequest((_, _) =>
+            throw new InvalidOperationException("diagnostic sink failed"))));
+
+        Assert.Same(expected, actual);
+        Assert.Equal(expected.ErrorCode, actual.ErrorCode);
+        Assert.Equal(expected.HttpStatusCode, actual.HttpStatusCode);
+        Assert.Equal(expected.SanitizedResponseJson, actual.SanitizedResponseJson);
+    }
+
+    [Fact]
+    public async Task RVideoSubmitPropagatesCallerCancellationFromDiagnosticCallback()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var client = new SubmitClient();
+        var service = CreateRVideoService(client);
+        var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task> callback = async (_, _) =>
+        {
+            callbackStarted.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellation.Token);
+        };
+
+        var submit = service.SubmitAsync(CreateSubmitRequest(callback), cancellation.Token);
+        await callbackStarted.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => submit);
+        Assert.Equal(0, client.SubmitCalls);
+    }
+
+    private static RVideo79AiVideoService CreateRVideoService(SubmitClient client)
+        => new(null!, null!, null!, client, null!, new ConfigurationBuilder().Build(), NullLogger<RVideo79AiVideoService>.Instance);
+
+    private static RVideo79AiVideoSubmitRequest CreateSubmitRequest(
+        Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task>? callback)
+        => new(
+            new RVideo79AiRuntime(
+                18, 99, "79ai", "https://api.example.test", "/create-video", "/video", "/image-upload",
+                "79ai.net", "project-1", new ResolvedProviderCredential { Secret = "secret" }, null, null, 0),
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast"),
+            "prompt", "16:9", "720p", 4, null, [], callback);
+
+    private sealed class SubmitClient : IAi79TaskClient
+    {
+        public int SubmitCalls { get; private set; }
+        public Ai79TaskSubmitException? Exception { get; init; }
+
+        public Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
+        {
+            SubmitCalls++;
+            if (Exception is not null) throw Exception;
+            return Task.FromResult(new Ai79TaskSubmitResult(
+                "legacy-task", """{"task_id":"task-1","id_base":"video-base-1","status":"PENDING"}""",
+                "task-1", "video-base-1", System.Net.HttpStatusCode.OK));
+        }
+
+        public Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void BuildSubmitRequestMetadata_IncludesSafeEffectiveFieldsAndImageMetadata()
+    {
+        var method = typeof(Ai79TaskClient).GetMethod("BuildSubmitRequestMetadata", NonPublicStatic);
+        Assert.NotNull(method);
+
+        var metadata = (string)method!.Invoke(null, new object?[]
+        {
+            "https://api.example.com/base",
+            "/submitVideo",
+            "79ai.net",
+            "seedream_5_0",
+            Ai79TaskOperation.Video,
+            "vip",
+            "12",
+            "16:9",
+            "16:9",
+            "1080p",
+            "motion",
+            "project-1",
+            "private",
+            "yes",
+            new[] { "https://cdn.example/video.jpg", "https://cdn.example/video.jpg" },
+            "image",
+            "image_2",
+            new Dictionary<string, string?>
+            {
+                ["custom_flag"] = "on",
+                ["access_token"] = "secret",
+                ["Authorization"] = "Bearer token",
+                ["credential"] = "hidden",
+                ["ciphertext"] = "blocked"
+            },
+            2
+        })!;
+
+        using var doc = JsonDocument.Parse(metadata);
+        Assert.Equal("vip", doc.RootElement.GetProperty("mode").GetString());
+        Assert.Equal("12", doc.RootElement.GetProperty("duration").GetString());
+        Assert.Equal("16:9", doc.RootElement.GetProperty("ratio").GetString());
+        Assert.Equal("16:9", doc.RootElement.GetProperty("aspect_ratio").GetString());
+        Assert.Equal("1080p", doc.RootElement.GetProperty("resolution").GetString());
+        Assert.Equal("motion", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("project-1", doc.RootElement.GetProperty("project_id").GetString());
+        Assert.Equal("private", doc.RootElement.GetProperty("privacy").GetString());
+        Assert.Equal("yes", doc.RootElement.GetProperty("translate_to_en").GetString());
+        Assert.Equal(2, doc.RootElement.GetProperty("imageCount").GetInt32());
+        Assert.Equal("custom_flag", Assert.Single(doc.RootElement.GetProperty("extraFieldNames").EnumerateArray()).GetString());
+
+        var images = doc.RootElement.GetProperty("images");
+        Assert.True(images[0].GetProperty("present").GetBoolean());
+        Assert.Equal("cdn.example", images[0].GetProperty("urlHost").GetString());
+        Assert.Equal("/video.jpg", images[0].GetProperty("urlPath").GetString());
+        Assert.Equal("https://cdn.example/video.jpg", images[0].GetProperty("sanitizedUrl").GetString());
+        Assert.True(images[1].GetProperty("isImage2").GetBoolean());
+        Assert.True(images[1].GetProperty("duplicateOfPrevious").GetBoolean());
+        Assert.DoesNotContain("access_token", metadata, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Authorization", metadata, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential", metadata, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ciphertext", metadata, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BuildSubmitFailureDiagnostics_HandlesDirectAndWrappedSubmitExceptions(bool wrapped)
+    {
+        var metadataMethod = typeof(Ai79TaskClient).GetMethod("BuildSubmitRequestMetadata", NonPublicStatic);
+        Assert.NotNull(metadataMethod);
+
+        var metadata = (string)metadataMethod!.Invoke(null, new object?[]
+        {
+            "https://api.example.com/base",
+            "/submitVideo",
+            "79ai.net",
+            "seedream_5_0",
+            Ai79TaskOperation.Video,
+            "vip",
+            "12",
+            "16:9",
+            "16:9",
+            "1080p",
+            "motion",
+            "project-1",
+            "private",
+            "yes",
+            Array.Empty<string>(),
+            null,
+            null,
+            new Dictionary<string, string?>(),
+            0
+        })!;
+
+        var submitException = new Ai79TaskSubmitException(
+            "79AI submit failed.",
+            """{"ok":false}""",
+            HttpStatusCode.BadRequest,
+            "submit_failed",
+            sanitizedRequestMetadataJson: metadata);
+
+        Exception exception = wrapped
+            ? new VideoProviderTransientException("wrapped", "submit_transient", submitException)
+            : submitException;
+
+        var diagnosticsMethod = typeof(SceneVideoWorkerHandler).GetMethod("BuildSubmitFailureDiagnostics", NonPublicStatic);
+        Assert.NotNull(diagnosticsMethod);
+
+        var diagnostics = diagnosticsMethod!.Invoke(null, new object?[] { exception });
+        Assert.NotNull(diagnostics);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(diagnostics));
+        Assert.Equal("submit_failed", doc.RootElement.GetProperty("providerErrorCode").GetString());
+        Assert.Equal("79AI submit failed.", doc.RootElement.GetProperty("providerErrorMessage").GetString());
+        var requestMetadata = doc.RootElement.GetProperty("sanitizedRequestMetadata").GetString();
+        Assert.NotNull(requestMetadata);
+        using var metadataDoc = JsonDocument.Parse(requestMetadata!);
+        Assert.Equal("vip", metadataDoc.RootElement.GetProperty("mode").GetString());
+    }
+
+    [Fact]
+    public void SceneVideoJobWorkerPersistsAi79SubmitDiagnosticsWithoutSecrets()
+    {
+        var job = new RenderJobDto
+        {
+            ModelCode = "veo_omni",
+            AttemptCount = 3,
+            MaxAttempts = 3
+        };
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit failed.",
+            """{"error":"unavailable","accessToken":"raw-access-token","apiKey":"raw-api-key","Authorization":"Bearer raw-token"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable",
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video","accessToken":"raw-access-token","apiKey":"raw-api-key","Authorization":"Bearer raw-token"}""");
+
+        var method = typeof(SceneVideoJobWorker).GetMethod(
+            "BuildAi79SubmitDiagnostics",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var diagnostics = method!.Invoke(null, new object[] { job, exception });
+        Assert.NotNull(diagnostics);
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(diagnostics));
+        var root = document.RootElement;
+        Assert.Equal("Ai79TaskSubmitException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("79ai", root.GetProperty("provider").GetString());
+        Assert.Equal("veo_omni", root.GetProperty("model").GetString());
+        Assert.Equal(503, root.GetProperty("httpStatusCode").GetInt32());
+        Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
+        Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
+        Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
+        Assert.DoesNotContain("raw-access-token", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-api-key", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("raw-access-token", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-api-key", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SceneVideoJobWorkerFailureEventDataHasCompleteDiagnosticShape()
+    {
+        var job = new RenderJobDto
+        {
+            ModelCode = "veo_omni",
+            AttemptCount = 3,
+            MaxAttempts = 3
+        };
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit failed.",
+            """{"error":"unavailable"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable",
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video"}""");
+
+        var method = typeof(SceneVideoJobWorker).GetMethod(
+            "BuildJobFailureEventData",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var eventData = method!.Invoke(null, new object[] { job, exception });
+        Assert.NotNull(eventData);
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(eventData));
+        var root = document.RootElement;
+        Assert.Equal(
+            new[]
+            {
+                "attemptCount",
+                "exceptionType",
+                "httpStatusCode",
+                "maxAttempts",
+                "model",
+                "provider",
+                "providerErrorCode",
+                "sanitizedRequestMetadataJson",
+                "sanitizedResponseJson"
+            },
+            root.EnumerateObject().Select(property => property.Name).OrderBy(name => name));
+        Assert.Equal("Ai79TaskSubmitException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("79ai", root.GetProperty("provider").GetString());
+        Assert.Equal("veo_omni", root.GetProperty("model").GetString());
+        Assert.Equal(503, root.GetProperty("httpStatusCode").GetInt32());
+        Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
+        Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
+        Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
+        Assert.Equal("""{"error":"unavailable"}""", root.GetProperty("sanitizedResponseJson").GetString());
+        Assert.Equal("""{"endpoint":"/create-video"}""", root.GetProperty("sanitizedRequestMetadataJson").GetString());
+    }
+
+    [Fact]
+    public void SceneVideoPendingReconciliationEventDataKeepsAi79DiagnosticsAndRetryBudget()
+    {
+        var job = new RenderJobDto
+        {
+            ModelCode = "veo_omni",
+            AttemptCount = 3,
+            MaxAttempts = 3
+        };
+        var submitException = new Ai79TaskSubmitException(
+            "79AI video submit failed.",
+            """{"error":"unavailable","access_token":"secret-response"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable",
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video","access_token":"secret-request"}""");
+        var exception = new RenderJobPendingReconciliationException(
+            "Video provider submit outcome is unknown.",
+            new VideoProviderTransientException("wrapped", "submit_transient", submitException));
+
+        var method = typeof(SceneVideoJobWorker).GetMethod(
+            "BuildJobFailureEventData",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var eventData = method!.Invoke(null, new object[] { job, exception });
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(eventData));
+        var root = document.RootElement;
+        Assert.Equal("Ai79TaskSubmitException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("79ai", root.GetProperty("provider").GetString());
+        Assert.Equal("veo_omni", root.GetProperty("model").GetString());
+        Assert.Equal(503, root.GetProperty("httpStatusCode").GetInt32());
+        Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
+        Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
+        Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
+        Assert.DoesNotContain("secret-response", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-request", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SceneVideoJobWorkerWritesAi79DiagnosticsBeforeRetryAndKeepsRetryPolicy()
+    {
+        var source = ReadRepoFile("Services", "Render", "SceneVideoJobWorker.cs");
+        var diagnosticsIndex = source.IndexOf("AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken)", StringComparison.Ordinal);
+        var retryIndex = source.IndexOf("var shouldRetry = job.AttemptCount < job.MaxAttempts;", StringComparison.Ordinal);
+
+        Assert.True(diagnosticsIndex >= 0);
+        Assert.True(retryIndex > diagnosticsIndex);
+        Assert.Contains("await jobs.ScheduleRetryAsync(job.Id, delay, ex.GetType().Name, ex.Message, stoppingToken);", source);
+        Assert.Contains("\"RVIDEO_79AI_SUBMIT_DIAGNOSTICS\"", source);
+        Assert.Contains("BuildJobFailureEventData(job, ex)", source);
+    }
+
+    [Fact]
+    public void SceneVideoSubmitCatchPersistsCompleteAi79DiagnosticsWithoutSecrets()
+    {
+        var source = ReadRepoFile("Services", "Render", "SceneVideoJobWorker.cs");
+
+        Assert.Contains("AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken)", source);
+        Assert.Contains("exceptionType = nameof(Ai79TaskSubmitException)", source);
+        Assert.Contains("provider = \"79ai\"", source);
+        Assert.Contains("model = job.ModelCode", source);
+        Assert.Contains("httpStatusCode = (int?)ai79.HttpStatusCode", source);
+        Assert.Contains("providerErrorCode = ai79.ErrorCode", source);
+        Assert.Contains("sanitizedResponseJson = SanitizeDiagnosticJson(ai79.SanitizedResponseJson)", source);
+        Assert.Contains("sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ai79.SanitizedRequestMetadataJson)", source);
+        Assert.Contains("attemptCount = job.AttemptCount", source);
+        Assert.Contains("maxAttempts = job.MaxAttempts", source);
+        Assert.Contains("RVIDEO_79AI_SUBMIT_DIAGNOSTICS", source);
+        Assert.DoesNotContain("exception.AccessToken", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exception.Authorization", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exception.Credential", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RecoverableStuckDetection_RequiresFailedJobAndBlankProviderTask()
+    {
+        var service = (RVideoSceneVideoRecoveryService)FormatterServices.GetUninitializedObject(typeof(RVideoSceneVideoRecoveryService));
+
+        var version = new SceneVideoVersionDto
+        {
+            Status = "queued",
+            ProviderTaskId = null
+        };
+        var job = new RenderJobDto
+        {
+            JobType = RenderJobTypes.RenderSceneVideo,
+            Status = RenderJobStatuses.Failed
+        };
+
+        Assert.True(service.IsRecoverableStuck(version, job));
+
+        version.ProviderTaskId = "task-1";
+        Assert.False(service.IsRecoverableStuck(version, job));
+
+        version.ProviderTaskId = null;
+        job.Status = RenderJobStatuses.Rendering;
+        Assert.False(service.IsRecoverableStuck(version, job));
+
+        job.Status = RenderJobStatuses.Failed;
+        version.Status = "completed";
+        Assert.False(service.IsRecoverableStuck(version, job));
+    }
+
+    [Fact]
+    public void SceneVideoUnknownSubmitReusesThePendingVersionWithoutBlindResubmission()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var versions = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        Assert.Contains("IsUnknownSubmission(version, providerTaskId, providerVideoIdBase)", worker);
+        Assert.Contains("RVIDEO_VIDEO_SUBMIT_UNKNOWN", worker);
+        Assert.Contains("RVIDEO_VIDEO_PENDING_RECONCILIATION", worker);
+        Assert.Contains("throw new RenderJobPendingReconciliationException", worker);
+        Assert.Contains("lower(status)='pending_reconciliation'", versions);
+        Assert.Contains("provider_task_id IS NULL OR btrim(provider_task_id) = ''", versions);
+    }
+
+    [Fact]
+    public void Ai79IdentifierPersistenceUsesSeparateTaskAndVideoBaseColumns()
+    {
+        var jobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var versions = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var adapter = ReadRepoFile("Services", "VideoRender", "Ai79VideoGenerationProviderAdapter.cs");
+
+        Assert.Contains("provider_task_id=@providerTaskId", jobs);
+        Assert.Contains("provider_video_id_base=@providerVideoIdBase", jobs);
+        Assert.Contains("provider_task_id=@providerTaskId", versions);
+        Assert.Contains("provider_video_id_base=@providerVideoIdBase", versions);
+        Assert.Contains("await _jobs.SetProviderIdentifiersAsync(job.Id, providerTaskId, providerVideoIdBase, ct)", worker);
+        Assert.Contains("result.ProviderTaskId ?? string.Empty", adapter);
+        Assert.Contains("providerVideoIdBase", adapter);
+    }
+
+    [Fact]
+    public void Ai79PollingUsesOnlyPersistedVideoBaseAndDoesNotReferenceMetadataColumn()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var service = ReadRepoFile("Services", "VideoRender", "RVideo79AiVideoService.cs");
+        var repository = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var jobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var versions = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        Assert.Contains("string? taskId = providerVideoIdBase", worker);
+        Assert.Contains("TaskIdField: \"videoId\"", service);
+        Assert.Contains("v.provider_video_id_base IS NOT NULL", repository);
+        Assert.Contains("providerPollCount", jobs);
+        Assert.DoesNotContain("ProviderTaskIdMetadata", worker, StringComparison.Ordinal);
+        Assert.DoesNotContain("providerTaskIdMetadata", versions, StringComparison.Ordinal);
+        Assert.DoesNotContain("providertaskidmetadata", jobs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SceneVideoReconciliationCanRestartKnownTasksAfterTheOriginalJobFailed()
+    {
+        var repository = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var jobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+
+        Assert.Contains("j.status NOT IN ('completed', 'cancelled')", repository);
+        Assert.Contains("v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')", repository);
+        Assert.Contains("'pending_reconciliation', 'failed'", jobs);
+    }
+
+    [Fact]
+    public void SceneVideoProviderSuccessDownloadsAndCompletesBeforeTheParentCanAdvance()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var completion = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
+
+        var downloadIndex = worker.IndexOf("\"RVIDEO_VIDEO_DOWNLOAD_STARTED\"", StringComparison.Ordinal);
+        var completeIndex = worker.IndexOf("\"RVIDEO_VIDEO_COMPLETED\"", StringComparison.Ordinal);
+        Assert.True(downloadIndex >= 0);
+        Assert.True(completeIndex > downloadIndex);
+        Assert.Contains("RVIDEO_VIDEO_DOWNLOAD_COMPLETED", worker);
+        Assert.Contains("CompleteSceneVideoVersionAsync", completion);
+        Assert.Contains("selected_video_version_id=@versionId", ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs"));
+    }
+
+    [Fact]
+    public void SceneVideoProviderEventsCarryPersistentCorrelationFields()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        foreach (var eventName in new[]
+                 {
+                     "RVIDEO_VIDEO_SUBMIT_STARTED",
+                     "RVIDEO_VIDEO_SUBMITTED",
+                     "RVIDEO_VIDEO_SUBMIT_UNKNOWN",
+                     "RVIDEO_VIDEO_PENDING_RECONCILIATION",
+                     "RVIDEO_VIDEO_POLL_STARTED",
+                     "RVIDEO_VIDEO_POLL_COMPLETED",
+                     "RVIDEO_VIDEO_DOWNLOAD_STARTED",
+                     "RVIDEO_VIDEO_DOWNLOAD_COMPLETED",
+                     "RVIDEO_VIDEO_COMPLETED",
+                     "RVIDEO_VIDEO_DOWNLOAD_FAILED",
+                     "RVIDEO_VIDEO_RECONCILIATION_STARTED",
+                     "RVIDEO_VIDEO_RECONCILIATION_COMPLETED"
+                 })
+        {
+            Assert.Contains(eventName, worker);
+        }
+
+        Assert.Contains("logicalRequestId", worker);
+        Assert.Contains("providerCode", worker);
+        Assert.Contains("modelCode", worker);
+        Assert.Contains("providerTaskId", worker);
+    }
+
+    [Theory]
+    [InlineData("/uploads/a.png", "https://dashboard.example/uploads/a.png")]
+    [InlineData("uploads/a.png", "https://dashboard.example/uploads/a.png")]
+    [InlineData("https://example.com/uploads/a.png", "https://example.com/uploads/a.png")]
+    public void RVideo79AiSubmitImageUrlsAreAbsoluteAndNormalized(string input, string expected)
+        => Assert.Equal(expected, RVideo79AiVideoService.ResolveProviderImageUrl(input, "https://dashboard.example/"));
+
+    [Theory]
+    [InlineData("NOT_RESOURCES", VideoProviderTaskStatus.ResourceUnavailable)]
+    [InlineData("PENDING", VideoProviderTaskStatus.Processing)]
+    [InlineData("ACTIVE", VideoProviderTaskStatus.Processing)]
+    [InlineData("PROCESSING", VideoProviderTaskStatus.Processing)]
+    public async Task RVideo79AiPollMapsRawProviderStatusesWithoutTreatingNoResourcesAsProcessing(
+        string providerStatus,
+        VideoProviderTaskStatus expected)
+    {
+        var service = new StubRVideo79AiVideoService
+        {
+            PollResult = new Ai79TaskStatusResult(
+                Ai79TaskStatusNormalizer.Running,
+                $$"""{"status":"{{providerStatus}}"}""",
+                null,
+                null,
+                null,
+                providerStatus)
+        };
+        var adapter = new Ai79VideoGenerationProviderAdapter(service);
+
+        var result = await adapter.PollAsync(new VideoProviderPollRequest(
+            18, 99, "79ai", RVideoVideoModelPolicy.CapabilityCode, "id-base-1"));
+
+        Assert.Equal(expected, result.Status);
+        Assert.Equal("id-base-1", result.ProviderTaskId);
+    }
+
+    [Fact]
+    public void RVideoSubmitDiagnosticsAreEmittedAroundHttpCallWithNoCredentialFields()
+    {
+        var service = ReadRepoFile("Services", "VideoRender", "RVideo79AiVideoService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.True(service.IndexOf("VideoProviderHttpSubmitDiagnosticStage.Request", StringComparison.Ordinal)
+                    < service.IndexOf("await _client.SubmitAsync(raw, ct)", StringComparison.Ordinal));
+        Assert.Contains("VideoProviderHttpSubmitDiagnosticStage.Response", service);
+        Assert.Contains("VideoProviderHttpSubmitDiagnosticStage.ResponseParseFailed", service);
+        Assert.Contains("RVIDEO_VIDEO_HTTP_SUBMIT_REQUEST", worker);
+        Assert.Contains("RVIDEO_VIDEO_HTTP_SUBMIT_RESPONSE", worker);
+        Assert.Contains("RVIDEO_VIDEO_HTTP_SUBMIT_RESPONSE_PARSE_FAILED", worker);
+        Assert.Contains("sanitizedResponseJson = SanitizeDiagnosticJson(diagnostic.SanitizedResponseJson)", worker);
+        Assert.DoesNotContain("request.Runtime.Credential", worker, StringComparison.Ordinal);
+    }
+
+    private sealed class StubRVideo79AiVideoService : IRVideo79AiVideoService
+    {
+        public Ai79TaskStatusResult PollResult { get; init; } = new(Ai79TaskStatusNormalizer.Running, "{}", null, null, null);
+
+        public Task<RVideo79AiRuntime> ResolveRuntimeAsync(long providerId, long providerCapabilityId, string providerCode, CancellationToken ct = default)
+            => Task.FromResult(new RVideo79AiRuntime(
+                providerId, providerCapabilityId, providerCode, "https://example.test/ai", "/create-video", "/video", "/image-upload",
+                "79ai.net", "default", new ResolvedProviderCredential(), null, null, 0));
+
+        public Task<RVideo79AiProviderImageAsset> UploadSourceImageAsync(RVideo79AiRuntime runtime, RVideo79AiVideoSourceImage source, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<RVideo79AiVideoSubmitResult> SubmitAsync(RVideo79AiVideoSubmitRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79TaskStatusResult> PollAsync(RVideo79AiRuntime runtime, string taskId, CancellationToken ct = default)
+            => Task.FromResult(PollResult);
+    }
+
+    private static string ReadRepoFile(params string[] parts)
+    {
+        var path = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "TodoX.Web",
+            Path.Combine(parts)));
+        return File.ReadAllText(path);
+    }
+}

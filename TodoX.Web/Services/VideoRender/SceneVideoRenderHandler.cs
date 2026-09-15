@@ -1,22 +1,92 @@
 using System.Text.Json;
+using Dapper;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
 
 public sealed class SceneVideoRenderInput
 {
+    public Guid? CoreJobId { get; set; }
     public long ProjectId { get; set; }
     public long[] SceneIds { get; set; } = Array.Empty<long>();
     public string AspectRatio { get; set; } = "9:16";
     public string Resolution { get; set; } = "720P";
-    public Guid UserId { get; set; }
+    public bool UseSharedReferenceImage { get; set; }
+    public string? SharedReferenceImageUrl { get; set; }
+    public string? SharedReferenceImageObjectKey { get; set; }
+    public Guid? SharedReferenceImageMediaId { get; set; }
+    public string? SharedReferenceImageFileName { get; set; }
+    public string? SharedReferenceImageMimeType { get; set; }
+    public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
-    public string? CreatedBy { get; set; }
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public string? ProviderConfigJson { get; set; }
     public string? CapabilityConfigJson { get; set; }
+    public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
+    public Guid? BillingOperationId { get; set; }
+    public string? ExistingLogicalRequestId { get; set; }
+    public Guid? ExistingSceneVideoVersionId { get; set; }
+    public bool ReuseExistingSceneVideoVersion { get; set; }
+    public string? RequestedModelCode { get; set; }
+    public string? RequestedMode { get; set; }
+    public int? RequestedDurationSeconds { get; set; }
+    public bool ManualOverride { get; set; }
+
+    public void ApplySharedReferenceImage(RVideoSceneImageReferenceSelection reference)
+    {
+        if (!reference.ReferenceRequested
+            || (string.IsNullOrWhiteSpace(reference.Url) && string.IsNullOrWhiteSpace(reference.ObjectKey)))
+        {
+            throw new InvalidOperationException("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED");
+        }
+
+        UseSharedReferenceImage = true;
+        SharedReferenceImageUrl = reference.Url;
+        SharedReferenceImageObjectKey = reference.ObjectKey;
+        SharedReferenceImageMediaId = reference.MediaId;
+        SharedReferenceImageFileName = reference.FileName;
+        SharedReferenceImageMimeType = reference.MimeType;
+    }
+
+    public void ApplySharedReferenceImage(string? url, string? objectKey)
+    {
+        if (string.IsNullOrWhiteSpace(url) && string.IsNullOrWhiteSpace(objectKey))
+        {
+            throw new InvalidOperationException("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED");
+        }
+
+        UseSharedReferenceImage = true;
+        SharedReferenceImageUrl = url;
+        SharedReferenceImageObjectKey = objectKey;
+    }
+
+    public void ApplySharedReferenceImage(RVideoSharedReferenceImageSnapshot snapshot)
+    {
+        if (snapshot is null
+            || (string.IsNullOrWhiteSpace(snapshot.PublicUrl) && string.IsNullOrWhiteSpace(snapshot.ObjectKey)))
+        {
+            throw new InvalidOperationException("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED");
+        }
+
+        UseSharedReferenceImage = true;
+        SharedReferenceImageMediaId = snapshot.MediaId;
+        SharedReferenceImageUrl = snapshot.PublicUrl;
+        SharedReferenceImageObjectKey = snapshot.ObjectKey;
+        SharedReferenceImageFileName = snapshot.FileName;
+        SharedReferenceImageMimeType = snapshot.MimeType;
+    }
+}
+
+public sealed class SceneVideoRenderSourceSnapshot
+{
+    public Guid? SelectedImageVersionId { get; set; }
+    public string? SourceImageUrl { get; set; }
+    public string? SourceImageObjectKey { get; set; }
 }
 
 public sealed class SceneVideoRenderHandler : IRenderJobHandler
@@ -28,30 +98,63 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     public const string RoutingModelCode = "scene_video_default";
 
     private readonly VideoRenderRepository _repo;
-    private readonly IAiProviderService _providers;
-    private readonly AiProviderRepository _providerRepo;
+    private readonly ISceneMediaVersioningService _versions;
+    private readonly RVideoJobSettingsRepository _settings;
+    private readonly IVideoProviderRoutingService _routing;
     private readonly IRenderJobService _jobs;
-    private readonly IYEScaleVideoPricingResolver _pricing;
+    private readonly IVideoRenderPricingResolver _pricing;
+    private readonly IPointPricingService _pointPricing;
+    private readonly WalletService _wallets;
+    private readonly TokenSettingsService _tokenSettings;
+    private readonly IRVideoInitialPointEstimateService _initialEstimate;
+    private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
+    private readonly IVideoRenderEligibilityService _eligibility;
     private readonly IVideoPromptValidator _promptValidator;
+    private readonly IRVideoTrustedPayerContextService _payers;
+    private readonly IAiProviderModelService _models;
+    private readonly IConfiguration _config;
     private readonly ILogger<SceneVideoRenderHandler> _logger;
 
     public string JobType => JobTypeName;
 
     public SceneVideoRenderHandler(
         VideoRenderRepository repo,
-        IAiProviderService providers,
-        AiProviderRepository providerRepo,
+        ISceneMediaVersioningService versions,
+        RVideoJobSettingsRepository settings,
+        IVideoProviderRoutingService routing,
         IRenderJobService jobs,
-        IYEScaleVideoPricingResolver pricing,
+        IVideoRenderPricingResolver pricing,
+        IPointPricingService pointPricing,
+        WalletService wallets,
+        TokenSettingsService tokenSettings,
+        IRVideoInitialPointEstimateService initialEstimate,
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
+        IVideoRenderEligibilityService eligibility,
         IVideoPromptValidator promptValidator,
+        IRVideoTrustedPayerContextService payers,
+        IAiProviderModelService models,
+        IConfiguration config,
         ILogger<SceneVideoRenderHandler> logger)
     {
         _repo = repo;
-        _providers = providers;
-        _providerRepo = providerRepo;
+        _versions = versions;
+        _settings = settings;
+        _routing = routing;
         _jobs = jobs;
         _pricing = pricing;
+        _pointPricing = pointPricing;
+        _wallets = wallets;
+        _tokenSettings = tokenSettings;
+        _initialEstimate = initialEstimate;
+        _factory = factory;
+        _tenant = tenant;
+        _eligibility = eligibility;
         _promptValidator = promptValidator;
+        _payers = payers;
+        _models = models;
+        _config = config;
         _logger = logger;
     }
 
@@ -63,31 +166,23 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         {
             throw new InvalidOperationException("Missing projectId in render video batch job.");
         }
+        if (input.SceneIds is null || input.SceneIds.Length == 0)
+        {
+            throw new InvalidOperationException("RVIDEO_VIDEO_SCENE_IDS_REQUIRED");
+        }
 
         var project = await _repo.GetProjectAsync(input.ProjectId, ct)
             ?? throw new InvalidOperationException("Video project not found.");
 
-        var option = await _providers.ResolveProviderForCapabilityAsync(AiProviderCatalog.ImageToVideo, providerCapabilityId: null, fromUser: false, ct);
-        if (!string.Equals(option.ProviderCode, "yescale_task_video", StringComparison.OrdinalIgnoreCase))
+        var route = await _routing.ResolveAsync(RVideoVideoModelPolicy.CapabilityCode, providerCapabilityId: null, fromUser: false, ct);
+        if (!string.Equals(route.CapabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("The current image-to-video provider is not supported by the TodoX runtime yet.");
+            throw new InvalidOperationException("RVIDEO_VIDEO_CAPABILITY_ROUTE_INVALID");
         }
-        if (!string.Equals(option.CapabilityCode, AiProviderCatalog.ImageToVideo, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(option.ModelName, "omni-flash", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("The current image-to-video runtime must resolve YEScale omni-flash.");
-        }
+        input.ProviderConfigJson = route.ProviderConfigJson;
+        input.CapabilityConfigJson = route.CapabilityConfigJson;
 
-        var detail = await _providerRepo.GetProviderAsync(option.ProviderId, ct)
-            ?? throw new InvalidOperationException("Configured image-to-video provider could not be loaded.");
-        var capability = detail.Capabilities.FirstOrDefault(x => x.Id == option.ProviderCapabilityId)
-            ?? throw new InvalidOperationException("Configured image-to-video capability could not be loaded.");
-        input.ProviderConfigJson = detail.ConfigJson;
-        input.CapabilityConfigJson = capability.ConfigJson;
-
-        var targetSceneIds = input.SceneIds.Length == 0
-            ? project.Scenes.Select(x => x.Id).ToHashSet()
-            : input.SceneIds.ToHashSet();
+        var targetSceneIds = input.SceneIds.ToHashSet();
         var scenes = project.Scenes
             .Where(scene => targetSceneIds.Contains(scene.Id))
             .OrderBy(scene => scene.SceneIndex)
@@ -96,24 +191,83 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         {
             return;
         }
+        if (input.TrustedPayerContext is null && LegacyPointBillingFeatureFlags.IsEnabled(_config))
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PAYER_CONTEXT_MISSING", "error",
+                "Scene-video batch was blocked because trusted payer context is missing.",
+                new { batchJobId = job.Id, input.ProjectId, errorCode = "rvideo_video_payer_context_mismatch" }, ct);
+            throw new RenderJobTerminalFailureException("rvideo_video_payer_context_mismatch: trusted payer context is required.");
+        }
+        input.TrustedPayerContext = await _payers.ValidateAndBuildRVideoTrustedPayerContextAsync(
+            input.ProjectId, scenes[0].Id, input.CustomerId, input.UserId, input.TrustedPayerContext, ct);
+        var settings = await _settings.GetAsync(project.Id, ct);
+        var qualityTier = ResolveQualityTier(route);
+        var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, job.Id);
+        var voiceCount = scenes.Count(scene =>
+            RVideoRules.RequiresExternalVoice(scene, settings)
+            && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)));
+        var imageSources = new List<RVideoEffectiveSceneImageSource>();
+        foreach (var scene in scenes)
+        {
+            var selectedImage = input.UseSharedReferenceImage
+                ? null
+                : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+            imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, selectedImage, project));
+        }
 
+        var aggregateEstimate = input.BillingIntent == PointBillingIntent.InitialRender
+            ? await _initialEstimate.EstimateInitialRVideoPointsAsync(
+                new RVideoInitialPointEstimateRequest(
+                    billingOperationId,
+                    job.Id,
+                    project.Id,
+                    await ResolvePointServiceIdAsync(project.CoreJobId, ct),
+                    input.CustomerId ?? job.CustomerId,
+                    project,
+                    scenes,
+                    scenes,
+                    settings,
+                    (scene, token) => input.UseSharedReferenceImage
+                        ? Task.FromResult<SceneImageVersionDto?>(null)
+                        : _versions.GetSelectedImageVersionAsync(scene.Id, token),
+                    qualityTier,
+                    qualityTier,
+                    ServiceSellPriceQualityTiers.Standard),
+                ct)
+            : await EstimateSceneVideoRerenderPointsAsync(job, input, project, scenes, qualityTier, billingOperationId, ct);
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
             $"Batch render video started for {scenes.Count} scenes.",
             new
             {
                 batchJobId = job.Id,
                 sceneCount = scenes.Count,
-                option.ProviderCode,
-                option.ModelName,
+                imageCount = aggregateEstimate.ImageCount,
+                videoSeconds = scenes.Sum(x => x.DurationSeconds),
+                voiceCount,
+                route.ProviderCode,
+                route.ModelName,
                 input.AspectRatio,
                 input.Resolution
             }, ct);
+        if (!aggregateEstimate.CanStart)
+        {
+            await _jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: "insufficient_points",
+                errorMessage: "Insufficient points.", ct: ct);
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLING_FAILED", "error",
+                "Initial rVideo render was blocked before provider submission.",
+                new { billingOperationId, parentRenderJobId = job.Id, projectId = project.Id, serviceId = aggregateEstimate.ServiceId, available_points_at_check = aggregateEstimate.AvailablePoints, required_points = aggregateEstimate.TotalPoints }, ct);
+            throw new RenderJobTerminalFailureException("Insufficient points.");
+        }
+        if (input.BillingIntent == PointBillingIntent.InitialRender)
+        {
+            await ChargeInitialStaticDirectImagesAsync(job, input, project, billingOperationId, aggregateEstimate, imageSources, ct);
+        }
 
         var enqueued = 0;
         var validationFailed = new List<int>();
         foreach (var scene in scenes)
         {
-            if (await EnqueueSceneChildJobAsync(project, scene, input, option, capability, job, ct))
+            if (await EnqueueSceneChildJobAsync(project, scene, input, route, job, ct))
             {
                 enqueued++;
             }
@@ -132,50 +286,162 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 enqueued,
                 validationFailed = validationFailed.Count,
                 validationFailedSceneIndexes = validationFailed,
-                provider = option.ProviderCode,
-                model = option.ModelName,
-                capability = option.CapabilityCode
+                provider = route.ProviderCode,
+                model = route.ModelName,
+                capability = route.CapabilityCode
             }, ct);
+
+        if (input.CoreJobId is Guid coreJobId)
+        {
+            await _jobs.AddEventAsync(
+                coreJobId,
+                "CORE_RVIDEO_SCENE_JOBS_CREATED",
+                "RVIDEO scene-video child jobs were created by the Core batch execution.",
+                new
+                {
+                    coreJobId,
+                    projectId = project.Id,
+                    sceneIds = scenes.Select(scene => scene.Id).ToArray(),
+                    childJobCount = enqueued,
+                    skippedSceneCount = validationFailed.Count,
+                    jobType = RenderJobTypes.RenderSceneVideo,
+                    service = RVideoCoreExecutionAdapter.RVideoServiceCode
+                },
+                "info",
+                ct);
+        }
     }
 
     private async Task<bool> EnqueueSceneChildJobAsync(
         VideoProjectDto project,
         VideoProjectSceneDto scene,
         SceneVideoRenderInput input,
-        ProviderOptionDto option,
-        AiProviderCapabilityDto capability,
+        VideoProviderRoute route,
         RenderJobDto parentJob,
         CancellationToken ct)
     {
-        var selectedImage = await _repo.GetSelectedImageProjectionAsync(scene.Id, ct);
-        var validation = _promptValidator.Validate(scene.VideoPrompt, option.ModelName, capability.ConfigJson, scene.SceneIndex);
+        var eligibility = await _eligibility.GetVideoRenderEligibilityAsync(project.Id, new[] { scene.Id }, ct);
+        var sceneEligibility = eligibility.Results.FirstOrDefault();
+        if (sceneEligibility is not null && sceneEligibility.Status != VideoRenderEligibilityStatus.Eligible)
+        {
+            await _repo.AddProjectEventAsync(project.Id,
+                sceneEligibility.Status switch
+                {
+                    VideoRenderEligibilityStatus.AlreadyCompleted => "SCENE_VIDEO_ALREADY_COMPLETED_SKIPPED",
+                    VideoRenderEligibilityStatus.AlreadyActive => "SCENE_VIDEO_ALREADY_ACTIVE_SKIPPED",
+                    VideoRenderEligibilityStatus.MissingImage => "SCENE_VIDEO_MISSING_IMAGE_SKIPPED",
+                    VideoRenderEligibilityStatus.InvalidPrompt => "SCENE_VIDEO_INVALID_PROMPT_SKIPPED",
+                    _ => "SCENE_VIDEO_REQUEST_SKIPPED"
+                },
+                sceneEligibility.Status == VideoRenderEligibilityStatus.AlreadyCompleted ? "info" : "warning",
+                sceneEligibility.Message,
+                new { projectId = project.Id, sceneId = scene.Id, scene.SceneIndex, sceneEligibility.Status, sceneEligibility.ErrorCode },
+                ct);
+            return false;
+        }
+
+        var settings = await _settings.GetAsync(project.Id, ct);
+        if (settings is null)
+        {
+            return false;
+        }
+
+        var selectedImage = input.UseSharedReferenceImage
+            ? null
+            : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+        if (input.UseSharedReferenceImage
+            && string.IsNullOrWhiteSpace(input.SharedReferenceImageUrl)
+            && string.IsNullOrWhiteSpace(input.SharedReferenceImageObjectKey))
+        {
+            input.ApplySharedReferenceImage(RVideoSceneImageReferenceSelection.Resolve(settings).ToSnapshot());
+        }
+        var effectiveSource = input.UseSharedReferenceImage
+            ? new RVideoEffectiveSceneImageSource(true, null, input.SharedReferenceImageUrl, input.SharedReferenceImageObjectKey, "shared_reference_image")
+            : RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, selectedImage, project);
+        var sourceImageUrl = effectiveSource.SourceImageUrl;
+        var sourceImageObjectKey = effectiveSource.SourceImageObjectKey;
+        var sourceImageVersionId = effectiveSource.SelectedImageVersionId;
+        if (string.IsNullOrWhiteSpace(sourceImageUrl) && string.IsNullOrWhiteSpace(sourceImageObjectKey))
+        {
+            await MarkSceneValidationFailedAsync(project.Id, scene, new VideoPromptValidationResult(
+                false,
+                route.ModelName ?? string.Empty,
+                scene.VideoPrompt?.Trim() ?? string.Empty,
+                VideoPromptValidator.CountUnicodeScalars(scene.VideoPrompt?.Trim() ?? string.Empty),
+                VideoPromptValidator.ResolveMaxPromptCharacters(route.ModelName, route.CapabilityConfigJson),
+                "scene_source_image_required",
+                input.UseSharedReferenceImage
+                    ? RVideoEffectiveSceneImageSourceResolver.MissingSharedReferenceMessage
+                    : $"Scene {scene.SceneIndex:00}: cần ảnh nguồn đã chọn trước khi render video."), ct);
+            return false;
+        }
+
+        var voiceMode = await ResolveVoiceModeAsync(project.Id, ct);
+        var voiceText = RVideoRules.ResolveSceneVoiceText(scene);
+        var voiceInstruction = RVideoRules.ResolveSceneVoiceInstruction(scene);
+        var finalPrompt = voiceMode == RVideoVoiceModes.Native
+            ? RVideoRules.ComposeNativeVoicePrompt(scene.VideoPrompt, voiceText, voiceInstruction)
+            : scene.VideoPrompt;
+        finalPrompt = RVideoSharedBaseImagePromptGuard.Apply(finalPrompt, input.UseSharedReferenceImage);
+        var requestedModel = string.IsNullOrWhiteSpace(input.RequestedModelCode)
+            ? route.ModelName
+            : input.RequestedModelCode.Trim();
+        var requestedPolicy = ResolveRequestedPolicy(route.ProviderCode, requestedModel, input.RequestedMode);
+        var requestedMode = requestedPolicy.Mode ?? input.RequestedMode?.Trim();
+        var requestedDuration = input.RequestedDurationSeconds is > 0
+            ? input.RequestedDurationSeconds.Value
+            : scene.DurationSeconds;
+        if (input.ManualOverride
+            && !await IsValidManualVideoOverrideAsync(route.ProviderId, route.ProviderCode, requestedModel, requestedMode, requestedDuration, ct))
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_MANUAL_RERENDER_REJECTED", "warning",
+                "Manual scene-video model or duration override is not supported by the provider catalog.",
+                new { projectId = project.Id, sceneId = scene.Id, scene.SceneIndex, requestedModel, requestedMode, requestedDurationSeconds = requestedDuration },
+                ct);
+            return false;
+        }
+
+        var validation = _promptValidator.Validate(finalPrompt, requestedModel, route.CapabilityConfigJson, scene.SceneIndex);
         if (!validation.IsValid)
         {
             await MarkSceneValidationFailedAsync(project.Id, scene, validation, ct);
             return false;
         }
 
-        var sourceImageUrl = selectedImage?.PublicUrl;
-        if (string.IsNullOrWhiteSpace(sourceImageUrl))
-        {
-            var imageValidation = new VideoPromptValidationResult(
-                false,
-                validation.ModelName,
-                validation.TrimmedPrompt,
-                validation.ActualCharacterCount,
-                validation.MaxCharacterCount,
-                "scene_source_image_required",
-                $"Scene {scene.SceneIndex:00}: cần ảnh nguồn đã chọn trước khi render video.");
-            await MarkSceneValidationFailedAsync(project.Id, scene, imageValidation, ct);
-            return false;
-        }
         var resolvedPrice = _pricing.Resolve(
-            option,
-            capability,
+            new ProviderOptionDto
+            {
+                ProviderId = route.ProviderId,
+                ProviderCapabilityId = route.ProviderCapabilityId,
+                ProviderCode = route.ProviderCode,
+                CapabilityCode = route.CapabilityCode,
+                ModelName = requestedModel,
+                UnitCostPoints = route.UnitCostPoints
+            },
+            new AiProviderCapabilityDto
+            {
+                Id = route.ProviderCapabilityId,
+                ProviderId = route.ProviderId,
+                ProviderCode = route.ProviderCode,
+                CapabilityCode = route.CapabilityCode,
+                ModelName = requestedModel,
+                ConfigJson = route.CapabilityConfigJson
+            },
+            requestedPolicy,
             input.AspectRatio,
             input.Resolution,
-            scene.DurationSeconds,
-            true);
+            requestedDuration);
+        var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
+        var qualityTier = ResolveQualityTier(route);
+        var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+            pointServiceId,
+            0,
+            qualityTier,
+            requestedDuration,
+            qualityTier,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            false), ct);
 
         await _repo.UpdateSceneAsync(
             scene.Id,
@@ -195,33 +461,55 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             SceneIndex = scene.SceneIndex,
             UserId = input.UserId,
             CustomerId = input.CustomerId,
-            CreatedBy = input.CreatedBy,
             TrustedPayerContext = input.TrustedPayerContext,
-            SelectedSourceImageVersionId = selectedImage?.Id,
+            UseSharedReferenceImage = input.UseSharedReferenceImage,
+            ImageInputMode = input.UseSharedReferenceImage
+                ? VideoSceneImageInputMode.SharedBaseImage
+                : VideoSceneImageInputMode.SceneSource,
+            SourceImageVersionId = sourceImageVersionId,
+            SelectedSourceImageVersionId = sourceImageVersionId,
             SourceImageUrl = sourceImageUrl,
-            SourceImageObjectKey = selectedImage?.StorageKey,
+            SourceImageObjectKey = sourceImageObjectKey,
+            SourceImageType = effectiveSource.SourceLabel,
+            SharedReferenceImageMediaId = input.SharedReferenceImageMediaId,
+            SharedReferenceImageUrl = input.SharedReferenceImageUrl,
+            SharedReferenceImageObjectKey = input.SharedReferenceImageObjectKey,
+            SharedReferenceImageFileName = input.SharedReferenceImageFileName,
+            SharedReferenceImageMimeType = input.SharedReferenceImageMimeType,
             ImagePrompt = scene.ImagePrompt,
             VideoPrompt = validation.TrimmedPrompt,
-            Voice = null,
-            VoiceInstruction = null,
-            ProviderId = option.ProviderId,
-            ProviderCode = option.ProviderCode,
+            Voice = voiceMode == RVideoVoiceModes.Native ? voiceText : null,
+            VoiceInstruction = voiceMode == RVideoVoiceModes.Native ? voiceInstruction : null,
+            ProviderId = route.ProviderId,
+            ProviderCode = route.ProviderCode,
             ProviderConfigJson = input.ProviderConfigJson,
-            ProviderCapabilityId = option.ProviderCapabilityId,
-            CapabilityCode = option.CapabilityCode,
+            ProviderCapabilityId = route.ProviderCapabilityId,
+            CapabilityCode = route.CapabilityCode,
             CapabilityConfigJson = input.CapabilityConfigJson,
-            ModelName = option.ModelName,
+            ModelName = requestedModel,
             MaxPromptCharacters = validation.MaxCharacterCount,
             AspectRatio = input.AspectRatio,
             Resolution = input.Resolution,
-            DurationSeconds = scene.DurationSeconds,
+            DurationSeconds = requestedDuration,
+            CustomerPointRate = pointEstimate.Video.Rate,
+            CustomerPointQuality = qualityTier,
+            BillingIntent = input.BillingIntent,
+            BillingOperationId = input.BillingOperationId ?? RVideoParentBillingState.ResolveBillingOperationId(project, parentJob.Id),
             EstimatedUsd = resolvedPrice.ProviderEstimatedCostUsd,
-            EstimatedPoints = resolvedPrice.ChargedPoints,
+            EstimatedPoints = 0,
             PricingMode = resolvedPrice.Mode,
             PricingRuleKey = resolvedPrice.RuleKey,
             TariffSnapshotJson = resolvedPrice.TariffSnapshotJson,
             CostSource = resolvedPrice.CostSource,
-            LogicalRequestId = BuildLogicalRequestId(parentJob.Id, scene.Id),
+            LogicalRequestId = string.IsNullOrWhiteSpace(input.ExistingLogicalRequestId)
+                ? BuildLogicalRequestId(parentJob.Id, scene.Id)
+                : input.ExistingLogicalRequestId.Trim(),
+            ExistingSceneVideoVersionId = input.ExistingSceneVideoVersionId,
+            ReuseExistingSceneVideoVersion = input.ReuseExistingSceneVideoVersion,
+            RequestedModelCode = input.ManualOverride ? requestedModel : null,
+            RequestedMode = input.ManualOverride ? requestedMode : null,
+            RequestedDurationSeconds = input.ManualOverride ? requestedDuration : null,
+            ManualOverride = input.ManualOverride,
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
@@ -234,12 +522,17 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             Prompt = new { projectId = project.Id, sceneId = scene.Id, parentJobId = parentJob.Id },
             References = Array.Empty<object>(),
             LogCode = parentJob.LogCode,
-            ProviderCode = option.ProviderCode,
-            ModelCode = option.ModelName,
+            ProviderCode = route.ProviderCode,
+            ModelCode = requestedModel,
             MaxAttempts = 3,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.Pending
         }, ct);
+
+        if (input.ExistingSceneVideoVersionId is Guid existingVersionId)
+        {
+            await _versions.TryBindSceneVideoVersionRenderJobAsync(existingVersionId, childJob.Id, ct);
+        }
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_CHILD_JOB_ENQUEUED", "info",
             $"Scene {scene.SceneIndex} was enqueued as an independent scene-video child job.",
@@ -251,12 +544,193 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 scene.SceneIndex,
                 input.AspectRatio,
                 input.Resolution,
-                option.ProviderCode,
-                option.ModelName,
-                sourceImageVersionId = selectedImage?.Id
+                route.ProviderCode,
+                modelName = requestedModel,
+                mode = requestedMode,
+                requestedDurationSeconds = requestedDuration,
+                sourceImageVersionId,
+                sourceImageType = effectiveSource.SourceLabel,
+                hasSourceImage = !string.IsNullOrWhiteSpace(sourceImageUrl) || !string.IsNullOrWhiteSpace(sourceImageObjectKey),
+                useSharedReferenceImage = input.UseSharedReferenceImage
             }, ct);
 
+        if (input.ManualOverride)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_MANUAL_RERENDER_REQUESTED", "info",
+                "Manual scene-video rerender was requested with an explicit model and duration.",
+                new
+                {
+                    sceneId = scene.Id,
+                    modelCode = requestedModel,
+                    mode = requestedMode,
+                    durationSeconds = requestedDuration
+                }, ct);
+        }
+
         return true;
+    }
+
+    private static RVideoVideoModelPolicyEntry ResolveRequestedPolicy(string providerCode, string? model, string? mode)
+    {
+        var requestedModel = string.IsNullOrWhiteSpace(model)
+            ? RVideoVideoModelPolicy.GetInitial().Model
+            : model.Trim();
+        var requestedMode = string.IsNullOrWhiteSpace(mode) ? null : mode.Trim();
+        return RVideoVideoModelPolicy.Models.FirstOrDefault(x =>
+                   string.Equals(x.ProviderCode, providerCode, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(x.Model, requestedModel, StringComparison.OrdinalIgnoreCase)
+                   && (string.IsNullOrWhiteSpace(requestedMode)
+                       || string.Equals(x.Mode, requestedMode, StringComparison.OrdinalIgnoreCase)))
+               ?? new RVideoVideoModelPolicyEntry(0, providerCode, requestedModel, requestedMode);
+    }
+
+    private async Task<bool> IsValidManualVideoOverrideAsync(
+        long providerId,
+        string providerCode,
+        string? modelCode,
+        string? mode,
+        int durationSeconds,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(modelCode) || durationSeconds <= 0)
+        {
+            return false;
+        }
+
+        var model = await _models.GetModelByCodeAsync(providerId, modelCode.Trim(), ct);
+        if (model is null
+            || !string.Equals(model.ProviderCode, providerCode, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(model.MediaType, "video", StringComparison.OrdinalIgnoreCase)
+            || !model.Enabled
+            || !model.AllowUserSelect
+            || model.IsDeprecated)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(mode)
+            && model.SupportedModes.Count > 0
+            && !model.SupportedModes.Contains(mode.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return model.SupportedDurations.Contains(durationSeconds);
+    }
+
+    private async Task<RVideoInitialPointEstimate> EstimateSceneVideoRerenderPointsAsync(
+        RenderJobDto job,
+        SceneVideoRenderInput input,
+        VideoProjectDto project,
+        IReadOnlyList<VideoProjectSceneDto> scenes,
+        string qualityTier,
+        Guid billingOperationId,
+        CancellationToken ct)
+    {
+        var serviceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
+        var videoScenes = scenes
+            .Select(scene => new PreRenderVideoScene(scene.Id, input.RequestedDurationSeconds is > 0 ? input.RequestedDurationSeconds.Value : scene.DurationSeconds))
+            .ToArray();
+        var plan = new PreRenderUsagePlan(
+            serviceId,
+            0,
+            qualityTier,
+            videoScenes,
+            qualityTier,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            false).Validate();
+        var pricing = await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
+        var customerId = input.CustomerId ?? job.CustomerId;
+        var available = customerId is Guid id
+            ? await _wallets.GetBalanceAsync(id)
+            : 0m;
+        var remaining = Math.Max(0m, available - pricing.TotalPoints);
+        var missing = Math.Max(0m, pricing.TotalPoints - available);
+
+        return new RVideoInitialPointEstimate(
+            billingOperationId,
+            job.Id,
+            project.Id,
+            serviceId,
+            plan.ImageCount,
+            pricing.Image.Rate,
+            pricing.Image.Points,
+            plan.VideoSeconds,
+            pricing.Video.Rate,
+            pricing.Video.Points,
+            plan.VoiceCount,
+            pricing.Voice.Rate,
+            pricing.Voice.Points,
+            pricing.TotalPoints,
+            available,
+            remaining,
+            missing,
+            customerId is null || available >= pricing.TotalPoints,
+            videoScenes,
+            pricing);
+    }
+
+    private async Task ChargeInitialStaticDirectImagesAsync(
+        RenderJobDto job,
+        SceneVideoRenderInput input,
+        VideoProjectDto project,
+        Guid billingOperationId,
+        RVideoInitialPointEstimate estimate,
+        IReadOnlyList<RVideoEffectiveSceneImageSource> imageSources,
+        CancellationToken ct)
+    {
+        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            await _tokenSettings.GetChargeStaticImagePointsAsync(),
+            imageSources);
+        var staticDirectPoints = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
+            estimate.ImageRate,
+            staticDirectSceneCount);
+        if (staticDirectSceneCount <= 0 || staticDirectPoints <= 0)
+        {
+            return;
+        }
+
+        var referenceId = RVideoInitialStaticImageDebit.BuildReferenceId(billingOperationId);
+        var charge = await _wallets.ChargeAsync(
+            input.CustomerId ?? job.CustomerId,
+            input.UserId ?? job.UserId,
+            staticDirectPoints,
+            staticDirectSceneCount,
+            "rvideo_initial_render_static_image",
+            "todox",
+            "static_direct",
+            "rvideo",
+            "image",
+            referenceId,
+            "rvideo_initial_static_image");
+        if (!charge.Ok)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_STATIC_IMAGE_BILLING_FAILED", "error",
+                "Initial rVideo static image debit could not be completed.",
+                new { billingOperationId, parentRenderJobId = job.Id, projectId = project.Id, staticDirectSceneCount, requiredPoints = staticDirectPoints, charge.Error }, ct);
+            throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points for static image billing.");
+        }
+
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_STATIC_IMAGE_BILLED", "info",
+            "Initial rVideo static direct image points were debited.",
+            new
+            {
+                billingOperationId,
+                chargeReferenceId = referenceId,
+                parentRenderJobId = job.Id,
+                projectId = project.Id,
+                staticDirectSceneCount,
+                imageRate = estimate.ImageRate,
+                requestedPoints = staticDirectPoints,
+                chargedPoints = charge.Charged
+            }, ct);
+    }
+
+    private async Task<string> ResolveVoiceModeAsync(long projectId, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(projectId, ct);
+        return RVideoRules.ResolveVoiceMode(settings);
     }
 
     private async Task MarkSceneValidationFailedAsync(
@@ -290,4 +764,66 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
 
     public static string BuildLogicalRequestId(Guid parentJobId, long sceneId)
         => $"render_job_scene_video-job-{parentJobId:N}-scene-{sceneId}";
+
+    private static bool IsCompletedSelectedImageVersion(SceneImageVersionDto? version)
+        => version is not null
+           && version.Id != Guid.Empty
+           && version.IsSelected
+           && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)
+    {
+        if (coreJobId is not Guid jobId)
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT service_id
+              FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenant
+             LIMIT 1;
+            """,
+            new { jobId, tenant = _tenant.TenantId });
+    }
+
+    private static string ResolveQualityTier(VideoProviderRoute route)
+    {
+        return ResolveConfiguredQualityTier(route.CapabilityConfigJson)
+            ?? ResolveConfiguredQualityTier(route.ProviderConfigJson)
+            ?? ServiceSellPriceQualityTiers.Standard;
+    }
+
+    private static string? ResolveConfiguredQualityTier(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            foreach (var key in new[] { "quality_tier", "qualityTier", "sell_quality_tier", "sellQualityTier", "point_quality_tier", "pointQualityTier" })
+            {
+                if (doc.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
+                {
+                    var tier = value.GetString()?.Trim().ToLowerInvariant();
+                    if (ServiceSellPriceQualityTiers.IsValid(tier))
+                    {
+                        return tier;
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
+    }
 }

@@ -1,0 +1,327 @@
+.tl-finalizing-shell {
+    position: relative;
+    display: grid;
+    place-items: center;
+    gap: 16px;
+    min-height: 300px;
+    padding: 30px 20px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 183, 77, 0.34);
+    border-radius: 8px;
+    text-align: center;
+    background:
+        radial-gradient(circle at center 30%, rgba(77, 208, 225, 0.11), transparent 34%),
+        radial-gradient(circle at center 64%, rgba(255, 183, 77, 0.13), transparent 38%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 45%),
+        linear-gradient(135deg, #11161c, #202730 58%, #11151b);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.tl-finalizing-shell::before {
+    position: absolute;
+    inset: 0;
+    content: "";
+    pointer-events: none;
+    background: linear-gradient(105deg, transparent 28%, rgba(255, 255, 255, 0.12) 46%, rgba(255, 255, 255, 0.025) 55%, transparent 72%);
+    transform: translateX(-115%);
+    animation: tl-finalizing-shell-sweep 2.45s ease-in-out infinite;
+}
+
+.tl-finalizing-stage {
+    position: relative;
+    width: min(360px, 86vw);
+    height: 150px;
+    isolation: isolate;
+}
+
+.tl-finalizing-frame,
+.tl-finalizing-piece {
+    position: absolute;
+    border-radius: 7px;
+}
+
+.tl-finalizing-frame {
+    z-index: 2;
+    top: 34px;
+    left: 50%;
+    width: 178px;
+    height: 92px;
+    transform: translateX(-50%);
+    border: 1px solid rgba(255, 224, 130, 0.68);
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.08) 2px, transparent 2px) 0 0 / 22px 100%,
+        linear-gradient(135deg, rgba(77, 208, 225, 0.12), rgba(255, 183, 77, 0.13));
+    box-shadow: 0 0 0 1px rgba(255, 183, 77, 0.08), 0 0 30px rgba(255, 183, 77, 0.14);
+    animation: tl-finalizing-frame-lock 2.7s ease-in-out infinite;
+}
+
+.tl-finalizing-frame::before,
+.tl-finalizing-frame::after {
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    width: 5px;
+    content: "";
+    border-radius: 999px;
+    background: repeating-linear-gradient(to bottom, rgba(255, 224, 130, 0.65) 0 4px, transparent 4px 9px);
+}
+
+.tl-finalizing-frame::before {
+    left: 10px;
+}
+
+.tl-finalizing-frame::after {
+    right: 10px;
+}
+
+.tl-finalizing-piece {
+    z-index: 3;
+    width: 82px;
+    height: 44px;
+    border: 1px solid rgba(128, 222, 234, 0.38);
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.12) 2px, transparent 2px) 0 0 / 16px 100%,
+        linear-gradient(135deg, rgba(128, 222, 234, 0.32), rgba(255, 202, 40, 0.2));
+    box-shadow: 0 0 18px rgba(77, 208, 225, 0.22);
+    opacity: 0;
+    animation: tl-finalizing-piece-merge 2.7s ease-in-out infinite;
+}
+
+.piece-1 {
+    top: 0;
+    left: 8px;
+    --merge-x: 96px;
+    --merge-y: 48px;
+}
+
+.piece-2 {
+    top: 0;
+    right: 8px;
+    --merge-x: -96px;
+    --merge-y: 48px;
+    animation-delay: 100ms;
+}
+
+.piece-3 {
+    bottom: 0;
+    left: 8px;
+    --merge-x: 96px;
+    --merge-y: -48px;
+    animation-delay: 200ms;
+}
+
+.piece-4 {
+    right: 8px;
+    bottom: 0;
+    --merge-x: -96px;
+    --merge-y: -48px;
+    animation-delay: 300ms;
+}
+
+.tl-finalizing-scan {
+    position: absolute;
+    z-index: 4;
+    top: 38px;
+    left: calc(50% - 89px);
+    width: 2px;
+    height: 84px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, transparent, rgba(128, 222, 234, 0.95), transparent);
+    box-shadow: 0 0 16px rgba(77, 208, 225, 0.72);
+    animation: tl-finalizing-scan 2.7s ease-in-out infinite;
+}
+
+.tl-finalizing-glow {
+    position: absolute;
+    z-index: 1;
+    top: 28px;
+    left: 50%;
+    width: 204px;
+    height: 108px;
+    transform: translateX(-50%);
+    border-radius: 12px;
+    background: radial-gradient(ellipse at center, rgba(255, 224, 130, 0.34), transparent 68%);
+    opacity: 0;
+    filter: blur(10px);
+    animation: tl-finalizing-glow 2.7s ease-in-out infinite;
+}
+
+.tl-finalizing-copy {
+    position: relative;
+    z-index: 5;
+    display: grid;
+    gap: 5px;
+    max-width: 560px;
+}
+
+.tl-finalizing-copy h3 {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.96);
+    font-size: 1.12rem;
+    font-weight: 750;
+    line-height: 1.28;
+}
+
+.tl-finalizing-copy p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.64);
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.tl-finalizing-progress {
+    position: relative;
+    z-index: 5;
+    display: block;
+    width: min(380px, 82%);
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 183, 77, 0.14);
+}
+
+.tl-finalizing-progress::after {
+    display: block;
+    width: 36%;
+    height: 100%;
+    content: "";
+    border-radius: inherit;
+    background: linear-gradient(90deg, #ffb74d, #ffe082, #80deea);
+    animation: tl-finalizing-progress-scan 1.55s ease-in-out infinite;
+}
+
+@keyframes tl-finalizing-shell-sweep {
+    0%,
+    18% {
+        transform: translateX(-115%);
+    }
+
+    82%,
+    100% {
+        transform: translateX(115%);
+    }
+}
+
+@keyframes tl-finalizing-piece-merge {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0) scale(0.92);
+    }
+
+    22%,
+    56% {
+        opacity: 1;
+        transform: translate3d(var(--merge-x), var(--merge-y), 0) scale(1);
+    }
+
+    66% {
+        opacity: 1;
+        transform: translate3d(var(--merge-x), var(--merge-y), 0) scale(0.97);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0) scale(0.92);
+    }
+}
+
+@keyframes tl-finalizing-frame-lock {
+    0%,
+    18%,
+    100% {
+        opacity: 0.58;
+        transform: translateX(-50%) scale(0.985);
+    }
+
+    42%,
+    66% {
+        opacity: 1;
+        transform: translateX(-50%) scale(1.01);
+    }
+}
+
+@keyframes tl-finalizing-glow {
+    0%,
+    24%,
+    100% {
+        opacity: 0;
+    }
+
+    48%,
+    64% {
+        opacity: 0.9;
+    }
+}
+
+@keyframes tl-finalizing-scan {
+    0%,
+    30% {
+        opacity: 0;
+        transform: translateX(0);
+    }
+
+    48%,
+    70% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        transform: translateX(176px);
+    }
+}
+
+@keyframes tl-finalizing-progress-scan {
+    0% {
+        transform: translateX(-110%);
+    }
+
+    100% {
+        transform: translateX(280%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tl-finalizing-shell::before,
+    .tl-finalizing-scan {
+        animation: none !important;
+    }
+
+    .tl-finalizing-piece {
+        opacity: 0.86;
+        animation: tl-finalizing-piece-breathe 2.8s ease-in-out infinite !important;
+    }
+
+    .tl-finalizing-frame,
+    .tl-finalizing-glow {
+        animation: tl-finalizing-frame-breathe 2.8s ease-in-out infinite !important;
+    }
+
+    .tl-finalizing-progress::after {
+        animation: tl-finalizing-progress-scan 2.6s ease-in-out infinite !important;
+    }
+}
+
+@keyframes tl-finalizing-piece-breathe {
+    0%,
+    100% {
+        opacity: 0.62;
+        transform: translate3d(calc(var(--merge-x) * 0.9), calc(var(--merge-y) * 0.9), 0) scale(0.97);
+    }
+
+    50% {
+        opacity: 1;
+        transform: translate3d(var(--merge-x), var(--merge-y), 0) scale(1);
+    }
+}
+
+@keyframes tl-finalizing-frame-breathe {
+    0%,
+    100% {
+        opacity: 0.58;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}

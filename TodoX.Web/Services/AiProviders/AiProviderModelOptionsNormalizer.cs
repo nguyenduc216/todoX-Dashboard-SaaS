@@ -17,7 +17,8 @@ public static class AiProviderModelOptionsNormalizer
         IEnumerable<string>? explicitResolutions,
         IEnumerable<string>? explicitRatios,
         IEnumerable<AiModelPriceDto>? prices,
-        string? rawJson = null)
+        string? rawJson = null,
+        IEnumerable<string?>? capabilityConfigJsons = null)
     {
         var modes = new HashSet<string>(CleanStrings(explicitModes), StringComparer.OrdinalIgnoreCase);
         var durations = new SortedSet<int>((explicitDurations ?? Array.Empty<int>()).Where(x => x > 0));
@@ -36,6 +37,10 @@ public static class AiProviderModelOptionsNormalizer
         }
 
         AddFromRaw(rawJson, modes, durations, resolutions, ratios);
+        foreach (var capabilityConfigJson in capabilityConfigJsons ?? Array.Empty<string?>())
+        {
+            AddFromRaw(capabilityConfigJson, modes, durations, resolutions, ratios);
+        }
 
         return new AiProviderModelOptions(
             modes.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
@@ -84,10 +89,32 @@ public static class AiProviderModelOptionsNormalizer
                 return;
             }
 
-            AddStrings(doc.RootElement, modes, "modes", "mode");
-            AddInts(doc.RootElement, durations, "durations", "duration", "duration_seconds");
-            AddStrings(doc.RootElement, resolutions, "resolutions", "resolution");
-            AddStrings(doc.RootElement, ratios, "ratios", "ratio");
+            AddStrings(doc.RootElement, modes, "modes", "mode", "supported_modes");
+            AddInts(doc.RootElement, durations, "durations", "duration", "duration_seconds", "supported_durations", "duration_options");
+            AddStrings(doc.RootElement, resolutions, "resolutions", "resolution", "supported_resolutions", "size", "sizes");
+            AddStrings(doc.RootElement, ratios, "ratios", "ratio", "aspect_ratio", "aspect_ratios", "supported_ratios");
+
+            foreach (var arrayName in new[] { "variants", "options", "variant_options", "price_options" })
+            {
+                if (!doc.RootElement.TryGetProperty(arrayName, out var variants)
+                    || variants.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var variant in variants.EnumerateArray())
+                {
+                    if (variant.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    AddStrings(variant, modes, "modes", "mode", "supported_modes");
+                    AddInts(variant, durations, "durations", "duration", "duration_seconds", "supported_durations", "duration_options");
+                    AddStrings(variant, resolutions, "resolutions", "resolution", "supported_resolutions", "size", "sizes");
+                    AddStrings(variant, ratios, "ratios", "ratio", "aspect_ratio", "aspect_ratios", "supported_ratios");
+                }
+            }
         }
         catch (JsonException)
         {
@@ -149,6 +176,16 @@ public static class AiProviderModelOptionsNormalizer
         else if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed) && parsed > 0)
         {
             target.Add(parsed);
+        }
+        else if (value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "type", "value", "seconds", "duration", "duration_seconds" })
+            {
+                if (value.TryGetProperty(name, out var child))
+                {
+                    AddInt(target, child);
+                }
+            }
         }
     }
 

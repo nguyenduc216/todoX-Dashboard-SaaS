@@ -21,3 +21,14 @@
     }
   }
 };
+
+window.todoXVideoPreview = window.todoXVideoPreview || {
+  play: async function (video) {
+    if (!video) return;
+    video.currentTime = 0;
+    try {
+      await video.play();
+    } catch {
+    }
+  }
+};

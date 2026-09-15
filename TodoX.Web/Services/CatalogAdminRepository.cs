@@ -33,6 +33,7 @@ public sealed class ServiceDto
     public decimal? MinTokenCost { get; set; }
     public int SellPriceCount { get; set; }
     public decimal? MinSellPoints { get; set; }
+    public string JobDefaultsJson { get; set; } = "{}";
 }
 
 public sealed class ServiceIllustrationDialogValue
@@ -90,6 +91,7 @@ public sealed class CatalogAdminRepository
                    s.description AS Description, s.short_description AS ShortDescription,
                    s.thumbnail_url AS ThumbnailUrl, s.cover_image_url AS CoverImageUrl,
                    s.workflow_code AS WorkflowCode, s.status AS Status, s.sort_order AS SortOrder,
+                   COALESCE(s.default_options->'job_defaults', '{}'::jsonb)::text AS JobDefaultsJson,
                    (SELECT count(*) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id) AS TierCount,
                    (SELECT min(token_cost) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id AND t.is_active) AS MinTokenCost,
                    (SELECT count(*) FROM catalog.service_sell_prices p WHERE p.service_id = s.id) AS SellPriceCount,
@@ -125,9 +127,9 @@ public sealed class CatalogAdminRepository
             """
             INSERT INTO catalog.services
                 (id, category_id, service_code, service_name, service_type, description,
-                 short_description, thumbnail_url, cover_image_url, workflow_code, status, sort_order, created_at)
+                 short_description, thumbnail_url, cover_image_url, workflow_code, status, sort_order, default_options, created_at)
             VALUES
-                (@id, @cat, @code, @name, @type, @desc, @short, @thumb, @cover, @workflow, @status, @sort, now());
+                (@id, @cat, @code, @name, @type, @desc, @short, @thumb, @cover, @workflow, @status, @sort, CAST(@defaults AS jsonb), now());
             """,
             new
             {
@@ -142,7 +144,8 @@ public sealed class CatalogAdminRepository
                 cover = s.CoverImageUrl,
                 workflow = s.WorkflowCode,
                 status = s.Status,
-                sort = s.SortOrder
+                sort = s.SortOrder,
+                defaults = ServiceJobDefaultsCodec.ToJson(ServiceJobDefaultsCodec.FromJson(s.JobDefaultsJson))
             });
         return id;
     }
@@ -159,7 +162,9 @@ public sealed class CatalogAdminRepository
             UPDATE catalog.services
                SET category_id=@cat, service_name=@name, service_type=@type,
                    description=@desc, short_description=@short, thumbnail_url=@thumb,
-                   cover_image_url=@cover, workflow_code=@workflow, status=@status, sort_order=@sort, updated_at=now()
+                   cover_image_url=@cover, workflow_code=@workflow, status=@status, sort_order=@sort,
+                   default_options=jsonb_set(COALESCE(default_options, '{}'::jsonb), '{job_defaults}', CAST(@defaults AS jsonb), true),
+                   updated_at=now()
              WHERE id=@id;
             """,
             new
@@ -175,7 +180,8 @@ public sealed class CatalogAdminRepository
                 cover = s.CoverImageUrl,
                 workflow = s.WorkflowCode,
                 status = s.Status,
-                sort = s.SortOrder
+                sort = s.SortOrder,
+                defaults = ServiceJobDefaultsCodec.ToJson(ServiceJobDefaultsCodec.FromJson(s.JobDefaultsJson))
             });
     }
 

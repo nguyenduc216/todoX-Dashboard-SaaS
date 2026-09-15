@@ -6,7 +6,7 @@ namespace TodoX.Web.Tests;
 public sealed class HealthVideoDemoPageTests
 {
     [Fact]
-    public void PageIsAuthenticatedAndRegisteredInNavigation()
+    public void PageIsAuthenticatedAndNotInProductionNavigation()
     {
         var repoRoot = FindRepoRoot();
         var page = ReadStrictUtf8(Path.Combine(repoRoot, "TodoX.Web", "Components", "Pages", "HealthVideoDemo.razor"));
@@ -16,11 +16,9 @@ public sealed class HealthVideoDemoPageTests
         Assert.Contains("Vui lòng đăng nhập để mở trang này.", page, StringComparison.Ordinal);
         Assert.DoesNotContain("private bool IsAdmin =>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Bạn cần quyền quản trị để mở trang này.", page, StringComparison.Ordinal);
-        Assert.Contains("Video Sức Khoẻ", layout, StringComparison.Ordinal);
-        Assert.Contains("/health-video-demo", layout, StringComparison.Ordinal);
-        Assert.Contains("HealthAndSafety", layout, StringComparison.Ordinal);
-        Assert.Contains("BuildHealthVideoDemoItem", layout, StringComparison.Ordinal);
-        Assert.Contains("VisibilityPolicy = \"always\"", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("Video Sức Khoẻ", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("/health-video-demo", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildHealthVideoDemoItem", layout, StringComparison.Ordinal);
     }
 
     [Fact]

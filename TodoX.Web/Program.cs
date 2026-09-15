@@ -1,15 +1,18 @@
-using TodoX.Web.Components;
+﻿using TodoX.Web.Components;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
+using TodoX.Web.Services.Platform;
 using TodoX.Web.Services.Reup;
 using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.DanceSell;
 using TodoX.Web.Services.Landing;
 using TodoX.Web.Services.SharedMedia;
+using TodoX.Web.Services.SystemDiagnostics;
 using TodoX.Web.Services.Timelapse;
+using TodoX.Web.Services.VideoRender;
 using MudBlazor.Services;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
@@ -34,9 +37,11 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<TodoXConnectionFactory>();
 builder.Services.AddSingleton<TodoXAutomationConnectionFactory>();
 builder.Services.AddSingleton<TenantContext>();
+builder.Services.AddTodoXCorePlatform();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<CustomerRepository>();
+builder.Services.AddScoped<ServiceFavoriteRepository>();
 builder.Services.AddScoped<PermissionRepository>();
 builder.Services.AddScoped<NavigationMenuRepository>();
 builder.Services.AddScoped<LandingContactLeadRepository>();
@@ -45,18 +50,34 @@ builder.Services.AddScoped<LandingIndustryMediaService>();
 builder.Services.AddSingleton<SharedMediaPathService>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddScoped<AuditRepository>();
+builder.Services.AddScoped<IAdminJobMonitorService, AdminJobMonitorService>();
+builder.Services.AddSingleton<IRuntimeBuildInfoProvider, RuntimeBuildInfoProvider>();
+builder.Services.AddScoped<ISystemDiagnosticsService, SystemDiagnosticsService>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
+builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>();
 builder.Services.AddScoped<CatalogAdminRepository>();
+builder.Services.AddScoped<IAiStudioCatalogService, AiStudioCatalogService>();
 builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();
+builder.Services.AddScoped<IPointPricingService, PointPricingService>();
 builder.Services.AddScoped<ITimelapseProfileRepository, TimelapseProfileRepository>();
 builder.Services.AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>();
 builder.Services.AddScoped<ITimelapseJobService, TimelapseJobService>();
 builder.Services.Configure<TimelapseProviderWorkerOptions>(builder.Configuration.GetSection(TimelapseProviderWorkerOptions.SectionName));
+builder.Services.AddScoped<TimelapseImageModelSelector>();
 builder.Services.AddScoped<ITimelapseWorkerRepository, TimelapseWorkerRepository>();
+builder.Services.AddScoped<ITimelapseCoreLifecycleBridge, TimelapseCoreLifecycleBridge>();
+builder.Services.AddScoped<IConstructionTimelapseExecutionBridge, ConstructionTimelapseExecutionBridge>();
+builder.Services.AddScoped<ICoreJobExecutionAdapter, ConstructionTimelapseAdapter>();
 builder.Services.AddScoped<ITimelapseProviderRuntime, TimelapseProviderRuntime>();
 builder.Services.AddScoped<ITimelapseFinalizerRuntime, TimelapseFinalizerRuntime>();
-builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>();
+builder.Services.AddScoped<ICoreJobExecutionAdapter, TodoX.Web.Services.VideoRender.RVideoCoreExecutionAdapter>();
+builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>(client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(3);
+});
+builder.Services.AddHttpClient("DanceSellDownload", client => client.Timeout = TimeSpan.FromMinutes(5))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<MrTodoXAvatarService>();
 builder.Services.AddScoped<SystemImageStorage>();
 builder.Services.AddScoped<ServiceThumbnailRenderService>();
@@ -74,6 +95,13 @@ builder.Services.AddScoped<FacebookOAuthService>();
 
 // Sprint 2F: media, image render (Vertex), avatar + chibi.
 builder.Services.AddScoped<TodoX.Web.Services.Media.IMediaFileService, TodoX.Web.Services.Media.MediaFileService>();
+builder.Services.AddScoped<TodoX.Web.Services.Media.LocalMediaPathResolver>();
+builder.Services.AddHttpClient("MediaBinaryDownload", client => client.Timeout = TimeSpan.FromSeconds(60))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
 builder.Services.AddScoped<TodoX.Web.Services.Settings.SettingsApiRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.Settings.PromptTemplateRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.Settings.IPromptTemplateService, TodoX.Web.Services.Settings.PromptTemplateService>();
@@ -114,6 +142,7 @@ builder.Services.AddHttpClient<IKieClient, KieClient>();
 builder.Services.AddScoped<IKiePayloadBuilder, KiePayloadBuilder>();
 builder.Services.AddSingleton<IKieRateLimiter, InMemoryKieRateLimiter>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IYEScaleImageService, TodoX.Web.Services.AiProviders.YEScaleImageService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.Gommo79AiImageService>();
 builder.Services.AddScoped<IAiImageProviderFactory, AiImageProviderFactory>();
 builder.Services.AddScoped<CharacterPromptBuilder>();
 builder.Services.AddScoped<AiCharacterRepository>();
@@ -131,6 +160,8 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialRep
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialResolver, TodoX.Web.Services.AiProviders.ProviderCredentialResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAi79CredentialMigrationService, TodoX.Web.Services.AiProviders.Ai79CredentialMigrationService>();
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79CatalogClient, TodoX.Web.Services.AiProviders.Ai79CatalogClient>();
+builder.Services.AddHttpClient("AiStudioMusicImport", client => client.Timeout = Timeout.InfiniteTimeSpan)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.Configure<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions>(builder.Configuration.GetSection(TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions.SectionName));
 builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncWorker>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingPayerResolver, TodoX.Web.Services.AiProviders.AiBillingPayerResolver>();
@@ -143,16 +174,58 @@ if (TodoX.Web.Services.AiProviders.AiImageBillingFeatureFlags.IsReconciliationWo
     builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiImageBillingReconciliationWorker>();
 }
 builder.Services.Configure<TodoX.Web.Services.VideoRender.VideoRenderOptions>(builder.Configuration.GetSection("VideoRender"));
+builder.Services.Configure<TodoX.Web.Services.VideoRender.VbeeOptions>(builder.Configuration.GetSection(TodoX.Web.Services.VideoRender.VbeeOptions.SectionName));
+builder.Services.PostConfigure<TodoX.Web.Services.VideoRender.VbeeOptions>(options =>
+{
+    ApplyEnv("VBEE_API_BASE_URL", value => options.ApiBaseUrl = value);
+    ApplyEnv("VBEE_TTS_PATH", value => options.TtsPath = value);
+    ApplyEnv("VBEE_API_TOKEN", value => options.ApiToken = value);
+    ApplyEnv("VBEE_APP_ID", value => options.AppId = value);
+    ApplyEnv("VBEE_CALLBACK_URL", value => options.CallbackUrl = value);
+    ApplyEnv("VBEE_CALLBACK_SECRET", value => options.CallbackSecret = value);
+    ApplyEnvInt("VBEE_DEFAULT_SAMPLE_RATE", value => options.DefaultSampleRate = value);
+    ApplyEnvInt("VBEE_DEFAULT_BITRATE", value => options.DefaultBitrate = value);
+    ApplyEnvDecimal("VBEE_DEFAULT_SPEED_RATE", value => options.DefaultSpeedRate = value);
+    ApplyEnvInt("VBEE_HTTP_TIMEOUT_SECONDS", value => options.HttpTimeoutSeconds = value);
+    ApplyEnvInt("VBEE_POLL_INTERVAL_SECONDS", value => options.PollIntervalSeconds = value);
+    ApplyEnvInt("VBEE_MAX_POLL_COUNT", value => options.MaxPollCount = value);
+});
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVbeeRuntimeConfigProvider, TodoX.Web.Services.VideoRender.VbeeRuntimeConfigProvider>();
+builder.Services.AddHttpClient<TodoX.Web.Services.VideoRender.IVbeeVoiceClient, TodoX.Web.Services.VideoRender.VbeeVoiceClient>()
+    .ConfigureHttpClient((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptionsMonitor<TodoX.Web.Services.VideoRender.VbeeOptions>>().CurrentValue;
+        client.Timeout = options.HttpTimeout;
+    });
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneAudioAutoChainService, TodoX.Web.Services.VideoRender.RVideoSceneAudioAutoChainService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneMediaFinalizerService, TodoX.Web.Services.VideoRender.RVideoSceneMediaFinalizerService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoCompletionService, TodoX.Web.Services.VideoRender.RVideoSceneVideoCompletionService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService, TodoX.Web.Services.VideoRender.RVideoTrustedPayerContextService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoJobService, TodoX.Web.Services.VideoRender.RVideoJobService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoProjectFinalizationService, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService>();
+builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoRecoveryService, TodoX.Web.Services.VideoRender.RVideoSceneVideoRecoveryService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideo79AiVideoService, TodoX.Web.Services.VideoRender.RVideo79AiVideoService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoProviderRoutingService, TodoX.Web.Services.VideoRender.VideoProviderRoutingService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoGenerationProviderAdapterResolver, TodoX.Web.Services.VideoRender.VideoGenerationProviderAdapterResolver>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoGenerationProviderAdapter, TodoX.Web.Services.VideoRender.Ai79VideoGenerationProviderAdapter>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoRenderPricingResolver, TodoX.Web.Services.VideoRender.VideoRenderPricingResolver>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoRenderEligibilityService, TodoX.Web.Services.VideoRender.VideoRenderEligibilityService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
 builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
+builder.Services.AddScoped<IRDanceDownloadTicketService, RDanceDownloadTicketService>();
 builder.Services.AddScoped<IDanceSellCompletionService, DanceSellCompletionService>();
 builder.Services.AddScoped<IDanceSellMotionSourceService, DanceSellMotionSourceService>();
+builder.Services.AddScoped<IRDanceFeatureService, RDanceFeatureService>();
 builder.Services.AddScoped<IDanceSellReferenceImageService, DanceSellReferenceImageService>();
+builder.Services.AddScoped<IDanceSellReferenceComparisonService, DanceSellReferenceComparisonService>();
 builder.Services.AddScoped<IDanceSellPhase2Service, DanceSellPhase2Service>();
+builder.Services.AddScoped<IDanceSellCustomerPricing, DanceSellCustomerPricing>();
 builder.Services.AddScoped<IDanceSellProviderCatalog, DanceSellProviderCatalog>();
 builder.Services.AddScoped<IDanceSellOperationRepository, DanceSellOperationRepository>();
 builder.Services.AddScoped<IDanceSellCostEstimator, DanceSellCostEstimator>();
@@ -160,11 +233,17 @@ builder.Services.AddScoped<IAiOperationBillingService, AiOperationBillingService
 builder.Services.AddScoped<IAiProviderBalanceClient, KieBalanceClient>();
 builder.Services.AddScoped<IAiProviderBalanceClientFactory, AiProviderBalanceClientFactory>();
 builder.Services.AddScoped<IDanceSellReferenceProvider, KieDanceSellReferenceProvider>();
+builder.Services.AddScoped<IDanceSellReferenceProvider, Ai79DanceSellReferenceProvider>();
 builder.Services.AddScoped<IDanceSellReferenceProviderFactory, DanceSellReferenceProviderFactory>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoRenderHandler>();
+builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneAudioRenderHandler>();
+builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneAudioMuxHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
+builder.Services.AddScoped<IRVideoInitialPointEstimateService, RVideoInitialPointEstimateService>();
+builder.Services.AddScoped<IRVideoSceneVideoAutoChainService, RVideoSceneVideoAutoChainService>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageBatchRenderHandler>();
+builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler>();
 builder.Services.AddScoped<IRenderJobHandler, DanceSellRenderHandler>();
 builder.Services.AddScoped<TodoX.Web.Services.Render.ISceneImageRenderService, TodoX.Web.Services.Render.SceneImageRenderService>();
 builder.Services.AddSingleton<TodoX.Web.Services.Render.GoogleVertexRateLimiter>();
@@ -173,10 +252,13 @@ builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
 builder.Services.AddScoped<TokenSettingsService>();
 builder.Services.AddScoped<WalletService>();
+builder.Services.AddSingleton<IPointBalanceChangeNotifier, PointBalanceChangeNotifier>();
 builder.Services.AddScoped<IRenderJobService, RenderJobService>();
 builder.Services.AddScoped<IRenderJobDispatcher, RenderJobDispatcher>();
 builder.Services.AddHostedService<RenderJobWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Render.SceneVideoJobWorker>();
+builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.SceneVideoReconciliationWorker>();
+builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.RVideoLifecycleWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseImageWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseVideoWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseFinalizerWorker>();
@@ -192,6 +274,9 @@ builder.Services.AddSingleton<ReupTaskPageGate>();
 builder.Services.AddHostedService<ReupCampaignWorker>();
 var app = builder.Build();
 
+app.Logger.LogInformation(
+    "TIMELAPSE_HOSTED_SERVICES_CONFIGURED imageWorker=true videoWorker=true finalizerWorker=true renderWorker=true sceneVideoWorker=true rVideoLifecycleWorker=true reupWorker=true");
+
 static void ApplyEnv(string key, Action<string> apply)
 {
     var value = Environment.GetEnvironmentVariable(key);
@@ -205,6 +290,15 @@ static void ApplyEnvInt(string key, Action<int> apply)
 {
     var value = Environment.GetEnvironmentVariable(key);
     if (int.TryParse(value, out var parsed))
+    {
+        apply(parsed);
+    }
+}
+
+static void ApplyEnvDecimal(string key, Action<decimal> apply)
+{
+    var value = Environment.GetEnvironmentVariable(key);
+    if (decimal.TryParse(value, out var parsed))
     {
         apply(parsed);
     }
@@ -411,6 +505,33 @@ extensionApi.MapGet("/download", async (
 
 app.MapDanceSellPhase1Endpoints();
 app.MapDanceSellPhase2Endpoints();
+app.MapAiStudioCatalogEndpoints();
+app.MapRVideoEndpoints();
+app.MapSceneAudioEndpoints();
+
+app.MapGet("/system/version", (IConfiguration configuration, IRuntimeBuildInfoProvider buildInfoProvider) =>
+{
+    var build = buildInfoProvider.Get();
+    return Results.Json(new
+    {
+        application = build.ApplicationName,
+        environment = build.Environment,
+        version = build.Version,
+        commit = build.CommitSha,
+        shortCommit = build.CommitShortSha,
+        branch = build.Branch,
+        commitMessage = build.CommitMessage,
+        buildTimeUtc = build.BuildTimeUtc,
+        publishTimeUtc = build.PublishTimeUtc,
+        instanceStartedUtc = build.ProcessStartTimeUtc,
+        features = new
+        {
+            renderQueueEnabled = configuration.GetValue("RenderQueue:Enabled", false),
+            rvideoLifecycleRegistered = app.Services.GetServices<IHostedService>().OfType<RVideoLifecycleWorker>().Any(),
+            legacyPointBillingEnabled = LegacyPointBillingFeatureFlags.IsEnabled(configuration)
+        }
+    });
+});
 
 app.MapPost("/api/ai/cost/estimate", async (
     TodoX.Web.Services.AiProviders.IAiPricingService pricing,
@@ -420,6 +541,11 @@ app.MapPost("/api/ai/cost/estimate", async (
     var result = await pricing.EstimateAsync(request, ct);
     return Results.Json(result);
 });
+
+if (app.Configuration.GetValue("CoreApi:Enabled", false))
+{
+    app.MapTodoXCoreApiV1();
+}
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

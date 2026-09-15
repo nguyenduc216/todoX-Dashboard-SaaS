@@ -1,0 +1,223 @@
+@page "/admin/ai-studio/voices"
+@using TodoX.Web.Models
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject IDialogService DialogService
+@inject IAiStudioCatalogService Catalog
+@inject ISnackbar Snackbar
+
+<PageTitle>AI Studio - Giọng đọc</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Giọng đọc</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Catalog voice dùng chung cho Rvideo và các dịch vụ video.</MudText>
+        </div>
+        @if (IsAdmin)
+        {
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="NewVoice">Thêm giọng</MudButton>
+        }
+    </MudStack>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!IsAdmin)
+    {
+        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị AI Studio để mở trang này.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="todox-card pa-4">
+            <MudGrid>
+                <MudItem xs="12" md="3"><MudTextField @bind-Value="_filter.Search" Label="Search" Variant="Variant.Outlined" Immediate="true" /></MudItem>
+                <MudItem xs="12" md="2"><MudTextField @bind-Value="_filter.ProviderCode" Label="Provider" Variant="Variant.Outlined" Immediate="true" /></MudItem>
+                <MudItem xs="12" md="2"><MudTextField @bind-Value="_filter.Gender" Label="Gender" Variant="Variant.Outlined" Immediate="true" /></MudItem>
+                <MudItem xs="12" md="2"><MudTextField @bind-Value="_filter.LanguageCode" Label="Language" Variant="Variant.Outlined" Immediate="true" /></MudItem>
+                <MudItem xs="12" md="2">
+                    <MudSelect T="bool?" @bind-Value="_filter.IsActive" Label="Status" Variant="Variant.Outlined">
+                        <MudSelectItem T="bool?" Value="null">Tất cả</MudSelectItem>
+                        <MudSelectItem T="bool?" Value="true">Active</MudSelectItem>
+                        <MudSelectItem T="bool?" Value="false">Inactive</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="1" Class="d-flex align-center">
+                    <MudIconButton Icon="@Icons.Material.Filled.Search" OnClick="Reload" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+            }
+            else
+            {
+                <MudTable Items="_voices" Dense="true" Hover="true" T="AiStudioVoiceDto">
+                    <HeaderContent>
+                        <MudTh>Tên</MudTh>
+                        <MudTh>Mã</MudTh>
+                        <MudTh>Provider</MudTh>
+                        <MudTh>Giới tính</MudTh>
+                        <MudTh>Ngôn ngữ / vùng</MudTh>
+                        <MudTh>Preview</MudTh>
+                        <MudTh>Rate</MudTh>
+                        <MudTh>Trạng thái</MudTh>
+                        <MudTh>Default</MudTh>
+                        <MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate Context="v">
+                        <MudTd DataLabel="Tên">@v.Name</MudTd>
+                        <MudTd DataLabel="Mã">@v.Code</MudTd>
+                        <MudTd DataLabel="Provider">@v.ProviderCode</MudTd>
+                        <MudTd DataLabel="Giới tính">@v.Gender</MudTd>
+                        <MudTd DataLabel="Ngôn ngữ / vùng">@($"{v.LanguageCode} {v.Region}".Trim())</MudTd>
+                        <MudTd DataLabel="Preview">
+                            @if (!string.IsNullOrWhiteSpace(v.PreviewFileUrl))
+                            {
+                                <audio controls src="@v.PreviewFileUrl" class="ai-audio-player"></audio>
+                                <MudText Typo="Typo.caption">@v.PreviewFileName</MudText>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Rate">@v.DefaultRate</MudTd>
+                        <MudTd DataLabel="Trạng thái">
+                            <MudChip T="string" Size="Size.Small" Color="@(v.IsActive ? Color.Success : Color.Default)">@(v.IsActive ? "Active" : "Inactive")</MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Default">@(v.IsDefault ? "Yes" : "-")</MudTd>
+                        <MudTd>
+                            <MudTooltip Text="Edit"><MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(v))" /></MudTooltip>
+                            <MudTooltip Text="Enable / Disable"><MudIconButton Icon="@(v.IsActive ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)" Size="Size.Small" OnClick="@(() => Toggle(v))" /></MudTooltip>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+<style>
+    .ai-audio-player { width: 180px; max-width: 100%; height: 34px; }
+</style>
+
+@code {
+    private readonly AiStudioCatalogFilter _filter = new();
+    private IReadOnlyList<AiStudioVoiceDto> _voices = Array.Empty<AiStudioVoiceDto>();
+    private bool _loading = true;
+
+    private bool IsAdmin => AuthState.CurrentUser?.IsAuthenticated == true
+                            && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        await Reload();
+        StateHasChanged();
+    }
+
+    private async Task Reload()
+    {
+        if (!IsAdmin) return;
+        _loading = true;
+        try
+        {
+            _voices = await Catalog.ListVoicesAsync(_filter);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task NewVoice()
+    {
+        var result = await OpenDialogAsync(new AiStudioVoiceDto { ProviderCode = "vbee", LanguageCode = "vi-VN", DefaultRate = 1.0m, MinRate = 0.8m, MaxRate = 1.2m, IsActive = true }, false);
+        if (result)
+        {
+            await Reload();
+        }
+    }
+
+    private async Task Edit(AiStudioVoiceDto voice)
+    {
+        var clone = new AiStudioVoiceDto
+        {
+            Id = voice.Id,
+            Name = voice.Name,
+            Code = voice.Code,
+            ProviderCode = voice.ProviderCode,
+            ProviderVoiceId = voice.ProviderVoiceId,
+            CompatibilityAlias = voice.CompatibilityAlias,
+            Gender = voice.Gender,
+            LanguageCode = voice.LanguageCode,
+            Region = voice.Region,
+            Description = voice.Description,
+            PreviewFileName = voice.PreviewFileName,
+            PreviewStorageKey = voice.PreviewStorageKey,
+            PreviewFileUrl = voice.PreviewFileUrl,
+            DefaultRate = voice.DefaultRate,
+            MinRate = voice.MinRate,
+            MaxRate = voice.MaxRate,
+            IsActive = voice.IsActive,
+            IsDefault = voice.IsDefault,
+            SortOrder = voice.SortOrder
+        };
+
+        var result = await OpenDialogAsync(clone, true);
+        if (result)
+        {
+            await Reload();
+        }
+    }
+
+    private async Task<bool> OpenDialogAsync(AiStudioVoiceDto model, bool editing)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Model"] = model,
+            ["IsEditing"] = editing
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseButton = true,
+            CloseOnEscapeKey = true,
+            BackdropClick = false
+        };
+
+        var dialog = await DialogService.ShowAsync<Components.Dialogs.AiStudioVoiceDialog>(editing ? "Sửa giọng" : "Thêm giọng", parameters, options);
+        var result = await dialog.Result;
+        return result is { Canceled: false };
+    }
+
+    private async Task Toggle(AiStudioVoiceDto voice)
+    {
+        try
+        {
+            if (voice.IsActive)
+            {
+                await Catalog.DisableVoiceAsync(voice.Id, AuthState.CurrentUser!);
+            }
+            else
+            {
+                voice.IsActive = true;
+                await Catalog.SaveVoiceAsync(voice, AuthState.CurrentUser!);
+            }
+
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

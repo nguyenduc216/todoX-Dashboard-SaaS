@@ -17,19 +17,29 @@ public interface IDanceSellRepository
     Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default);
     Task UpdateCharacterAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
+    Task ClearProductAsync(Guid id, CancellationToken ct = default);
+    Task RemoveProductAndUseCharacterReferenceAsync(Guid id, CancellationToken ct = default);
     Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
-    Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
-    Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
+    Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default);
+    Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default);
+    Task PersistMotionDurationAsync(Guid id, int durationSeconds, CancellationToken ct = default);
+    Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default);
     Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default);
     Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default);
     Task<DanceSellReferenceVersionDto?> GetReferenceVersionAsync(Guid versionId, CancellationToken ct = default);
     Task<DanceSellReferenceVersionDto> CreateReferenceVersionAsync(DanceSellReferenceVersionDto version, CancellationToken ct = default);
+    Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
+    Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default);
+    Task UpdateReferenceVersionScoreAsync(Guid versionId, string scoreJson, CancellationToken ct = default);
     Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default);
+    Task UnapproveReferenceAsync(Guid danceSellJobId, CancellationToken ct = default);
     Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default);
     Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default);
     Task<bool> UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default);
+    Task<bool> SelectHistoricalRenderResultAsync(Guid jobId, Guid operationId, string resultVideoUrl, CancellationToken ct = default);
     Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task ResetMotionRenderStateAsync(Guid id, Guid renderJobId, CancellationToken ct = default);
 }
 
 public sealed class DanceSellRepository : IDanceSellRepository
@@ -52,7 +62,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
             """
             INSERT INTO dance_sell.dance_sell_jobs
                 (tenant_id, customer_id, user_id, logical_request_id, title, prompt,
-                 character_image_url, motion_video_url, mode, character_orientation,
+                 character_image_url, motion_video_url, mode, orientation,
                  placement_mode, custom_placement_instruction, reference_mode, image_prompt,
                  reference_provider_code, reference_provider_model, motion_provider_code, motion_provider_model,
                  current_stage, billing_status, refund_status, status, request_json, created_by, updated_by,
@@ -62,12 +72,14 @@ public sealed class DanceSellRepository : IDanceSellRepository
                  '', '', @mode, @orientation,
                  @placementMode, @customInstruction, @referenceMode, @imagePrompt,
                  @referenceProviderCode, @referenceProviderModel, @motionProviderCode, @motionProviderModel,
-                 'draft', 'not_required', 'not_required', 'draft', '{}'::jsonb, @user, @user,
+                 'draft', 'not_required', 'not_required', 'draft',
+                 jsonb_build_object('autoFinish', @autoFinish, 'ratio', @ratio, 'serviceId', @serviceId, 'serviceCode', @serviceCode),
+                 @user, @user,
                  now(), now())
             RETURNING id AS Id, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
                       render_job_id AS RenderJobId, logical_request_id AS LogicalRequestId,
                       status AS Status, prompt AS Prompt, character_image_url AS CharacterImageUrl,
-                      motion_video_url AS MotionVideoUrl, mode AS Mode, character_orientation AS CharacterOrientation,
+                      motion_video_url AS MotionVideoUrl, mode AS Mode, COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio, orientation AS CharacterOrientation,
                       provider_code AS ProviderCode, provider_model AS ProviderModel,
                       provider_task_id AS ProviderTaskId, provider_status AS ProviderStatus,
                       request_json::text AS RequestJson, submit_response_json::text AS SubmitResponseJson,
@@ -100,13 +112,17 @@ public sealed class DanceSellRepository : IDanceSellRepository
                       prepared_reference_media_id AS PreparedReferenceMediaId, prepared_reference_object_key AS PreparedReferenceObjectKey,
                       prepared_reference_url AS PreparedReferenceUrl, prepared_reference_status AS PreparedReferenceStatus,
                       prepared_reference_approved_at AS PreparedReferenceApprovedAt, source_stage_status AS SourceStageStatus,
-                      source_stage_error AS SourceStageError, created_by AS CreatedBy, updated_by AS UpdatedBy;
+                      source_stage_error AS SourceStageError,
+                      COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish,
+                      created_by AS CreatedBy, updated_by AS UpdatedBy;
             """,
             new
             {
                 tenant = request.TenantId ?? _tenant.TenantId,
                 customer = request.CustomerId,
                 user = request.UserId,
+                serviceId = request.ServiceId,
+                serviceCode = request.ServiceCode,
                 logicalRequestId = $"dance-sell-{Guid.NewGuid():N}",
                 title = NormalizeTitle(request.Title),
                 prompt = request.Prompt.Trim(),
@@ -119,7 +135,9 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 referenceProviderCode = NullIfBlank(request.ReferenceProviderCode),
                 referenceProviderModel = NullIfBlank(request.ReferenceProviderModel),
                 motionProviderCode = NullIfBlank(request.MotionProviderCode),
-                motionProviderModel = NullIfBlank(request.MotionProviderModel)
+                motionProviderModel = NullIfBlank(request.MotionProviderModel),
+                ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.Ratio),
+                autoFinish = request.AutoFinish
             });
     }
 
@@ -132,16 +150,16 @@ public sealed class DanceSellRepository : IDanceSellRepository
             """
             INSERT INTO dance_sell.dance_sell_jobs
                 (id, tenant_id, customer_id, user_id, render_job_id, logical_request_id, status,
-                 prompt, character_image_url, motion_video_url, mode, character_orientation,
+                 prompt, character_image_url, motion_video_url, mode, orientation,
                  provider_code, provider_model, request_json, created_at, updated_at)
             VALUES
                 (@id, @tenant, @customer, @user, @renderJobId, @logicalRequestId, 'queued',
                  @prompt, @characterImageUrl, @motionVideoUrl, @mode, @orientation,
-                 @providerCode, @providerModel, '{}'::jsonb, now(), now())
+                 @providerCode, @providerModel, jsonb_build_object('ratio', @ratio), now(), now())
             RETURNING id AS Id, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
                       render_job_id AS RenderJobId, logical_request_id AS LogicalRequestId,
                       status AS Status, prompt AS Prompt, character_image_url AS CharacterImageUrl,
-                      motion_video_url AS MotionVideoUrl, mode AS Mode, character_orientation AS CharacterOrientation,
+                      motion_video_url AS MotionVideoUrl, mode AS Mode, COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio, orientation AS CharacterOrientation,
                       provider_code AS ProviderCode, provider_model AS ProviderModel,
                       provider_task_id AS ProviderTaskId, provider_status AS ProviderStatus,
                       request_json::text AS RequestJson, submit_response_json::text AS SubmitResponseJson,
@@ -165,6 +183,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionVideoUrl = request.MotionVideoUrl.Trim(),
                 mode = request.Mode.Trim(),
                 orientation = request.CharacterOrientation.Trim(),
+                ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.Ratio),
                 providerCode = request.ProviderCode,
                 providerModel = request.ProviderModel
             });
@@ -216,11 +235,10 @@ public sealed class DanceSellRepository : IDanceSellRepository
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
-            UPDATE dance_sell.dance_sell_jobs
+            UPDATE dance_sell.dance_sell_jobs j
                SET status='queued',
                    render_job_id=@renderJobId,
                    logical_request_id=@logicalRequestId,
-                   character_image_url=@preparedReferenceUrl,
                    motion_video_url=@motionVideoUrl,
                    motion_provider_code=@motionProviderCode,
                    motion_provider_model=@motionProviderModel,
@@ -229,8 +247,17 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    provider_code=@motionProviderCode,
                    provider_model=@motionProviderModel,
                    current_stage='motion_queued',
+                   billing_status = CASE
+                       WHEN COALESCE(r.point_cost_estimate, 0) > 0 THEN 'charged'
+                       ELSE j.billing_status
+                   END,
                    provider_task_id=NULL,
                    provider_status=NULL,
+                   submit_response_json=NULL,
+                   poll_response_json=NULL,
+                   callback_json=NULL,
+                   poll_count=0,
+                   next_poll_at=NULL,
                    submitted_at=NULL,
                    last_polled_at=NULL,
                    completed_at=NULL,
@@ -238,8 +265,10 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    error_message=NULL,
                    error_json=NULL,
                    updated_at=now()
-             WHERE id=@id
-               AND status NOT IN ('submitted','rendering','completed');
+              FROM render.render_jobs r
+             WHERE j.id=@id
+               AND r.id=@renderJobId
+               AND j.status NOT IN ('submitted','rendering','completed');
             """,
             new
             {
@@ -253,6 +282,35 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionProviderCapabilityId = motionRoute.ProviderCapabilityId,
                 motionProviderAccountId = motionRoute.ProviderAccountId
             });
+    }
+
+    public async Task ResetMotionRenderStateAsync(Guid id, Guid renderJobId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET status='queued',
+                   render_job_id=@renderJobId,
+                   provider_task_id=NULL,
+                   provider_status=NULL,
+                   submit_response_json=NULL,
+                   poll_response_json=NULL,
+                   callback_json=NULL,
+                   poll_count=0,
+                   next_poll_at=NULL,
+                   submitted_at=NULL,
+                   last_polled_at=NULL,
+                   completed_at=NULL,
+                   error_code=NULL,
+                   error_message=NULL,
+                   error_json=NULL,
+                   current_stage='motion_queued',
+                   updated_at=now()
+             WHERE id=@id
+               AND status IN ('queued','submitted','rendering','failed','timeout');
+            """,
+            new { id, renderJobId });
     }
 
     public async Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default)
@@ -269,10 +327,15 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    image_prompt=@imagePrompt,
                    reference_provider_code=@referenceProviderCode,
                    reference_provider_model=@referenceProviderModel,
-                   motion_provider_code=@motionProviderCode,
-                   motion_provider_model=@motionProviderModel,
+                   motion_provider_code=COALESCE(@motionProviderCode, motion_provider_code),
+                   motion_provider_model=COALESCE(@motionProviderModel, motion_provider_model),
                    mode=@mode,
-                   character_orientation=@orientation,
+                   orientation=@orientation,
+                   request_json=jsonb_set(
+                       jsonb_set(COALESCE(request_json, '{}'::jsonb), '{autoFinish}', to_jsonb(CAST(@autoFinish AS boolean)), true),
+                       '{ratio}',
+                       to_jsonb(@ratio),
+                       true),
                    updated_at=now()
              WHERE id=@id;
             """,
@@ -290,7 +353,9 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionProviderCode = NullIfBlank(request.MotionProviderCode),
                 motionProviderModel = NullIfBlank(request.MotionProviderModel),
                 mode = request.Mode.Trim(),
-                orientation = request.CharacterOrientation.Trim()
+                orientation = request.CharacterOrientation.Trim(),
+                ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.Ratio),
+                autoFinish = request.AutoFinish
             });
     }
 
@@ -299,6 +364,68 @@ public sealed class DanceSellRepository : IDanceSellRepository
 
     public async Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
         => await UpdateMediaAsync(id, "product_media_id", mediaId, "product_object_key", objectKey, "product_image_url", publicUrl, ct);
+
+    public async Task ClearProductAsync(Guid id, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET product_media_id=NULL,
+                   product_object_key=NULL,
+                   product_image_url=NULL,
+                   updated_at=now()
+             WHERE id=@id;
+            """,
+            new { id });
+    }
+
+    public async Task RemoveProductAndUseCharacterReferenceAsync(Guid id, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET product_media_id=NULL,
+                   product_object_key=NULL,
+                   product_image_url=NULL,
+                   prepared_reference_media_id=character_media_id,
+                   prepared_reference_object_key=character_object_key,
+                   prepared_reference_url=character_image_url,
+                   prepared_reference_status=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN 'approved'
+                       ELSE 'not_created'
+                   END,
+                   prepared_reference_approved_at=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN now()
+                       ELSE NULL
+                   END,
+                   reference_approved_at=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN now()
+                       ELSE NULL
+                   END,
+                   source_stage_error=NULL,
+                   current_stage=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN 'reference_approved'
+                       ELSE 'reference_inputs'
+                   END,
+                   updated_at=now()
+             WHERE id=@id;
+
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET is_selected=false
+             WHERE dance_sell_job_id=@id;
+            """,
+            new { id });
+    }
 
     public async Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
     {
@@ -322,11 +449,51 @@ public sealed class DanceSellRepository : IDanceSellRepository
             new { id, mediaId, objectKey, publicUrl });
     }
 
-    public async Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
-        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.Upload, publicUrl, mediaId, objectKey, publicUrl, ct);
+    public async Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default)
+        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.Upload, publicUrl, mediaId, objectKey, publicUrl, durationSeconds, ct);
 
-    public async Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
-        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.TikTok, sourceUrl, mediaId, objectKey, publicUrl, ct);
+    public async Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default)
+        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.TikTok, sourceUrl, mediaId, objectKey, publicUrl, durationSeconds, ct);
+
+    public async Task PersistMotionDurationAsync(Guid id, int durationSeconds, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{durationSeconds}', to_jsonb(@durationSeconds), true),
+                   updated_at=now()
+             WHERE id=@id;
+            """,
+            new { id, durationSeconds });
+    }
+
+    public async Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET prepared_reference_status=@status,
+                   source_stage_error=NULL,
+                   prepared_reference_media_id=NULL,
+                   prepared_reference_object_key=NULL,
+                   prepared_reference_url=NULL,
+                   prepared_reference_approved_at=NULL,
+                   reference_approved_at=NULL,
+                   current_stage=CASE
+                       WHEN @status='generating' THEN 'reference_generation'
+                       ELSE 'reference_inputs'
+                   END,
+                   updated_at=now()
+             WHERE id=@id;
+
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET is_selected = false
+             WHERE dance_sell_job_id=@id;
+            """,
+            new { id, status });
+    }
 
     public async Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default)
     {
@@ -417,6 +584,56 @@ public sealed class DanceSellRepository : IDanceSellRepository
             version);
     }
 
+    public async Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET media_id=@mediaId,
+                   object_key=@objectKey,
+                   public_url=@publicUrl,
+                   response_json=CAST(@responseJson AS jsonb),
+                   error_json=NULL,
+                   status='ready',
+                   completed_at=now()
+             WHERE id=@versionId
+               AND status='generating';
+            """,
+            new { versionId, mediaId, objectKey, publicUrl, responseJson });
+    }
+
+    public async Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET error_json=CAST(@errorJson AS jsonb),
+                   status='failed',
+                   completed_at=now()
+             WHERE id=@versionId
+               AND status='generating';
+            """,
+            new { versionId, errorJson });
+    }
+
+    public async Task UpdateReferenceVersionScoreAsync(Guid versionId, string scoreJson, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET response_json = jsonb_set(
+                       COALESCE(response_json, '{}'::jsonb),
+                       '{manualScore}',
+                       CAST(@scoreJson AS jsonb),
+                       true)
+             WHERE id=@versionId;
+            """,
+            new { versionId, scoreJson });
+    }
+
     public async Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
@@ -428,6 +645,50 @@ public sealed class DanceSellRepository : IDanceSellRepository
             """,
             new { danceSellJobId, versionId });
         return changed > 0;
+    }
+
+    public async Task<bool> SelectHistoricalRenderResultAsync(Guid jobId, Guid operationId, string resultVideoUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(resultVideoUrl)) return false;
+        using var conn = await _factory.OpenAsync(ct);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET result_video_url=@resultVideoUrl,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND EXISTS (
+                   SELECT 1
+                     FROM dance_sell.dance_sell_provider_operations
+                    WHERE id=@operationId
+                      AND dance_sell_job_id=@jobId
+                      AND operation_type='motion_video'
+                      AND status='completed');
+            """,
+            new { jobId, operationId, resultVideoUrl = resultVideoUrl.Trim() });
+        return changed > 0;
+    }
+
+    public async Task UnapproveReferenceAsync(Guid danceSellJobId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET is_selected = false
+             WHERE dance_sell_job_id=@danceSellJobId;
+
+            UPDATE dance_sell.dance_sell_jobs
+               SET prepared_reference_status='ready',
+                   source_stage_error=NULL,
+                   prepared_reference_approved_at=NULL,
+                   reference_approved_at=NULL,
+                   current_stage='reference_ready',
+                   updated_at=now()
+             WHERE id=@danceSellJobId
+               AND prepared_reference_status='approved';
+            """,
+            new { danceSellJobId });
     }
 
     public async Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default)
@@ -476,7 +737,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
            SET status='completed',
                provider_status=@providerStatus,
                poll_response_json=CAST(@pollResponseJson AS jsonb),
-               result_video_url=COALESCE(result_video_url, @resultVideoUrl),
+               result_url=@resultVideoUrl,
                current_stage='completed',
                last_polled_at=now(),
                completed_at=COALESCE(completed_at, now()),
@@ -526,7 +787,6 @@ public sealed class DanceSellRepository : IDanceSellRepository
             UPDATE dance_sell.dance_sell_jobs
                SET callback_json=CAST(@callbackJson AS jsonb),
                    provider_status=@providerStatus,
-                   result_video_url=COALESCE(result_video_url, @resultVideoUrl),
                    status = CASE
                        WHEN status IN ('completed','failed','timeout') THEN status
                        WHEN @resultVideoUrl IS NOT NULL THEN 'completed'
@@ -535,6 +795,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    END,
                    error_code=COALESCE(error_code, @errorCode),
                    error_message=COALESCE(error_message, @errorMessage),
+                   result_url=COALESCE(NULLIF(@resultVideoUrl, ''), result_url),
                    completed_at = CASE WHEN (@resultVideoUrl IS NOT NULL OR @errorCode IS NOT NULL) THEN COALESCE(completed_at, now()) ELSE completed_at END,
                    updated_at=now()
              WHERE provider_task_id=@providerTaskId;
@@ -542,7 +803,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
             new { providerTaskId, callbackJson, providerStatus, resultVideoUrl, errorCode, errorMessage });
     }
 
-    private async Task UpdateMotionAsync(Guid id, string sourceType, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct)
+    private async Task UpdateMotionAsync(Guid id, string sourceType, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct)
     {
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
@@ -555,10 +816,11 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    motion_video_url=@publicUrl,
                    source_stage_status='ready',
                    source_stage_error=NULL,
+                   request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{durationSeconds}', to_jsonb(@durationSeconds), true),
                    updated_at=now()
              WHERE id=@id;
             """,
-            new { id, sourceType, sourceUrl, mediaId, objectKey, publicUrl });
+            new { id, sourceType, sourceUrl, mediaId, objectKey, publicUrl, durationSeconds });
     }
 
     private static string NormalizeTitle(string? title)
@@ -587,7 +849,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
         SELECT id AS Id, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
                render_job_id AS RenderJobId, logical_request_id AS LogicalRequestId,
                status AS Status, prompt AS Prompt, character_image_url AS CharacterImageUrl,
-               motion_video_url AS MotionVideoUrl, mode AS Mode, character_orientation AS CharacterOrientation,
+               motion_video_url AS MotionVideoUrl, mode AS Mode, orientation AS CharacterOrientation,
                provider_code AS ProviderCode, provider_model AS ProviderModel,
                provider_task_id AS ProviderTaskId, provider_status AS ProviderStatus,
                request_json::text AS RequestJson, submit_response_json::text AS SubmitResponseJson,
@@ -619,7 +881,10 @@ public sealed class DanceSellRepository : IDanceSellRepository
                prepared_reference_media_id AS PreparedReferenceMediaId, prepared_reference_object_key AS PreparedReferenceObjectKey,
                prepared_reference_url AS PreparedReferenceUrl, prepared_reference_status AS PreparedReferenceStatus,
                prepared_reference_approved_at AS PreparedReferenceApprovedAt, source_stage_status AS SourceStageStatus,
-               source_stage_error AS SourceStageError, created_by AS CreatedBy, updated_by AS UpdatedBy
+               source_stage_error AS SourceStageError,
+               COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish,
+               COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio,
+               created_by AS CreatedBy, updated_by AS UpdatedBy
           FROM dance_sell.dance_sell_jobs
         """;
 

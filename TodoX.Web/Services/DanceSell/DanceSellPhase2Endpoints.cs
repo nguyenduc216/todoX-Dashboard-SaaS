@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using TodoX.Web.Models;
@@ -16,27 +18,35 @@ public static class DanceSellPhase2Endpoints
         group.MapGet("/jobs", ListJobsAsync);
         group.MapPost("/jobs", CreateJobAsync).DisableAntiforgery();
         group.MapGet("/jobs/{id:guid}", GetJobAsync);
+        group.MapGet("/jobs/{id:guid}/download-ticket", GetDownloadTicketAsync);
+        group.MapGet("/jobs/{id:guid}/download", DownloadAsync).DisableAntiforgery();
+        group.MapGet("/jobs/{id:guid}/reference/download", DownloadReferenceAsync).DisableAntiforgery();
         group.MapPut("/jobs/{id:guid}", UpdateBusinessAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/character", UploadCharacterAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/product", UploadProductAsync).DisableAntiforgery();
+        group.MapDelete("/jobs/{id:guid}/product", RemoveProductAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/direct-reference", UploadDirectReferenceAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/motion/upload", UploadMotionAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/motion/tiktok", StageTikTokAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/reference/generate", GenerateReferenceAsync).DisableAntiforgery();
         group.MapGet("/jobs/{id:guid}/reference/versions", ListReferenceVersionsAsync);
         group.MapPost("/jobs/{id:guid}/reference/{versionId:guid}/approve", ApproveReferenceAsync).DisableAntiforgery();
+        group.MapPost("/jobs/{id:guid}/reference/unapprove", UnapproveReferenceAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/render", QueueRenderAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/retry", RetryAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/retry-reference", GenerateReferenceAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/retry-motion", RetryAsync).DisableAntiforgery();
 
-        var admin = app.MapGroup("/api/admin");
+        var admin = app.MapGroup("/api/admin").RequireTodoXAdmin();
         admin.MapGet("/ai-operation-logs", SearchOperationLogsAsync);
         admin.MapGet("/ai-operation-logs/{id:guid}", GetOperationLogAsync);
         admin.MapPost("/ai-operation-logs/{id:guid}/refund", RefundOperationAsync).DisableAntiforgery();
         admin.MapPost("/ai-operation-logs/{id:guid}/retry-refund", RetryRefundAsync).DisableAntiforgery();
         admin.MapPost("/ai-operation-logs/{id:guid}/retry-charge", RetryChargeAsync).DisableAntiforgery();
         admin.MapGet("/ai-provider-accounts", ListProviderAccountsAsync);
+        admin.MapPost("/dance-sell/jobs/{id:guid}/reference-comparison/run", RunReferenceComparisonAsync).DisableAntiforgery();
+        admin.MapPost("/dance-sell/jobs/{id:guid}/reference-comparison/{versionId:guid}/poll", PollReferenceComparisonAsync).DisableAntiforgery();
+        admin.MapPost("/dance-sell/jobs/{id:guid}/reference-comparison/{versionId:guid}/score", ScoreReferenceComparisonAsync).DisableAntiforgery();
     }
 
     private static async Task<IResult> GetProvidersAsync(string operationType, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
@@ -54,6 +64,112 @@ public static class DanceSellPhase2Endpoints
     private static async Task<IResult> GetJobAsync(Guid id, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.GetAsync(id, user, ct));
 
+    private static async Task<IResult> GetDownloadTicketAsync(
+        Guid id,
+        string type,
+        AuthStateService auth,
+        IDanceSellPhase2Service service,
+        CancellationToken ct)
+        => await ExecuteAsync(auth, user => service.GetDownloadTicketAsync(id, type, user, ct));
+
+    private static async Task<IResult> DownloadAsync(
+        Guid id,
+        string? t,
+        IRDanceDownloadTicketService tickets,
+        IDanceSellRepository repository,
+        IHttpClientFactory httpClients,
+        CancellationToken ct)
+        => await ExecuteDownloadAsync(id, t, RDanceDownloadTypes.Result, tickets, repository, httpClients, ct);
+
+    private static async Task<IResult> DownloadReferenceAsync(
+        Guid id,
+        string? t,
+        IRDanceDownloadTicketService tickets,
+        IDanceSellRepository repository,
+        IHttpClientFactory httpClients,
+        CancellationToken ct)
+        => await ExecuteDownloadAsync(id, t, RDanceDownloadTypes.Reference, tickets, repository, httpClients, ct);
+
+    private static async Task<IResult> ExecuteDownloadAsync(
+        Guid id,
+        string? token,
+        string expectedType,
+        IRDanceDownloadTicketService tickets,
+        IDanceSellRepository repository,
+        IHttpClientFactory httpClients,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
+
+        RDanceDownloadTicket ticket;
+        try
+        {
+            ticket = tickets.ValidateTicket(token);
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
+
+        if (ticket.JobId != id
+            || !string.Equals(ticket.Type, expectedType, StringComparison.Ordinal))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var job = await repository.GetByIdAsync(id, ct);
+        if (job is null)
+        {
+            return Results.NotFound();
+        }
+
+        var remoteUrl = expectedType == RDanceDownloadTypes.Result
+            ? job.ResultVideoUrl
+            : job.PreparedReferenceUrl;
+        if (string.IsNullOrWhiteSpace(remoteUrl)
+            || (expectedType == RDanceDownloadTypes.Result
+                && !string.Equals(job.Status, DanceSellJobStatuses.Completed, StringComparison.OrdinalIgnoreCase))
+            || (expectedType == RDanceDownloadTypes.Reference
+                && !string.Equals(job.PreparedReferenceStatus, DanceSellReferenceStatuses.Approved, StringComparison.OrdinalIgnoreCase)))
+        {
+            return Results.StatusCode(StatusCodes.Status409Conflict);
+        }
+
+        if (!Uri.TryCreate(remoteUrl, UriKind.Absolute, out var remoteUri))
+        {
+            return Results.StatusCode(StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await EnsurePublicHttpsUrlAsync(remoteUri, ct);
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.StatusCode(StatusCodes.Status400BadRequest);
+        }
+
+        var client = httpClients.CreateClient("DanceSellDownload");
+        using var request = new HttpRequestMessage(HttpMethod.Get, remoteUri);
+        var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            response.Dispose();
+            return Results.StatusCode(StatusCodes.Status502BadGateway);
+        }
+
+        var contentType = expectedType == RDanceDownloadTypes.Result
+            ? "video/mp4"
+            : (response.Content.Headers.ContentType?.MediaType ?? "image/jpeg");
+        var fileName = expectedType == RDanceDownloadTypes.Result
+            ? $"todox-rdance-{id:N}.mp4"
+            : $"todox-rdance-reference-{id:N}.jpg";
+        return new DanceSellRemoteDownloadResult(response, contentType, fileName);
+    }
+
     private static async Task<IResult> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.UpdateBusinessAsync(id, request, user, ct));
 
@@ -62,6 +178,9 @@ public static class DanceSellPhase2Endpoints
 
     private static async Task<IResult> UploadProductAsync(Guid id, HttpRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteFileAsync(request, auth, (user, file, bytes) => service.UploadProductAsync(id, bytes, file.FileName, file.ContentType, user, ct), ct);
+
+    private static async Task<IResult> RemoveProductAsync(Guid id, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
+        => await ExecuteAsync(auth, user => service.RemoveProductAsync(id, user, ct));
 
     private static async Task<IResult> UploadDirectReferenceAsync(Guid id, HttpRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteFileAsync(request, auth, (user, file, bytes) => service.UploadDirectReferenceAsync(id, bytes, file.FileName, file.ContentType, user, ct), ct);
@@ -84,6 +203,9 @@ public static class DanceSellPhase2Endpoints
 
     private static async Task<IResult> ApproveReferenceAsync(Guid id, Guid versionId, AuthStateService auth, IDanceSellReferenceImageService service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.ApproveAsync(id, versionId, user, ct));
+
+    private static async Task<IResult> UnapproveReferenceAsync(Guid id, AuthStateService auth, IDanceSellReferenceImageService service, CancellationToken ct)
+        => await ExecuteAsync(auth, user => service.UnapproveAsync(id, user, ct));
 
     private static async Task<IResult> QueueRenderAsync(Guid id, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.QueueRenderAsync(id, user, ct));
@@ -117,6 +239,15 @@ public static class DanceSellPhase2Endpoints
 
     private static Task<IResult> ListProviderAccountsAsync(AuthStateService auth)
         => ExecuteAdminAsync(auth, () => Task.FromResult<IReadOnlyList<ProviderAccountDto>>(Array.Empty<ProviderAccountDto>()));
+
+    private static async Task<IResult> RunReferenceComparisonAsync(Guid id, AuthStateService auth, IDanceSellReferenceComparisonService service, CancellationToken ct)
+        => await ExecuteAdminAsync(auth, () => service.RunAsync(id, auth.CurrentUser!, ct));
+
+    private static async Task<IResult> PollReferenceComparisonAsync(Guid id, Guid versionId, AuthStateService auth, IDanceSellReferenceComparisonService service, CancellationToken ct)
+        => await ExecuteAdminAsync(auth, () => service.PollAsync(id, versionId, auth.CurrentUser!, ct));
+
+    private static async Task<IResult> ScoreReferenceComparisonAsync(Guid id, Guid versionId, DanceSellReferenceComparisonScoreRequest request, AuthStateService auth, IDanceSellReferenceComparisonService service, CancellationToken ct)
+        => await ExecuteAdminAsync(auth, () => service.ScoreAsync(id, versionId, request, auth.CurrentUser!, ct));
 
     private static async Task<IResult> ExecuteFileAsync<T>(HttpRequest request, AuthStateService auth, Func<CurrentUserSession, IFormFile, byte[], Task<T>> action, CancellationToken ct)
     {
@@ -157,6 +288,14 @@ public static class DanceSellPhase2Endpoints
             {
                 "DANCE_SELL_UNAUTHORIZED" => StatusCodes.Status403Forbidden,
                 "DANCE_SELL_NOT_FOUND" => StatusCodes.Status404NotFound,
+                "DANCE_SELL_RESULT_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_RESULT_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_RESULT_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
+                "DANCE_SELL_DOWNLOAD_TICKET_INVALID" => StatusCodes.Status401Unauthorized,
+                "DANCE_SELL_DOWNLOAD_TYPE_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_REFERENCE_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_REFERENCE_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_REFERENCE_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
                 _ => StatusCodes.Status400BadRequest
             };
             return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);
@@ -186,6 +325,105 @@ public static class DanceSellPhase2Endpoints
                 _ => StatusCodes.Status400BadRequest
             };
             return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);
+        }
+    }
+
+    private static async Task<IResult> ExecuteResultAsync(AuthStateService auth, Func<CurrentUserSession, Task<IResult>> action)
+    {
+        var user = auth.CurrentUser;
+        if (user?.IsAuthenticated != true)
+        {
+            return Results.Json(new { success = false, errorCode = "DANCE_SELL_UNAUTHORIZED", message = "Authentication required." }, statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        try
+        {
+            return await action(user);
+        }
+        catch (InvalidOperationException ex)
+        {
+            var status = ex.Message switch
+            {
+                "DANCE_SELL_UNAUTHORIZED" => StatusCodes.Status403Forbidden,
+                "DANCE_SELL_NOT_FOUND" => StatusCodes.Status404NotFound,
+                "DANCE_SELL_RESULT_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_RESULT_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_RESULT_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
+                "DANCE_SELL_REFERENCE_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_REFERENCE_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_REFERENCE_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
+                _ => StatusCodes.Status400BadRequest
+            };
+            return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);
+        }
+    }
+
+    private static async Task EnsurePublicHttpsUrlAsync(Uri uri, CancellationToken ct)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttps
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
+        }
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = IPAddress.TryParse(uri.DnsSafeHost, out var address)
+                ? new[] { address }
+                : await Dns.GetHostAddressesAsync(uri.DnsSafeHost, ct);
+        }
+        catch (SocketException)
+        {
+            throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
+        }
+
+        if (addresses.Length == 0 || addresses.Any(IsPrivateOrLocalAddress))
+        {
+            throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
+        }
+    }
+
+    private static bool IsPrivateOrLocalAddress(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address)
+            || address.Equals(IPAddress.Any)
+            || address.Equals(IPAddress.IPv6Any)
+            || address.Equals(IPAddress.None)
+            || address.Equals(IPAddress.IPv6None)
+            || address.IsIPv6LinkLocal
+            || address.IsIPv6SiteLocal
+            || address.IsIPv6UniqueLocal)
+        {
+            return true;
+        }
+
+        var bytes = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return bytes[0] == 10
+                || bytes[0] == 127
+                || bytes[0] == 0
+                || (bytes[0] == 169 && bytes[1] == 254)
+                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+                || (bytes[0] == 192 && bytes[1] == 168);
+        }
+
+        return false;
+    }
+
+    private sealed class DanceSellRemoteDownloadResult(HttpResponseMessage response, string contentType, string fileName) : IResult
+    {
+        public async Task ExecuteAsync(HttpContext httpContext)
+        {
+            using (response)
+            {
+                httpContext.Response.ContentType = contentType;
+                httpContext.Response.Headers.ContentDisposition = $"attachment; filename=\"{fileName}\"";
+                await using var stream = await response.Content.ReadAsStreamAsync(httpContext.RequestAborted);
+                await stream.CopyToAsync(httpContext.Response.Body, httpContext.RequestAborted);
+            }
         }
     }
 }

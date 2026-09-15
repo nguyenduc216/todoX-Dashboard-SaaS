@@ -22,6 +22,27 @@ public sealed class AiPricingEngineTests
     }
 
     [Fact]
+    public void FindPrice_UsesGenericDurationWhenSupportedDurationHasNoExactPrice()
+    {
+        var generic = new AiModelPriceDto { Mode = "fast", Resolution = "720p", DurationSeconds = null, Ratio = "16:9", Active = true };
+
+        var matched = AiPricingEngine.FindPrice([generic], "fast", "720p", 6, "16:9");
+
+        Assert.Same(generic, matched);
+    }
+
+    [Fact]
+    public void FindPrice_PrefersExactDurationOverGenericDuration()
+    {
+        var generic = new AiModelPriceDto { Mode = "fast", Resolution = "720p", DurationSeconds = null, Ratio = "16:9", Active = true };
+        var exact = new AiModelPriceDto { Mode = "fast", Resolution = "720p", DurationSeconds = 6, Ratio = "16:9", Active = true };
+
+        var matched = AiPricingEngine.FindPrice([generic, exact], "fast", "720p", 6, "16:9");
+
+        Assert.Same(exact, matched);
+    }
+
+    [Fact]
     public void BuildEstimate_ReturnsPriceNotConfiguredWhenMissing()
     {
         var model = new AiProviderModelListItemDto { Id = 1, ProviderId = 2, DisplayName = "Seedance" };
