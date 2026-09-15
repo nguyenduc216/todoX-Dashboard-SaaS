@@ -121,16 +121,20 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         var reload = detail[reloadStart..reloadEnd];
 
         var loadCall = reload.IndexOf("_job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);", StringComparison.Ordinal);
-        var postLoadCall = reload.IndexOf("RenderJobs.GetAsync(renderJobId)", StringComparison.Ordinal);
-        var postLoadCatch = reload.IndexOf("_loadError = DetailRefreshErrorMessage;", StringComparison.Ordinal);
+        var postLoadCall = reload.IndexOf("await TryLoadRenderJobAsync(_job);", StringComparison.Ordinal);
+        var warningCall = reload.IndexOf("MarkPostLoadWarning();", StringComparison.Ordinal);
         Assert.True(loadCall >= 0);
         Assert.True(postLoadCall > loadCall);
-        Assert.True(postLoadCatch > postLoadCall);
+        Assert.True(warningCall > postLoadCall);
 
-        var postLoadCatchBlock = reload[postLoadCatch..];
-        Assert.DoesNotContain("_job = null", postLoadCatchBlock);
-        Assert.DoesNotContain("LoadNotFoundMessage", postLoadCatchBlock);
-        Assert.Contains("Logger.LogWarning(ex, \"RDance detail refresh failed after primary job load", postLoadCatchBlock);
+        var postLoadSection = reload[postLoadCall..];
+        Assert.DoesNotContain("_job = null", postLoadSection);
+        Assert.DoesNotContain("_loadError = DetailRefreshErrorMessage;", postLoadSection);
+        Assert.DoesNotContain("LoadNotFoundMessage", postLoadSection);
+        Assert.Contains("Logger.LogWarning(ex, \"RDance render job enrichment failed after primary job load", postLoadSection);
+        Assert.Contains("Logger.LogWarning(ex, \"RDance reference version enrichment failed after primary job load", postLoadSection);
+        Assert.Contains("Logger.LogWarning(ex, \"RDance estimate enrichment failed after primary job load", postLoadSection);
+        Assert.Contains("Logger.LogWarning(ex, \"RDance auto-finish continuation failed after primary job load", postLoadSection);
     }
 
     [Fact]
@@ -142,14 +146,78 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         var reload = detail[reloadStart..reloadEnd];
 
         var primaryCatch = reload.IndexOf("_loadError = ClassifyPrimaryJobLoadError(ex);", StringComparison.Ordinal);
-        var postLoadCatch = reload.IndexOf("_loadError = DetailRefreshErrorMessage;", StringComparison.Ordinal);
+        var postLoadCall = reload.IndexOf("await TryLoadRenderJobAsync(_job);", StringComparison.Ordinal);
 
         Assert.True(primaryCatch >= 0);
-        Assert.True(postLoadCatch > primaryCatch);
+        Assert.True(postLoadCall > primaryCatch);
         Assert.Contains("_job = null", reload[..primaryCatch]);
-        Assert.DoesNotContain("_job = null", reload[postLoadCatch..]);
-        Assert.Contains("await InvokeAsync(StateHasChanged);", reload[..postLoadCatch]);
-        Assert.Contains("return;", reload[..postLoadCatch]);
+        Assert.DoesNotContain("_job = null", reload[postLoadCall..]);
+        Assert.Contains("await InvokeAsync(StateHasChanged);", reload[..postLoadCall]);
+        Assert.Contains("return;", reload[..postLoadCall]);
+    }
+
+    [Fact]
+    public void RdanceDetailDoesNotUseFatalLoadErrorForPostLoadFailures()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var reloadStart = detail.IndexOf("private async Task ReloadAsync", StringComparison.Ordinal);
+        var reloadEnd = detail.IndexOf("private static string ClassifyPrimaryJobLoadError", reloadStart, StringComparison.Ordinal);
+        var reload = detail[reloadStart..reloadEnd];
+        var postLoadStart = reload.IndexOf("await TryLoadRenderJobAsync(_job);", StringComparison.Ordinal);
+
+        Assert.True(postLoadStart >= 0);
+        Assert.DoesNotContain("_loadError = DetailRefreshErrorMessage;", reload[postLoadStart..]);
+        Assert.DoesNotContain("Không tìm thấy video quảng cáo thời trang.", reload[postLoadStart..]);
+        Assert.Contains("private const string OptionalDetailRefreshWarningMessage", detail);
+        Assert.Contains("@_postLoadWarning", detail);
+        Assert.Contains("Severity=\"Severity.Warning\"", detail);
+    }
+
+    [Fact]
+    public void RdanceDraftPreRenderStateIsValidForDetailPage()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var canRenderStart = detail.IndexOf("private bool CanRender", StringComparison.Ordinal);
+        var canRenderEnd = detail.IndexOf("private bool IsActive", canRenderStart, StringComparison.Ordinal);
+        var canRender = detail[canRenderStart..canRenderEnd];
+
+        Assert.Contains("MotionVideoMediaId is not null", canRender);
+        Assert.Contains("!string.IsNullOrWhiteSpace(_job.MotionVideoUrl)", canRender);
+        Assert.Contains("SourceStageStatus == DanceSellSourceStageStatuses.Ready", canRender);
+        Assert.Contains("HasValidMotionDuration", canRender);
+        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", canRender);
+        Assert.Contains("!string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl)", canRender);
+        Assert.DoesNotContain("RenderJobId", canRender);
+        Assert.DoesNotContain("ResultVideoUrl", canRender);
+    }
+
+    [Fact]
+    public void RdancePostLoadEnrichmentStepsAreIsolated()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+
+        Assert.Contains("private async Task TryLoadRenderJobAsync(DanceSellJobDto job)", detail);
+        Assert.Contains("private async Task TryLoadReferenceVersionsAsync(DanceSellJobDto job)", detail);
+        Assert.Contains("private async Task TryRefreshEstimateAsync(DanceSellJobDto job)", detail);
+        Assert.Contains("private async Task TryContinueAutoFinishAsync(DanceSellJobDto job)", detail);
+
+        foreach (var methodName in new[]
+        {
+            "private async Task TryLoadRenderJobAsync",
+            "private async Task TryLoadReferenceVersionsAsync",
+            "private async Task TryRefreshEstimateAsync",
+            "private async Task TryContinueAutoFinishAsync"
+        })
+        {
+            var start = detail.IndexOf(methodName, StringComparison.Ordinal);
+            Assert.True(start >= 0, $"Missing method: {methodName}");
+            var next = detail.IndexOf("\n    private ", start + methodName.Length, StringComparison.Ordinal);
+            var method = next < 0 ? detail[start..] : detail[start..next];
+            Assert.Contains("catch (Exception ex)", method);
+            Assert.Contains("MarkPostLoadWarning();", method);
+            Assert.DoesNotContain("_loadError", method);
+            Assert.DoesNotContain("_job = null", method);
+        }
     }
 
     [Fact]
@@ -189,15 +257,15 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     public void RdanceDraftDetailDoesNotLookupMissingRenderJob()
     {
         var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
-        var reloadStart = detail.IndexOf("private async Task ReloadAsync", StringComparison.Ordinal);
-        var reloadEnd = detail.IndexOf("private static string ClassifyPrimaryJobLoadError", reloadStart, StringComparison.Ordinal);
-        var reload = detail[reloadStart..reloadEnd];
+        var methodStart = detail.IndexOf("private async Task TryLoadRenderJobAsync", StringComparison.Ordinal);
+        var methodEnd = detail.IndexOf("private async Task TryLoadReferenceVersionsAsync", methodStart, StringComparison.Ordinal);
+        var method = detail[methodStart..methodEnd];
 
-        Assert.Contains("_job.RenderJobId is Guid renderJobId", reload);
-        Assert.Contains("? await RenderJobs.GetAsync(renderJobId)", reload);
-        Assert.Contains(": null", reload);
-        Assert.DoesNotContain("RenderJobs.GetAsync(Guid.Empty)", reload);
-        Assert.DoesNotContain("RenderJobs.GetAsync(_job.RenderJobId.Value)", reload);
+        Assert.Contains("job.RenderJobId is Guid renderJobId", method);
+        Assert.Contains("? await RenderJobs.GetAsync(renderJobId)", method);
+        Assert.Contains(": null", method);
+        Assert.DoesNotContain("RenderJobs.GetAsync(Guid.Empty)", method);
+        Assert.DoesNotContain("RenderJobs.GetAsync(_job.RenderJobId.Value)", method);
     }
 
     [Fact]

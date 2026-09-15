@@ -56,6 +56,10 @@
         {
             <MudAlert Severity="Severity.Error">@_motionReadinessError</MudAlert>
         }
+        @if (!string.IsNullOrWhiteSpace(_postLoadWarning))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@_postLoadWarning</MudAlert>
+        }
         @if (HasMotionVideoWithoutValidDuration)
         {
             <MudAlert Severity="Severity.Warning" Dense="true">@MotionDurationNotReadyMessage</MudAlert>
@@ -687,6 +691,7 @@
     private const string LoadNotFoundMessage = "Không tìm thấy video quảng cáo thời trang.";
     private const string LoadUnauthorizedMessage = "Bạn không có quyền xem video này.";
     private const string DetailRefreshErrorMessage = "Không thể tải đầy đủ thông tin video. Vui lòng thử tải lại.";
+    private const string OptionalDetailRefreshWarningMessage = "Một số thông tin bổ sung chưa tải được. Bạn vẫn có thể xem và tiếp tục thao tác với video này.";
     private string _title = DefaultTitle;
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
@@ -703,6 +708,7 @@
     private string? _referenceReadinessError;
     private string? _motionReadinessError;
     private string? _loadError;
+    private string? _postLoadWarning;
     private string? _motionFileName;
     private long? _motionFileSize;
     private string? _motionUploadError;
@@ -1037,6 +1043,7 @@
         if (AuthState.CurrentUser is null) return;
         var wasActive = IsActive;
         _loadError = null;
+        _postLoadWarning = null;
         _referenceReadinessError = null;
         _motionReadinessError = null;
         try
@@ -1088,37 +1095,92 @@
             return;
         }
 
+        _title = string.IsNullOrWhiteSpace(_job.Title) ? DefaultTitle : _job.Title.Trim();
+        _autoFinish = _job.AutoFinish;
+        _ratio = string.Equals(_job.Ratio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
+        if (selectResultOnCompletion && wasActive && _job.Status == DanceSellJobStatuses.Completed)
+        {
+            _tabIndex = 3;
+        }
+        if (_job.MotionSourceType == DanceSellMotionSourceTypes.TikTok
+            && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl))
+        {
+            _tiktokUrl = _job.MotionSourceUrl;
+        }
+
+        await TryLoadRenderJobAsync(_job);
+        await TryLoadReferenceVersionsAsync(_job);
+        await TryRefreshEstimateAsync(_job);
+        await TryContinueAutoFinishAsync(_job);
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task TryLoadRenderJobAsync(DanceSellJobDto job)
+    {
         try
         {
-            _title = string.IsNullOrWhiteSpace(_job.Title) ? DefaultTitle : _job.Title.Trim();
-            _autoFinish = _job.AutoFinish;
-            _ratio = string.Equals(_job.Ratio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
-            _renderJob = _job.RenderJobId is Guid renderJobId
+            _renderJob = job.RenderJobId is Guid renderJobId
                 ? await RenderJobs.GetAsync(renderJobId)
                 : null;
-            if (selectResultOnCompletion && wasActive && _job.Status == DanceSellJobStatuses.Completed)
-            {
-                _tabIndex = 3;
-            }
-            if (_job.MotionSourceType == DanceSellMotionSourceTypes.TikTok
-                && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl))
-            {
-                _tiktokUrl = _job.MotionSourceUrl;
-            }
-            var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
+        }
+        catch (Exception ex)
+        {
+            _renderJob = null;
+            MarkPostLoadWarning();
+            Logger.LogWarning(ex, "RDance render job enrichment failed after primary job load for job {JobId}.", job.Id);
+        }
+    }
+
+    private async Task TryLoadReferenceVersionsAsync(DanceSellJobDto job)
+    {
+        try
+        {
+            var versions = await DanceRepo.ListReferenceVersionsAsync(job.Id);
             _referenceVersions = versions;
             _latestReference = ResolveAutoFinishReference(versions);
+        }
+        catch (Exception ex)
+        {
+            _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
+            _latestReference = null;
+            MarkPostLoadWarning();
+            Logger.LogWarning(ex, "RDance reference version enrichment failed after primary job load for job {JobId}.", job.Id);
+        }
+    }
+
+    private async Task TryRefreshEstimateAsync(DanceSellJobDto job)
+    {
+        try
+        {
             await RefreshEstimateAsync();
+        }
+        catch (Exception ex)
+        {
+            _estimate = null;
+            _pointEstimate = null;
+            _displayPoints = null;
+            _latestMotionOperation = null;
+            MarkPostLoadWarning();
+            Logger.LogWarning(ex, "RDance estimate enrichment failed after primary job load for job {JobId}.", job.Id);
+        }
+    }
+
+    private async Task TryContinueAutoFinishAsync(DanceSellJobDto job)
+    {
+        try
+        {
             await ContinueAutoFinishAsync();
         }
         catch (Exception ex)
         {
-            _loadError = DetailRefreshErrorMessage;
-            Logger.LogWarning(ex, "RDance detail refresh failed after primary job load for job {JobId}.", _job.Id);
+            MarkPostLoadWarning();
+            Logger.LogWarning(ex, "RDance auto-finish continuation failed after primary job load for job {JobId}.", job.Id);
         }
-
-        await InvokeAsync(StateHasChanged);
     }
+
+    private void MarkPostLoadWarning()
+        => _postLoadWarning ??= OptionalDetailRefreshWarningMessage;
 
     private static string ClassifyPrimaryJobLoadError(Exception ex)
         => ex.Message switch
