@@ -45,6 +45,7 @@ builder.Services.AddScoped<LandingIndustryMediaService>();
 builder.Services.AddSingleton<SharedMediaPathService>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddScoped<AuditRepository>();
+builder.Services.AddScoped<IAdminJobMonitorService, AdminJobMonitorService>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CatalogAdminRepository>();
