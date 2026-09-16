@@ -31,32 +31,24 @@ else
             </MudStack>
         </MudStack>
 
-        <MudGrid Spacing="2" Class="admin-job-monitor-stats">
-            <MudItem xs="12" sm="6" md="3">
-                <div class="monitor-stat">
-                    <MudIcon Icon="@Icons.Material.Filled.Description" />
-                    <span>Tổng job<strong>@_page.Stats.Total.ToString("N0")</strong></span>
-                </div>
-            </MudItem>
-            <MudItem xs="12" sm="6" md="3">
-                <div class="monitor-stat processing">
-                    <MudIcon Icon="@Icons.Material.Filled.Autorenew" />
-                    <span>Đang xử lý<strong>@_page.Stats.Processing.ToString("N0")</strong></span>
-                </div>
-            </MudItem>
-            <MudItem xs="12" sm="6" md="3">
-                <div class="monitor-stat complete">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" />
-                    <span>Hoàn thành<strong>@_page.Stats.Completed.ToString("N0")</strong></span>
-                </div>
-            </MudItem>
-            <MudItem xs="12" sm="6" md="3">
-                <div class="monitor-stat failed">
-                    <MudIcon Icon="@Icons.Material.Filled.Error" />
-                    <span>Thất bại<strong>@_page.Stats.Failed.ToString("N0")</strong></span>
-                </div>
-            </MudItem>
-        </MudGrid>
+        <div class="admin-job-monitor-stats">
+            <div class="monitor-stat">
+                <MudIcon Icon="@Icons.Material.Filled.Description" />
+                <span>Tổng job<strong>@_page.Stats.Total.ToString("N0")</strong></span>
+            </div>
+            <div class="monitor-stat processing">
+                <MudIcon Icon="@Icons.Material.Filled.Autorenew" />
+                <span>Đang xử lý<strong>@_page.Stats.Processing.ToString("N0")</strong></span>
+            </div>
+            <div class="monitor-stat complete">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" />
+                <span>Hoàn thành<strong>@_page.Stats.Completed.ToString("N0")</strong></span>
+            </div>
+            <div class="monitor-stat failed">
+                <MudIcon Icon="@Icons.Material.Filled.Error" />
+                <span>Thất bại<strong>@_page.Stats.Failed.ToString("N0")</strong></span>
+            </div>
+        </div>
 
         <MudPaper Class="monitor-filters" Elevation="0">
             <MudSelect T="string" Value="@_timePreset" ValueChanged="SetTimePreset" Label="Tất cả thời gian" Variant="Variant.Outlined" Dense="true">
@@ -94,24 +86,81 @@ else
         }
 
         <MudPaper Class="monitor-table-panel" Elevation="0">
-            <MudTable Items="@_page.Items" Hover="true" Dense="true" Breakpoint="Breakpoint.None" Class="monitor-table">
-                <HeaderContent>
-                    <MudTh>Kết quả</MudTh><MudTh>Thời gian</MudTh><MudTh>Tài khoản</MudTh><MudTh>Dịch vụ</MudTh><MudTh>Trạng thái</MudTh><MudTh>Job ID</MudTh><MudTh>Giai đoạn hiện tại</MudTh><MudTh>Thao tác</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTr @onclick="@(() => OpenDetailsAsync(context))">
-                        <MudTd><button class="monitor-thumb" type="button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(context))"><img src="@Thumb(context)" alt="Kết quả" /><span class="thumb-duration">@Duration(context)</span></button></MudTd>
-                        <MudTd>@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
-                        <MudTd><span class="account-name">@context.AccountName</span><small>@context.AccountEmail</small></MudTd>
-                        <MudTd><button type="button" class="service-cell service-cell-button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(context))"><MudIcon Icon="@Icons.Material.Filled.VideoLibrary" />@DisplayService(context)</button></MudTd>
-                        <MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip></MudTd>
-                        <MudTd><button type="button" class="job-id" @onclick:stopPropagation="true" @onclick="@(() => CopyIdAsync(context.Id))">@ShortId(context.Id) <MudIcon Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" /></button></MudTd>
-                        <MudTd><div class="stage-cell">@Stage(context)<MudProgressLinear Value="@context.ProgressPercent" Color="Color.Warning" Size="Size.Small" /></div></MudTd>
-                        <MudTd><MudIconButton Icon="@Icons.Material.Filled.MoreHoriz" aria-label="Mở chi tiết" OnClick="@(() => OpenDetailsAsync(context))" /></MudTd>
-                    </MudTr>
-                </RowTemplate>
-                <NoRecordsContent><MudText Class="pa-6">Không có job phù hợp.</MudText></NoRecordsContent>
-            </MudTable>
+            <div class="jobs-grid monitor-table" role="table" aria-label="Danh sách job">
+                <div class="jobs-grid-row jobs-grid-header" role="row">
+                    <div role="columnheader">Kết quả</div>
+                    <div role="columnheader">Thời gian</div>
+                    <div role="columnheader">Tài khoản</div>
+                    <div role="columnheader">Dịch vụ</div>
+                    <div role="columnheader">Trạng thái</div>
+                    <div role="columnheader">Job ID</div>
+                    <div role="columnheader">Giai đoạn hiện tại</div>
+                    <div role="columnheader">Thao tác</div>
+                </div>
+                @if (_page.Items.Count == 0)
+                {
+                    <div class="monitor-empty" role="row">
+                        <MudText>Không có job phù hợp.</MudText>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var job in _page.Items)
+                    {
+                        <div class="jobs-grid-row jobs-grid-body" role="row" @onclick="@(() => OpenDetailsAsync(job))">
+                            <div role="cell">
+                                <button class="monitor-thumb" type="button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(job))">
+                                    @if (!string.IsNullOrWhiteSpace(job.ThumbnailUrl))
+                                    {
+                                        <img src="@Thumb(job)" alt="Kết quả video" />
+                                    }
+                                    else
+                                    {
+                                        <span class="thumb-empty">Chưa có kết quả</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(job.VideoUrl))
+                                    {
+                                        <span class="thumb-play" aria-hidden="true">▶</span>
+                                    }
+                                    <span class="thumb-duration">@Duration(job)</span>
+                                </button>
+                            </div>
+                            <div role="cell">
+                                <strong class="date-cell">@job.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy")</strong>
+                                <span class="time-cell">@job.CreatedAt.ToLocalTime().ToString("HH:mm:ss")</span>
+                                <small>@RelativeTime(job.CreatedAt)</small>
+                            </div>
+                            <div role="cell">
+                                <span class="account-name">@job.AccountName</span>
+                                <small>@job.AccountEmail</small>
+                            </div>
+                            <div role="cell">
+                                <button type="button" class="service-cell service-cell-button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(job))">
+                                    <MudIcon Icon="@Icons.Material.Filled.VideoLibrary" />@DisplayService(job)
+                                </button>
+                            </div>
+                            <div role="cell"><MudChip T="string" Size="Size.Small" Color="@StatusColor(job.Status)">@StatusText(job.Status)</MudChip></div>
+                            <div role="cell">
+                                <button type="button" class="job-id" @onclick:stopPropagation="true" @onclick="@(() => CopyIdAsync(job.Id))">
+                                    @ShortId(job.Id) <MudIcon Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" />
+                                </button>
+                            </div>
+                            <div role="cell">
+                                <div class="stage-cell">
+                                    <span>@Stage(job)</span>
+                                    @if (job.ProgressPercent < 100 && job.ProgressPercent > 0)
+                                    {
+                                        <MudProgressLinear Value="@job.ProgressPercent" Color="Color.Warning" Size="Size.Small" />
+                                    }
+                                </div>
+                            </div>
+                            <div role="cell">
+                                <MudIconButton Icon="@Icons.Material.Filled.MoreHoriz" aria-label="Mở chi tiết" OnClick="@(() => OpenDetailsAsync(job))" />
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
             <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="monitor-pagination">
                 <MudText Class="todox-page-subtitle">@_page.TotalCount job, trang @_query.Page / @Math.Max(1, _page.TotalPages)</MudText>
                 <MudPagination Count="@Math.Max(1, _page.TotalPages)" Selected="@_query.Page" SelectedChanged="ChangePageAsync" />
@@ -131,8 +180,10 @@ else
             <div class="drawer-content">
                 @if (_detail.InputOutput.OutputLinks.FirstOrDefault(x => x.Kind == "video") is { } video)
                 { <video class="drawer-media" controls poster="@(_detail.Overview.Summary.ThumbnailUrl)" src="@video.Url"></video> }
+                else if (!string.IsNullOrWhiteSpace(_detail.Overview.Summary.ThumbnailUrl))
+                { <img class="drawer-media" src="@_detail.Overview.Summary.ThumbnailUrl" alt="Kết quả job" /> }
                 else
-                { <img class="drawer-media" src="@( _detail.Overview.Summary.ThumbnailUrl ?? Placeholder )" alt="Kết quả job" /> }
+                { <div class="drawer-media drawer-media-empty">Chưa có video kết quả</div> }
                 <h3>Thông tin job</h3>
                 <dl class="detail-list">
                     <dt>Job ID</dt><dd>@_detail.Overview.Summary.Id</dd>
@@ -298,6 +349,14 @@ else
     }
 
     private static string ShortId(Guid id) => $"job_{id:N}"[..12];
+    private static string RelativeTime(DateTime value)
+    {
+        var elapsed = DateTime.UtcNow - value.ToUniversalTime();
+        if (elapsed.TotalMinutes < 1) return "vừa xong";
+        if (elapsed.TotalHours < 1) return $"{Math.Max(1, (int)elapsed.TotalMinutes)} phút trước";
+        if (elapsed.TotalDays < 1) return $"{Math.Max(1, (int)elapsed.TotalHours)} giờ trước";
+        return $"{Math.Max(1, (int)elapsed.TotalDays)} ngày trước";
+    }
     private static string DisplayService(AdminJobMonitorJobSummary job) => string.IsNullOrWhiteSpace(job.ServiceName) ? job.ServiceCode : job.ServiceName;
     private static string Stage(AdminJobMonitorJobSummary job) => string.IsNullOrWhiteSpace(job.CurrentStage) ? StatusText(job.Status) : job.CurrentStage;
     private static string Duration(AdminJobMonitorJobSummary job) => job.DurationSeconds is int seconds

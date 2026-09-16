@@ -59,16 +59,21 @@ public sealed class AdminJobMonitorTests
         Assert.Contains("Tất cả tài khoản", page, StringComparison.Ordinal);
         Assert.Contains("monitor-custom-date-range", page, StringComparison.Ordinal);
         Assert.Contains("thumb-duration", page, StringComparison.Ordinal);
-        Assert.Contains("Duration(context)", page, StringComparison.Ordinal);
+        Assert.Contains("Duration(job)", page, StringComparison.Ordinal);
         Assert.Contains("DurationSeconds", page, StringComparison.Ordinal);
+        Assert.Contains("jobs-grid-header", page, StringComparison.Ordinal);
+        Assert.Contains("jobs-grid-body", page, StringComparison.Ordinal);
+        Assert.Contains("thumb-play", page, StringComparison.Ordinal);
+        Assert.Contains("Chưa có kết quả", page, StringComparison.Ordinal);
 
-        Assert.Contains("--job-monitor-columns", css, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: var(--job-monitor-columns)", css, StringComparison.Ordinal);
+        Assert.Contains("--monitor-columns", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: var(--monitor-columns)", css, StringComparison.Ordinal);
         Assert.Contains("border-right: 1px solid", css, StringComparison.Ordinal);
         Assert.Contains("aspect-ratio: 9 / 16", css, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: minmax(150px, 1.05fr) minmax(155px, 1.15fr) minmax(145px, 1.05fr) minmax(145px, 1.05fr) minmax(220px, 1.8fr) auto", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: repeat(4, minmax(0, 1fr))", css, StringComparison.Ordinal);
+        Assert.Contains("width: min(560px, 100vw)", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".monitor-table-panel { overflow-x: auto", css, StringComparison.Ordinal);
-        Assert.DoesNotContain(".monitor-table { min-width: 1040px", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("!important", css, StringComparison.Ordinal);
     }
 
     [Fact]
