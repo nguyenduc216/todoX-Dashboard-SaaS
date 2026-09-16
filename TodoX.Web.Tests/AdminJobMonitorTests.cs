@@ -61,13 +61,24 @@ public sealed class AdminJobMonitorTests
         Assert.Contains("thumb-duration", page, StringComparison.Ordinal);
         Assert.Contains("Duration(job)", page, StringComparison.Ordinal);
         Assert.Contains("DurationSeconds", page, StringComparison.Ordinal);
-        Assert.Contains("jobs-grid-header", page, StringComparison.Ordinal);
-        Assert.Contains("jobs-grid-body", page, StringComparison.Ordinal);
+        Assert.Contains("monitor-grid-header", page, StringComparison.Ordinal);
+        Assert.Contains("monitor-grid-row", page, StringComparison.Ordinal);
         Assert.Contains("thumb-play", page, StringComparison.Ordinal);
         Assert.Contains("Chưa có kết quả", page, StringComparison.Ordinal);
 
-        Assert.Contains("--monitor-columns", css, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: var(--monitor-columns)", css, StringComparison.Ordinal);
+        Assert.Contains("--monitor-grid-columns", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: var(--monitor-grid-columns)", css, StringComparison.Ordinal);
+        Assert.Contains("min-height: 108px", css, StringComparison.Ordinal);
+        Assert.Contains("padding: 10px 12px", css, StringComparison.Ordinal);
+        Assert.Contains("height: 42px", css, StringComparison.Ordinal);
+        Assert.Contains("monitor-filter-bar", page, StringComparison.Ordinal);
+        Assert.Contains("filter-time", page, StringComparison.Ordinal);
+        Assert.Contains("filter-account", page, StringComparison.Ordinal);
+        Assert.Contains("filter-service", page, StringComparison.Ordinal);
+        Assert.Contains("filter-status", page, StringComparison.Ordinal);
+        Assert.Contains("filter-search", page, StringComparison.Ordinal);
+        Assert.Contains("filter-refresh", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("MudTable", page, StringComparison.Ordinal);
         Assert.Contains("border-right: 1px solid", css, StringComparison.Ordinal);
         Assert.Contains("aspect-ratio: 9 / 16", css, StringComparison.Ordinal);
         Assert.Contains("grid-template-columns: repeat(4, minmax(0, 1fr))", css, StringComparison.Ordinal);

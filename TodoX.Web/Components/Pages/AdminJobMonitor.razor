@@ -50,7 +50,8 @@ else
             </div>
         </div>
 
-        <MudPaper Class="monitor-filters" Elevation="0">
+        <div class="monitor-filter-bar">
+            <div class="filter-time">
             <MudSelect T="string" Value="@_timePreset" ValueChanged="SetTimePreset" Label="Tất cả thời gian" Variant="Variant.Outlined" Dense="true">
                 <MudSelectItem Value="@("all")">Tất cả thời gian</MudSelectItem>
                 <MudSelectItem Value="@("today")">Hôm nay</MudSelectItem>
@@ -59,14 +60,20 @@ else
                 <MudSelectItem Value="@("month")">Tháng này</MudSelectItem>
                 <MudSelectItem Value="@("custom")">Tùy chỉnh</MudSelectItem>
             </MudSelect>
+            </div>
+            <div class="filter-account">
             <MudSelect T="string" Value="@_query.Account" ValueChanged="SetAccountAsync" Label="Tất cả tài khoản" Variant="Variant.Outlined" Dense="true">
                 <MudSelectItem Value="@((string?)null)">Tất cả tài khoản</MudSelectItem>
                 @foreach (var item in _options.Accounts) { <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem> }
             </MudSelect>
+            </div>
+            <div class="filter-service">
             <MudSelect T="string" Value="@_query.Service" ValueChanged="SetServiceAsync" Label="Dịch vụ" Variant="Variant.Outlined" Dense="true">
                 <MudSelectItem Value="@((string?)null)">Tất cả dịch vụ</MudSelectItem>
                 @foreach (var item in _options.Services) { <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem> }
             </MudSelect>
+            </div>
+            <div class="filter-status">
             <MudSelect T="string" Value="@_query.Status" ValueChanged="SetStatusAsync" Label="Trạng thái" Variant="Variant.Outlined" Dense="true">
                 <MudSelectItem Value="@((string?)null)">Tất cả trạng thái</MudSelectItem>
                 <MudSelectItem Value="@("processing")">Đang xử lý</MudSelectItem>
@@ -74,20 +81,25 @@ else
                 <MudSelectItem Value="@("failed")">Thất bại</MudSelectItem>
                 <MudSelectItem Value="@("pending")">Đang chờ</MudSelectItem>
             </MudSelect>
-            <MudTextField T="string" Value="@_searchText" ValueChanged="SetSearchText" Label="Tìm kiếm job, tài khoản hoặc Job ID..." Variant="Variant.Outlined" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="SearchAsync" Immediate="true" OnKeyDown="HandleSearchKeyDown" />
-            <MudIconButton Icon="@Icons.Material.Filled.Refresh" aria-label="Làm mới" title="Làm mới" OnClick="ReloadAsync" />
-        </MudPaper>
+            </div>
+            <div class="filter-search">
+            <MudTextField T="string" Value="@_searchText" ValueChanged="SetSearchText" Label="Tìm kiếm job, tài khoản hoặc Job ID..." Variant="Variant.Outlined" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="SearchAsync" Immediate="true" OnKeyDown="HandleSearchKeyDown" />
+            </div>
+            <button class="filter-refresh" type="button" aria-label="Làm mới" title="Làm mới" @onclick="ReloadAsync">
+                <MudIcon Icon="@Icons.Material.Filled.Refresh" />
+            </button>
+        </div>
         @if (_timePreset == "custom")
         {
-            <div class="monitor-custom-date-range">
+            <div class="monitor-custom-date-range filter-custom-date-range">
                 <MudDatePicker Date="@FromDate" DateChanged="SetFromDateAsync" Label="Từ ngày" Variant="Variant.Outlined" />
                 <MudDatePicker Date="@ToDate" DateChanged="SetToDateAsync" Label="Đến ngày" Variant="Variant.Outlined" />
             </div>
         }
 
         <MudPaper Class="monitor-table-panel" Elevation="0">
-            <div class="jobs-grid monitor-table" role="table" aria-label="Danh sách job">
-                <div class="jobs-grid-row jobs-grid-header" role="row">
+            <div class="monitor-grid" role="table" aria-label="Danh sách job">
+                <div class="monitor-grid-header monitor-grid-row" role="row">
                     <div role="columnheader">Kết quả</div>
                     <div role="columnheader">Thời gian</div>
                     <div role="columnheader">Tài khoản</div>
@@ -107,7 +119,7 @@ else
                 {
                     @foreach (var job in _page.Items)
                     {
-                        <div class="jobs-grid-row jobs-grid-body" role="row" @onclick="@(() => OpenDetailsAsync(job))">
+                        <div class="monitor-grid-row" role="row" @onclick="@(() => OpenDetailsAsync(job))">
                             <div role="cell">
                                 <button class="monitor-thumb" type="button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(job))">
                                     @if (!string.IsNullOrWhiteSpace(job.ThumbnailUrl))
