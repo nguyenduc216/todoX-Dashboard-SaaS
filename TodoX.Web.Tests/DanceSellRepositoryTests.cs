@@ -98,6 +98,26 @@ public sealed class DanceSellRepositoryTests
     }
 
     [Fact]
+    public void UpdateSubmittedSql_MergesSubmitMetadataWithoutDroppingPersistedDuration()
+    {
+        var source = ReadRepositorySource();
+        var section = GetMethodSection(source, "UpdateSubmittedAsync");
+
+        Assert.Contains("COALESCE(request_json, '{}'::jsonb) || CAST(@requestJson AS jsonb)", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("request_json=CAST(@requestJson AS jsonb)", section, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MotionSubmitAttemptSql_MergesSubmitMetadataWithoutDroppingOperationDuration()
+    {
+        var source = ReadOperationsSource();
+        var section = GetMethodSection(source, "BeginMotionSubmitAttemptAsync");
+
+        Assert.Contains("COALESCE(o.request_json, '{}'::jsonb) || CAST(@requestJson AS jsonb)", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'{submitAttempt}'", section, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ResetReferenceSql_InvalidatesPreviouslyApprovedReferenceWhenSourceImageChanges()
     {
         var source = ReadRepositorySource();
@@ -191,12 +211,34 @@ public sealed class DanceSellRepositoryTests
         throw new FileNotFoundException("Could not locate DanceSellRepository.cs from the test output directory.");
     }
 
+    private static string ReadOperationsSource()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "TodoX.Web", "Services", "DanceSell", "DanceSellAiOperations.cs");
+            if (File.Exists(candidate))
+            {
+                return File.ReadAllText(candidate);
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("Could not locate DanceSellAiOperations.cs from the test output directory.");
+    }
+
     private static string GetMethodSection(string source, string methodName)
     {
         var start = source.IndexOf($"public async Task {methodName}(", StringComparison.Ordinal);
         if (start < 0)
         {
             start = source.IndexOf($"public async Task<DanceSellJobDto> {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"public async Task<int> {methodName}(", StringComparison.Ordinal);
         }
 
         if (start < 0)

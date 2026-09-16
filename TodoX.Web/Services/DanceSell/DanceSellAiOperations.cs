@@ -824,7 +824,7 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                 )
                 UPDATE dance_sell.dance_sell_provider_operations o
                    SET request_json=jsonb_set(
-                           CAST(@requestJson AS jsonb),
+                           COALESCE(o.request_json, '{}'::jsonb) || CAST(@requestJson AS jsonb),
                            '{submitAttempt}',
                            to_jsonb(next_attempt.attempt_no),
                            true),

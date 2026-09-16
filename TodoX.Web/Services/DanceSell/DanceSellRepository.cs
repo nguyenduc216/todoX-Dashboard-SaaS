@@ -701,7 +701,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    provider_task_id=COALESCE(provider_task_id, @providerTaskId),
                    provider_status='submitted',
                    current_stage='motion_rendering',
-                   request_json=CAST(@requestJson AS jsonb),
+                   request_json=COALESCE(request_json, '{}'::jsonb) || CAST(@requestJson AS jsonb),
                    submit_response_json=CAST(@submitResponseJson AS jsonb),
                    submitted_at=COALESCE(submitted_at, now()),
                    updated_at=now()
