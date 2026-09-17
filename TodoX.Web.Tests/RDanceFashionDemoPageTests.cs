@@ -830,7 +830,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("\"video/mp4\"", handler, StringComparison.Ordinal);
         Assert.Contains("\"video/webm\"", handler, StringComparison.Ordinal);
         Assert.Contains("MaxMotionControlVideoBytes = 50L * 1024 * 1024", handler, StringComparison.Ordinal);
-        Assert.Contains("_media.OpenReadAsync(mediaIdValue", handler, StringComparison.Ordinal);
+        Assert.Contains("OpenMediaOrRecoverFromPublicUrlAsync(mediaIdValue, recoverablePublicUrl", handler, StringComparison.Ordinal);
+        Assert.Contains("var recoverablePublicUrl = FirstNonBlank(media.PublicUrl, media.FileUrl, publicUrl)", handler, StringComparison.Ordinal);
         Assert.Contains("Task<Stream?> OpenReadAsync", media, StringComparison.Ordinal);
         var submit = GetMethodSection(handler, "Submit79AiAsync");
         Assert.DoesNotContain("Convert.ToBase64String", submit, StringComparison.Ordinal);
@@ -858,6 +859,37 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("await ScheduleNextPollAsync(renderJob, \"79AI motion output URL pending; next poll scheduled.\"", poll, StringComparison.Ordinal);
         Assert.Contains("await _completion.CompleteAsync", poll, StringComparison.Ordinal);
         Assert.Contains("ResultVideoUrl = status.OutputUrl", poll, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DanceSellReferenceUploadRecoversWhenCanonicalLocalPathIsStale()
+    {
+        var root = FindRepoRoot();
+        var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
+        var resolve = GetMethodSection(handler, "ResolveMotionFileAsync");
+        var recover = GetMethodSection(handler, "OpenMediaOrRecoverFromPublicUrlAsync");
+
+        Assert.Contains("danceJob.PreparedReferenceMediaId", handler, StringComparison.Ordinal);
+        Assert.Contains("danceJob.PreparedReferenceObjectKey", handler, StringComparison.Ordinal);
+        Assert.Contains("danceJob.PreparedReferenceUrl", handler, StringComparison.Ordinal);
+        Assert.Contains("GetByPublicUrlAsync(publicUrl", resolve, StringComparison.Ordinal);
+        Assert.Contains("FirstNonBlank(media.PublicUrl, media.FileUrl, publicUrl)", resolve, StringComparison.Ordinal);
+        Assert.Contains("OpenMediaOrRecoverFromPublicUrlAsync(mediaIdValue, recoverablePublicUrl", resolve, StringComparison.Ordinal);
+        Assert.Contains("var stream = await _media.OpenReadAsync(mediaId, ct)", recover, StringComparison.Ordinal);
+        Assert.Contains("if (stream is not null)", recover, StringComparison.Ordinal);
+        Assert.Contains("TryResolveRecoverableMediaUri(fallbackUrl, out var uri)", recover, StringComparison.Ordinal);
+        Assert.Contains("_httpClientFactory.CreateClient()", recover, StringComparison.Ordinal);
+        Assert.Contains("HttpCompletionOption.ResponseHeadersRead", recover, StringComparison.Ordinal);
+        Assert.Contains("using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct)", recover, StringComparison.Ordinal);
+        Assert.Contains("var recovered = new MemoryStream()", recover, StringComparison.Ordinal);
+        Assert.Contains("await response.Content.CopyToAsync(recovered, ct)", recover, StringComparison.Ordinal);
+        Assert.Contains("recovered.Position = 0", recover, StringComparison.Ordinal);
+
+        var resolveUri = GetMethodSection(handler, "TryResolveRecoverableMediaUri");
+        Assert.Contains("Storage:PublicUploadBase", resolveUri, StringComparison.Ordinal);
+        Assert.Contains("TodoX:PublicBaseUrl", resolveUri, StringComparison.Ordinal);
+        Assert.Contains("Storage:PublicBaseUrl", resolveUri, StringComparison.Ordinal);
+        Assert.Contains("TryBuildHttpsUri", resolveUri, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -947,6 +979,14 @@ public sealed class RDanceFashionDemoPageTests
         }
         if (start < 0)
         {
+            start = source.IndexOf($"private async Task<Stream?> {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"private async Task<ResolvedMotionFile?> {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
             start = source.IndexOf($"private async Task<Ai79MotionRuntime> {methodName}(", StringComparison.Ordinal);
         }
         if (start < 0)
@@ -964,6 +1004,14 @@ public sealed class RDanceFashionDemoPageTests
         if (start < 0)
         {
             start = source.IndexOf($"private static string {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"private bool {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"private static bool {methodName}(", StringComparison.Ordinal);
         }
 
         Assert.True(start >= 0, $"Could not locate {methodName}.");

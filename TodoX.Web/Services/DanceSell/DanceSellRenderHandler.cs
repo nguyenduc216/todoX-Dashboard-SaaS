@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
@@ -32,6 +33,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     private readonly IAi79TaskClient _ai79;
     private readonly IMediaFileService _media;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _config;
     private readonly IOptionsMonitor<KieOptions> _options;
     private readonly ILogger<DanceSellRenderHandler> _logger;
 
@@ -53,6 +55,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         IAi79TaskClient ai79,
         IMediaFileService media,
         IHttpClientFactory httpClientFactory,
+        IConfiguration config,
         IOptionsMonitor<KieOptions> options,
         ILogger<DanceSellRenderHandler> logger)
     {
@@ -71,6 +74,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         _ai79 = ai79;
         _media = media;
         _httpClientFactory = httpClientFactory;
+        _config = config;
         _options = options;
         _logger = logger;
     }
@@ -1194,13 +1198,14 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             var mime = NormalizeMotionMime(media.MimeType, media.FileName, allowedMime);
             ValidateMotionFile(mime, media.FileSizeBytes, allowedMime, maxBytes, requiredErrorCode, unsupportedMimeErrorCode, tooLargeErrorCode);
             var mediaIdValue = media.Id;
+            var recoverablePublicUrl = FirstNonBlank(media.PublicUrl, media.FileUrl, publicUrl);
             return new ResolvedMotionFile(
                 fieldName,
                 FirstNonBlank(media.FileName, Path.GetFileName(media.ObjectKey), fallbackFileName)!,
                 mime,
                 media.FileSizeBytes ?? -1,
                 media.ObjectKey is null ? "media" : "media_storage",
-                async token => await _media.OpenReadAsync(mediaIdValue, token));
+                async token => await OpenMediaOrRecoverFromPublicUrlAsync(mediaIdValue, recoverablePublicUrl, token));
         }
 
         var fallbackUrl = FirstNonBlank(publicUrl);
@@ -1230,6 +1235,84 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 response.EnsureSuccessStatusCode();
                 return await response.Content.ReadAsStreamAsync(token);
             });
+    }
+
+    private async Task<Stream?> OpenMediaOrRecoverFromPublicUrlAsync(Guid mediaId, string? fallbackUrl, CancellationToken ct)
+    {
+        var stream = await _media.OpenReadAsync(mediaId, ct);
+        if (stream is not null)
+        {
+            return stream;
+        }
+
+        if (!TryResolveRecoverableMediaUri(fallbackUrl, out var uri))
+        {
+            return null;
+        }
+
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var recovered = new MemoryStream();
+        await response.Content.CopyToAsync(recovered, ct);
+        recovered.Position = 0;
+        return recovered;
+    }
+
+    private bool TryResolveRecoverableMediaUri(string? fallbackUrl, out Uri uri)
+    {
+        uri = null!;
+        var recoverableUrl = FirstNonBlank(fallbackUrl);
+        if (recoverableUrl is null)
+        {
+            return false;
+        }
+
+        if (Uri.TryCreate(recoverableUrl, UriKind.Absolute, out var absolute))
+        {
+            if (absolute.Scheme == Uri.UriSchemeHttps)
+            {
+                uri = absolute;
+                return true;
+            }
+
+            return false;
+        }
+
+        var storageBase = FirstNonBlank(_config["Storage:PublicUploadBase"]);
+        if (Uri.TryCreate(storageBase, UriKind.Absolute, out var absoluteStorageBase)
+            && absoluteStorageBase.Scheme == Uri.UriSchemeHttps
+            && TryBuildHttpsUri(absoluteStorageBase, recoverableUrl, out uri))
+        {
+            return true;
+        }
+
+        var appBase = FirstNonBlank(_config["TodoX:PublicBaseUrl"], _config["App:PublicBaseUrl"], _config["Storage:PublicBaseUrl"]);
+        if (Uri.TryCreate(appBase, UriKind.Absolute, out var absoluteAppBase)
+            && absoluteAppBase.Scheme == Uri.UriSchemeHttps
+            && TryBuildHttpsUri(absoluteAppBase, recoverableUrl, out uri))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryBuildHttpsUri(Uri baseUri, string relativeUrl, out Uri uri)
+    {
+        var candidate = $"{baseUri.GetLeftPart(UriPartial.Authority).TrimEnd('/')}/{relativeUrl.TrimStart('/')}";
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var built) && built.Scheme == Uri.UriSchemeHttps)
+        {
+            uri = built;
+            return true;
+        }
+
+        uri = null!;
+        return false;
     }
 
     private static void ValidateMotionFile(
