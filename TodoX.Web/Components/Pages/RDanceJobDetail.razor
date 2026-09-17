@@ -133,13 +133,31 @@
                                     <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Merge" Disabled="@(_busy || string.IsNullOrWhiteSpace(_job.ProductImageUrl))" OnClick="GenerateReferenceAsync">Ghép ảnh</MudButton>
                                 </div>
                                 <div class="rdance-media-frame rdance-main-frame">
-                                    @Preview(_job.PreparedReferenceUrl ?? _job.CharacterImageUrl, "Khung ảnh chính")
+                                    @if (IsImageInputActive)
+                                    {
+                                        <div class="rdance-input-loading" role="status" aria-live="polite">
+                                            <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+                                            <strong>Đang tải hình ảnh...</strong>
+                                            @if (!string.IsNullOrWhiteSpace(_imageFileName))
+                                            {
+                                                <span>@_imageFileName</span>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        @Preview(_job.PreparedReferenceUrl ?? _job.CharacterImageUrl, "Khung ảnh chính")
+                                    }
                                     @if (IsReferenceGenerating)
                                     {
                                         <div class="rdance-frame-overlay" aria-label="Đang tạo ảnh..."><MudText Typo="Typo.body2">Đang ghép ảnh</MudText></div>
                                     }
                                 </div>
                             </div>
+                            @if (!string.IsNullOrWhiteSpace(_imageUploadError))
+                            {
+                                <MudAlert Severity="Severity.Error" Dense="true">@_imageUploadError</MudAlert>
+                            }
                         </MudPaper>
 
                         <MudPaper Class="todox-panel rdance-step-card">
@@ -163,7 +181,18 @@
                                 </div>
                             </div>
                             <div class="rdance-media-frame rdance-video-frame">
-                                @if (!string.IsNullOrWhiteSpace(_job.MotionVideoUrl))
+                                @if (IsMotionInputActive)
+                                {
+                                    <div class="rdance-input-loading" role="status" aria-live="polite">
+                                        <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+                                        <strong>@MotionInputLoadingText</strong>
+                                        @if (!string.IsNullOrWhiteSpace(_motionFileName))
+                                        {
+                                            <span>@_motionFileName</span>
+                                        }
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(_job.MotionVideoUrl))
                                 {
                                     <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-frame-media rdance-frame-video"></video>
                                 }
@@ -194,6 +223,23 @@
                                 @if (_job.Status == DanceSellJobStatuses.Completed && !string.IsNullOrWhiteSpace(_job.ResultVideoUrl))
                                 {
                                     <video src="@_job.ResultVideoUrl" controls playsinline class="rdance-frame-media rdance-frame-video"></video>
+                                }
+                                else if (!IsActive && _job.Status is not DanceSellJobStatuses.Failed and not DanceSellJobStatuses.Timeout)
+                                {
+                                    <div class="rdance-result-empty-state">
+                                        @if (!string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl ?? _job.CharacterImageUrl))
+                                        {
+                                            <img src="@(_job.PreparedReferenceUrl ?? _job.CharacterImageUrl)" alt="Ảnh tham chiếu" />
+                                        }
+                                        <div class="rdance-result-empty-copy">
+                                            <strong>Video chưa được tạo</strong>
+                                            <span class="rdance-result-prompt">@(_job.Prompt ?? "Nội dung đã được cấu hình")</span>
+                                            <span>@(!string.IsNullOrWhiteSpace(_job.MotionVideoUrl) ? "Video tham chiếu đã sẵn sàng" : "Chưa có video tham chiếu")</span>
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MovieCreation" Disabled="@(!CanRender || _busy)" OnClick="ConfirmAndQueueAsync">
+                                                Tạo video
+                                            </MudButton>
+                                        </div>
+                                    </div>
                                 }
                                 else
                                 {
@@ -709,14 +755,19 @@
     private string? _motionReadinessError;
     private string? _loadError;
     private string? _postLoadWarning;
+    private string? _imageFileName;
+    private string? _imageUploadError;
+    private ImageInputState _imageInputState;
     private string? _motionFileName;
     private long? _motionFileSize;
     private string? _motionUploadError;
+    private MotionInputState _motionInputState;
     private bool _motionDragActive;
     private bool _characterDragActive;
     private bool _productDragActive;
     private CancellationTokenSource? _pollCts;
     private PeriodicTimer? _pollTimer;
+    private Task? _pollTask;
     private int _scoreShirtColor = 3;
     private int _scoreGarmentShape = 3;
     private int _scoreGraphicText = 3;
@@ -879,6 +930,7 @@
     private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
     private string CharacterImageUploadZoneClass => $"rdance-upload-zone rdance-image-upload-zone{(_characterDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
     private string ProductImageUploadZoneClass => $"rdance-upload-zone rdance-image-upload-zone{(_productDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
+    private bool IsImageInputActive => _imageInputState == ImageInputState.Uploading;
     private string ReferenceHelpText => _job?.ProductMediaId is not null
         ? "AI sẽ tạo ảnh người mẫu mặc sản phẩm để dùng làm ảnh nguồn cho video."
         : "Ảnh người mẫu sẽ được dùng trực tiếp để tạo video.";
@@ -1239,6 +1291,8 @@
 
     private async Task StageTikTokAsync()
     {
+        _motionInputState = MotionInputState.Resolving;
+        _motionFileName = "TikTok MP4";
         await RunAsync(async () =>
         {
             await EnsureEditableAsync();
@@ -1248,6 +1302,7 @@
             _motionFileName = "TikTok MP4";
             _motionFileSize = null;
             _motionUploadError = null;
+            _motionInputState = MotionInputState.Ready;
             Snackbar.Add("Đã staging video TikTok.", Severity.Success);
             await ReloadAsync();
         });
@@ -1257,6 +1312,10 @@
     private Color TikTokOverlayColor => _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? Color.Warning : Color.Default;
     private string TikTokOverlayButtonClass => $"rdance-overlay-button {(_job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? "is-active" : "is-inactive")}";
     private string UploadOverlayButtonClass => $"rdance-overlay-button {(_job?.MotionSourceType == DanceSellMotionSourceTypes.Upload ? "is-active" : "is-inactive")}";
+    private bool IsMotionInputActive => _motionInputState is MotionInputState.Resolving or MotionInputState.Uploading;
+    private string MotionInputLoadingText => _motionInputState == MotionInputState.Resolving
+        ? "Đang tải video..."
+        : "Đang tải video lên...";
 
     private async Task OpenTikTokEditorAsync()
     {
@@ -1321,9 +1380,11 @@
         _motionFileName = file.Name;
         _motionFileSize = file.Size;
         _motionUploadError = null;
+        _motionInputState = MotionInputState.Uploading;
         var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
         if (await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(job.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!)))
         {
+            _motionInputState = MotionInputState.Ready;
             await ReloadAsync();
             await AutoPrepareReferenceAsync();
         }
@@ -1332,9 +1393,15 @@
     private async Task OnCharacterSelected(InputFileChangeEventArgs args)
     {
         _characterDragActive = false;
+        if (!PrepareImageUpload(args.File))
+        {
+            return;
+        }
+
         var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
         if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(job.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
         {
+            _imageInputState = ImageInputState.Ready;
             await ReloadAsync();
             if (_job?.CharacterMediaId is not null && !string.IsNullOrWhiteSpace(_job.CharacterImageUrl))
             {
@@ -1346,9 +1413,15 @@
     private async Task OnProductSelected(InputFileChangeEventArgs args)
     {
         _productDragActive = false;
+        if (!PrepareImageUpload(args.File))
+        {
+            return;
+        }
+
         var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
         if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(job.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
         {
+            _imageInputState = ImageInputState.Ready;
             await ReloadAsync();
             if (_job?.ProductMediaId is not null && !string.IsNullOrWhiteSpace(_job.ProductImageUrl))
             {
@@ -1380,6 +1453,24 @@
             Snackbar.Add("Tải tệp thành công.", Severity.Success);
         });
         return saved;
+    }
+
+    private bool PrepareImageUpload(IBrowserFile file)
+    {
+        _imageFileName = file.Name;
+        var error = ValidateImage(file);
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            _imageInputState = ImageInputState.Failed;
+            _imageUploadError = error;
+            Snackbar.Add(error, Severity.Error);
+            _ = InvokeAsync(StateHasChanged);
+            return false;
+        }
+
+        _imageUploadError = null;
+        _imageInputState = ImageInputState.Uploading;
+        return true;
     }
 
     private async Task AutoPrepareReferenceAsync()
@@ -1459,6 +1550,31 @@
                 && !Path.GetExtension(file.Name).Equals(".mp4", StringComparison.OrdinalIgnoreCase)))
         {
             return "Chỉ hỗ trợ video MP4.";
+        }
+
+        return null;
+    }
+
+    private string? ValidateImage(IBrowserFile file)
+    {
+        if (file.Size <= 0)
+        {
+            return "Ảnh không hợp lệ.";
+        }
+
+        if (file.Size > MaxImageBytes)
+        {
+            return "Ảnh vượt quá dung lượng cho phép.";
+        }
+
+        var extension = Path.GetExtension(file.Name);
+        if (string.IsNullOrWhiteSpace(file.Name)
+            || (!file.ContentType.Equals("image/png", StringComparison.OrdinalIgnoreCase)
+                && !file.ContentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase)
+                && !file.ContentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase)
+                && extension is not ".png" and not ".jpg" and not ".jpeg" and not ".webp"))
+        {
+            return "Chỉ hỗ trợ ảnh PNG, JPG, JPEG hoặc WEBP.";
         }
 
         return null;
@@ -1578,6 +1694,7 @@
         _job = await DanceSell.QueueRenderAsync(job.Id, AuthState.CurrentUser!);
         _tabIndex = 3;
         await ReloadAsync();
+        StartPolling();
     }
 
     private async Task CancelAsync()
@@ -2063,8 +2180,22 @@
     {
         if (_busy) return;
         _busy = true;
+        await InvokeAsync(StateHasChanged);
         try { await action(); }
-        catch (Exception ex) { Snackbar.Add(CustomerErrorMessage(ex), Severity.Error); }
+        catch (Exception ex)
+        {
+            if (IsImageInputActive)
+            {
+                _imageInputState = ImageInputState.Failed;
+                _imageUploadError = CustomerErrorMessage(ex);
+            }
+            if (IsMotionInputActive)
+            {
+                _motionInputState = MotionInputState.Failed;
+                _motionUploadError = CustomerErrorMessage(ex);
+            }
+            Snackbar.Add(CustomerErrorMessage(ex), Severity.Error);
+        }
         finally { _busy = false; await InvokeAsync(StateHasChanged); }
     }
 
@@ -2175,8 +2306,8 @@
     {
         StopPolling();
         _pollCts = new CancellationTokenSource();
-        _pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-        _ = PollLoopAsync(_pollCts.Token);
+        _pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _pollTask = PollLoopAsync(_pollTimer, _pollCts.Token);
     }
 
     private void StopPolling()
@@ -2186,26 +2317,35 @@
         _pollCts?.Dispose();
         _pollCts = null;
         _pollTimer = null;
+        _pollTask = null;
     }
 
-    private async Task PollLoopAsync(CancellationToken ct)
+    private async Task PollLoopAsync(PeriodicTimer timer, CancellationToken ct)
     {
+        var monitoringRender = IsActive;
         try
         {
-            while (_pollTimer is not null && await _pollTimer.WaitForNextTickAsync(ct))
+            while (await timer.WaitForNextTickAsync(ct))
             {
-                if (ShouldResumeAutoReference)
+                try
                 {
-                    await InvokeAsync(AutoPrepareReferenceAsync);
-                }
-                else if (IsActive)
-                {
-                    var wasActive = IsActive;
-                    await InvokeAsync(() => ReloadAsync(wasActive));
-                    if (wasActive && !IsActive)
+                    if (ShouldResumeAutoReference)
                     {
-                        StopPolling();
+                        await InvokeAsync(AutoPrepareReferenceAsync);
                     }
+                    else if (monitoringRender || IsActive)
+                    {
+                        monitoringRender = true;
+                        await InvokeAsync(() => ReloadAsync(selectResultOnCompletion: true));
+                        if (_job is not null && string.IsNullOrWhiteSpace(_loadError) && !IsActive)
+                        {
+                            return;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "RDance UI polling refresh failed for job {JobId}; polling will continue.", JobId);
                 }
             }
         }
@@ -2218,6 +2358,23 @@
         _pollCts?.Cancel();
         _pollTimer?.Dispose();
         _pollCts?.Dispose();
+    }
+
+    private enum ImageInputState
+    {
+        Idle,
+        Uploading,
+        Ready,
+        Failed
+    }
+
+    private enum MotionInputState
+    {
+        Idle,
+        Resolving,
+        Uploading,
+        Ready,
+        Failed
     }
 }
 
@@ -2588,6 +2745,13 @@
     .rdance-download-button { margin-left: auto; flex: 0 0 auto; }
     .rdance-copy-button { width: 32px; height: 32px; flex: 0 0 auto; }
     .rdance-frame-overlay { position: absolute; inset: auto 10px 10px; z-index: 2; display: grid; place-items: center; padding: 8px 10px; border-radius: 8px; background: rgba(7,10,14,.78); color: rgba(255,255,255,.88); pointer-events: none; }
+    .rdance-input-loading { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 18px; background: rgba(7,10,14,.88); color: rgba(255,255,255,.9); text-align: center; }
+    .rdance-input-loading span { color: rgba(255,255,255,.58); overflow-wrap: anywhere; }
+    .rdance-result-empty-state { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; background: #090d12; text-align: center; }
+    .rdance-result-empty-state > img { width: clamp(72px, 36%, 132px); max-height: 42%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); }
+    .rdance-result-empty-copy { display: grid; gap: 7px; justify-items: center; width: min(100%, 260px); color: rgba(255,255,255,.68); text-align: center; }
+    .rdance-result-empty-copy strong { color: rgba(255,255,255,.94); }
+    .rdance-result-prompt { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rdance-status-list { display: grid; gap: 10px; }
     .rdance-status-item { display: grid; gap: 2px; padding: 2px 0; color: rgba(255,255,255,.72); font-size: .84rem; line-height: 1.25; }
     .rdance-status-item > div { display: flex; align-items: center; gap: 6px; min-width: 0; }

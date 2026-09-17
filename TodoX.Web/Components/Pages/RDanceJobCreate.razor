@@ -137,7 +137,18 @@
                             </button>
                         </div>
                         <div class="rdance-media-frame rdance-main-frame">
-                            @if (!string.IsNullOrWhiteSpace(CreateReferenceImageUrl))
+                            @if (IsImageInputActive)
+                            {
+                                <div class="rdance-input-loading" role="status" aria-live="polite">
+                                    <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+                                    <strong>Đang tải hình ảnh...</strong>
+                                    @if (!string.IsNullOrWhiteSpace(_imageFileName))
+                                    {
+                                        <span>@_imageFileName</span>
+                                    }
+                                </div>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(CreateReferenceImageUrl))
                             {
                                 <img src="@CreateReferenceImageUrl" alt="Ảnh tham chiếu" class="rdance-frame-media rdance-frame-image" />
                             }
@@ -162,7 +173,18 @@
                         </div>
                     </div>
                     <div class="rdance-media-frame rdance-video-frame">
-                        @if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
+                        @if (IsMotionInputActive)
+                        {
+                            <div class="rdance-input-loading" role="status" aria-live="polite">
+                                <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+                                <strong>@MotionInputLoadingText</strong>
+                                @if (!string.IsNullOrWhiteSpace(_motionFileName))
+                                {
+                                    <span>@_motionFileName</span>
+                                }
+                            </div>
+                        }
+                        else if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
                         {
                             <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-frame-media rdance-frame-video"></video>
                         }
@@ -310,7 +332,11 @@
     private DanceSellJobDto? _job;
     private string? _readinessError;
     private string? _imageUploadError;
+    private string? _imageFileName;
+    private ImageInputState _imageInputState;
     private string? _motionUploadError;
+    private string? _motionFileName;
+    private MotionInputState _motionInputState;
     private bool _motionDragActive;
     private bool _busy;
     private bool _autoFinish = true;
@@ -329,6 +355,11 @@
     private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
     private string TikTokOverlayButtonClass => $"rdance-overlay-button {(_job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok || !string.IsNullOrWhiteSpace(_tiktokUrl) ? "is-active" : "is-inactive")}";
     private string UploadOverlayButtonClass => $"rdance-overlay-button {(_job?.MotionSourceType == DanceSellMotionSourceTypes.Upload || !string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "is-active" : "is-inactive")}";
+    private bool IsImageInputActive => _imageInputState == ImageInputState.Uploading;
+    private bool IsMotionInputActive => _motionInputState is MotionInputState.Resolving or MotionInputState.Uploading;
+    private string MotionInputLoadingText => _motionInputState == MotionInputState.Resolving
+        ? "Đang tải video..."
+        : "Đang tải video lên...";
     private string CreateReferenceStatusKey => _job?.PreparedReferenceStatus switch
     {
         DanceSellReferenceStatuses.Generating => "yellow",
@@ -454,14 +485,19 @@
         });
 
     private async Task StageTikTokAndOpenAsync()
-        => await RunAsync(async () =>
+    {
+        _motionInputState = MotionInputState.Resolving;
+        _motionFileName = "TikTok MP4";
+        await RunAsync(async () =>
         {
             var job = await (RDanceFeatures.IsNewUiEnabled ? EnsureDraftAsync() : CreateDraftAsync());
             _job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl.Trim(), AuthState.CurrentUser!);
             _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
             await ResolveReferenceAfterMotionAsync(_job);
+            _motionInputState = MotionInputState.Ready;
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
+    }
 
     private async Task OpenTikTokEditorAsync()
     {
@@ -510,6 +546,8 @@
         var error = ValidateImage(file);
         if (!string.IsNullOrWhiteSpace(error))
         {
+            _imageFileName = file.Name;
+            _imageInputState = ImageInputState.Failed;
             _imageUploadError = error;
             Snackbar.Add(error, Severity.Error);
             await InvokeAsync(StateHasChanged);
@@ -517,6 +555,8 @@
         }
 
         _imageUploadError = null;
+        _imageFileName = file.Name;
+        _imageInputState = ImageInputState.Uploading;
         await RunAsync(async () =>
         {
             var job = await EnsureDraftAsync();
@@ -526,6 +566,7 @@
             _job = character
                 ? await DanceSell.UploadCharacterAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!)
                 : await DanceSell.UploadProductAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
+            _imageInputState = ImageInputState.Ready;
             Snackbar.Add("Tải ảnh thành công.", Severity.Success);
         });
     }
@@ -544,6 +585,8 @@
         }
 
         _motionUploadError = null;
+        _motionFileName = file.Name;
+        _motionInputState = MotionInputState.Uploading;
         await RunAsync(async () =>
         {
             var job = await (RDanceFeatures.IsNewUiEnabled ? EnsureDraftAsync() : CreateDraftAsync());
@@ -559,6 +602,7 @@
 
             await ResolveReferenceAfterMotionAsync(_job);
             _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
+            _motionInputState = MotionInputState.Ready;
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
     }
@@ -682,12 +726,23 @@
         }
 
         _busy = true;
+        await InvokeAsync(StateHasChanged);
         try
         {
             await action();
         }
         catch (Exception ex)
         {
+            if (IsImageInputActive)
+            {
+                _imageInputState = ImageInputState.Failed;
+                _imageUploadError = ex.Message;
+            }
+            if (IsMotionInputActive)
+            {
+                _motionInputState = MotionInputState.Failed;
+                _motionUploadError = ex.Message;
+            }
             Snackbar.Add(ex.Message, Severity.Error);
         }
         finally
@@ -705,6 +760,23 @@
     private void OnMotionDragEnter(DragEventArgs _) => _motionDragActive = true;
     private void OnMotionDragLeave(DragEventArgs _) => _motionDragActive = false;
     private void OnMotionDrop(DragEventArgs _) => _motionDragActive = false;
+
+    private enum ImageInputState
+    {
+        Idle,
+        Uploading,
+        Ready,
+        Failed
+    }
+
+    private enum MotionInputState
+    {
+        Idle,
+        Resolving,
+        Uploading,
+        Ready,
+        Failed
+    }
 }
 
 <style>
@@ -735,6 +807,8 @@
     .rdance-media-frame { position: relative; width: 100%; aspect-ratio: 9 / 16; display: grid; place-items: center; overflow: hidden; min-width: 0; border-radius: 8px; background: #090d12; color: rgba(255,255,255,.6); }
     .rdance-main-frame, .rdance-video-frame, .rdance-result-frame { height: 100%; }
     .rdance-empty-media { display: grid; place-items: center; gap: 8px; padding: 12px; color: rgba(255,255,255,.48); text-align: center; }
+    .rdance-input-loading { position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 18px; background: rgba(7,10,14,.88); color: rgba(255,255,255,.9); text-align: center; }
+    .rdance-input-loading span { color: rgba(255,255,255,.58); overflow-wrap: anywhere; }
     .rdance-overlay-actions { position: absolute; top: 8px; left: 8px; z-index: 3; display: flex; gap: 6px; }
     .rdance-overlay-button { position: relative; display: inline-grid !important; place-items: center; width: 32px !important; min-width: 32px !important; height: 32px !important; min-height: 32px !important; padding: 0 !important; border-radius: 8px !important; border: 1px solid rgba(255,255,255,.18); background: rgba(7,10,14,.78); color: rgba(255,255,255,.72); overflow: hidden; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
     .rdance-overlay-button .mud-icon-root { font-size: 1rem; }

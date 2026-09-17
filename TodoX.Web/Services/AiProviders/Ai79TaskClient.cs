@@ -120,7 +120,9 @@ public sealed record Ai79MotionControlSubmitRequest(
     string Ratio,
     string SubType,
     string BackgroundSource,
-    bool IncludeImagesZeroUrl = true);
+    bool IncludeImagesZeroUrl = true,
+    Ai79MultipartFilePart? CharacterImageFile = null,
+    Ai79MultipartFilePart? MotionVideoFile = null);
 
 public sealed record Ai79ImageUploadRequest(
     string BaseUrl,
@@ -527,6 +529,79 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     public async Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default)
     {
+        if (request.CharacterImageFile is not null || request.MotionVideoFile is not null)
+        {
+            if (request.CharacterImageFile is null || request.MotionVideoFile is null)
+            {
+                throw new Ai79TaskSubmitException(
+                    "79AI motion control multipart submit requires both character image and motion video files.",
+                    JsonSerializer.Serialize(new { error = "missing_motion_control_file" }, JsonOptions),
+                    errorCode: "missing_motion_control_file");
+            }
+
+            var fields = new Dictionary<string, string?>
+            {
+                ["domain"] = request.Domain,
+                ["project_id"] = request.ProjectId,
+                ["model"] = request.Model,
+                ["prompt"] = request.Prompt,
+                ["subType"] = request.SubType,
+                ["background_source"] = request.BackgroundSource,
+                ["mode"] = request.Mode,
+                ["ratio"] = request.Ratio
+            };
+            var sanitizedRequestMetadata = BuildSubmitRequestMetadata(
+                request.BaseUrl,
+                request.EndpointPath,
+                request.Domain,
+                request.Model,
+                Ai79TaskOperation.Video,
+                mode: request.Mode,
+                ratio: request.Ratio,
+                type: request.SubType,
+                projectId: request.ProjectId,
+                fields: new Dictionary<string, string?>
+                {
+                    ["background_source"] = request.BackgroundSource,
+                    [request.CharacterImageFile.FieldName] = "<file>",
+                    [request.MotionVideoFile.FieldName] = "<file>"
+                },
+                fileCount: 2);
+
+            using var multipartBody = new MultipartFormDataContent();
+            foreach (var pair in fields)
+            {
+                multipartBody.Add(new StringContent(pair.Value ?? string.Empty), pair.Key);
+            }
+
+            foreach (var file in new[] { request.CharacterImageFile, request.MotionVideoFile })
+            {
+                var stream = await file.OpenReadAsync(ct)
+                    ?? throw new Ai79TaskSubmitException(
+                        $"79AI multipart file '{file.FieldName}' could not be opened.",
+                        JsonSerializer.Serialize(new { error = "missing_file", field = file.FieldName }, JsonOptions),
+                        errorCode: "missing_file");
+                var content = new StreamContent(stream);
+                content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.MimeType);
+                multipartBody.Add(content, file.FieldName, file.FileName);
+            }
+
+            using var multipartRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
+            multipartRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
+            multipartRequest.Content = multipartBody;
+
+            using var multipartTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            multipartTimeoutCts.CancelAfter(_motionControlSubmitTimeout);
+            using var multipartResponse = await _httpClient.SendAsync(multipartRequest, HttpCompletionOption.ResponseHeadersRead, multipartTimeoutCts.Token);
+            return await ReadSubmitResultAsync(
+                multipartResponse,
+                request.AccessToken,
+                request.EndpointPath,
+                Ai79TaskOperation.Video,
+                sanitizedRequestMetadata,
+                multipartTimeoutCts.Token);
+        }
+
         var form = new Dictionary<string, string>
         {
             ["domain"] = request.Domain,
