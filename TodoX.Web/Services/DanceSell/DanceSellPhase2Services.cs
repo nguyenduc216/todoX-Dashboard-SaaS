@@ -1547,6 +1547,7 @@ public interface IDanceSellPhase2Service
 
 public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 {
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> QueueLocks = new();
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> RetryLocks = new();
     private readonly IDanceSellRepository _repo;
     private readonly IMediaFileService _media;
@@ -1812,12 +1813,16 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
     public async Task<DanceSellJobDto> QueueRenderAsync(Guid id, CurrentUserSession user, CancellationToken ct = default)
     {
-        var job = await RequireOwnedJobAsync(id, user, ct);
-        ValidateReadyForRender(job);
-        if (job.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering)
+        var gate = QueueLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
         {
-            throw new InvalidOperationException("DANCE_SELL_JOB_ALREADY_ACTIVE");
-        }
+            var job = await RequireOwnedJobAsync(id, user, ct);
+            ValidateReadyForRender(job);
+            if (job.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering)
+            {
+                throw new InvalidOperationException("DANCE_SELL_JOB_ALREADY_ACTIVE");
+            }
 
         var logicalRequestId = string.IsNullOrWhiteSpace(job.LogicalRequestId) ? $"dance-sell-{Guid.NewGuid():N}" : job.LogicalRequestId;
         var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
@@ -1935,8 +1940,13 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             MaxAttempts = Math.Max(3, _kie.CurrentValue.MaxPollCount + _kie.CurrentValue.SubmitMaxRetry + 5)
         }, ct);
 
-        await _repo.QueueForRenderAsync(job.Id, renderJob.Id, logicalRequestId, job.PreparedReferenceUrl!, job.MotionVideoUrl, motionRoute, ct);
-        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+            await _repo.QueueForRenderAsync(job.Id, renderJob.Id, logicalRequestId, job.PreparedReferenceUrl!, job.MotionVideoUrl, motionRoute, ct);
+            return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public async Task<DanceSellJobDto> RetryAsync(Guid id, CurrentUserSession user, CancellationToken ct = default)

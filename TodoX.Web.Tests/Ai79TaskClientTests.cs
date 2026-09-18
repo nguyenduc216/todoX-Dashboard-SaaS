@@ -422,6 +422,32 @@ public sealed class Ai79TaskClientTests
     }
 
     [Fact]
+    public async Task MotionControlSubmit_PreservesNumericProviderErrorCodeFromErrorField()
+    {
+        var handler = new RecordingJsonHandler("""{"success":false,"error":"2100","message":"Tải media lên thất bại, vui lòng kiểm tra file và thử lại."}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitMotionControlAsync(new Ai79MotionControlSubmitRequest(
+            "https://v2.api.gommo.net",
+            "/ai/jobs/video/kling_video_motion_3",
+            "secret-token",
+            "79ai.net",
+            "default",
+            "kling_video_motion_3",
+            "prompt",
+            "https://cdn.example/reference.png",
+            "https://cdn.example/motion.mp4",
+            "standard",
+            "default",
+            "motion",
+            "input_video")));
+
+        Assert.Equal("2100", ex.ErrorCode);
+        Assert.Contains("Tải media lên thất bại", ex.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("2100", ex.SanitizedResponseJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MotionControlSubmit_UsesBoundedSubmitTimeoutWithoutChangingPoll()
     {
         var handler = new HangingHandler();

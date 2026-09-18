@@ -74,6 +74,19 @@ public sealed class RDanceVideoFlowRegressionTests
         Assert.Contains("StartPolling();", ExtractMethod(detail, "private async Task QueueRenderFromUserActionAsync"));
     }
 
+    [Fact]
+    public void QueueRenderUsesPerJobGateBeforeChargingAndEnqueueing()
+    {
+        var source = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
+        var queue = ExtractMethod(source, "public async Task<DanceSellJobDto> QueueRenderAsync");
+
+        Assert.Contains("QueueLocks.GetOrAdd(id", source);
+        Assert.Contains("await gate.WaitAsync(ct);", queue);
+        Assert.Contains("finally", queue);
+        Assert.Contains("gate.Release();", queue);
+        Assert.Contains("DANCE_SELL_JOB_ALREADY_ACTIVE", queue);
+    }
+
     private static string ExtractMethod(string source, string signature)
     {
         var start = source.IndexOf(signature, StringComparison.Ordinal);

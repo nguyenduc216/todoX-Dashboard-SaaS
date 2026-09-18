@@ -1466,6 +1466,11 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         var errorCode = FindErrorValue(element, "error_code", "errorCode", "code");
         var errorMessage = FindErrorValue(element, "error_message", "errorMessage", "message", "msg");
         var scalarError = FindErrorValue(element, "error", "errors");
+        if (string.IsNullOrWhiteSpace(errorCode)
+            && string.Equals(scalarError, "2100", StringComparison.OrdinalIgnoreCase))
+        {
+            errorCode = scalarError;
+        }
         var status = FindStatus(element);
         var success = FindString(element, "success");
 
