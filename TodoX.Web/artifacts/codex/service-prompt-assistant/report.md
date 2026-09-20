@@ -61,6 +61,26 @@ The configured service prompt template is validated before execution. The assist
 
 Validation is applied to version names, prompt templates, descriptions, filenames, and upload content. Limits are read from configuration rather than hard-coded in the UI.
 
+## JSONB Persistence Fix
+
+Incident: PostgreSQL `42804` occurred while saving `request_snapshot_sanitized` in `settings.service_prompt_generations`.
+
+Root cause: .NET string parameters were inserted into PostgreSQL `jsonb` columns without explicit casts.
+
+Fix:
+
+- `RequestSnapshot` is inserted with `CAST(@RequestSnapshot AS jsonb)`.
+- `GeneratedJson` is inserted with `CAST(@GeneratedJson AS jsonb)`.
+- `ValidationErrors` is inserted with `CAST(@ValidationErrors AS jsonb)`.
+- `GeneratedJson = NULL` remains accepted by PostgreSQL through the cast.
+- `RequestSnapshot`, `ValidationErrors`, and non-null `GeneratedJson` are parsed before the database connection is opened; malformed JSON is rejected instead of being stored.
+
+Database migration required: **NO**.
+
+Schema changed: **NO**.
+
+Render pipeline changed: **NO**.
+
 ## Repair
 
 The UI exposes validation and repair-attempt metadata returned by the assistant flow. Repair behavior remains within the Service Prompt Assistant scope and does not alter protected media or billing contracts.
@@ -85,11 +105,11 @@ Targeted tests:
 
 `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~ServicePromptAssistantTests`
 
-Result: **10 passed, 0 failed**.
+Result: **14 passed, 0 failed** after adding the JSONB persistence regression tests.
 
 Full test suite:
 
-Result: **954 passed, 22 failed**. The baseline was **950 passed, 22 failed**. The remaining failures are in pre-existing RDance, Timelapse, RVideo, render, billing, and provider regression areas and were not changed.
+Result: **958 passed, 22 failed**. The baseline before this change was **954 passed, 22 failed**; the four additional tests are the JSONB persistence regression tests. The remaining failures are in pre-existing RDance, Timelapse, RVideo, render, billing, and provider regression areas and were not changed.
 
 ## Build
 

@@ -183,6 +183,70 @@ public sealed class ServicePromptAssistantTests
         Assert.DoesNotContain("secret-token", error.SanitizedResponse, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void GenerationPersistenceSqlCastsAllJsonbColumnsAndAllowsNullableGeneratedJson()
+    {
+        var sql = ServicePromptGenerationPersistenceContract.InsertSql;
+
+        Assert.Contains("CAST(@RequestSnapshot AS jsonb)", sql, StringComparison.Ordinal);
+        Assert.Contains("CAST(@GeneratedJson AS jsonb)", sql, StringComparison.Ordinal);
+        Assert.Contains("CAST(@ValidationErrors AS jsonb)", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("@RequestSnapshot, @RawResponse", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("@GeneratedJson, @ValidationStatus", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenerationPersistenceAcceptsJsonbCompatibleSnapshotErrorsAndNullableGeneratedJson()
+    {
+        var model = CreatePersistence(
+            requestSnapshot: """{"providerCode":"79ai","modelCode":"configured-model"}""",
+            generatedJson: null,
+            validationErrors: "[]");
+
+        ServicePromptGenerationPersistenceContract.Validate(model);
+    }
+
+    [Fact]
+    public void GenerationPersistenceAcceptsGeneratedJsonAndMultipleValidationErrors()
+    {
+        var model = CreatePersistence(
+            requestSnapshot: """{"providerCode":"79ai","modelCode":"configured-model"}""",
+            generatedJson: """{"title":"ok","scenes":[]}""",
+            validationErrors: """[{"path":"$.scenes[0].motion","code":"missing_field","message":"motion is required"},{"path":"$.title","code":"empty","message":"title is required"}]""");
+
+        ServicePromptGenerationPersistenceContract.Validate(model);
+    }
+
+    [Fact]
+    public void GenerationPersistenceRejectsMalformedJsonBeforeInsert()
+    {
+        var malformedSnapshot = CreatePersistence(requestSnapshot: "{broken");
+        var malformedErrors = CreatePersistence(validationErrors: "{broken");
+        var malformedGenerated = CreatePersistence(generatedJson: "{broken");
+
+        Assert.Throws<ArgumentException>(() => ServicePromptGenerationPersistenceContract.Validate(malformedSnapshot));
+        Assert.Throws<ArgumentException>(() => ServicePromptGenerationPersistenceContract.Validate(malformedErrors));
+        Assert.Throws<ArgumentException>(() => ServicePromptGenerationPersistenceContract.Validate(malformedGenerated));
+    }
+
+    private static ServicePromptGenerationPersistence CreatePersistence(
+        string requestSnapshot = "{}",
+        string? generatedJson = """{"title":"ok"}""",
+        string validationErrors = "[]")
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            ServiceId = Guid.NewGuid(),
+            AssistantId = Guid.NewGuid(),
+            TrainingVersionId = Guid.NewGuid(),
+            ProviderCode = "79ai",
+            ModelCode = "configured-model",
+            RequestSnapshot = requestSnapshot,
+            GeneratedJson = generatedJson,
+            ValidationErrors = validationErrors,
+            CreatedAt = DateTime.UtcNow
+        };
+
     private sealed class FakeCredentialResolver : IProviderCredentialResolver
     {
         private readonly string _secret;

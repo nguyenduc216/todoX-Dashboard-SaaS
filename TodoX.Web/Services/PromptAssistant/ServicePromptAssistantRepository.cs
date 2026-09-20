@@ -332,22 +332,10 @@ public sealed class ServicePromptAssistantRepository
         ServicePromptGenerationPersistence model,
         CancellationToken ct = default)
     {
+        ServicePromptGenerationPersistenceContract.Validate(model);
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO settings.service_prompt_generations
-                (id, service_id, service_prompt_assistant_id, training_version_id, user_id, customer_id,
-                 provider_code, model_code, user_input, request_snapshot_sanitized, raw_response_sanitized,
-                 generated_json, validation_status, validation_errors_json, repair_attempt_count,
-                 prompt_tokens, completion_tokens, total_tokens, status, error_code, error_message,
-                 created_at, completed_at)
-            VALUES
-                (@Id, @ServiceId, @AssistantId, @TrainingVersionId, @UserId, @CustomerId,
-                 @ProviderCode, @ModelCode, @UserInput, @RequestSnapshot, @RawResponse,
-                 @GeneratedJson, @ValidationStatus, CAST(@ValidationErrors AS jsonb), @RepairAttempts,
-                 @PromptTokens, @CompletionTokens, @TotalTokens, @Status, @ErrorCode, @ErrorMessage,
-                 @CreatedAt, @CompletedAt);
-            """,
+            ServicePromptGenerationPersistenceContract.InsertSql,
             model,
             cancellationToken: ct));
     }
@@ -411,6 +399,53 @@ public sealed class ServicePromptAssistantRepository
         public Guid Id { get; set; }
         public Guid AssistantId { get; set; }
         public string Status { get; set; } = string.Empty;
+    }
+}
+
+internal static class ServicePromptGenerationPersistenceContract
+{
+    internal const string InsertSql =
+        """
+        INSERT INTO settings.service_prompt_generations
+            (id, service_id, service_prompt_assistant_id, training_version_id, user_id, customer_id,
+             provider_code, model_code, user_input, request_snapshot_sanitized, raw_response_sanitized,
+             generated_json, validation_status, validation_errors_json, repair_attempt_count,
+             prompt_tokens, completion_tokens, total_tokens, status, error_code, error_message,
+             created_at, completed_at)
+        VALUES
+            (@Id, @ServiceId, @AssistantId, @TrainingVersionId, @UserId, @CustomerId,
+             @ProviderCode, @ModelCode, @UserInput, CAST(@RequestSnapshot AS jsonb), @RawResponse,
+             CAST(@GeneratedJson AS jsonb), @ValidationStatus, CAST(@ValidationErrors AS jsonb), @RepairAttempts,
+             @PromptTokens, @CompletionTokens, @TotalTokens, @Status, @ErrorCode, @ErrorMessage,
+             @CreatedAt, @CompletedAt);
+        """;
+
+    internal static void Validate(ServicePromptGenerationPersistence model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        EnsureValidJson(model.RequestSnapshot, nameof(model.RequestSnapshot));
+        EnsureValidJson(model.ValidationErrors, nameof(model.ValidationErrors));
+        if (model.GeneratedJson is not null)
+        {
+            EnsureValidJson(model.GeneratedJson, nameof(model.GeneratedJson));
+        }
+    }
+
+    private static void EnsureValidJson(string? json, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new ArgumentException("JSON value is required.", parameterName);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("JSON value is malformed.", parameterName, ex);
+        }
     }
 }
 
