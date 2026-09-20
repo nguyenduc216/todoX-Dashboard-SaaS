@@ -1,114 +1,153 @@
-# Service Prompt Assistant Report
+# Service Prompt Assistant Phase 1 Report
 
-Date: 2026-09-19
-Baseline commit: `991eb650e3771b94f4975b0744eb11b7bc2d043f`
+## Summary
+
+Phase 1 of the Service Prompt Assistant configuration is complete. The implementation covers assistant configuration, training versions, publishing, prompt execution through 79AI, validation, repair metadata, usage reporting, and the related dashboard dialog.
 
 ## Scope
 
-Implemented service-level Prompt Assistant for:
+Included:
 
-`natural language request -> configurable 79AI-compatible provider -> JSON parse -> recursive structure validation -> bounded repair -> preview/history persistence`
+- Service-scoped prompt assistant configuration and version management.
+- Draft validation and safe publishing workflow.
+- 79AI chat-completions integration using configuration.
+- Upload limits, prompt template validation, and controlled provider errors.
+- Dashboard configuration, playground, history, and usage display.
+- Standalone database hardening SQL.
+- Regression tests for Phase 1 validation and provider configuration.
 
-The implementation supports per-service configuration, draft/published/archived training versions, JSON template upload, structure-description upload, playground generation, validation errors, token usage, copy-to-clipboard, and generation history.
+Frozen and untouched:
 
-## Changed Files
+- Image generation, video generation, voice/audio, point/billing.
+- RVideo, render, RDance, and Timelapse behavior.
+- Existing public APIs outside the requested assistant scope.
 
-- `Components/Pages/Services.razor`
-- `Components/Dialogs/ServicePromptAssistantDialog.razor`
-- `Program.cs`
-- `appsettings.json`
-- `Services/PromptAssistant/ServicePromptAssistantModels.cs`
-- `Services/PromptAssistant/ServicePromptCompiler.cs`
-- `Services/PromptAssistant/ServicePromptOutputParser.cs`
-- `Services/PromptAssistant/ServicePromptStructureValidator.cs`
-- `Services/PromptAssistant/ServicePrompt79AiClient.cs`
-- `Services/PromptAssistant/ServicePromptAssistantRepository.cs`
-- `Services/PromptAssistant/ServicePromptAssistantService.cs`
-- `database/manual/service-prompt-assistant/20260919_service_prompt_assistant.sql`
-- `../TodoX.Web.Tests/ServicePromptAssistantTests.cs`
+## Baseline
 
-## Database
+- Branch: `feature/admin-job-monitor`
+- Baseline commit: `4dba6072c52cc8b444896bc2e74289e4c8a332b9`
+- Existing worktree changes were preserved.
 
-Added a standalone manual SQL script for:
+## Architecture
 
-- `settings.service_prompt_assistants`
-- `settings.service_prompt_training_versions`
-- `settings.service_prompt_generations`
-- required indexes and constraints
+The dashboard uses the existing Service Prompt Assistant repository, service, provider client, models, and Blazor dialog boundaries. Configuration is read through the existing options path. Persistence remains service- and assistant-scoped, with publishing handled transactionally by the repository.
 
-The script is additive, includes an idempotent active-version foreign-key guard, and was not executed. No migration was created or modified. No database update is required until the user manually reviews and runs this script.
+## Code Changes
 
-## Provider and Security
+- `ServicePromptAssistantRepository.PublishAsync` validates ownership and draft state, archives the previous published version, publishes the requested draft, and updates the active version in one transaction.
+- Domain failures use `ServicePromptDomainException`.
+- Service validation covers version names, templates, descriptions, filenames, content, and configured byte limits.
+- The 79AI client reports controlled errors when the provider response lacks choices, messages, or content.
+- The dialog now exposes configuration, versions, uploads, playground, history, validation, repair attempts, token usage, and latency.
+- Tests cover validator edge cases, configured endpoint and limits, invalid URLs, and missing provider content.
 
-- Provider URL, provider code, model code, timeout, and limits are configurable.
-- Credentials are resolved through the existing `IProviderCredentialResolver`.
-- No credential, access key, model ID, or secret was added to source/configuration.
-- Stored request/response data is sanitized; provider secrets are replaced before persistence.
-- YEScale MCP was queried for provider `79ai`; it returned zero model records. Therefore no YEScale model ID or capability was invented, and the provider/model remain configuration-driven.
+## Publish Fix
 
-## Validation and Repair
+Publishing requires the requested version to belong to the selected assistant and service, requires `DRAFT` state, checks affected rows, and performs archive/publish/active-version updates transactionally.
 
-- JSON markdown fences are stripped before parsing.
-- Invalid JSON is converted to a controlled provider error.
-- Validation recursively checks required fields, unknown fields, JSON types, nested objects, and array item structure.
-- Array length remains variable.
-- Repair attempts are bounded to configured values clamped to 0-3.
-- Prompt, completion, and total token usage are aggregated across initial generation and repairs.
+## 79AI Config
 
-## Protected Subsystems
+The configured default endpoint is:
 
-Untouched:
+`https://79ai.net/api/chat/completions`
 
-- image, video, and voice generation
-- render workers, handlers, queues, schedulers, and finalizers
-- provider submit/poll logic
-- ffmpeg
-- billing, points, retry behavior
-- RDance, Timelapse, and RVideo production flows
+Credentials are not stored in source, configuration, tests, logs, or this report.
 
-The only existing page edited was `Components/Pages/Services.razor`, which received the Prompt Assistant action.
+## Prompt Flow
 
-## Validation Results
+The configured service prompt template is validated before execution. The assistant sends the resulting prompt through the configured provider client, captures the provider response, and records the existing generation/history metadata used by the dashboard.
 
-Passed:
+## Validation
 
-```text
-dotnet test ..\TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~ServicePromptAssistantTests
-6 passed, 0 failed
+Validation is applied to version names, prompt templates, descriptions, filenames, and upload content. Limits are read from configuration rather than hard-coded in the UI.
 
-dotnet build ..\TodoX.Dashboard.sln -c Release --no-restore -p:UseSharedCompilation=false
-0 errors, 46 warnings
+## Repair
 
-dotnet publish TodoX.Web.csproj -c Release --no-restore -p:UseSharedCompilation=false -o ..\artifacts\publish\todox-dashboard
-success
-```
+The UI exposes validation and repair-attempt metadata returned by the assistant flow. Repair behavior remains within the Service Prompt Assistant scope and does not alter protected media or billing contracts.
 
-Publish output:
+## Token Usage
 
-`D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`
+The playground and history views display token usage and latency when supplied by the existing generation metadata.
+
+## UI
+
+The Service Prompt Assistant dialog was restored to readable ASCII labels and includes configuration, training versions, upload previews, playground execution, history, validation status, repair attempts, token usage, and latency.
+
+## Database Update/Status
+
+The standalone SQL file adds composite uniqueness and foreign-key constraints needed to ensure active versions and generations remain associated with the correct assistant and service.
+
+Status: **NOT EXECUTED**. The current connection string targets a shared host whose environment could not be safely identified as development. No migration was created, modified, or applied, and no SQL was executed against a database.
+
+## Tests
+
+Targeted tests:
+
+`dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~ServicePromptAssistantTests`
+
+Result: **10 passed, 0 failed**.
 
 Full test suite:
 
-```text
-dotnet test ..\TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --no-restore
-950 passed, 22 failed, 0 skipped
-```
+Result: **954 passed, 22 failed**. The baseline was **950 passed, 22 failed**. The remaining failures are in pre-existing RDance, Timelapse, RVideo, render, billing, and provider regression areas and were not changed.
 
-The 22 failures are existing unrelated source-contract/regression failures in RDance, Timelapse, render, billing, and provider behavior. No protected production behavior was changed to address them.
+## Build
 
-Lint:
+Command:
 
-```text
-dotnet format TodoX.Web.csproj --no-restore --verify-no-changes
-failed
-```
+`dotnet build TodoX.Dashboard.sln -c Release --no-restore -p:UseSharedCompilation=false`
 
-The command reports pre-existing whitespace violations across unrelated repository files, including protected media/render modules. Those files were not modified.
+Result: **Success, 0 errors, 46 warnings**.
 
-Additional checks:
+## Publish
 
-- `git diff --check`: passed
-- Changed-file mojibake/replacement-character scan: passed
-- No database command was executed
-- No commit or push was performed
-- No production service was restarted or deployed
+Command:
+
+`dotnet publish TodoX.Web/TodoX.Web.csproj -c Release --no-restore -p:UseSharedCompilation=false -o artifacts/publish/todox-dashboard`
+
+Result: **Success**.
+
+Output:
+
+`D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`
+
+## Render Pipeline Safety Verification
+
+No RVideo, render, image generation, video generation, voice/audio, RDance, Timelapse, or billing production files were changed. The unrelated baseline failures in those areas were not repaired as part of this task.
+
+## Security
+
+- No credentials, access keys, or environment-specific secrets were added.
+- Provider endpoint remains configuration-driven.
+- Database SQL remains a manual, standalone script.
+- Existing user changes were preserved.
+
+## Changed Files
+
+- `TodoX.Web.Tests/ServicePromptAssistantTests.cs`
+- `TodoX.Web/Components/Dialogs/ServicePromptAssistantDialog.razor`
+- `TodoX.Web/Services/PromptAssistant/ServicePrompt79AiClient.cs`
+- `TodoX.Web/Services/PromptAssistant/ServicePromptAssistantModels.cs`
+- `TodoX.Web/Services/PromptAssistant/ServicePromptAssistantRepository.cs`
+- `TodoX.Web/Services/PromptAssistant/ServicePromptAssistantService.cs`
+- `TodoX.Web/appsettings.json`
+- `TodoX.Web/database/manual/service-prompt-assistant/20260919_service_prompt_assistant.sql`
+- `TodoX.Web/artifacts/codex/service-prompt-assistant/report.md`
+
+## Known Limitations
+
+- `dotnet format TodoX.Web/TodoX.Web.csproj --no-restore --verify-no-changes` reports many pre-existing whitespace violations across unrelated and protected files.
+- The full test suite still contains the baseline protected-subsystem failures.
+- The database hardening SQL requires explicit manual review and execution in the intended environment.
+
+## Git
+
+The requested commit message is:
+
+`fix: complete service prompt assistant phase one`
+
+The final commit SHA and remote push verification are reported with the completed task.
+
+## Next Phase
+
+Phase 2 can add operational workflows and deeper provider integration after the manual database review and deployment-environment confirmation.

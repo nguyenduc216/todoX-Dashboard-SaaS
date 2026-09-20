@@ -9,7 +9,7 @@ public sealed class ServicePromptAssistantOptions
 
     public bool EnabledByDefault { get; set; } = false;
     public string ProviderCode { get; set; } = "79ai";
-    public string ApiUrl { get; set; } = string.Empty;
+    public string ApiUrl { get; set; } = "https://79ai.net/api/chat/completions";
     public int TimeoutSeconds { get; set; } = 120;
     public int MaxTemplateBytes { get; set; } = 2_000_000;
     public int MaxDescriptionBytes { get; set; } = 1_000_000;
@@ -134,6 +134,17 @@ public sealed class ServicePromptProviderException : InvalidOperationException
 
     public string Code { get; }
     public string SanitizedResponse { get; }
+}
+
+public sealed class ServicePromptDomainException : InvalidOperationException
+{
+    public ServicePromptDomainException(string code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+
+    public string Code { get; }
 }
 
 public sealed class ServicePromptGenerationRequest

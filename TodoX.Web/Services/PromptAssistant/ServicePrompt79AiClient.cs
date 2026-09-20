@@ -89,7 +89,30 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         {
             using var document = JsonDocument.Parse(raw);
             var root = document.RootElement;
-            var content = root.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+            if (!root.TryGetProperty("choices", out var choices)
+                || choices.ValueKind != JsonValueKind.Array
+                || choices.GetArrayLength() == 0)
+            {
+                throw new ServicePromptProviderException(
+                    "missing_choices",
+                    "Prompt provider response is missing choices.",
+                    sanitized);
+            }
+
+            var choice = choices[0];
+            if (!choice.TryGetProperty("message", out var responseMessage)
+                || responseMessage.ValueKind != JsonValueKind.Object)
+            {
+                throw new ServicePromptProviderException(
+                    "missing_message",
+                    "Prompt provider response is missing a message.",
+                    sanitized);
+            }
+
+            var content = responseMessage.TryGetProperty("content", out var contentElement)
+                && contentElement.ValueKind == JsonValueKind.String
+                ? contentElement.GetString()
+                : null;
             if (string.IsNullOrWhiteSpace(content))
             {
                 throw new ServicePromptProviderException("missing_content", "Prompt provider response is missing content.", sanitized);

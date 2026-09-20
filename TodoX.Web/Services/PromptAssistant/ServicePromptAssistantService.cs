@@ -326,8 +326,20 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         if (request.MaxTokens is <= 0) throw new ArgumentException("Max tokens must be positive.");
     }
 
-    private static void ValidateTraining(ServicePromptTrainingSaveRequest request)
+    private void ValidateTraining(ServicePromptTrainingSaveRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.VersionName))
+        {
+            throw new ArgumentException("Version name is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.TemplateJson))
+        {
+            throw new ArgumentException("Template is required.");
+        }
+        if (System.Text.Encoding.UTF8.GetByteCount(request.TemplateJson) > _options.TemplateLimit)
+        {
+            throw new ArgumentException("Template exceeds the maximum allowed size.");
+        }
         using var template = JsonDocument.Parse(request.TemplateJson);
         if (template.RootElement.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
         {
@@ -341,6 +353,15 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         if (string.IsNullOrWhiteSpace(request.DescriptionContent))
         {
             throw new ArgumentException("Structure description is required.");
+        }
+        if (System.Text.Encoding.UTF8.GetByteCount(request.DescriptionContent) > _options.DescriptionLimit)
+        {
+            throw new ArgumentException("Structure description exceeds the maximum allowed size.");
+        }
+        var descriptionExtension = Path.GetExtension(request.DescriptionFileName);
+        if (!new[] { ".txt", ".md", ".json" }.Contains(descriptionExtension, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Description file must use .txt, .md, or .json.");
         }
     }
 

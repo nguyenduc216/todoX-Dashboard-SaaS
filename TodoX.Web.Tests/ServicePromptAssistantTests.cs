@@ -54,6 +54,58 @@ public sealed class ServicePromptAssistantTests
     }
 
     [Fact]
+    public void ValidatorRejectsRootMismatchAndAllowsEmptyRepresentativeArray()
+    {
+        var validator = new ServicePromptStructureValidator();
+
+        var rootMismatch = validator.Validate("""{"items":[]}""", "[]");
+        Assert.Contains(rootMismatch, x => x.Path == "$" && x.Code == "wrong_type");
+
+        var emptyArray = validator.Validate("""{"items":[]}""", """{"items":[{"new_field":"allowed only when no representative exists"}]}""");
+        Assert.Empty(emptyArray);
+    }
+
+    [Fact]
+    public void ValidatorRejectsUnknownFieldAndWrongNestedType()
+    {
+        var validator = new ServicePromptStructureValidator();
+        var errors = validator.Validate(
+            """{"config":{"enabled":true},"items":[{"id":1}]}""",
+            """{"config":{"enabled":"yes"},"items":[{"id":1,"extra":true}]}""");
+
+        Assert.Contains(errors, x => x.Path == "$.config.enabled" && x.Code == "wrong_type");
+        Assert.Contains(errors, x => x.Path == "$.items[0].extra" && x.Code == "unknown_field");
+    }
+
+    [Fact]
+    public void OptionsUseTheConfigured79AiEndpointAndLimits()
+    {
+        var options = new ServicePromptAssistantOptions();
+
+        Assert.Equal("https://79ai.net/api/chat/completions", options.ApiUrl);
+        Assert.Equal(2_000_000, options.TemplateLimit);
+        Assert.Equal(1_000_000, options.DescriptionLimit);
+        Assert.Equal(TimeSpan.FromSeconds(120), options.Timeout);
+    }
+
+    [Fact]
+    public async Task ProviderClientRejectsInvalidUrlAndMissingContent()
+    {
+        var client = new ServicePrompt79AiClient(
+            new HttpClient(new RecordingJsonHandler("""{"choices":[{"message":{}}]}""")),
+            new FakeCredentialResolver("secret-token"),
+            Options.Create(new ServicePromptAssistantOptions()));
+
+        var invalidUrl = await Assert.ThrowsAsync<ServicePromptProviderException>(() =>
+            client.CompleteAsync(new("not-a-url", "79ai", "model", "system", "user", null, null)));
+        Assert.Equal("invalid_api_url", invalidUrl.Code);
+
+        var missingContent = await Assert.ThrowsAsync<ServicePromptProviderException>(() =>
+            client.CompleteAsync(new("https://79ai.example/chat", "79ai", "model", "system", "user", null, null)));
+        Assert.Equal("missing_content", missingContent.Code);
+    }
+
+    [Fact]
     public async Task ProviderClientParsesUsageAndSanitizesProviderResponse()
     {
         var handler = new RecordingJsonHandler(

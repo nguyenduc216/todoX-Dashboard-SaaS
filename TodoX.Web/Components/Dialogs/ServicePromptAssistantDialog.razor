@@ -1,4 +1,5 @@
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.Extensions.Options
 @using Microsoft.JSInterop
 @using TodoX.Web.Models
 @using TodoX.Web.Services.PromptAssistant
@@ -6,6 +7,7 @@
 @inject AuthStateService AuthState
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@inject IOptions<ServicePromptAssistantOptions> PromptAssistantOptions
 
 <MudDialog>
     <TitleContent>
@@ -18,11 +20,11 @@
         }
         else
         {
-            <MudTabs Rounded="true" KeepPanelsAlive="true">
-                <MudTabPanel Text="Cấu hình">
+            <MudTabs KeepPanelsAlive="true">
+                <MudTabPanel Text="Configuration">
                     <MudGrid Class="pa-2">
                         <MudItem xs="12" sm="6">
-                            <MudSwitch T="bool" @bind-Value="_enabled" Color="Color.Warning" Label="Bật Prompt Assistant" />
+                            <MudSwitch T="bool" @bind-Value="_enabled" Color="Color.Warning" Label="Enabled" />
                         </MudItem>
                         <MudItem xs="12" sm="6">
                             <MudTextField T="string" @bind-Value="_provider" Label="Provider" Variant="Variant.Outlined" />
@@ -31,17 +33,17 @@
                             <MudTextField T="string" @bind-Value="_model" Label="Model" Variant="Variant.Outlined" />
                         </MudItem>
                         <MudItem xs="12" sm="6">
-                            <MudNumericField T="decimal?" @bind-Value="_temperature" Label="Temperature" Variant="Variant.Outlined" Min="0" Max="2" />
+                            <MudNumericField T="decimal?" @bind-Value="_temperature" Label="Temperature (0-2)" Variant="Variant.Outlined" Min="0" Max="2" />
                         </MudItem>
                         <MudItem xs="12" sm="6">
                             <MudNumericField T="int?" @bind-Value="_maxTokens" Label="Max tokens" Variant="Variant.Outlined" Min="1" />
                         </MudItem>
                         <MudItem xs="12" sm="6">
-                            <MudNumericField T="int" @bind-Value="_maxRepairAttempts" Label="Max repair attempts" Variant="Variant.Outlined" Min="0" Max="3" />
+                            <MudNumericField T="int" @bind-Value="_maxRepairAttempts" Label="Max repair attempts (0-3)" Variant="Variant.Outlined" Min="0" Max="3" />
                         </MudItem>
                         <MudItem xs="12">
                             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAssistantAsync">
-                                Lưu cấu hình
+                                Save configuration
                             </MudButton>
                         </MudItem>
                     </MudGrid>
@@ -51,7 +53,7 @@
                     <MudStack Spacing="2" Class="pa-2">
                         <MudText Typo="Typo.subtitle2">Published: @PublishedVersionLabel</MudText>
                         <MudText Typo="Typo.subtitle2">Draft: @DraftVersionLabel</MudText>
-                        <MudTextField T="string" @bind-Value="_versionName" Label="Tên version draft" Variant="Variant.Outlined" />
+                        <MudTextField T="string" @bind-Value="_versionName" Label="Draft version name" Variant="Variant.Outlined" />
                         <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
                             <label class="profile-avatar-upload">
                                 <MudIcon Icon="@Icons.Material.Filled.UploadFile" Size="Size.Small" />
@@ -67,29 +69,29 @@
                         @if (!string.IsNullOrWhiteSpace(_templateFileName))
                         {
                             <MudText Typo="Typo.caption">Template: @_templateFileName</MudText>
-                            <MudTextField T="string" Value="_templateJson" Label="Formatted template preview" Variant="Variant.Outlined" Lines="8" ReadOnly="true" />
+                            <MudTextField T="string" Value="_templateJson" Label="Template preview (read-only)" Variant="Variant.Outlined" Lines="8" ReadOnly="true" />
                         }
                         @if (!string.IsNullOrWhiteSpace(_descriptionFileName))
                         {
                             <MudText Typo="Typo.caption">Description: @_descriptionFileName</MudText>
-                            <MudTextField T="string" Value="_description" Label="Description preview" Variant="Variant.Outlined" Lines="6" ReadOnly="true" />
+                            <MudTextField T="string" Value="_description" Label="Description preview (read-only)" Variant="Variant.Outlined" Lines="6" ReadOnly="true" />
                         }
                         <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveDraftAsync">
-                            Lưu draft
+                            Save draft
                         </MudButton>
                         <MudTable Items="_versions" Dense="true" Hover="true">
                             <HeaderContent>
-                                <MudTh>Version</MudTh><MudTh>Tên</MudTh><MudTh>Status</MudTh><MudTh>Actions</MudTh>
+                                <MudTh>Version</MudTh><MudTh>Name</MudTh><MudTh>Status</MudTh><MudTh>Actions</MudTh>
                             </HeaderContent>
                             <RowTemplate>
                                 <MudTd DataLabel="Version">@context.VersionNo</MudTd>
-                                <MudTd DataLabel="Tên">@context.VersionName</MudTd>
-                                <MudTd DataLabel="Status">@context.Status</MudTd>
+                                <MudTd DataLabel="Name">@context.VersionName</MudTd>
+                                <MudTd DataLabel="Status">@context.Status.ToString().ToUpperInvariant()</MudTd>
                                 <MudTd DataLabel="Actions">
                                     @if (context.Status == ServicePromptTrainingStatus.Draft)
                                     {
-                                        <MudIconButton Icon="@Icons.Material.Filled.Publish" title="Publish" OnClick="@(() => PublishAsync(context.Id))" />
-                                        <MudIconButton Icon="@Icons.Material.Filled.Archive" title="Archive" OnClick="@(() => ArchiveAsync(context.Id))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Publish" title="Publish draft" OnClick="@(() => PublishAsync(context.Id))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Archive" title="Archive draft" OnClick="@(() => ArchiveAsync(context.Id))" />
                                     }
                                 </MudTd>
                             </RowTemplate>
@@ -99,10 +101,10 @@
 
                 <MudTabPanel Text="Test playground">
                     <MudStack Spacing="2" Class="pa-2">
-                        <MudTextField T="string" @bind-Value="_userInput" Label="Nhập yêu cầu bằng ngôn ngữ tự nhiên" Variant="Variant.Outlined" Lines="5" />
+                        <MudTextField T="string" @bind-Value="_userInput" Label="Natural-language request" Variant="Variant.Outlined" Lines="5" />
                         <MudStack Row="true" Class="flex-wrap gap-2">
                             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@_generating" OnClick="GenerateAsync">
-                                Generate Test
+                                Run test
                             </MudButton>
                             @if (_lastResult?.GeneratedJson is not null)
                             {
@@ -120,20 +122,20 @@
                                 @(_lastResult.ValidationPassed ? "Validation PASS" : $"Validation FAIL - {_lastResult.ErrorCode}")
                             </MudAlert>
                             <MudText Typo="Typo.caption">
-                                Provider: @_lastResult.ProviderCode - Model: @_lastResult.ModelCode -
-                                Repair: @_lastResult.RepairAttemptCount -
-                                Tokens: @_lastResult.PromptTokens / @_lastResult.CompletionTokens / @_lastResult.TotalTokens
+                                Provider: @_lastResult.ProviderCode | Model: @_lastResult.ModelCode |
+                                Repair attempts: @_lastResult.RepairAttemptCount |
+                                Prompt tokens: @_lastResult.PromptTokens |
+                                Completion tokens: @_lastResult.CompletionTokens |
+                                Total tokens: @_lastResult.TotalTokens |
+                                Latency: @_lastResult.Latency.TotalMilliseconds.ToString("0") ms
                             </MudText>
                             @if (_lastResult.GeneratedJson is not null)
                             {
                                 <MudTextField T="string" Value="_lastResult.GeneratedJson" Label="Generated JSON" Variant="Variant.Outlined" Lines="12" ReadOnly="true" />
                             }
-                            @if (_lastResult.ValidationErrors.Count > 0)
+                            @foreach (var error in _lastResult.ValidationErrors)
                             {
-                                @foreach (var error in _lastResult.ValidationErrors)
-                                {
-                                    <MudText Color="Color.Error" Typo="Typo.caption">@error.Path - @error.Code - @error.Message</MudText>
-                                }
+                                <MudText Color="Color.Error" Typo="Typo.caption">@error.Path - @error.Code - @error.Message</MudText>
                             }
                         }
                     </MudStack>
@@ -142,14 +144,14 @@
                 <MudTabPanel Text="History">
                     <MudTable Items="_generations" Dense="true" Hover="true">
                         <HeaderContent>
-                            <MudTh>Created</MudTh><MudTh>Status</MudTh><MudTh>Validation</MudTh><MudTh>Repair</MudTh><MudTh>Tokens</MudTh>
+                            <MudTh>Created</MudTh><MudTh>Status</MudTh><MudTh>Validation</MudTh><MudTh>Repair</MudTh><MudTh>Total tokens</MudTh>
                         </HeaderContent>
                         <RowTemplate>
                             <MudTd DataLabel="Created">@context.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>
                             <MudTd DataLabel="Status">@context.Status</MudTd>
                             <MudTd DataLabel="Validation">@(context.ValidationPassed ? "PASS" : "FAIL")</MudTd>
                             <MudTd DataLabel="Repair">@context.RepairAttemptCount</MudTd>
-                            <MudTd DataLabel="Tokens">@context.TotalTokens</MudTd>
+                            <MudTd DataLabel="Total tokens">@context.TotalTokens</MudTd>
                         </RowTemplate>
                     </MudTable>
                 </MudTabPanel>
@@ -157,7 +159,7 @@
         }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Đóng</MudButton>
+        <MudButton OnClick="Cancel">Close</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -187,19 +189,18 @@
         => _versions.FirstOrDefault(x => x.Status == ServicePromptTrainingStatus.Published);
     private ServicePromptTrainingVersionDto? DraftVersion
         => _versions.FirstOrDefault(x => x.Status == ServicePromptTrainingStatus.Draft);
-    private string PublishedVersionLabel => PublishedVersion is null ? "Chưa có" : $"v{PublishedVersion.VersionNo} - {PublishedVersion.VersionName}";
-    private string DraftVersionLabel => DraftVersion is null ? "Chưa có" : $"v{DraftVersion.VersionNo} - {DraftVersion.VersionName}";
+    private string PublishedVersionLabel => PublishedVersion is null ? "None" : $"v{PublishedVersion.VersionNo} - {PublishedVersion.VersionName}";
+    private string DraftVersionLabel => DraftVersion is null ? "None" : $"v{DraftVersion.VersionNo} - {DraftVersion.VersionName}";
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            var workspace = await AssistantService.LoadWorkspaceAsync(Service.Id);
-            ApplyWorkspace(workspace);
+            ApplyWorkspace(await AssistantService.LoadWorkspaceAsync(Service.Id));
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Không tải được Prompt Assistant: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not load Prompt Assistant: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -225,11 +226,11 @@
         {
             await AssistantService.SaveAssistantAsync(new(
                 Service.Id, _enabled, _provider, _model, _temperature, _maxTokens, _maxRepairAttempts));
-            Snackbar.Add("Đã lưu cấu hình Prompt Assistant.", Severity.Success);
+            Snackbar.Add("Prompt Assistant configuration saved.", Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Không lưu được cấu hình: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not save configuration: {ex.Message}", Severity.Error);
         }
     }
 
@@ -238,25 +239,26 @@
         var file = args.File;
         if (file is null || !string.Equals(Path.GetExtension(file.Name), ".json", StringComparison.OrdinalIgnoreCase))
         {
-            Snackbar.Add("Template phải là file .json.", Severity.Error);
+            Snackbar.Add("Template must be a .json file.", Severity.Error);
             return;
         }
 
         try
         {
-            await using var stream = file.OpenReadStream(2_000_000);
+            await using var stream = file.OpenReadStream(PromptAssistantOptions.Value.TemplateLimit);
             using var reader = new StreamReader(stream);
             using var document = System.Text.Json.JsonDocument.Parse(await reader.ReadToEndAsync());
             if (document.RootElement.ValueKind is not (System.Text.Json.JsonValueKind.Object or System.Text.Json.JsonValueKind.Array))
             {
-                throw new InvalidOperationException("Root JSON phải là object hoặc array.");
+                throw new InvalidOperationException("JSON root must be an object or array.");
             }
+
             _templateFileName = file.Name;
             _templateJson = System.Text.Json.JsonSerializer.Serialize(document.RootElement, ServicePromptJson.Options);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Template không hợp lệ: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Invalid template: {ex.Message}", Severity.Error);
         }
     }
 
@@ -266,20 +268,26 @@
         var extension = file is null ? string.Empty : Path.GetExtension(file.Name);
         if (file is null || !new[] { ".txt", ".md", ".json" }.Contains(extension, StringComparer.OrdinalIgnoreCase))
         {
-            Snackbar.Add("Description phải là .txt, .md hoặc .json.", Severity.Error);
+            Snackbar.Add("Description must be .txt, .md, or .json.", Severity.Error);
             return;
         }
 
         try
         {
-            await using var stream = file.OpenReadStream(1_000_000);
+            await using var stream = file.OpenReadStream(PromptAssistantOptions.Value.DescriptionLimit);
             using var reader = new StreamReader(stream);
+            var description = await reader.ReadToEndAsync();
+            if (string.IsNullOrWhiteSpace(description))
+            {
+                throw new InvalidOperationException("Description cannot be empty.");
+            }
+
             _descriptionFileName = file.Name;
-            _description = await reader.ReadToEndAsync();
+            _description = description;
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Không đọc được description: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not read description: {ex.Message}", Severity.Error);
         }
     }
 
@@ -290,12 +298,12 @@
             await AssistantService.SaveTrainingDraftAsync(
                 new(Service.Id, _versionName, _templateFileName, _templateJson, _descriptionFileName, _description),
                 AuthState.CurrentUser);
-            Snackbar.Add("Đã lưu training draft.", Severity.Success);
+            Snackbar.Add("Training draft saved.", Severity.Success);
             await ReloadAsync();
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Không lưu được draft: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not save draft: {ex.Message}", Severity.Error);
         }
     }
 
@@ -304,12 +312,12 @@
         try
         {
             await AssistantService.PublishAsync(Service.Id, id);
-            Snackbar.Add("Đã publish training version.", Severity.Success);
+            Snackbar.Add("Training version published.", Severity.Success);
             await ReloadAsync();
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Không publish được version: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not publish version: {ex.Message}", Severity.Error);
         }
     }
 
@@ -318,26 +326,25 @@
         try
         {
             await AssistantService.ArchiveAsync(Service.Id, id);
-            Snackbar.Add("Đã archive training version.", Severity.Success);
+            Snackbar.Add("Training version archived.", Severity.Success);
             await ReloadAsync();
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Không archive được version: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not archive version: {ex.Message}", Severity.Error);
         }
     }
 
     private async Task ReloadAsync()
     {
-        var workspace = await AssistantService.LoadWorkspaceAsync(Service.Id);
-        ApplyWorkspace(workspace);
+        ApplyWorkspace(await AssistantService.LoadWorkspaceAsync(Service.Id));
     }
 
     private async Task GenerateAsync()
     {
         if (string.IsNullOrWhiteSpace(_userInput))
         {
-            Snackbar.Add("Hãy nhập yêu cầu trước khi generate.", Severity.Warning);
+            Snackbar.Add("Enter a request before running the test.", Severity.Warning);
             return;
         }
 
@@ -349,7 +356,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Generate lỗi: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Test failed: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -362,7 +369,7 @@
         if (_lastResult?.GeneratedJson is not null)
         {
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", _lastResult.GeneratedJson);
-            Snackbar.Add("Đã copy JSON.", Severity.Success);
+            Snackbar.Add("JSON copied.", Severity.Success);
         }
     }
 

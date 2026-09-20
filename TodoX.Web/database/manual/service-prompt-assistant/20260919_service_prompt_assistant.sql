@@ -37,12 +37,30 @@ CREATE TABLE IF NOT EXISTS settings.service_prompt_training_versions
     created_at timestamptz NOT NULL DEFAULT now(),
     published_at timestamptz,
     CONSTRAINT uq_service_prompt_training_versions_number UNIQUE (service_prompt_assistant_id, version_no),
+    CONSTRAINT uq_service_prompt_training_versions_assistant_id UNIQUE (service_prompt_assistant_id, id),
     CONSTRAINT ck_service_prompt_training_versions_status CHECK (status IN ('DRAFT', 'PUBLISHED', 'ARCHIVED')),
     CONSTRAINT ck_service_prompt_training_versions_template_root CHECK (jsonb_typeof(template_json) IN ('object', 'array'))
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_service_prompt_assistants_id_service
+    ON settings.service_prompt_assistants(id, service_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_service_prompt_training_versions_assistant_id
+    ON settings.service_prompt_training_versions(service_prompt_assistant_id, id);
+
 DO $$
 BEGIN
+    IF EXISTS
+    (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conname = 'fk_service_prompt_assistants_active_version'
+           AND conrelid = 'settings.service_prompt_assistants'::regclass
+    ) THEN
+        ALTER TABLE settings.service_prompt_assistants
+            DROP CONSTRAINT fk_service_prompt_assistants_active_version;
+    END IF;
+
     IF NOT EXISTS
     (
         SELECT 1
@@ -52,8 +70,8 @@ BEGIN
     ) THEN
         ALTER TABLE settings.service_prompt_assistants
             ADD CONSTRAINT fk_service_prompt_assistants_active_version
-            FOREIGN KEY (active_training_version_id)
-            REFERENCES settings.service_prompt_training_versions(id)
+            FOREIGN KEY (id, active_training_version_id)
+            REFERENCES settings.service_prompt_training_versions(service_prompt_assistant_id, id)
             DEFERRABLE INITIALLY DEFERRED;
     END IF;
 END $$;
@@ -93,6 +111,14 @@ CREATE TABLE IF NOT EXISTS settings.service_prompt_generations
     CONSTRAINT ck_service_prompt_generations_validation_status CHECK (validation_status IN ('PASS', 'FAIL')),
     CONSTRAINT ck_service_prompt_generations_repair_attempts CHECK (repair_attempt_count BETWEEN 0 AND 3)
 );
+
+ALTER TABLE settings.service_prompt_generations
+    DROP CONSTRAINT IF EXISTS fk_service_prompt_generations_service_assistant;
+
+ALTER TABLE settings.service_prompt_generations
+    ADD CONSTRAINT fk_service_prompt_generations_service_assistant
+    FOREIGN KEY (service_prompt_assistant_id, service_id)
+    REFERENCES settings.service_prompt_assistants(id, service_id);
 
 CREATE INDEX IF NOT EXISTS ix_service_prompt_generations_service_created
     ON settings.service_prompt_generations(service_id, created_at DESC);

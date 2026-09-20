@@ -215,27 +215,81 @@ public sealed class ServicePromptAssistantRepository
     {
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
-        var assistantId = await conn.ExecuteScalarAsync<Guid>(
+        var assistantId = await conn.QuerySingleOrDefaultAsync<Guid?>(
             new CommandDefinition(
-                "SELECT id FROM settings.service_prompt_assistants WHERE service_id=@serviceId;",
+                "SELECT id FROM settings.service_prompt_assistants WHERE service_id=@serviceId LIMIT 1;",
                 new { serviceId },
                 tx,
                 cancellationToken: ct));
+        if (assistantId is null)
+        {
+            throw new ServicePromptDomainException("assistant_not_found", "Prompt Assistant was not found for this service.");
+        }
+
+        var version = await conn.QuerySingleOrDefaultAsync<ServicePromptPublishCandidate>(
+            new CommandDefinition(
+                """
+                SELECT id AS Id, service_prompt_assistant_id AS AssistantId, status AS Status
+                  FROM settings.service_prompt_training_versions
+                 WHERE id=@versionId
+                 LIMIT 1;
+                """,
+                new { versionId },
+                tx,
+                cancellationToken: ct));
+        if (version is null)
+        {
+            throw new ServicePromptDomainException("version_not_found", "Training version was not found.");
+        }
+
+        if (version.AssistantId != assistantId.Value)
+        {
+            throw new ServicePromptDomainException("version_service_mismatch", "Training version does not belong to this service.");
+        }
+
+        if (!string.Equals(version.Status, "DRAFT", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ServicePromptDomainException("version_not_draft", "Only a draft training version can be published.");
+        }
+
         await conn.ExecuteAsync(new CommandDefinition(
             """
             UPDATE settings.service_prompt_training_versions
                SET status='ARCHIVED'
              WHERE service_prompt_assistant_id=@assistantId AND status='PUBLISHED' AND id<>@versionId;
-            UPDATE settings.service_prompt_training_versions
-               SET status='PUBLISHED', published_at=now()
-             WHERE id=@versionId AND service_prompt_assistant_id=@assistantId AND status='DRAFT';
-            UPDATE settings.service_prompt_assistants
-               SET active_training_version_id=@versionId, updated_at=now()
-             WHERE id=@assistantId;
             """,
             new { assistantId, versionId },
             tx,
             cancellationToken: ct));
+
+        var publishedRows = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE settings.service_prompt_training_versions
+               SET status='PUBLISHED', published_at=now()
+             WHERE id=@versionId AND service_prompt_assistant_id=@assistantId AND status='DRAFT';
+            """,
+            new { assistantId, versionId },
+            tx,
+            cancellationToken: ct));
+        if (publishedRows != 1)
+        {
+            throw new ServicePromptDomainException("publish_failed", "Training version could not be published.");
+        }
+
+        var assistantRows = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE settings.service_prompt_assistants
+               SET active_training_version_id=@versionId, updated_at=now()
+             WHERE id=@assistantId AND service_id=@serviceId;
+            """,
+            new { assistantId, serviceId, versionId },
+            tx,
+            cancellationToken: ct));
+        if (assistantRows != 1)
+        {
+            throw new ServicePromptDomainException("assistant_update_failed", "Prompt Assistant active version could not be updated.");
+        }
+
         tx.Commit();
     }
 
@@ -350,6 +404,13 @@ public sealed class ServicePromptAssistantRepository
         public string? ErrorMessage { get; set; }
         public DateTime CreatedAt { get; set; }
         public decimal? LatencySeconds { get; set; }
+    }
+
+    private sealed class ServicePromptPublishCandidate
+    {
+        public Guid Id { get; set; }
+        public Guid AssistantId { get; set; }
+        public string Status { get; set; } = string.Empty;
     }
 }
 
