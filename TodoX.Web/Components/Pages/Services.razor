@@ -82,6 +82,7 @@
                                 <div class="todox-service-actions">
                                     <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" title="Giá bán" OnClick="@(() => OpenSellPrices(svc))" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Tune" Size="Size.Small" title="Point rates" OnClick="@(() => OpenPointRates(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" title="Prompt Assistant" OnClick="@(() => OpenPromptAssistant(svc))" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(svc))" />
                                 </div>
                             </MudStack>
@@ -191,5 +192,31 @@
         var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true };
         await DialogService.ShowAsync<ServicePointRatesDialog>($"Point rates · {svc.ServiceName}", parameters, options);
         await Reload();
+    }
+
+    private async Task OpenPromptAssistant(ServiceDto svc)
+    {
+        if (!CanManageServices)
+        {
+            Snackbar.Add("Bạn không có quyền quản lý Prompt Assistant.", Severity.Error);
+            return;
+        }
+
+        var parameters = new DialogParameters<ServicePromptAssistantDialog>
+        {
+            { x => x.Service, svc }
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraLarge,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false,
+            CloseOnEscapeKey = true
+        };
+        await DialogService.ShowAsync<ServicePromptAssistantDialog>(
+            $"Prompt Assistant · {svc.ServiceName}",
+            parameters,
+            options);
     }
 }
