@@ -8,9 +8,9 @@ public sealed class ServicePromptAssistantOptions
     public const string SectionName = "PromptAssistant";
 
     public bool EnabledByDefault { get; set; } = false;
-    public string ProviderCode { get; set; } = "79ai";
-    public string ApiUrl { get; set; } = "https://79ai.net/api/chat/completions";
-    public int TimeoutSeconds { get; set; } = 120;
+    public string ProviderCode { get; set; } = "gommo_agent";
+    public string ApiUrl { get; set; } = "https://api.gommo.net/api/v2/chat";
+    public int TimeoutSeconds { get; set; } = 300;
     public int MaxTemplateBytes { get; set; } = 2_000_000;
     public int MaxDescriptionBytes { get; set; } = 1_000_000;
 
@@ -39,8 +39,10 @@ public sealed class ServicePromptAssistantDto
     public Guid Id { get; set; }
     public Guid ServiceId { get; set; }
     public bool Enabled { get; set; }
-    public string ProviderCode { get; set; } = "79ai";
+    public string ProviderCode { get; set; } = "gommo_agent";
     public string ModelCode { get; set; } = string.Empty;
+    public int? GommoAgentId { get; set; }
+    public string GommoAgentIdBase { get; set; } = string.Empty;
     public decimal? Temperature { get; set; }
     public int? MaxTokens { get; set; }
     public int MaxRepairAttempts { get; set; } = 1;
@@ -109,11 +111,8 @@ public sealed record ServicePromptValidationError(string Path, string Code, stri
 public sealed record ServicePromptProviderRequest(
     string ApiUrl,
     string ProviderCode,
-    string ModelCode,
-    string SystemPrompt,
-    string UserInput,
-    decimal? Temperature,
-    int? MaxTokens);
+    string AgentIdBase,
+    string UserInput);
 
 public sealed record ServicePromptProviderResponse(
     string Content,
@@ -160,6 +159,8 @@ public sealed record ServicePromptAssistantSaveRequest(
     bool Enabled,
     string ProviderCode,
     string ModelCode,
+    int? GommoAgentId,
+    string GommoAgentIdBase,
     decimal? Temperature,
     int? MaxTokens,
     int MaxRepairAttempts);

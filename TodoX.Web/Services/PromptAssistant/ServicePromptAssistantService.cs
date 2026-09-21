@@ -9,6 +9,7 @@ public interface IServicePromptAssistantService
 {
     Task<ServicePromptAssistantWorkspace> LoadWorkspaceAsync(Guid serviceId, CancellationToken ct = default);
     Task<ServicePromptAssistantDto> SaveAssistantAsync(ServicePromptAssistantSaveRequest request, CancellationToken ct = default);
+    Task TestConnectionAsync(Guid serviceId, CancellationToken ct = default);
     Task<Guid> SaveTrainingDraftAsync(ServicePromptTrainingSaveRequest request, CurrentUserSession? user, CancellationToken ct = default);
     Task PublishAsync(Guid serviceId, Guid versionId, CancellationToken ct = default);
     Task ArchiveAsync(Guid serviceId, Guid versionId, CancellationToken ct = default);
@@ -65,6 +66,15 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         return _repository.SaveAssistantAsync(request, ct);
     }
 
+    public async Task TestConnectionAsync(Guid serviceId, CancellationToken ct = default)
+    {
+        var assistant = await _repository.GetOrCreateAssistantAsync(serviceId, _options, ct);
+        if (string.IsNullOrWhiteSpace(assistant.GommoAgentIdBase))
+            throw new ServicePromptDomainException("missing_agent_id_base", "Gommo Agent ID Base is not configured.");
+        await _provider.CompleteAsync(new ServicePromptProviderRequest(
+            _options.ApiUrl, assistant.ProviderCode, assistant.GommoAgentIdBase, "connection test"), ct);
+    }
+
     public async Task<Guid> SaveTrainingDraftAsync(
         ServicePromptTrainingSaveRequest request,
         CurrentUserSession? user,
@@ -96,7 +106,6 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         var generationId = Guid.NewGuid();
         var assistant = await _repository.GetOrCreateAssistantAsync(serviceId, _options, ct);
         var version = await _repository.GetPublishedAsync(assistant.Id, ct);
-        var service = await _repository.GetServiceContextAsync(serviceId, ct);
         if (!assistant.Enabled)
         {
             return await PersistAndReturnAsync(
@@ -122,12 +131,6 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         }
 
         var templateJson = version.TemplateJson;
-        var description = version.DescriptionContent;
-        var serviceContext = service is null
-            ? $"service_id={serviceId}; training_version={version.VersionNo}"
-            : $"service_id={service.Id}; service_code={service.ServiceCode}; service_name={service.ServiceName}; " +
-              $"service_type={service.ServiceType}; service_description={service.Description}; training_version={version.VersionNo}";
-        var systemPrompt = _compiler.Compile(serviceContext, userInput, templateJson, description);
         var errors = new List<ServicePromptValidationError>();
         var repairAttempts = 0;
         var promptTokens = (int?)null;
@@ -143,18 +146,12 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         {
             for (var attempt = 0; ; attempt++)
             {
-                var requestPrompt = attempt == 0
-                    ? systemPrompt
-                    : _compiler.CompileRepair(serviceContext, userInput, templateJson, description, generatedJson ?? string.Empty, errors);
                 var response = await _provider.CompleteAsync(
                     new ServicePromptProviderRequest(
                         _options.ApiUrl,
                         assistant.ProviderCode,
-                        assistant.ModelCode,
-                        requestPrompt,
-                        userInput,
-                        assistant.Temperature,
-                        assistant.MaxTokens),
+                        assistant.GommoAgentIdBase,
+                        userInput),
                     ct);
                 rawResponses.Add(response.SanitizedRawResponse);
                 promptTokens = Sum(promptTokens, response.PromptTokens);
@@ -321,7 +318,8 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
     {
         if (request.ServiceId == Guid.Empty) throw new ArgumentException("Service is required.");
         if (string.IsNullOrWhiteSpace(request.ProviderCode)) throw new ArgumentException("Provider is required.");
-        if (string.IsNullOrWhiteSpace(request.ModelCode)) throw new ArgumentException("Model is required.");
+        if (request.GommoAgentId is <= 0) throw new ArgumentException("Gommo Agent ID must be positive.");
+        if (string.IsNullOrWhiteSpace(request.GommoAgentIdBase)) throw new ArgumentException("Gommo Agent ID Base is required.");
         if (request.Temperature is < 0 or > 2) throw new ArgumentException("Temperature must be between 0 and 2.");
         if (request.MaxTokens is <= 0) throw new ArgumentException("Max tokens must be positive.");
     }

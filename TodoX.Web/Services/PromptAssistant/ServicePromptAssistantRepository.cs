@@ -37,6 +37,7 @@ public sealed class ServicePromptAssistantRepository
                 """
                 SELECT id AS Id, service_id AS ServiceId, enabled AS Enabled,
                        provider_code AS ProviderCode, model_code AS ModelCode,
+                       gommo_agent_id AS GommoAgentId, gommo_agent_id_base AS GommoAgentIdBase,
                        temperature AS Temperature, max_tokens AS MaxTokens,
                        max_repair_attempts AS MaxRepairAttempts,
                        active_training_version_id AS ActiveTrainingVersionId
@@ -55,11 +56,12 @@ public sealed class ServicePromptAssistantRepository
             new CommandDefinition(
                 """
                 INSERT INTO settings.service_prompt_assistants
-                    (id, service_id, enabled, provider_code, model_code, max_repair_attempts)
+                    (id, service_id, enabled, provider_code, model_code, gommo_agent_id, gommo_agent_id_base, max_repair_attempts)
                 VALUES
-                    (gen_random_uuid(), @serviceId, @enabled, @provider, '', 1)
+                    (gen_random_uuid(), @serviceId, @enabled, @provider, '', NULL, '', 1)
                 RETURNING id AS Id, service_id AS ServiceId, enabled AS Enabled,
                           provider_code AS ProviderCode, model_code AS ModelCode,
+                          gommo_agent_id AS GommoAgentId, gommo_agent_id_base AS GommoAgentIdBase,
                           temperature AS Temperature, max_tokens AS MaxTokens,
                           max_repair_attempts AS MaxRepairAttempts,
                           active_training_version_id AS ActiveTrainingVersionId;
@@ -68,7 +70,7 @@ public sealed class ServicePromptAssistantRepository
                 {
                     serviceId,
                     enabled = options.EnabledByDefault,
-                    provider = string.IsNullOrWhiteSpace(options.ProviderCode) ? "79ai" : options.ProviderCode.Trim()
+                    provider = string.IsNullOrWhiteSpace(options.ProviderCode) ? "gommo_agent" : options.ProviderCode.Trim()
                 },
                 cancellationToken: ct));
     }
@@ -82,19 +84,22 @@ public sealed class ServicePromptAssistantRepository
             new CommandDefinition(
                 """
                 INSERT INTO settings.service_prompt_assistants
-                    (id, service_id, enabled, provider_code, model_code, temperature, max_tokens, max_repair_attempts)
+                    (id, service_id, enabled, provider_code, model_code, gommo_agent_id, gommo_agent_id_base, temperature, max_tokens, max_repair_attempts)
                 VALUES
-                    (gen_random_uuid(), @ServiceId, @Enabled, @ProviderCode, @ModelCode, @Temperature, @MaxTokens, @MaxRepairAttempts)
+                    (gen_random_uuid(), @ServiceId, @Enabled, @ProviderCode, @ModelCode, @GommoAgentId, @GommoAgentIdBase, @Temperature, @MaxTokens, @MaxRepairAttempts)
                 ON CONFLICT (service_id)
                 DO UPDATE SET enabled=EXCLUDED.enabled,
                               provider_code=EXCLUDED.provider_code,
                               model_code=EXCLUDED.model_code,
+                              gommo_agent_id=EXCLUDED.gommo_agent_id,
+                              gommo_agent_id_base=EXCLUDED.gommo_agent_id_base,
                               temperature=EXCLUDED.temperature,
                               max_tokens=EXCLUDED.max_tokens,
                               max_repair_attempts=EXCLUDED.max_repair_attempts,
                               updated_at=now()
                 RETURNING id AS Id, service_id AS ServiceId, enabled AS Enabled,
                           provider_code AS ProviderCode, model_code AS ModelCode,
+                          gommo_agent_id AS GommoAgentId, gommo_agent_id_base AS GommoAgentIdBase,
                           temperature AS Temperature, max_tokens AS MaxTokens,
                           max_repair_attempts AS MaxRepairAttempts,
                           active_training_version_id AS ActiveTrainingVersionId;
@@ -105,6 +110,8 @@ public sealed class ServicePromptAssistantRepository
                     request.Enabled,
                     ProviderCode = request.ProviderCode.Trim(),
                     ModelCode = request.ModelCode.Trim(),
+                    request.GommoAgentId,
+                    GommoAgentIdBase = request.GommoAgentIdBase.Trim(),
                     request.Temperature,
                     request.MaxTokens,
                     MaxRepairAttempts = Math.Clamp(request.MaxRepairAttempts, 0, 3)

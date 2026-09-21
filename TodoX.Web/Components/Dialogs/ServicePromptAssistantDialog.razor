@@ -27,10 +27,16 @@
                             <MudSwitch T="bool" @bind-Value="_enabled" Color="Color.Warning" Label="Enabled" />
                         </MudItem>
                         <MudItem xs="12" sm="6">
-                            <MudTextField T="string" @bind-Value="_provider" Label="Provider" Variant="Variant.Outlined" />
+                            <MudTextField T="string" Value="_provider" Label="Provider" Variant="Variant.Outlined" ReadOnly="true" />
                         </MudItem>
                         <MudItem xs="12" sm="6">
                             <MudTextField T="string" @bind-Value="_model" Label="Model" Variant="Variant.Outlined" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudNumericField T="int?" @bind-Value="_gommoAgentId" Label="Agent ID" Variant="Variant.Outlined" Min="1" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField T="string" @bind-Value="_gommoAgentIdBase" Label="Agent ID Base" Variant="Variant.Outlined" />
                         </MudItem>
                         <MudItem xs="12" sm="6">
                             <MudNumericField T="decimal?" @bind-Value="_temperature" Label="Temperature (0-2)" Variant="Variant.Outlined" Min="0" Max="2" />
@@ -42,6 +48,10 @@
                             <MudNumericField T="int" @bind-Value="_maxRepairAttempts" Label="Max repair attempts (0-3)" Variant="Variant.Outlined" Min="0" Max="3" />
                         </MudItem>
                         <MudItem xs="12">
+                            <MudText Typo="Typo.caption">Connection: @_connectionStatus</MudText>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.CloudDone" OnClick="TestConnectionAsync" Disabled="_busy">
+                                Test Connection
+                            </MudButton>
                             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAssistantAsync">
                                 Save configuration
                             </MudButton>
@@ -109,6 +119,7 @@
                             @if (_lastResult?.GeneratedJson is not null)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" title="Copy JSON" OnClick="CopyJsonAsync" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Download" title="Download JSON" OnClick="DownloadJsonAsync" />
                                 <MudIconButton Icon="@Icons.Material.Filled.Replay" title="Re-run" OnClick="GenerateAsync" />
                             }
                         </MudStack>
@@ -169,9 +180,13 @@
 
     private bool _loading = true;
     private bool _generating;
+    private bool _busy;
     private bool _enabled;
-    private string _provider = "79ai";
+    private string _provider = "gommo_agent";
     private string _model = string.Empty;
+    private int? _gommoAgentId;
+    private string _gommoAgentIdBase = string.Empty;
+    private string _connectionStatus = "Not configured";
     private decimal? _temperature;
     private int? _maxTokens;
     private int _maxRepairAttempts = 1;
@@ -213,6 +228,9 @@
         _enabled = workspace.Assistant.Enabled;
         _provider = workspace.Assistant.ProviderCode;
         _model = workspace.Assistant.ModelCode;
+        _gommoAgentId = workspace.Assistant.GommoAgentId;
+        _gommoAgentIdBase = workspace.Assistant.GommoAgentIdBase;
+        _connectionStatus = _gommoAgentId is > 0 && !string.IsNullOrWhiteSpace(_gommoAgentIdBase) ? "Configured" : "Not configured";
         _temperature = workspace.Assistant.Temperature;
         _maxTokens = workspace.Assistant.MaxTokens;
         _maxRepairAttempts = workspace.Assistant.MaxRepairAttempts;
@@ -225,13 +243,33 @@
         try
         {
             await AssistantService.SaveAssistantAsync(new(
-                Service.Id, _enabled, _provider, _model, _temperature, _maxTokens, _maxRepairAttempts));
+                Service.Id, _enabled, "gommo_agent", _model, _gommoAgentId, _gommoAgentIdBase, _temperature, _maxTokens, _maxRepairAttempts));
+            _connectionStatus = "Configured";
             Snackbar.Add("Prompt Assistant configuration saved.", Severity.Success);
         }
         catch (Exception ex)
         {
             Snackbar.Add($"Could not save configuration: {ex.Message}", Severity.Error);
         }
+    }
+
+    private async Task TestConnectionAsync()
+    {
+        _busy = true;
+        try
+        {
+            await AssistantService.SaveAssistantAsync(new(
+                Service.Id, _enabled, "gommo_agent", _model, _gommoAgentId, _gommoAgentIdBase, _temperature, _maxTokens, _maxRepairAttempts));
+            await AssistantService.TestConnectionAsync(Service.Id);
+            _connectionStatus = "Test Passed";
+            Snackbar.Add("Gommo Agent connection passed.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _connectionStatus = "Test Failed";
+            Snackbar.Add($"Gommo Agent connection failed: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
     }
 
     private async Task UploadTemplateAsync(InputFileChangeEventArgs args)
@@ -371,6 +409,12 @@
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", _lastResult.GeneratedJson);
             Snackbar.Add("JSON copied.", Severity.Success);
         }
+    }
+
+    private async Task DownloadJsonAsync()
+    {
+        if (_lastResult?.GeneratedJson is null) return;
+        await JS.InvokeVoidAsync("todoxDownload.saveTextFile", $"prompt-{_lastResult.GenerationId}.json", _lastResult.GeneratedJson);
     }
 
     private void Cancel() => MudDialog.Cancel();
