@@ -17,7 +17,8 @@ public sealed class GommoPromptAssistantTests
             "event: usage\ndata: {\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\n" +
             $"data: {Chunk("\"scene\":\"demo\"}")}\n\n" +
             "data: [DONE]\n\n");
-        var client = new ServicePrompt79AiClient(new HttpClient(handler), new StaticCredentialResolver("secret-token"),
+        var credentials = new StaticCredentialResolver("secret-token");
+        var client = new ServicePrompt79AiClient(new HttpClient(handler), credentials,
             Options.Create(new ServicePromptAssistantOptions { TimeoutSeconds = 30 }));
 
         var result = await client.CompleteAsync(new ServicePromptProviderRequest(
@@ -26,6 +27,7 @@ public sealed class GommoPromptAssistantTests
         Assert.Equal("{\"scene\":\"demo\"}", result.Content);
         Assert.Equal(5, result.TotalTokens);
         Assert.DoesNotContain("secret-token", result.SanitizedRawResponse);
+        Assert.Equal(("79ai", "access_token"), credentials.LastResolve);
         Assert.Equal("base-123", handler.RequestBody!.RootElement.GetProperty("agent_id").GetString());
         Assert.NotEqual(handler.RequestBody.RootElement.GetProperty("user_message_id").GetString(), handler.RequestBody.RootElement.GetProperty("assistant_message_id").GetString());
     }
@@ -34,8 +36,13 @@ public sealed class GommoPromptAssistantTests
 
     private sealed class StaticCredentialResolver(string secret) : IProviderCredentialResolver
     {
+        public (string ProviderCode, string CredentialRole)? LastResolve { get; private set; }
+
         public Task<ResolvedProviderCredential> ResolveAsync(string providerCode, string credentialRole, CancellationToken ct = default)
-            => Task.FromResult(new ResolvedProviderCredential { ProviderAccountId = Guid.NewGuid(), ProviderCode = providerCode, CredentialRole = credentialRole, Secret = secret });
+        {
+            LastResolve = (providerCode, credentialRole);
+            return Task.FromResult(new ResolvedProviderCredential { ProviderAccountId = Guid.NewGuid(), ProviderCode = providerCode, CredentialRole = credentialRole, Secret = secret });
+        }
     }
 
     private sealed class StubHandler(string body) : HttpMessageHandler

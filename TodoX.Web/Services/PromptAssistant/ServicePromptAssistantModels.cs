@@ -9,6 +9,7 @@ public sealed class ServicePromptAssistantOptions
 
     public bool EnabledByDefault { get; set; } = false;
     public string ProviderCode { get; set; } = "gommo_agent";
+    public string CredentialProviderCode { get; set; } = "79ai";
     public string ApiUrl { get; set; } = "https://api.gommo.net/api/v2/chat";
     public int TimeoutSeconds { get; set; } = 300;
     public int MaxTemplateBytes { get; set; } = 2_000_000;
