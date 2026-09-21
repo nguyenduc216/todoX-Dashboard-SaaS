@@ -516,6 +516,7 @@ app.MapDanceSellPhase1Endpoints();
 app.MapDanceSellPhase2Endpoints();
 app.MapAiStudioCatalogEndpoints();
 app.MapRVideoEndpoints();
+app.MapPromptAssistantEndpoints();
 app.MapSceneAudioEndpoints();
 
 app.MapGet("/system/version", (IConfiguration configuration, IRuntimeBuildInfoProvider buildInfoProvider) =>

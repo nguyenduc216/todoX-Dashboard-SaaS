@@ -202,6 +202,19 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void AiPromptGenerationDoesNotEnterRVideoDraftOrRenderFlow()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var generateMethod = Between(source, "private async Task GenerateAiPromptAsync", "private Task OnAspectRatioChangedAsync");
+
+        Assert.Contains("PromptAssistant.GeneratePromptAsync", generateMethod);
+        Assert.Contains("PromptAssistantGeneratedDialog", generateMethod);
+        Assert.DoesNotContain("RVideoJobs.CreateDraftAsync", generateMethod);
+        Assert.DoesNotContain("CreateQueued", generateMethod);
+        Assert.DoesNotContain("Enqueue", generateMethod);
+    }
+
+    [Fact]
     public void VideoCards_ExposeRetryRerenderAndFailedVideoLabelForStuckJobs()
     {
         var razor = File.ReadAllText(RazorPath);
