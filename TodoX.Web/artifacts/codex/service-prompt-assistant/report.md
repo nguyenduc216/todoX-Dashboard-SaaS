@@ -31,7 +31,7 @@ Commit: `7708ea18e2bbfc05b60d4bb37fdd560b2815fe8b`
 
 - Build: passed, 0 errors.
 - `ServicePromptAssistantTests`: passed, 10/10.
-- Filter `GommoPromptAssistantTests`: build passed, but test runner reported 0 matching tests because that class is not included in the test project. Live Gommo acceptance was not run without a configured credential.
+- `GommoPromptAssistantTests`: passed, 1/1 after moving the test into `TodoX.Web.Tests`. Live Gommo acceptance was not run without a configured credential.
 - `git diff --check`: passed.
 - Publish: passed to `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`.
 
