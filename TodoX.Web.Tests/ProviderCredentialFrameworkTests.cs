@@ -109,6 +109,21 @@ public sealed class ProviderCredentialFrameworkTests
 
         Assert.Equal("redacted-unit-value", resolved.Secret);
         Assert.Equal("79ai", resolved.ProviderCode);
+        Assert.Equal("79ai", repo.LastProviderCode);
+    }
+
+    [Fact]
+    public async Task Resolver_MissingCredentialThrowsWithoutLeakingSecret()
+    {
+        var resolver = new ProviderCredentialResolver(
+            new FakeProviderCredentialRepository(),
+            new ProviderCredentialProtector(new FixedKeyStore()));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => resolver.ResolveAsync("gommo_agent", "access_token"));
+
+        Assert.Equal("Provider credential is not configured.", error.Message);
+        Assert.DoesNotContain("redacted", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -247,7 +262,10 @@ public sealed class ProviderCredentialFrameworkTests
         public string? LastProviderCode { get; set; }
 
         public Task<ProviderCredentialAccount?> GetPreferredAccountAsync(string providerCode, string environment = "production", CancellationToken ct = default)
-            => Task.FromResult(Account);
+        {
+            LastProviderCode = providerCode;
+            return Task.FromResult(Account);
+        }
 
         public Task<ProviderCredentialMapping?> GetActiveMappingAsync(Guid providerAccountId, string credentialRole, CancellationToken ct = default)
             => Task.FromResult(Mapping);

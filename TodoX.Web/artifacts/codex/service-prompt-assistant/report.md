@@ -1,44 +1,49 @@
-# Prompt Assistant Phase 1 Report
+# Gommo Agent Credential Resolver Report
 
 Date: 2026-09-21
 Branch: `feature/admin-job-monitor`
-Commit: `7708ea18e2bbfc05b60d4bb37fdd560b2815fe8b`
-
-## Scope Completed
-
-- Dashboard Prompt Assistant configuration for Gommo Agent.
-- Runtime endpoint: `https://api.gommo.net/api/v2/chat`.
-- `Gommo-Token` resolved through the existing credential abstraction; no secret is stored or returned to the UI.
-- Runtime payload uses `GommoAgentIdBase`, fresh user/assistant UUIDs, and only the natural-language user request.
-- SSE reads `data:` events, aggregates only `choices[0].delta.content`, ignores thinking/usage as output, supports `[DONE]`, timeout, bounded diagnostics, auth/error mapping, and sanitization.
-- Final response JSON parsing and root/scenes validation, with optional consistency checks for `scene_count`, `duration`, and `total_shot_count`.
-- Playground shows final JSON, output tokens, credit, timing, and supports copy/download.
-- History reads provider and runtime metrics.
-- One generation performs one provider call; legacy training/compiler/validator backend remains available but training UI is hidden for Phase 1.
+Baseline: `fcf9e637216b5e6174b2ba4d1cbfbb2153193ac5`
 
 ## Changed Files
 
-- `TodoX.Web/Components/Dialogs/ServicePromptAssistantDialog.razor`
-- `TodoX.Web/Services/PromptAssistant/ServicePrompt79AiClient.cs`
-- `TodoX.Web/Services/PromptAssistant/ServicePromptAssistantModels.cs`
-- `TodoX.Web/Services/PromptAssistant/ServicePromptAssistantRepository.cs`
-- `TodoX.Web/Services/PromptAssistant/ServicePromptAssistantService.cs`
-- `TodoX.Web/Services/PromptAssistant/ServicePromptOutputParser.cs`
-- `TodoX.Web.Tests/ServicePromptAssistantTests.cs`
-- `TodoX.Web/database/manual/service-prompt-assistant/20260921_phase1_generation_metrics.sql`
+- `TodoX.Web/Services/AiProviders/ProviderCredentialResolver.cs`
+- `TodoX.Web.Tests/ProviderCredentialFrameworkTests.cs`
 
-## Validation Results
+No database schema, migration, video pipeline, render routing, queue, or provider selection code was changed.
 
-- Build: passed, 0 errors.
-- `ServicePromptAssistantTests`: passed, 10/10.
-- `GommoPromptAssistantTests`: passed, 1/1 after moving the test into `TodoX.Web.Tests`. Live Gommo acceptance was not run without a configured credential.
-- `git diff --check`: passed.
-- Publish: passed to `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`.
+## Root Cause
 
-## Database Prerequisite
+The reported `billing.provider_accounts` lookup does not exist in the current production repository implementation. Inspection confirmed that `ProviderCredentialRepository` already uses the existing TodoX AI credential framework:
 
-`20260921_phase1_generation_metrics.sql` is a manual, unexecuted SQL prerequisite. It makes `training_version_id` nullable for Phase 1 runtime generations and adds runtime metric columns. No migration was created or executed, and no database was modified.
+- `public.todox_ai_provider_account`
+- `public.todox_ai_provider_account_credential`
+- `system.ai_provider_credentials_secure`
+
+There is no query to `billing.provider_accounts`, no EF `ToTable` mapping for that schema in this credential path, and no new credential table was introduced by this fix. The remaining defect in the previous commit was duplicate `gommo_agent -> 79ai` normalization statements in `ProviderCredentialResolver`.
+
+## Solution
+
+- Kept the Prompt Assistant contract input as `provider_code = gommo_agent`, `credential_role = access_token`.
+- Consolidated normalization into one switch expression: `gommo_agent => 79ai`.
+- The resolver then calls the existing repository path, which selects the enabled production `79ai` account, active credential mapping, and secure credential record, decrypts the secret, updates `last_used_at`, and returns it to the caller.
+- Direct `79ai` input remains unchanged for all existing video and other AI provider callers.
+- Missing credentials still throw the existing sanitized `InvalidOperationException`; tests verify no secret leakage.
+
+## Validation
+
+- `dotnet build TodoX.Dashboard.sln -c Release --no-restore -p:UseSharedCompilation=false /m:1` - passed, 0 errors.
+- `dotnet test TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~GommoPromptAssistantTests|FullyQualifiedName~ProviderCredentialFrameworkTests"` - passed, 9/9.
+- `dotnet test ... --filter FullyQualifiedName~RVideoVideoHotfixTests` - no matching tests in the configured test project; no RVideo production code was changed. Existing RVideo tests are under `TodoX.Web\Tests` and are not included by `TodoX.Web.Tests.csproj`.
+- `git diff --check` - passed.
+- `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -p:UseSharedCompilation=false /m:1 -o D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard` - passed.
+
+## Database / Deployment
+
+No database change is required. No migration, SQL script, new table, or schema change was created or executed.
+
+Published output:
+`D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`
 
 ## Protected Areas
 
-Untouched: RVideo/render pipeline, image/video/audio/voice generation, workers, ffmpeg, mux/finalizer, RDance, Timelapse, Dance Sell, billing/points, and provider pipelines outside Prompt Assistant.
+Untouched: video render credential lookup behavior, 79AI provider routing, provider account lease behavior, render queue, image/video/audio/voice generation, workers, ffmpeg, mux/finalizer, RDance, Timelapse, Dance Sell, and billing/points.
