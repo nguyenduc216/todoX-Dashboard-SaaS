@@ -43,11 +43,7 @@
                         </MudItem>
                         <MudItem xs="12" sm="6">
                             <MudNumericField T="int?" @bind-Value="_maxTokens" Label="Max tokens" Variant="Variant.Outlined" Min="1" />
-                        </MudItem>
-                        <MudItem xs="12" sm="6">
-                            <MudNumericField T="int" @bind-Value="_maxRepairAttempts" Label="Max repair attempts (0-3)" Variant="Variant.Outlined" Min="0" Max="3" />
-                        </MudItem>
-                        <MudItem xs="12">
+                        </MudItem>`r`n                        <MudItem xs="12">
                             <MudText Typo="Typo.caption">Connection: @_connectionStatus</MudText>
                             <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.CloudDone" OnClick="TestConnectionAsync" Disabled="_busy">
                                 Test Connection
@@ -59,7 +55,8 @@
                     </MudGrid>
                 </MudTabPanel>
 
-                <MudTabPanel Text="Training versions">
+                @* Legacy training management is retained in backend/data and hidden for Phase 1. *@
+                @* <MudTabPanel Text="Training versions">
                     <MudStack Spacing="2" Class="pa-2">
                         <MudText Typo="Typo.subtitle2">Published: @PublishedVersionLabel</MudText>
                         <MudText Typo="Typo.subtitle2">Draft: @DraftVersionLabel</MudText>
@@ -107,7 +104,7 @@
                             </RowTemplate>
                         </MudTable>
                     </MudStack>
-                </MudTabPanel>
+                </MudTabPanel> *@
 
                 <MudTabPanel Text="Test playground">
                     <MudStack Spacing="2" Class="pa-2">
@@ -133,12 +130,17 @@
                                 @(_lastResult.ValidationPassed ? "Validation PASS" : $"Validation FAIL - {_lastResult.ErrorCode}")
                             </MudAlert>
                             <MudText Typo="Typo.caption">
-                                Provider: @_lastResult.ProviderCode | Model: @_lastResult.ModelCode |
+                                Agent ID: @_gommoAgentId | Agent ID Base: @_gommoAgentIdBase |
+                                Configured model: @_lastResult.ModelCode | Runtime provider: @_lastResult.RuntimeProvider |
                                 Repair attempts: @_lastResult.RepairAttemptCount |
                                 Prompt tokens: @_lastResult.PromptTokens |
-                                Completion tokens: @_lastResult.CompletionTokens |
+                                Output tokens: @_lastResult.OutputTokens |
                                 Total tokens: @_lastResult.TotalTokens |
-                                Latency: @_lastResult.Latency.TotalMilliseconds.ToString("0") ms
+                                Credit: @_lastResult.Credit |
+                                First event: @_lastResult.FirstEventMs ms |
+                                First content: @_lastResult.FirstContentMs ms |
+                                Total: @_lastResult.Latency.TotalMilliseconds.ToString("0") ms |
+                                Streaming: @_lastResult.StreamingDurationMs ms
                             </MudText>
                             @if (_lastResult.GeneratedJson is not null)
                             {
@@ -155,7 +157,7 @@
                 <MudTabPanel Text="History">
                     <MudTable Items="_generations" Dense="true" Hover="true">
                         <HeaderContent>
-                            <MudTh>Created</MudTh><MudTh>Status</MudTh><MudTh>Validation</MudTh><MudTh>Repair</MudTh><MudTh>Total tokens</MudTh>
+                            <MudTh>Created</MudTh><MudTh>Status</MudTh><MudTh>Validation</MudTh><MudTh>Provider</MudTh><MudTh>Total tokens</MudTh><MudTh>Duration</MudTh><MudTh>Credit</MudTh>
                         </HeaderContent>
                         <RowTemplate>
                             <MudTd DataLabel="Created">@context.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>

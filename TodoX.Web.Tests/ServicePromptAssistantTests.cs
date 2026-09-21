@@ -33,7 +33,7 @@ public sealed class ServicePromptAssistantTests
         Assert.Equal("ok", parsed.RootElement.GetProperty("title").GetString());
 
         var error = Assert.Throws<ServicePromptProviderException>(() => parser.Parse("{broken"));
-        Assert.Equal("invalid_json", error.Code);
+        Assert.Equal("generated_json_invalid", error.Code);
     }
 
     [Fact]
@@ -78,109 +78,13 @@ public sealed class ServicePromptAssistantTests
     }
 
     [Fact]
-    public void OptionsUseTheConfigured79AiEndpointAndLimits()
+    public void OptionsUseTheConfiguredGommoEndpointAndLimits()
     {
         var options = new ServicePromptAssistantOptions();
-
-        Assert.Equal("https://79ai.net/api/chat/completions", options.ApiUrl);
+        Assert.Equal("https://api.gommo.net/api/v2/chat", options.ApiUrl);
+        Assert.Equal(TimeSpan.FromSeconds(300), options.Timeout);
         Assert.Equal(2_000_000, options.TemplateLimit);
         Assert.Equal(1_000_000, options.DescriptionLimit);
-        Assert.Equal(TimeSpan.FromSeconds(120), options.Timeout);
-    }
-
-    [Fact]
-    public async Task ProviderClientRejectsInvalidUrlAndMissingContent()
-    {
-        var client = new ServicePrompt79AiClient(
-            new HttpClient(new RecordingJsonHandler("""{"choices":[{"message":{}}]}""")),
-            new FakeCredentialResolver("secret-token"),
-            Options.Create(new ServicePromptAssistantOptions()));
-
-        var invalidUrl = await Assert.ThrowsAsync<ServicePromptProviderException>(() =>
-            client.CompleteAsync(new("not-a-url", "79ai", "model", "system", "user", null, null)));
-        Assert.Equal("invalid_api_url", invalidUrl.Code);
-
-        var missingContent = await Assert.ThrowsAsync<ServicePromptProviderException>(() =>
-            client.CompleteAsync(new("https://79ai.example/chat", "79ai", "model", "system", "user", null, null)));
-        Assert.Equal("missing_content", missingContent.Code);
-    }
-
-    [Fact]
-    public async Task ProviderClientParsesUsageAndSanitizesProviderResponse()
-    {
-        var handler = new RecordingJsonHandler(
-            """{"id":"req-1","choices":[{"message":{"content":"{\"title\":\"ok\"}"}}],"usage":{"prompt_tokens":4,"completion_tokens":7,"total_tokens":11}}""");
-        var credentials = new FakeCredentialResolver("secret-token");
-        var client = new ServicePrompt79AiClient(
-            new HttpClient(handler),
-            credentials,
-            Options.Create(new ServicePromptAssistantOptions
-            {
-                TimeoutSeconds = 10
-            }));
-
-        var result = await client.CompleteAsync(new(
-            "https://79ai.example/v1/chat/completions",
-            "79ai",
-            "configured-model",
-            "system",
-            "user",
-            null,
-            null));
-
-        Assert.Equal("{\"title\":\"ok\"}", result.Content);
-        Assert.Equal(4, result.PromptTokens);
-        Assert.Equal(7, result.CompletionTokens);
-        Assert.Equal(11, result.TotalTokens);
-        Assert.Equal("req-1", result.ProviderRequestId);
-        Assert.Contains("Bearer secret-token", handler.Requests.Single().Authorization, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ProviderClientMissingUsageDoesNotFail()
-    {
-        var handler = new RecordingJsonHandler(
-            """{"choices":[{"message":{"content":"{\"title\":\"ok\"}"}}]}""");
-        var client = new ServicePrompt79AiClient(
-            new HttpClient(handler),
-            new FakeCredentialResolver("secret-token"),
-            Options.Create(new ServicePromptAssistantOptions()));
-
-        var result = await client.CompleteAsync(new(
-            "https://79ai.example/v1/chat/completions",
-            "79ai",
-            "configured-model",
-            "system",
-            "user",
-            null,
-            null));
-
-        Assert.Null(result.PromptTokens);
-        Assert.Null(result.CompletionTokens);
-        Assert.Null(result.TotalTokens);
-    }
-
-    [Fact]
-    public async Task ProviderClientMissingChoicesIsControlledAndSanitized()
-    {
-        var handler = new RecordingJsonHandler("""{"error":"secret-token"}""", HttpStatusCode.BadRequest);
-        var client = new ServicePrompt79AiClient(
-            new HttpClient(handler),
-            new FakeCredentialResolver("secret-token"),
-            Options.Create(new ServicePromptAssistantOptions()));
-
-        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() =>
-            client.CompleteAsync(new(
-                "https://79ai.example/v1/chat/completions",
-                "79ai",
-                "configured-model",
-                "system",
-                "user",
-                null,
-                null)));
-
-        Assert.Equal("http_400", error.Code);
-        Assert.DoesNotContain("secret-token", error.SanitizedResponse, StringComparison.Ordinal);
     }
 
     [Fact]

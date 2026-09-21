@@ -151,6 +151,9 @@ public sealed class ServicePromptAssistantRepository
                        validation_status AS ValidationStatus, validation_errors_json::text AS ValidationErrorsJson,
                        repair_attempt_count AS RepairAttemptCount, prompt_tokens AS PromptTokens,
                        completion_tokens AS CompletionTokens, total_tokens AS TotalTokens,
+                       runtime_provider AS RuntimeProvider, credit AS Credit, first_event_ms AS FirstEventMs,
+                       first_content_ms AS FirstContentMs, total_duration_ms AS TotalDurationMs,
+                       streaming_duration_ms AS StreamingDurationMs,
                        status AS Status, error_code AS ErrorCode, error_message AS ErrorMessage,
                        created_at AS CreatedAt,
                        EXTRACT(EPOCH FROM (completed_at - created_at)) AS LatencySeconds
@@ -364,6 +367,12 @@ public sealed class ServicePromptAssistantRepository
             PromptTokens = row.PromptTokens,
             CompletionTokens = row.CompletionTokens,
             TotalTokens = row.TotalTokens,
+            RuntimeProvider = row.RuntimeProvider ?? string.Empty,
+            Credit = row.Credit,
+            FirstEventMs = row.FirstEventMs,
+            FirstContentMs = row.FirstContentMs,
+            TotalDurationMs = row.TotalDurationMs,
+            StreamingDurationMs = row.StreamingDurationMs,
             Status = Enum.TryParse<ServicePromptGenerationStatus>(row.Status, true, out var status)
                 ? status
                 : ServicePromptGenerationStatus.ProviderFailed,
@@ -383,7 +392,7 @@ public sealed class ServicePromptAssistantRepository
         public Guid Id { get; set; }
         public Guid ServiceId { get; set; }
         public Guid ServicePromptAssistantId { get; set; }
-        public Guid TrainingVersionId { get; set; }
+        public Guid? TrainingVersionId { get; set; }
         public string UserInput { get; set; } = string.Empty;
         public string ProviderCode { get; set; } = string.Empty;
         public string ModelCode { get; set; } = string.Empty;
@@ -394,6 +403,12 @@ public sealed class ServicePromptAssistantRepository
         public int? PromptTokens { get; set; }
         public int? CompletionTokens { get; set; }
         public int? TotalTokens { get; set; }
+        public string? RuntimeProvider { get; set; }
+        public decimal? Credit { get; set; }
+        public int? FirstEventMs { get; set; }
+        public int? FirstContentMs { get; set; }
+        public int? TotalDurationMs { get; set; }
+        public int? StreamingDurationMs { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? ErrorCode { get; set; }
         public string? ErrorMessage { get; set; }
@@ -417,13 +432,15 @@ internal static class ServicePromptGenerationPersistenceContract
             (id, service_id, service_prompt_assistant_id, training_version_id, user_id, customer_id,
              provider_code, model_code, user_input, request_snapshot_sanitized, raw_response_sanitized,
              generated_json, validation_status, validation_errors_json, repair_attempt_count,
-             prompt_tokens, completion_tokens, total_tokens, status, error_code, error_message,
+             prompt_tokens, completion_tokens, total_tokens, runtime_provider, credit, first_event_ms,
+             first_content_ms, total_duration_ms, streaming_duration_ms, status, error_code, error_message,
              created_at, completed_at)
         VALUES
             (@Id, @ServiceId, @AssistantId, @TrainingVersionId, @UserId, @CustomerId,
              @ProviderCode, @ModelCode, @UserInput, CAST(@RequestSnapshot AS jsonb), @RawResponse,
              CAST(@GeneratedJson AS jsonb), @ValidationStatus, CAST(@ValidationErrors AS jsonb), @RepairAttempts,
-             @PromptTokens, @CompletionTokens, @TotalTokens, @Status, @ErrorCode, @ErrorMessage,
+             @PromptTokens, @CompletionTokens, @TotalTokens, @RuntimeProvider, @Credit, @FirstEventMs,
+             @FirstContentMs, @TotalDurationMs, @StreamingDurationMs, @Status, @ErrorCode, @ErrorMessage,
              @CreatedAt, @CompletedAt);
         """;
 
@@ -461,7 +478,7 @@ public sealed class ServicePromptGenerationPersistence
     public Guid Id { get; init; }
     public Guid ServiceId { get; init; }
     public Guid AssistantId { get; init; }
-    public Guid TrainingVersionId { get; init; }
+    public Guid? TrainingVersionId { get; init; }
     public Guid? UserId { get; init; }
     public Guid? CustomerId { get; init; }
     public string ProviderCode { get; init; } = string.Empty;
@@ -476,6 +493,12 @@ public sealed class ServicePromptGenerationPersistence
     public int? PromptTokens { get; init; }
     public int? CompletionTokens { get; init; }
     public int? TotalTokens { get; init; }
+    public string? RuntimeProvider { get; init; }
+    public decimal? Credit { get; init; }
+    public int? FirstEventMs { get; init; }
+    public int? FirstContentMs { get; init; }
+    public int? TotalDurationMs { get; init; }
+    public int? StreamingDurationMs { get; init; }
     public string Status { get; init; } = "ProviderFailed";
     public string? ErrorCode { get; init; }
     public string? ErrorMessage { get; init; }

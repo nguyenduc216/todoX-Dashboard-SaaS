@@ -70,7 +70,7 @@ public sealed class ServicePromptGenerationDto
     public Guid Id { get; set; }
     public Guid ServiceId { get; set; }
     public Guid ServicePromptAssistantId { get; set; }
-    public Guid TrainingVersionId { get; set; }
+    public Guid? TrainingVersionId { get; set; }
     public string UserInput { get; set; } = string.Empty;
     public string ProviderCode { get; set; } = string.Empty;
     public string ModelCode { get; set; } = string.Empty;
@@ -80,7 +80,14 @@ public sealed class ServicePromptGenerationDto
     public int RepairAttemptCount { get; set; }
     public int? PromptTokens { get; set; }
     public int? CompletionTokens { get; set; }
+    public int? OutputTokens => CompletionTokens;
     public int? TotalTokens { get; set; }
+    public decimal? Credit { get; set; }
+    public string RuntimeProvider { get; set; } = string.Empty;
+    public int? FirstEventMs { get; set; }
+    public int? FirstContentMs { get; set; }
+    public int? TotalDurationMs { get; set; }
+    public int? StreamingDurationMs { get; set; }
     public ServicePromptGenerationStatus Status { get; set; }
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
@@ -97,6 +104,7 @@ public sealed class ServicePromptGenerationResult
     public int RepairAttemptCount { get; init; }
     public int? PromptTokens { get; init; }
     public int? CompletionTokens { get; init; }
+    public int? OutputTokens => CompletionTokens;
     public int? TotalTokens { get; init; }
     public string ProviderCode { get; init; } = string.Empty;
     public string ModelCode { get; init; } = string.Empty;
@@ -104,6 +112,12 @@ public sealed class ServicePromptGenerationResult
     public string? ErrorCode { get; init; }
     public string? ErrorMessage { get; init; }
     public TimeSpan Latency { get; init; }
+    public int? FirstEventMs { get; init; }
+    public int? FirstContentMs { get; init; }
+    public int? TotalDurationMs { get; init; }
+    public int? StreamingDurationMs { get; init; }
+    public decimal? Credit { get; init; }
+    public string RuntimeProvider { get; init; } = string.Empty;
 }
 
 public sealed record ServicePromptValidationError(string Path, string Code, string Message);
@@ -120,7 +134,13 @@ public sealed record ServicePromptProviderResponse(
     int? CompletionTokens,
     int? TotalTokens,
     string SanitizedRawResponse,
-    string? ProviderRequestId = null);
+    string? ProviderRequestId = null,
+    decimal? Credit = null,
+    string? RuntimeProvider = null,
+    int? FirstEventMs = null,
+    int? FirstContentMs = null,
+    int? TotalDurationMs = null,
+    int? StreamingDurationMs = null);
 
 public sealed class ServicePromptProviderException : InvalidOperationException
 {
