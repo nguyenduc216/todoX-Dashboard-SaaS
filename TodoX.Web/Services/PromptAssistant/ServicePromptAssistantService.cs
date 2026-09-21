@@ -203,6 +203,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             Latency = Stopwatch.GetElapsedTime(started),
             FirstEventMs = firstEventMs,
             FirstContentMs = firstContentMs,
+            TotalDurationMs = totalDurationMs,
             StreamingDurationMs = streamingDurationMs,
             Credit = credit,
             RuntimeProvider = runtimeProvider ?? assistant.ProviderCode

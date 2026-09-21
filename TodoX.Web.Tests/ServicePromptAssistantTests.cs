@@ -122,6 +122,18 @@ public sealed class ServicePromptAssistantTests
     }
 
     [Fact]
+    public void GenerationPersistenceCarriesProviderTotalDurationToTheMetricsColumn()
+    {
+        var model = CreatePersistence(requestSnapshot: "{}", totalDurationMs: 321);
+
+        ServicePromptGenerationPersistenceContract.Validate(model);
+
+        Assert.Equal(321, model.TotalDurationMs);
+        Assert.Contains("total_duration_ms", ServicePromptGenerationPersistenceContract.InsertSql, StringComparison.Ordinal);
+        Assert.Contains("@TotalDurationMs", ServicePromptGenerationPersistenceContract.InsertSql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GenerationPersistenceRejectsMalformedJsonBeforeInsert()
     {
         var malformedSnapshot = CreatePersistence(requestSnapshot: "{broken");
@@ -136,7 +148,8 @@ public sealed class ServicePromptAssistantTests
     private static ServicePromptGenerationPersistence CreatePersistence(
         string requestSnapshot = "{}",
         string? generatedJson = """{"title":"ok"}""",
-        string validationErrors = "[]")
+        string validationErrors = "[]",
+        int? totalDurationMs = null)
         => new()
         {
             Id = Guid.NewGuid(),
@@ -148,6 +161,7 @@ public sealed class ServicePromptAssistantTests
             RequestSnapshot = requestSnapshot,
             GeneratedJson = generatedJson,
             ValidationErrors = validationErrors,
+            TotalDurationMs = totalDurationMs,
             CreatedAt = DateTime.UtcNow
         };
 

@@ -26,6 +26,8 @@ public sealed class GommoPromptAssistantTests
 
         Assert.Equal("{\"scene\":\"demo\"}", result.Content);
         Assert.Equal(5, result.TotalTokens);
+        Assert.NotNull(result.TotalDurationMs);
+        Assert.True(result.TotalDurationMs >= 0);
         Assert.DoesNotContain("secret-token", result.SanitizedRawResponse);
         Assert.Equal(("gommo_agent", "access_token"), credentials.LastResolve);
         Assert.Equal("base-123", handler.RequestBody!.RootElement.GetProperty("agent_id").GetString());
