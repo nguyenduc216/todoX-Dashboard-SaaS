@@ -31,7 +31,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         ResolvedProviderCredential credential;
         try
         {
-            credential = await _credentials.ResolveAsync(_options.CredentialProviderCode, "access_token", ct);
+            credential = await _credentials.ResolveAsync(request.ProviderCode, "access_token", ct);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

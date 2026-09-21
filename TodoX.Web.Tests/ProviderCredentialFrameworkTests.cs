@@ -76,6 +76,42 @@ public sealed class ProviderCredentialFrameworkTests
     }
 
     [Fact]
+    public async Task Resolver_MapsGommoAgentToShared79AiCredentialAccount()
+    {
+        var protector = new ProviderCredentialProtector(new FixedKeyStore());
+        var protectedCredential = await protector.ProtectAsync("redacted-unit-value");
+        var secure = ToRecord(protectedCredential);
+        secure.Id = Guid.NewGuid();
+        secure.ProviderAccountId = Guid.NewGuid();
+
+        var repo = new FakeProviderCredentialRepository
+        {
+            Account = new ProviderCredentialAccount
+            {
+                Id = secure.ProviderAccountId,
+                ProviderCode = "79ai",
+                Environment = "production",
+                Enabled = true,
+                IsDefault = true
+            },
+            Mapping = new ProviderCredentialMapping
+            {
+                ProviderAccountId = secure.ProviderAccountId,
+                CredentialRole = "access_token",
+                SecureCredentialId = secure.Id,
+                Enabled = true
+            },
+            Secure = secure
+        };
+        var resolver = new ProviderCredentialResolver(repo, protector);
+
+        var resolved = await resolver.ResolveAsync("gommo_agent", "access_token");
+
+        Assert.Equal("redacted-unit-value", resolved.Secret);
+        Assert.Equal("79ai", resolved.ProviderCode);
+    }
+
+    [Fact]
     public async Task Resolver_IgnoresDisabledMappingAndInactiveOrExpiredCredential()
     {
         var protector = new ProviderCredentialProtector(new FixedKeyStore());
@@ -208,6 +244,7 @@ public sealed class ProviderCredentialFrameworkTests
         public ProviderCredentialMapping? Mapping { get; set; }
         public ProviderSecureCredentialRecord? Secure { get; set; }
         public Guid? LastUsedId { get; private set; }
+        public string? LastProviderCode { get; set; }
 
         public Task<ProviderCredentialAccount?> GetPreferredAccountAsync(string providerCode, string environment = "production", CancellationToken ct = default)
             => Task.FromResult(Account);

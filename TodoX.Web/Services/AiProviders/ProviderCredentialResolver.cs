@@ -21,6 +21,15 @@ public sealed class ProviderCredentialResolver : IProviderCredentialResolver
         var normalizedProviderCode = string.IsNullOrWhiteSpace(providerCode)
             ? throw new InvalidOperationException("Provider credential is not configured.")
             : providerCode.Trim().ToLowerInvariant();
+        normalizedProviderCode = normalizedProviderCode.Equals("gommo_agent", StringComparison.OrdinalIgnoreCase) ? "79ai" : normalizedProviderCode;
+        normalizedProviderCode = normalizedProviderCode.Equals("gommo_agent", StringComparison.OrdinalIgnoreCase)
+            ? "79ai"
+            : normalizedProviderCode;
+        normalizedProviderCode = normalizedProviderCode switch
+        {
+            "gommo_agent" => "79ai",
+            _ => normalizedProviderCode
+        };
         var normalizedRole = string.IsNullOrWhiteSpace(credentialRole)
             ? throw new InvalidOperationException("Provider credential is not configured.")
             : credentialRole.Trim();
