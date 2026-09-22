@@ -190,6 +190,36 @@ else
                                         <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Code" OnClick="OpenRawPromptAsync" Disabled="@string.IsNullOrWhiteSpace(_prompt)">Xem JSON</MudButton>
                                     </MudStack>
                                     }
+                                    @if (_projectId is not null)
+                                    {
+                                        <MudDivider Class="my-2" />
+                                        <MudText Typo="Typo.subtitle2">Prompt hiện tại</MudText>
+                                        @if (ActivePrompt is not null)
+                                        {
+                                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
+                                                <MudText Typo="Typo.body2">@PromptTitle(ActivePrompt) · @PromptDuration(ActivePrompt)s · @PromptSceneCount(ActivePrompt) scene</MudText>
+                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OpenGenerationAsync(ActivePrompt))">Xem Prompt</MudButton>
+                                            </MudStack>
+                                        }
+                                        else
+                                        {
+                                            <MudText Typo="Typo.caption">Chưa có prompt active cho project này.</MudText>
+                                        }
+                                        @if (_promptHistory.Count > 0)
+                                        {
+                                            <MudText Typo="Typo.subtitle2" Class="mt-2">Prompt History</MudText>
+                                            @foreach (var generation in _promptHistory)
+                                            {
+                                                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="flex-wrap gap-2 prompt-history-row">
+                                                    <MudText Typo="Typo.body2">@PromptTitle(generation) · @(IsImported(generation) ? "Imported JSON" : "AI Generated") · @generation.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                                                    <MudStack Row="true" Spacing="1">
+                                                        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => OpenGenerationAsync(generation))">Xem Prompt</MudButton>
+                                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(ActivePrompt?.Id == generation.Id)" OnClick="@(() => SelectPromptAsync(generation))">Dùng prompt này</MudButton>
+                                                    </MudStack>
+                                                </MudStack>
+                                            }
+                                        }
+                                    }
                                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="CheckPromptAsync">Kiểm tra cấu trúc</MudButton>
                                     <MudSelect T="string" Label="Tỷ lệ video của project" Value="@_aspectRatio" ValueChanged="OnAspectRatioChangedAsync" Variant="Variant.Outlined" Dense="true" Required="true">
                                         <MudSelectItem T="string" Value="@string.Empty">Chọn tỷ lệ trước khi tạo scene</MudSelectItem>
@@ -773,6 +803,8 @@ else
     private int _aiSceneCount = 7;
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
+    private IReadOnlyList<ServicePromptGenerationDto> _promptHistory = [];
+    private ServicePromptGenerationDto? ActivePrompt => _promptHistory.FirstOrDefault(x => x.Id == _project?.ActivePromptGenerationId);
     private string _aspectRatio = AspectRatioLandscape;
     private string _resolution = Resolution720p;
     private int _totalSeconds = 16;
@@ -1786,6 +1818,7 @@ else
             {
                 _thinkScenes = _project.ThinkScenes;
                 _prompt = _project.OriginalPrompt;
+                await LoadPromptWorkspaceAsync();
                 _autoFinish = ReadAutoFinish(_prompt);
                 try
                 {
@@ -2557,6 +2590,78 @@ else
         return Task.CompletedTask;
     }
 
+    private async Task LoadPromptWorkspaceAsync()
+    {
+        if (_projectId is not long projectId)
+        {
+            _promptHistory = [];
+            return;
+        }
+
+        _promptHistory = await PromptAssistant.GetProjectGenerationsAsync(projectId);
+        if (ActivePrompt?.GeneratedJson is { Length: > 0 } activeJson)
+        {
+            _prompt = activeJson;
+            _promptParseResult = PromptParser.Parse(_prompt);
+            ApplyVideoSettingsFromPrompt();
+        }
+    }
+
+    private async Task OpenGenerationAsync(ServicePromptGenerationDto generation)
+    {
+        if (string.IsNullOrWhiteSpace(generation.GeneratedJson)) return;
+        var parsed = PromptParser.Parse(generation.GeneratedJson);
+        var parameters = new DialogParameters
+        {
+            [nameof(PromptAssistantGeneratedDialog.GenerationId)] = generation.Id,
+            [nameof(PromptAssistantGeneratedDialog.PromptJson)] = generation.GeneratedJson,
+            [nameof(PromptAssistantGeneratedDialog.Title)] = parsed.Summary.VideoTitle ?? "Video prompt",
+            [nameof(PromptAssistantGeneratedDialog.DurationSeconds)] = parsed.Model.DurationSeconds ?? parsed.Summary.DeclaredDurationSeconds ?? 0,
+            [nameof(PromptAssistantGeneratedDialog.SceneCount)] = parsed.Model.Scenes.Count
+        };
+        await DialogService.ShowAsync<PromptAssistantGeneratedDialog>("Prompt JSON", parameters,
+            new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+    }
+
+    private async Task SelectPromptAsync(ServicePromptGenerationDto generation)
+    {
+        if (_projectId is not long projectId || generation.Id == _project?.ActivePromptGenerationId) return;
+        if (!await PromptAssistant.SetActiveProjectGenerationAsync(projectId, generation.Id))
+        {
+            Snackbar.Add("Không thể chọn prompt cho project này.", Severity.Warning);
+            return;
+        }
+        _project!.ActivePromptGenerationId = generation.Id;
+        _prompt = generation.GeneratedJson ?? string.Empty;
+        _promptParseResult = PromptParser.Parse(_prompt);
+        ApplyVideoSettingsFromPrompt();
+        Snackbar.Add("Đã chọn prompt làm prompt hiện tại.", Severity.Success);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static bool IsImported(ServicePromptGenerationDto generation)
+        => string.Equals(generation.ProviderCode, "IMPORT", StringComparison.OrdinalIgnoreCase);
+
+    private static string PromptTitle(ServicePromptGenerationDto generation)
+    {
+        if (string.IsNullOrWhiteSpace(generation.GeneratedJson)) return "Prompt không có nội dung";
+        try
+        {
+            using var doc = JsonDocument.Parse(generation.GeneratedJson);
+            foreach (var key in new[] { "video_title", "title" })
+                if (doc.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
+                    return value.GetString() ?? "Video prompt";
+        }
+        catch (JsonException) { }
+        return "Video prompt";
+    }
+
+    private static int PromptDuration(ServicePromptGenerationDto generation)
+        => generation.GeneratedJson is null ? 0 : new TodoXVideoPromptParser().Parse(generation.GeneratedJson).Model.DurationSeconds ?? 0;
+
+    private static int PromptSceneCount(ServicePromptGenerationDto generation)
+        => generation.GeneratedJson is null ? 0 : new TodoXVideoPromptParser().Parse(generation.GeneratedJson).Model.Scenes.Count;
+
     private Task OpenSceneVideoPreview(VideoProjectSceneDto scene)
     {
         var videoUrl = ResolveDraftVideoUrl(scene, GetSceneDraft(scene));
@@ -2626,11 +2731,30 @@ else
             _prompt = await reader.ReadToEndAsync();
             _promptParseResult = PromptParser.Parse(_prompt);
             ApplyVideoSettingsFromPrompt();
+            if (!_promptParseResult.IsJsonValid)
+            {
+                Snackbar.Add("File đã nạp nhưng JSON syntax không hợp lệ.", Severity.Warning);
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            if (ServiceId is not Guid serviceId || serviceId == Guid.Empty)
+            {
+                Snackbar.Add("Thiếu thông tin dịch vụ để lưu Prompt JSON.", Severity.Warning);
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            await EnsurePromptWorkspaceProjectAsync();
+            var result = await PromptAssistant.ImportPromptAsync(
+                serviceId,
+                _projectId!.Value,
+                _prompt,
+                AuthState.CurrentUser);
+            await ReloadAsync();
             Snackbar.Add(
-                _promptParseResult.IsJsonValid
-                    ? $"Đã nạp JSON {file.Name}."
-                    : "File đã nạp nhưng JSON syntax không hợp lệ.",
-                _promptParseResult.IsJsonValid ? Severity.Success : Severity.Warning);
+                $"Đã nạp và lưu JSON {file.Name}.",
+                Severity.Success);
         }
         catch (DecoderFallbackException)
         {
@@ -2671,10 +2795,12 @@ else
         _aiGenerating = true;
         try
         {
+            await EnsurePromptWorkspaceProjectAsync();
             var result = await PromptAssistant.GeneratePromptAsync(
                 serviceId,
                 PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(serviceId, _aiPromptInput, _aiDuration, _aiSceneCount)),
-                AuthState.CurrentUser);
+                AuthState.CurrentUser,
+                videoProjectId: _projectId);
 
             if (!result.ValidationPassed || string.IsNullOrWhiteSpace(result.GeneratedJson))
             {
@@ -2683,6 +2809,16 @@ else
             }
 
             var generatedParseResult = PromptParser.Parse(result.GeneratedJson);
+            if (!generatedParseResult.IsTodoXSchemaValid)
+            {
+                Snackbar.Add("Prompt AI trả về JSON chưa đúng schema TodoX.", Severity.Error);
+                return;
+            }
+
+            _prompt = result.GeneratedJson;
+            _promptParseResult = generatedParseResult;
+            ApplyVideoSettingsFromPrompt();
+            await ReloadAsync();
             var model = generatedParseResult.Model;
             var parameters = new DialogParameters
             {
@@ -2712,6 +2848,41 @@ else
         {
             _aiGenerating = false;
         }
+    }
+
+    private async Task EnsurePromptWorkspaceProjectAsync()
+    {
+        if (_projectId is not null)
+        {
+            return;
+        }
+
+        if (AuthState.CurrentUser is not { } user)
+        {
+            throw new InvalidOperationException("User session is required to create a prompt workspace.");
+        }
+
+        var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
+        {
+            Prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish),
+            AspectRatio = _aspectRatio,
+            CharacterId = _selectedCharacter?.Id,
+            SourceImageUrl = ResolveDirectSourceImageUrl(),
+            TotalSeconds = Math.Max(1, _totalSeconds),
+            SceneSeconds = Math.Max(1, _sceneSeconds),
+            ThinkScenes = false,
+            Title = "Prompt workspace",
+            CreateEmptyProject = true
+        }, user.UserId, user.CustomerId,
+            VideoOptions.CurrentValue.StorageRoot,
+            VideoOptions.CurrentValue.PublicBase,
+            DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+
+        _projectId = result.Id;
+        _project = result;
+        await RVideoSettings.SaveAsync(result.Id, BuildRVideoSettingsRequest());
+        await ProjectCreated.InvokeAsync(result.Id);
+        await LoadPromptWorkspaceAsync();
     }
 
     private Task OnAspectRatioChangedAsync(string value)

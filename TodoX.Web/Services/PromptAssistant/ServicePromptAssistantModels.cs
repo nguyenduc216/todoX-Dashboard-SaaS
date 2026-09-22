@@ -71,6 +71,7 @@ public sealed class ServicePromptGenerationDto
     public Guid ServiceId { get; set; }
     public Guid ServicePromptAssistantId { get; set; }
     public Guid? TrainingVersionId { get; set; }
+    public long? VideoProjectId { get; set; }
     public string UserInput { get; set; } = string.Empty;
     public string ProviderCode { get; set; } = string.Empty;
     public string ModelCode { get; set; } = string.Empty;

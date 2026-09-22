@@ -34,7 +34,8 @@ public static class PromptAssistantEndpoints
                 request.ServiceId,
                 BuildAgentInput(request),
                 auth.CurrentUser,
-                ct);
+                ct,
+                request.VideoProjectId);
 
             return Results.Json(ToResponse(result));
         }
@@ -107,7 +108,8 @@ public sealed record PromptAssistantGenerateRequest(
     Guid ServiceId,
     string UserInput,
     int? Duration = 30,
-    int? SceneCount = 7);
+    int? SceneCount = 7,
+    long? VideoProjectId = null);
 
 public sealed record PromptAssistantGenerateResponse(
     bool Success,

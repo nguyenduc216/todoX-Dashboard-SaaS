@@ -45,7 +45,8 @@ public sealed class VideoRenderRepository
                     (@tenant, @user, @customer, @title, @prompt, @total, @sceneSeconds, @sceneCount,
                      @think, @character, @uploaded, @sourceImageUrl, @storageRoot, @publicBase, @jobFolder, @status, now(), now())
                 RETURNING id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
-                          original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
+                          original_prompt AS OriginalPrompt, active_prompt_generation_id AS ActivePromptGenerationId,
+                          total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                           scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
                           uploaded_character_url AS UploadedCharacterUrl, source_image_url AS SourceImageUrl,
                           storage_root AS StorageRoot, public_base AS PublicBase,
@@ -148,7 +149,8 @@ public sealed class VideoRenderRepository
             var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
                 """
                 SELECT id AS Id, core_job_id AS CoreJobId, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
-                       original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
+                       original_prompt AS OriginalPrompt, active_prompt_generation_id AS ActivePromptGenerationId,
+                       total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                        scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
                        uploaded_character_url AS UploadedCharacterUrl, source_image_url AS SourceImageUrl,
                        storage_root AS StorageRoot, public_base AS PublicBase,

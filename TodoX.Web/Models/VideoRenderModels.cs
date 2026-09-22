@@ -35,6 +35,7 @@ public sealed class VideoProjectDto
     public Guid TenantId { get; set; }
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
+    public Guid? ActivePromptGenerationId { get; set; }
     public string? Title { get; set; }
     public string OriginalPrompt { get; set; } = string.Empty;
     public int TotalSeconds { get; set; }

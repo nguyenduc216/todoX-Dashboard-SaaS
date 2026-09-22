@@ -208,10 +208,38 @@ public class RenderVideoJobsLayoutTests
         var generateMethod = Between(source, "private async Task GenerateAiPromptAsync", "private Task OnAspectRatioChangedAsync");
 
         Assert.Contains("PromptAssistant.GeneratePromptAsync", generateMethod);
+        Assert.Contains("videoProjectId: _projectId", generateMethod);
+        Assert.Contains("EnsurePromptWorkspaceProjectAsync", generateMethod);
         Assert.Contains("PromptAssistantGeneratedDialog", generateMethod);
         Assert.DoesNotContain("RVideoJobs.CreateDraftAsync", generateMethod);
         Assert.DoesNotContain("CreateQueued", generateMethod);
         Assert.DoesNotContain("Enqueue", generateMethod);
+    }
+
+    [Fact]
+    public void PromptImportPersistsToProjectWorkspaceWithoutEnqueueingRender()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var importMethod = Between(source, "private async Task ImportPromptJsonAsync", "private async Task GenerateAiPromptAsync");
+
+        Assert.Contains("PromptAssistant.ImportPromptAsync", importMethod);
+        Assert.Contains("EnsurePromptWorkspaceProjectAsync", importMethod);
+        Assert.Contains("await ReloadAsync();", importMethod);
+        Assert.DoesNotContain("RVideoJobs.CreateDraftAsync", importMethod);
+        Assert.DoesNotContain("Enqueue", importMethod);
+    }
+
+    [Fact]
+    public void PromptWorkspaceSqlIsAdditiveAndContainsProjectLinkage()
+    {
+        var migration = File.ReadAllText(Path.Combine(WebRoot, "database", "manual", "20260922_video_project_prompt_workspace.sql"));
+        var verify = File.ReadAllText(Path.Combine(WebRoot, "database", "manual", "verify_20260922_video_project_prompt_workspace.sql"));
+
+        Assert.Contains("ADD COLUMN IF NOT EXISTS video_project_id", migration);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS active_prompt_generation_id", migration);
+        Assert.Contains("CREATE INDEX IF NOT EXISTS ix_service_prompt_generations_video_project", migration);
+        Assert.Contains("video_project_id", verify);
+        Assert.Contains("active_prompt_generation_id", verify);
     }
 
     [Fact]

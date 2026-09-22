@@ -1,16 +1,19 @@
 using Dapper;
 using System.Text.Json;
 using TodoX.Web.Data;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.PromptAssistant;
 
 public sealed class ServicePromptAssistantRepository
 {
     private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
 
-    public ServicePromptAssistantRepository(TodoXConnectionFactory factory)
+    public ServicePromptAssistantRepository(TodoXConnectionFactory factory, TenantContext tenant)
     {
         _factory = factory;
+        _tenant = tenant;
     }
 
     public async Task<ServicePromptServiceContext?> GetServiceContextAsync(Guid serviceId, CancellationToken ct = default)
@@ -165,6 +168,30 @@ public sealed class ServicePromptAssistantRepository
                 new { serviceId },
                 cancellationToken: ct));
         return rows.Select(MapGeneration).ToList();
+    }
+
+    public async Task<IReadOnlyList<ServicePromptGenerationDto>> GetProjectGenerationsAsync(long videoProjectId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<ServicePromptGenerationRow>(
+            new CommandDefinition(
+                ProjectGenerationSql,
+                new { videoProjectId, tenant = _tenant.TenantId },
+                cancellationToken: ct));
+        return rows.Select(MapGeneration).ToList();
+    }
+
+    public async Task<ServicePromptGenerationDto?> GetProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<ServicePromptGenerationRow>(
+            new CommandDefinition(
+                ProjectGenerationSql + "\n AND id=@generationId\n LIMIT 1;",
+                new { videoProjectId, generationId, tenant = _tenant.TenantId },
+                cancellationToken: ct));
+        return row is null ? null : MapGeneration(row);
     }
 
     public async Task<Guid> SaveDraftAsync(
@@ -350,6 +377,74 @@ public sealed class ServicePromptAssistantRepository
             cancellationToken: ct));
     }
 
+    public async Task SaveGenerationAndSetActiveAsync(ServicePromptGenerationPersistence model, CancellationToken ct = default)
+    {
+        ServicePromptGenerationPersistenceContract.Validate(model);
+        if (model.VideoProjectId is null)
+            throw new ArgumentException("Video project is required for workspace persistence.", nameof(model));
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var inserted = await conn.ExecuteAsync(new CommandDefinition(
+            ServicePromptGenerationPersistenceContract.InsertSql, model, tx, cancellationToken: ct));
+        if (inserted != 1)
+            throw new ServicePromptDomainException("generation_insert_failed", "Prompt generation could not be saved.");
+
+        var updated = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE video_render.video_projects p
+               SET active_prompt_generation_id=@generationId, updated_at=now()
+             WHERE p.id=@videoProjectId AND p.tenant_id=@tenant
+               AND EXISTS (
+                   SELECT 1 FROM settings.service_prompt_generations g
+                    WHERE g.id=@generationId AND g.video_project_id=p.id);
+            """,
+            new { generationId = model.Id, model.VideoProjectId, tenant = _tenant.TenantId }, tx, cancellationToken: ct));
+        if (updated != 1)
+        {
+            tx.Rollback();
+            throw new ServicePromptDomainException("video_project_not_found", "Video project was not found.");
+        }
+
+        tx.Commit();
+    }
+
+    public async Task<bool> SetActiveProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE video_render.video_projects p
+               SET active_prompt_generation_id=@generationId, updated_at=now()
+             WHERE p.id=@videoProjectId AND p.tenant_id=@tenant
+               AND EXISTS (
+                   SELECT 1 FROM settings.service_prompt_generations g
+                    WHERE g.id=@generationId AND g.video_project_id=p.id);
+            """,
+            new { videoProjectId, generationId, tenant = _tenant.TenantId }, cancellationToken: ct));
+        return rows == 1;
+    }
+
+    private const string ProjectGenerationSql = """
+        SELECT g.id AS Id, g.service_id AS ServiceId, g.service_prompt_assistant_id AS ServicePromptAssistantId,
+               g.training_version_id AS TrainingVersionId, g.video_project_id AS VideoProjectId, g.user_input AS UserInput,
+               g.provider_code AS ProviderCode, g.model_code AS ModelCode, g.generated_json AS GeneratedJson,
+               g.validation_status AS ValidationStatus, g.validation_errors_json::text AS ValidationErrorsJson,
+               g.repair_attempt_count AS RepairAttemptCount, g.prompt_tokens AS PromptTokens,
+               g.completion_tokens AS CompletionTokens, g.total_tokens AS TotalTokens,
+               g.runtime_provider AS RuntimeProvider, g.credit AS Credit, g.first_event_ms AS FirstEventMs,
+               g.first_content_ms AS FirstContentMs, g.total_duration_ms AS TotalDurationMs,
+               g.streaming_duration_ms AS StreamingDurationMs, g.status AS Status, g.error_code AS ErrorCode,
+               g.error_message AS ErrorMessage, g.created_at AS CreatedAt,
+               EXTRACT(EPOCH FROM (g.completed_at - g.created_at)) AS LatencySeconds
+          FROM settings.service_prompt_generations g
+          JOIN video_render.video_projects p ON p.id=g.video_project_id AND p.tenant_id=@tenant
+         WHERE g.video_project_id=@videoProjectId
+         ORDER BY g.created_at DESC
+        """;
+
     private static ServicePromptGenerationDto MapGeneration(ServicePromptGenerationRow row)
         => new()
         {
@@ -357,6 +452,7 @@ public sealed class ServicePromptAssistantRepository
             ServiceId = row.ServiceId,
             ServicePromptAssistantId = row.ServicePromptAssistantId,
             TrainingVersionId = row.TrainingVersionId,
+            VideoProjectId = row.VideoProjectId,
             UserInput = row.UserInput,
             ProviderCode = row.ProviderCode,
             ModelCode = row.ModelCode,
@@ -393,6 +489,7 @@ public sealed class ServicePromptAssistantRepository
         public Guid ServiceId { get; set; }
         public Guid ServicePromptAssistantId { get; set; }
         public Guid? TrainingVersionId { get; set; }
+        public long? VideoProjectId { get; set; }
         public string UserInput { get; set; } = string.Empty;
         public string ProviderCode { get; set; } = string.Empty;
         public string ModelCode { get; set; } = string.Empty;
@@ -429,14 +526,14 @@ internal static class ServicePromptGenerationPersistenceContract
     internal const string InsertSql =
         """
         INSERT INTO settings.service_prompt_generations
-            (id, service_id, service_prompt_assistant_id, training_version_id, user_id, customer_id,
+            (id, service_id, service_prompt_assistant_id, training_version_id, video_project_id, user_id, customer_id,
              provider_code, model_code, user_input, request_snapshot_sanitized, raw_response_sanitized,
              generated_json, validation_status, validation_errors_json, repair_attempt_count,
              prompt_tokens, completion_tokens, total_tokens, runtime_provider, credit, first_event_ms,
              first_content_ms, total_duration_ms, streaming_duration_ms, status, error_code, error_message,
              created_at, completed_at)
         VALUES
-            (@Id, @ServiceId, @AssistantId, @TrainingVersionId, @UserId, @CustomerId,
+            (@Id, @ServiceId, @AssistantId, @TrainingVersionId, @VideoProjectId, @UserId, @CustomerId,
              @ProviderCode, @ModelCode, @UserInput, CAST(@RequestSnapshot AS jsonb), @RawResponse,
              CAST(@GeneratedJson AS jsonb), @ValidationStatus, CAST(@ValidationErrors AS jsonb), @RepairAttempts,
              @PromptTokens, @CompletionTokens, @TotalTokens, @RuntimeProvider, @Credit, @FirstEventMs,
@@ -479,6 +576,7 @@ public sealed class ServicePromptGenerationPersistence
     public Guid ServiceId { get; init; }
     public Guid AssistantId { get; init; }
     public Guid? TrainingVersionId { get; init; }
+    public long? VideoProjectId { get; init; }
     public Guid? UserId { get; init; }
     public Guid? CustomerId { get; init; }
     public string ProviderCode { get; init; } = string.Empty;

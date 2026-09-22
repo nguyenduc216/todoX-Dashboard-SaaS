@@ -17,6 +17,17 @@ public interface IServicePromptAssistantService
         Guid serviceId,
         string userInput,
         CurrentUserSession? userSession,
+        CancellationToken ct = default,
+        long? videoProjectId = null);
+
+    Task<IReadOnlyList<ServicePromptGenerationDto>> GetProjectGenerationsAsync(long videoProjectId, CancellationToken ct = default);
+    Task<ServicePromptGenerationDto?> GetProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default);
+    Task<bool> SetActiveProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default);
+    Task<ServicePromptGenerationResult> ImportPromptAsync(
+        Guid serviceId,
+        long videoProjectId,
+        string generatedJson,
+        CurrentUserSession? userSession,
         CancellationToken ct = default);
 }
 
@@ -95,7 +106,8 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         Guid serviceId,
         string userInput,
         CurrentUserSession? userSession,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        long? videoProjectId = null)
     {
         if (string.IsNullOrWhiteSpace(userInput))
         {
@@ -114,6 +126,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                 serviceId,
                 assistant,
                 null,
+                videoProjectId,
                 ct);
         }
 
@@ -214,6 +227,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             serviceId,
             assistant,
             null,
+            videoProjectId,
             ct,
             userInput,
             string.Join(Environment.NewLine, rawResponses),
@@ -226,18 +240,19 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         Guid serviceId,
         ServicePromptAssistantDto assistant,
         ServicePromptTrainingVersionDto? version,
+        long? videoProjectId,
         CancellationToken ct,
         string? userInput = null,
         string? rawResponse = null,
         string? requestSnapshot = null)
     {
-        await _repository.SaveGenerationAsync(
-            new ServicePromptGenerationPersistence
+        var persistence = new ServicePromptGenerationPersistence
             {
                 Id = result.GenerationId,
                 ServiceId = serviceId,
                 AssistantId = assistant.Id,
                 TrainingVersionId = version?.Id,
+                VideoProjectId = videoProjectId,
                 UserId = userSession?.UserId,
                 CustomerId = userSession?.CustomerId,
                 ProviderCode = result.ProviderCode,
@@ -263,8 +278,75 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                 ErrorMessage = result.ErrorMessage,
                 CreatedAt = DateTime.UtcNow - result.Latency,
                 CompletedAt = DateTime.UtcNow
-            },
-            ct);
+            };
+        if (videoProjectId is not null && result.ValidationPassed)
+        {
+            await _repository.SaveGenerationAndSetActiveAsync(persistence, ct);
+        }
+        else
+        {
+            await _repository.SaveGenerationAsync(persistence, ct);
+        }
+        return result;
+    }
+
+    public Task<IReadOnlyList<ServicePromptGenerationDto>> GetProjectGenerationsAsync(long videoProjectId, CancellationToken ct = default)
+        => _repository.GetProjectGenerationsAsync(videoProjectId, ct);
+
+    public Task<bool> SetActiveProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default)
+        => _repository.SetActiveProjectGenerationAsync(videoProjectId, generationId, ct);
+
+    public Task<ServicePromptGenerationDto?> GetProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default)
+        => _repository.GetProjectGenerationAsync(videoProjectId, generationId, ct);
+
+    public async Task<ServicePromptGenerationResult> ImportPromptAsync(
+        Guid serviceId,
+        long videoProjectId,
+        string generatedJson,
+        CurrentUserSession? userSession,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(generatedJson))
+            throw new ArgumentException("Prompt JSON is required.", nameof(generatedJson));
+
+        using var document = JsonDocument.Parse(generatedJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ServicePromptDomainException("generated_json_invalid", "Prompt JSON must be an object.");
+
+        var assistant = await _repository.GetOrCreateAssistantAsync(serviceId, _options, ct);
+        var generationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var result = new ServicePromptGenerationResult
+        {
+            GenerationId = generationId,
+            GeneratedJson = document.RootElement.GetRawText(),
+            ValidationPassed = true,
+            ProviderCode = "IMPORT",
+            ModelCode = string.Empty,
+            Status = ServicePromptGenerationStatus.Success,
+            Latency = TimeSpan.Zero,
+            RuntimeProvider = "IMPORT"
+        };
+        await _repository.SaveGenerationAndSetActiveAsync(new ServicePromptGenerationPersistence
+        {
+            Id = generationId,
+            ServiceId = serviceId,
+            AssistantId = assistant.Id,
+            VideoProjectId = videoProjectId,
+            UserId = userSession?.UserId,
+            CustomerId = userSession?.CustomerId,
+            ProviderCode = "IMPORT",
+            ModelCode = string.Empty,
+            UserInput = "Imported JSON prompt",
+            RequestSnapshot = JsonSerializer.Serialize(new { source = "IMPORT" }, ServicePromptJson.Options),
+            RawResponse = null,
+            GeneratedJson = result.GeneratedJson,
+            ValidationStatus = "PASS",
+            ValidationErrors = "[]",
+            Status = result.Status.ToString(),
+            CreatedAt = now,
+            CompletedAt = now
+        }, ct);
         return result;
     }
 
