@@ -428,7 +428,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     }, ct: ct);
             }
 
-            var motionPrompt = ReadConfigString(runtime.RouteConfigJson, "motion_prompt") ?? string.Empty;
+            var resolvedMotionPrompt = DanceSellMotionPromptResolver.Resolve(danceJob.VideoPrompt, danceJob.Prompt);
+            var motionPrompt = resolvedMotionPrompt.Value;
             if (string.IsNullOrWhiteSpace(referenceUrlUsed) || string.IsNullOrWhiteSpace(motionProviderUrl))
             {
                 await FailAsync(renderJob, danceJob, "DANCE_SELL_PROVIDER_MEDIA_REQUIRED", "Provider-side reference image and motion video are required before submit.", "{}", permanent: true, ct, operationId: motionOperationId);
@@ -540,6 +541,12 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     submitAttempt,
                     startedAt = submitStartedAtUtc
                 }, ct: ct);
+            _logger.LogInformation(
+                "DANCE_SELL_MOTION_SUBMIT_PROMPT jobId={JobId} model={Model} promptLength={PromptLength} promptSource={PromptSource}",
+                danceJob.Id,
+                runtime.Model,
+                motionPrompt.Length,
+                resolvedMotionPrompt.Source);
             var submitted = await _ai79.SubmitMotionControlAsync(request, ct);
             submitStartedAt.Stop();
             await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId, submitted.SanitizedResponseJson, ct);
@@ -1383,12 +1390,13 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             throw new RenderJobDeferredException("KIE submit deferred by local rate limiter.");
         }
 
+        var resolvedMotionPrompt = DanceSellMotionPromptResolver.Resolve(danceJob.VideoPrompt, danceJob.Prompt);
         KieMotionControlRequest payload;
         try
         {
             payload = _payloadBuilder.BuildMotionControlRequest(new KieMotionControlBuildRequest
             {
-                Prompt = danceJob.Prompt,
+                Prompt = resolvedMotionPrompt.Value,
                 CharacterImageUrl = danceJob.CharacterImageUrl,
                 MotionVideoUrl = danceJob.MotionVideoUrl,
                 Mode = danceJob.Mode,
@@ -1406,6 +1414,12 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         var sw = Stopwatch.StartNew();
         try
         {
+            _logger.LogInformation(
+                "DANCE_SELL_MOTION_SUBMIT_PROMPT jobId={JobId} model={Model} promptLength={PromptLength} promptSource={PromptSource}",
+                danceJob.Id,
+                payload.Model,
+                payload.Input.Prompt.Length,
+                resolvedMotionPrompt.Source);
             var submitted = await _client.CreateTaskAsync(payload, ct);
             sw.Stop();
             var responseJson = KieJsonRedactor.Redact(submitted.RawResponse) ?? "{}";

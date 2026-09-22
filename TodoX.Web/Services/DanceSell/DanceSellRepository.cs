@@ -848,7 +848,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
         """
         SELECT id AS Id, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
                render_job_id AS RenderJobId, logical_request_id AS LogicalRequestId,
-               status AS Status, prompt AS Prompt, character_image_url AS CharacterImageUrl,
+               status AS Status, prompt AS Prompt, video_prompt AS VideoPrompt, character_image_url AS CharacterImageUrl,
                motion_video_url AS MotionVideoUrl, mode AS Mode, orientation AS CharacterOrientation,
                provider_code AS ProviderCode, provider_model AS ProviderModel,
                provider_task_id AS ProviderTaskId, provider_status AS ProviderStatus,

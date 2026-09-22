@@ -83,6 +83,34 @@ public sealed class RDanceReferencePromptRegressionTests
     }
 
     [Fact]
+    public void DanceSellMotionUsesJobPromptWhenVideoPromptIsMissing()
+    {
+        var resolved = DanceSellMotionPromptResolver.Resolve(null, "  job prompt  ");
+
+        Assert.Equal("job prompt", resolved.Value);
+        Assert.Equal("prompt", resolved.Source);
+    }
+
+    [Fact]
+    public void DanceSellMotionUsesExactDefaultWhenBothPromptsAreEmpty()
+    {
+        var resolved = DanceSellMotionPromptResolver.Resolve(" ", "\t");
+
+        Assert.Equal(DanceSellMotionPromptResolver.DefaultPrompt, resolved.Value);
+        Assert.Equal("default", resolved.Source);
+        Assert.NotEmpty(resolved.Value);
+    }
+
+    [Fact]
+    public void DanceSellMotionVideoPromptHasPriorityOverJobPrompt()
+    {
+        var resolved = DanceSellMotionPromptResolver.Resolve("  video prompt  ", "job prompt");
+
+        Assert.Equal("video prompt", resolved.Value);
+        Assert.Equal("video_prompt", resolved.Source);
+    }
+
+    [Fact]
     public void ManualRetryCreatesFreshMotionAttemptAndRebindsRenderInput()
     {
         var service = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");

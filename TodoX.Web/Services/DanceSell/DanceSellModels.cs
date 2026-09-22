@@ -293,6 +293,7 @@ public sealed class DanceSellJobDto
     public string LogicalRequestId { get; set; } = string.Empty;
     public string Status { get; set; } = DanceSellJobStatuses.Queued;
     public string Prompt { get; set; } = string.Empty;
+    public string? VideoPrompt { get; set; }
     public string CharacterImageUrl { get; set; } = string.Empty;
     public string MotionVideoUrl { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
@@ -363,6 +364,28 @@ public sealed class DanceSellJobDto
     public bool AutoFinish { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
+}
+
+public readonly record struct DanceSellMotionPrompt(string Value, string Source);
+
+public static class DanceSellMotionPromptResolver
+{
+    public const string DefaultPrompt = "Transfer the motion from reference video to the character.\nPreserve identity, face and body anatomy.\nKeep the original movement.\nApply the supplied product naturally.\nCreate a smooth fashion showcase video.";
+
+    public static DanceSellMotionPrompt Resolve(string? videoPrompt, string? prompt)
+    {
+        if (!string.IsNullOrWhiteSpace(videoPrompt))
+        {
+            return new DanceSellMotionPrompt(videoPrompt.Trim(), "video_prompt");
+        }
+
+        if (!string.IsNullOrWhiteSpace(prompt))
+        {
+            return new DanceSellMotionPrompt(prompt.Trim(), "prompt");
+        }
+
+        return new DanceSellMotionPrompt(DefaultPrompt, "default");
+    }
 }
 
 public sealed class DanceSellAdminTestRequest
