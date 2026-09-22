@@ -217,6 +217,22 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void PromptWorkspaceDefaultsToAiGenerationWithImportUnderAdvanced()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var promptSourceSection = Between(source, "Dịch vụ đã chọn:", "MudButton Variant=\"Variant.Outlined\" Color=\"Color.Primary\" OnClick=\"CheckPromptAsync\"");
+
+        Assert.Contains("Tạo nội dung AI", promptSourceSection);
+        Assert.Contains("Tạo Prompt AI", promptSourceSection);
+        Assert.Contains("Nâng cao: Import JSON thủ công", promptSourceSection);
+        Assert.Contains("<MudExpansionPanel Text=\"Nâng cao: Import JSON thủ công\">", promptSourceSection);
+        Assert.DoesNotContain("MudRadioGroup", promptSourceSection);
+        Assert.DoesNotContain("Prompt Source", promptSourceSection);
+        Assert.True(promptSourceSection.IndexOf("Tạo nội dung AI", StringComparison.Ordinal)
+            < promptSourceSection.IndexOf("Nâng cao: Import JSON thủ công", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void PromptImportPersistsToProjectWorkspaceWithoutEnqueueingRender()
     {
         var source = File.ReadAllText(RazorPath);

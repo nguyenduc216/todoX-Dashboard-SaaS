@@ -153,43 +153,28 @@ else
                             <MudPaper Class="pa-4 h-100" Outlined="true" rounded="true">
                                 <MudStack Spacing="2" Class="h-100">
                                     <MudText Typo="Typo.subtitle1">Dịch vụ đã chọn: @ResolveServiceLabel()</MudText>
-                                    <MudText Typo="Typo.subtitle2">Prompt Source</MudText>
-                                    <MudRadioGroup T="string" @bind-Value="_promptSource">
-                                        <MudRadio T="string" Value="@PromptSourceImport">Import JSON Prompt</MudRadio>
-                                        <MudRadio T="string" Value="@PromptSourceAi">Generate AI Prompt</MudRadio>
-                                    </MudRadioGroup>
-                                    @if (_promptSource == PromptSourceAi)
-                                    {
-                                        <MudPaper Class="pa-3" Outlined="true" rounded="true">
-                                            <MudStack Spacing="2">
-                                                <MudTextField T="string" @bind-Value="_aiPromptInput" Label="Nội dung video mong muốn" Variant="Variant.Outlined" Lines="4" />
-                                                <MudGrid>
-                                                    <MudItem xs="12" sm="6">
-                                                        <MudSelect T="int" @bind-Value="_aiDuration" Label="Duration" Variant="Variant.Outlined" Dense="true">
-                                                            @foreach (var duration in AiPromptDurations)
-                                                            {
-                                                                <MudSelectItem T="int" Value="@duration">@duration giây</MudSelectItem>
-                                                            }
-                                                        </MudSelect>
-                                                    </MudItem>
-                                                    <MudItem xs="12" sm="6">
-                                                        <MudNumericField T="int" @bind-Value="_aiSceneCount" Label="Scene count" Variant="Variant.Outlined" Min="1" Max="100" />
-                                                    </MudItem>
-                                                </MudGrid>
-                                                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="GenerateAiPromptAsync" Disabled="@(_aiGenerating || string.IsNullOrWhiteSpace(_aiPromptInput))">
-                                                    @(_aiGenerating ? "Đang tạo prompt..." : "Tạo Prompt AI")
-                                                </MudButton>
-                                            </MudStack>
-                                        </MudPaper>
-                                    }
-                                    else
-                                    {
-                                    <MudTextField T="string" Label="Prompt JSON đã nạp" Value="@PromptFileSummary" ReadOnly="true" Variant="Variant.Outlined" Lines="2" />
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                        <InputFile OnChange="ImportPromptJsonAsync" accept=".json,application/json,text/json" />
-                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Code" OnClick="OpenRawPromptAsync" Disabled="@string.IsNullOrWhiteSpace(_prompt)">Xem JSON</MudButton>
-                                    </MudStack>
-                                    }
+                                    <MudText Typo="Typo.subtitle2">Tạo nội dung AI</MudText>
+                                    <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                        <MudStack Spacing="2">
+                                            <MudTextField T="string" @bind-Value="_aiPromptInput" Label="Nội dung video mong muốn" Variant="Variant.Outlined" Lines="4" />
+                                            <MudGrid>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudSelect T="int" @bind-Value="_aiDuration" Label="Duration" Variant="Variant.Outlined" Dense="true">
+                                                        @foreach (var duration in AiPromptDurations)
+                                                        {
+                                                            <MudSelectItem T="int" Value="@duration">@duration giây</MudSelectItem>
+                                                        }
+                                                    </MudSelect>
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudNumericField T="int" @bind-Value="_aiSceneCount" Label="Scene count" Variant="Variant.Outlined" Min="1" Max="100" />
+                                                </MudItem>
+                                            </MudGrid>
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="GenerateAiPromptAsync" Disabled="@(_aiGenerating || string.IsNullOrWhiteSpace(_aiPromptInput))">
+                                                @(_aiGenerating ? "Đang tạo prompt..." : "Tạo Prompt AI")
+                                            </MudButton>
+                                        </MudStack>
+                                    </MudPaper>
                                     @if (_projectId is not null)
                                     {
                                         <MudDivider Class="my-2" />
@@ -220,6 +205,17 @@ else
                                             }
                                         }
                                     }
+                                    <MudExpansionPanels Elevation="0" Dense="true">
+                                        <MudExpansionPanel Text="Nâng cao: Import JSON thủ công">
+                                            <MudStack Spacing="2">
+                                                <MudTextField T="string" Label="Prompt JSON đã nạp" Value="@PromptFileSummary" ReadOnly="true" Variant="Variant.Outlined" Lines="2" />
+                                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                                    <InputFile OnChange="ImportPromptJsonAsync" accept=".json,application/json,text/json" />
+                                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Code" OnClick="OpenRawPromptAsync" Disabled="@string.IsNullOrWhiteSpace(_prompt)">Xem JSON</MudButton>
+                                                </MudStack>
+                                            </MudStack>
+                                        </MudExpansionPanel>
+                                    </MudExpansionPanels>
                                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="CheckPromptAsync">Kiểm tra cấu trúc</MudButton>
                                     <MudSelect T="string" Label="Tỷ lệ video của project" Value="@_aspectRatio" ValueChanged="OnAspectRatioChangedAsync" Variant="Variant.Outlined" Dense="true" Required="true">
                                         <MudSelectItem T="string" Value="@string.Empty">Chọn tỷ lệ trước khi tạo scene</MudSelectItem>
@@ -797,7 +793,6 @@ else
     private string? _sharedReferenceImageFileName;
     private string? _sharedReferenceImageMimeType;
     private string _prompt = string.Empty;
-    private string _promptSource = PromptSourceImport;
     private string _aiPromptInput = string.Empty;
     private int _aiDuration = 30;
     private int _aiSceneCount = 7;
@@ -880,8 +875,6 @@ else
     private const string Resolution720p = "720p";
     private const string Resolution1080p = "1080p";
     private const string Resolution4K = "4K";
-    private const string PromptSourceImport = "import";
-    private const string PromptSourceAi = "ai";
     private static readonly int[] AiPromptDurations = [5, 10, 15, 30, 60, 90];
 
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && GetFinalMergeReadiness().CanMerge;
