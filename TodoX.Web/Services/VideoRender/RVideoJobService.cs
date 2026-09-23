@@ -148,6 +148,30 @@ public sealed class RVideoJobService : IRVideoJobService
                 operationType = service.ServiceType
             }, tx);
 
+        // Prompt Workspace projects created by the legacy path may already have settings;
+        // preserve them while completing the canonical RVIDEO job contract when absent.
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO video_render.rvideo_job_settings
+                (project_id, tenant_id, execution_mode, current_stage, skip_character,
+                 use_reference_image_for_all_scenes, character_mode, selected_character_id,
+                 character_snapshot_json, voice_mode, voice_catalog_code, voice_snapshot_json,
+                 default_tts_rate, music_catalog_code, music_snapshot_json, music_volume,
+                 created_at, updated_at)
+            VALUES
+                (@projectId, @tenant, @executionMode, 'INFO', false, false, 'NONE', NULL,
+                 '{}'::jsonb, @voiceMode, NULL, '{}'::jsonb, 1.0, NULL, '{}'::jsonb, 0.8,
+                 now(), now())
+            ON CONFLICT (project_id) DO NOTHING;
+            """,
+            new
+            {
+                projectId,
+                tenant = _tenant.TenantId,
+                executionMode = RVideoExecutionModes.Manual,
+                voiceMode = RVideoVoiceModes.None
+            }, tx);
+
         var linked = await conn.ExecuteAsync(
             "UPDATE video_render.video_projects SET core_job_id=@jobId, updated_at=now() WHERE id=@projectId AND tenant_id=@tenant AND core_job_id IS NULL;",
             new { jobId, projectId, tenant = _tenant.TenantId }, tx);

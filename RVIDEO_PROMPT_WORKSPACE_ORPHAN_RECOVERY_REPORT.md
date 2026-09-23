@@ -62,13 +62,15 @@ No changes were made to image generation, video generation, voice/TTS, provider 
 
 ## Tests
 
-- Targeted recovery, RVIDEO ownership, RenderVideoJobs, and Prompt Assistant tests: **59 passed, 0 failed**.
-- Tests cover existing linkage reuse, ownership checks, row locking, draft/not-required Core Job values, core_job_id-only linkage, no scene/image/provider/billing references, and no startup execution.
+- Targeted `RenderJobCoreServiceClaimRegressionTests`: **10 passed, 0 failed**.
+- The recovery path now also creates the missing `video_render.rvideo_job_settings` row in the same transaction, using `ON CONFLICT (project_id) DO NOTHING` so existing settings are preserved.
+- Full `TodoX.Web.Tests` run: **989 passed, 22 failed**. The failures are pre-existing regressions in unrelated Core Platform, RDance, provider, billing, and UI tests; no recovery test failed.
+- `git diff --check`: passed.
 
 ## Build and Publish
 
 - `dotnet build TodoX.Dashboard.sln -c Release --no-restore -p:UseSharedCompilation=false /m:1`: **succeeded, 0 errors** (46 existing generated/legacy warnings).
-- `dotnet publish TodoX.Web\\TodoX.Web.csproj -c Release --no-restore -p:UseSharedCompilation=false /m:1 -o D:\\todoX\\Dashboard-web\\TodoXPortal\\todoX-Dashboard-SaaS\\artifacts\\publish\\todox-dashboard`: **succeeded**.
+- `dotnet publish TodoX.Web.csproj -c Release --no-restore -p:UseSharedCompilation=false /m:1 -o D:\\todoX\\Dashboard-web\\TodoXPortal\\todoX-Dashboard-SaaS\\artifacts\\publish\\todox-dashboard`: **succeeded**.
 
 ## Production Recovery Status
 
@@ -76,4 +78,4 @@ Production recovery for projects 104-108 was **not executed**. The explicit oper
 
 ## Commit
 
-Commit SHA: 7dee30e
+Commit SHA: recorded by the final Git commit for this change.

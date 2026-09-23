@@ -144,6 +144,8 @@ public sealed class RenderJobCoreServiceClaimRegressionTests
         Assert.Contains("'draft', 'info'", recovery, StringComparison.Ordinal);
         Assert.Contains("point_status", recovery, StringComparison.Ordinal);
         Assert.Contains("'not_required'", recovery, StringComparison.Ordinal);
+        Assert.Contains("INSERT INTO video_render.rvideo_job_settings", recovery, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT (project_id) DO NOTHING", recovery, StringComparison.Ordinal);
         Assert.Contains("UPDATE video_render.video_projects SET core_job_id", recovery, StringComparison.Ordinal);
         Assert.Contains("core_job_id IS NULL", recovery, StringComparison.Ordinal);
         Assert.DoesNotContain("video_project_scenes", recovery, StringComparison.Ordinal);
