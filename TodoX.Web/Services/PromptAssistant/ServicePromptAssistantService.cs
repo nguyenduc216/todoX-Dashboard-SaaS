@@ -170,7 +170,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             credit = response.Credit;
             runtimeProvider = response.RuntimeProvider;
             using var parsed = _parser.Parse(response.Content);
-            generatedJson = parsed.RootElement.GetRawText();
+            generatedJson = ServicePromptJson.Canonicalize(parsed.RootElement.GetRawText());
             if (parsed.RootElement.ValueKind != JsonValueKind.Object)
                 throw new ServicePromptProviderException("generated_json_invalid", "Final prompt must be a JSON object.", response.SanitizedRawResponse);
             if (videoProjectId is long projectId)
@@ -341,7 +341,9 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         var videoSettings = videoProjectId is long projectId
             ? await _videoSettings.GetAsync(projectId, ct)
             : null;
-        var finalJson = VideoPromptReferenceEnricher.Enrich(document.RootElement.GetRawText(), videoSettings);
+        var finalJson = VideoPromptReferenceEnricher.Enrich(
+            ServicePromptJson.Canonicalize(document.RootElement.GetRawText()),
+            videoSettings);
         var generationId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var result = new ServicePromptGenerationResult

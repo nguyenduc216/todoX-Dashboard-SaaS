@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.PromptAssistant;
@@ -214,6 +215,13 @@ public static class ServicePromptJson
 {
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         WriteIndented = true
     };
+
+    public static string Canonicalize(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return JsonSerializer.Serialize(document.RootElement, Options);
+    }
 }

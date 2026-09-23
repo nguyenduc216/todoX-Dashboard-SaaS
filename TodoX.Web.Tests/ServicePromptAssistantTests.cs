@@ -39,6 +39,37 @@ public sealed class ServicePromptAssistantTests
     }
 
     [Fact]
+    public void CanonicalJsonSerializationWritesVietnameseUnicodeWithoutChangingValues()
+    {
+        const string escapedJson = """
+            {"voice":"\u0110\u1eb7c bi\u1ec7t ng\u01b0\u1eddi Vi\u1ec7t Nam","image_prompt":"Nh\u00e2n v\u1eadt \u0111\u1ee9ng gi\u1eefa con \u0111\u01b0\u1eddng","subtitle_lines":["\u0110\u00e3 s\u1ed1ng"]}
+            """;
+
+        var canonical = ServicePromptJson.Canonicalize(escapedJson);
+        using var document = JsonDocument.Parse(canonical);
+
+        Assert.Contains("Đặc biệt người Việt Nam", canonical, StringComparison.Ordinal);
+        Assert.Contains("Nhân vật đứng giữa con đường", canonical, StringComparison.Ordinal);
+        Assert.Contains("Đã sống", canonical, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u0110", canonical, StringComparison.Ordinal);
+        Assert.Equal("Đặc biệt người Việt Nam", document.RootElement.GetProperty("voice").GetString());
+        Assert.Equal("Nhân vật đứng giữa con đường", document.RootElement.GetProperty("image_prompt").GetString());
+        Assert.Equal("Đã sống", document.RootElement.GetProperty("subtitle_lines")[0].GetString());
+    }
+
+    [Fact]
+    public void CanonicalJsonSerializationDoesNotDecodeLiteralDoubleEscapedUnicode()
+    {
+        const string doubleEscapedJson = """{"voice":"\\u0110\\u1eb7c"}""";
+
+        var canonical = ServicePromptJson.Canonicalize(doubleEscapedJson);
+        using var document = JsonDocument.Parse(canonical);
+
+        Assert.Equal("\\u0110\\u1eb7c", document.RootElement.GetProperty("voice").GetString());
+        Assert.Contains("\\\\u0110", canonical, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ValidatorChecksNestedShapeAndAllowsVariableArrayLength()
     {
         var validator = new ServicePromptStructureValidator();
@@ -164,6 +195,25 @@ public sealed class ServicePromptAssistantTests
 
         Assert.Equal(prompt, noCharacterResult);
         Assert.Equal(prompt, missingUploadResult);
+    }
+
+    [Fact]
+    public void ReferenceEnrichmentPreservesVietnameseUnicodeInImagePrompt()
+    {
+        const string prompt = "{\"scenes\":[{\"image_prompt\":\"Nh\\u00e2n v\\u1eadt \\u0111\\u1ee9ng gi\\u1eefa con \\u0111\\u01b0\\u1eddng.\"}]}";
+        var settings = new RVideoJobSettingsDto
+        {
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = "{\"fileUrl\":\"https://media.example/reference.png\"}"
+        };
+
+        var result = VideoPromptReferenceEnricher.Enrich(prompt, settings);
+        using var document = JsonDocument.Parse(result);
+        var imagePrompt = document.RootElement.GetProperty("scenes")[0]
+            .GetProperty("image_prompt").GetString();
+
+        Assert.Contains("Nh\u00e2n v\u1eadt \u0111\u1ee9ng gi\u1eefa con \u0111\u01b0\u1eddng.", imagePrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u", result, StringComparison.Ordinal);
     }
 
     [Fact]
