@@ -5,12 +5,14 @@ using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.Platform;
 using TodoX.Web.Services.Render;
+using Microsoft.Extensions.Logging;
 
 namespace TodoX.Web.Services.VideoRender;
 
 public interface IRVideoJobService
 {
     Task<RVideoJobCreatedResult> CreateDraftAsync(RVideoJobCreateRequest request, CurrentUserSession user, string storageRoot, string publicBase, string jobFolder, CancellationToken ct = default);
+    Task<RVideoJobCreatedResult> RecoverOrphanPromptWorkspaceAsync(long projectId, Guid serviceId, string serviceCode, CurrentUserSession user, CancellationToken ct = default);
     Task<RVideoJobView?> GetByJobIdAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task UpdateAsync(Guid jobId, RVideoJobUpdateRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<long?> ResolveProjectIdAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
@@ -46,6 +48,8 @@ public sealed class RVideoJobCreateRequest
     public string? SourceImageUrl { get; init; }
 }
 
+public sealed record RVideoOrphanRecoveryRequest(long ProjectId, Guid ServiceId, string ServiceCode);
+
 public sealed record RVideoJobCreatedResult(Guid JobId, long ProjectId, string Status, string Route);
 
 public sealed class RVideoJobView
@@ -63,14 +67,99 @@ public sealed class RVideoJobService : IRVideoJobService
     private readonly ICoreServiceCatalogService _catalog;
     private readonly VideoRenderRepository _projects;
     private readonly RVideoJobSettingsRepository _settings;
+    private readonly ILogger<RVideoJobService> _logger;
 
-    public RVideoJobService(TodoXConnectionFactory factory, TenantContext tenant, ICoreServiceCatalogService catalog, VideoRenderRepository projects, RVideoJobSettingsRepository settings)
+    public RVideoJobService(TodoXConnectionFactory factory, TenantContext tenant, ICoreServiceCatalogService catalog, VideoRenderRepository projects, RVideoJobSettingsRepository settings, ILogger<RVideoJobService> logger)
     {
         _factory = factory;
         _tenant = tenant;
         _catalog = catalog;
         _projects = projects;
         _settings = settings;
+        _logger = logger;
+    }
+
+    public async Task<RVideoJobCreatedResult> RecoverOrphanPromptWorkspaceAsync(long projectId, Guid serviceId, string serviceCode, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureCustomer(user);
+        var service = await _catalog.GetByCodeAsync(serviceCode, ct)
+            ?? throw new InvalidOperationException("Dịch vụ RVIDEO không tồn tại.");
+        if (service.Id != serviceId || !service.Enabled || !string.Equals(service.ServiceType, TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Dịch vụ RVIDEO không hợp lệ.");
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = $"rvideo-orphan-recovery:{_tenant.TenantId}:{projectId}" }, tx);
+
+        var project = await conn.QuerySingleOrDefaultAsync<OrphanProjectRow>(
+            """
+            SELECT id AS ProjectId, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
+                   core_job_id AS CoreJobId, title AS Title, original_prompt AS OriginalPrompt,
+                   total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds, think_scenes AS ThinkScenes,
+                   source_image_url AS SourceImageUrl
+              FROM video_render.video_projects
+             WHERE id=@projectId AND tenant_id=@tenant
+             FOR UPDATE;
+            """,
+            new { projectId, tenant = _tenant.TenantId }, tx);
+        if (project is null)
+            throw new InvalidOperationException("RVIDEO_PROJECT_NOT_FOUND");
+        if (project.CustomerId != user.CustomerId || project.UserId != user.UserId)
+            throw new UnauthorizedAccessException("RVIDEO_PROJECT_OWNERSHIP_MISMATCH");
+        if (project.CoreJobId is Guid existingJobId)
+        {
+            tx.Commit();
+            _logger.LogInformation("RVIDEO_ORPHAN_RECOVERY_ALREADY_LINKED projectId={ProjectId} coreJobId={CoreJobId} tenantId={TenantId} customerId={CustomerId} userId={UserId}", projectId, existingJobId, project.TenantId, project.CustomerId, project.UserId);
+            return new(existingJobId, projectId, RenderJobStatuses.Draft, $"/jobs/rvideo/{existingJobId}");
+        }
+        if (!string.Equals(project.Title, "Prompt workspace", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("RVIDEO_PROJECT_IS_NOT_PROMPT_WORKSPACE");
+
+        var logicalRequestId = $"rvideo-orphan-recovery:{projectId}";
+        var jobId = await conn.QuerySingleAsync<Guid>(
+            """
+            INSERT INTO render.render_jobs
+                (id, tenant_id, customer_id, user_id, service_id, logical_request_id, job_type, operation_type, source_type,
+                 status, current_step, progress_percent, priority, input_json, prompt_json, reference_json,
+                 output_json, options, point_cost_estimate, point_cost_charged, point_status, max_attempts, queued_at, created_at)
+            SELECT @jobId, p.tenant_id, p.customer_id, p.user_id, @serviceId, @logicalRequestId, @jobType, @operationType, 'dashboard',
+                   'draft', 'info', 0, 100,
+                   jsonb_build_object('engine','RVIDEO','projectId',p.id,'serviceId',@serviceId,'serviceCode',@serviceCode,
+                                      'title',p.title,'description',p.original_prompt,'prompt',p.original_prompt,
+                                      'totalSeconds',p.total_seconds,'sceneSeconds',p.scene_seconds,'thinkScenes',p.think_scenes,
+                                      'sourceImageUrl',p.source_image_url,'recovery',true),
+                   jsonb_build_object('text',p.original_prompt), '[]'::jsonb, '[]'::jsonb, '{}'::jsonb,
+                   0, 0, 'not_required', 1, now(), now()
+              FROM video_render.video_projects p
+             WHERE p.id=@projectId
+            RETURNING id;
+            """,
+            new
+            {
+                jobId = Guid.NewGuid(),
+                projectId,
+                serviceId,
+                serviceCode = service.ServiceCode,
+                logicalRequestId,
+                jobType = RenderJobTypes.CoreService,
+                operationType = service.ServiceType
+            }, tx);
+
+        var linked = await conn.ExecuteAsync(
+            "UPDATE video_render.video_projects SET core_job_id=@jobId, updated_at=now() WHERE id=@projectId AND tenant_id=@tenant AND core_job_id IS NULL;",
+            new { jobId, projectId, tenant = _tenant.TenantId }, tx);
+        if (linked != 1)
+            throw new InvalidOperationException("RVIDEO_ORPHAN_RECOVERY_LINK_FAILED");
+
+        await conn.ExecuteAsync(
+            "INSERT INTO render.render_job_events(job_id,tenant_id,event_type,level,message,data_json,created_at) VALUES(@jobId,@tenant,'RVIDEO_ORPHAN_RECOVERED','info','Linked an existing Prompt Workspace project to a new draft Core Job.','{}'::jsonb,now());",
+            new { jobId, tenant = _tenant.TenantId }, tx);
+        tx.Commit();
+        _logger.LogInformation("RVIDEO_ORPHAN_RECOVERY_CREATED projectId={ProjectId} coreJobId={CoreJobId} tenantId={TenantId} customerId={CustomerId} userId={UserId} operationType={OperationType}", projectId, jobId, project.TenantId, project.CustomerId, project.UserId, service.ServiceType);
+        return new(jobId, projectId, RenderJobStatuses.Draft, $"/jobs/rvideo/{jobId}");
     }
 
     public async Task<RVideoJobCreatedResult> CreateDraftAsync(RVideoJobCreateRequest request, CurrentUserSession user, string storageRoot, string publicBase, string jobFolder, CancellationToken ct = default)
@@ -351,6 +440,20 @@ public sealed class RVideoJobService : IRVideoJobService
 
     private sealed class CoreJobRow : CoreRowMapper.Row
     { public Guid? ServiceId { get; set; } public Guid? CustomerId { get; set; } public Guid? UserId { get; set; } public string ServiceCode { get; set; } = string.Empty; }
+    private sealed class OrphanProjectRow
+    {
+        public long ProjectId { get; set; }
+        public Guid TenantId { get; set; }
+        public Guid? CustomerId { get; set; }
+        public Guid? UserId { get; set; }
+        public Guid? CoreJobId { get; set; }
+        public string? Title { get; set; }
+        public string OriginalPrompt { get; set; } = string.Empty;
+        public int TotalSeconds { get; set; }
+        public int SceneSeconds { get; set; }
+        public bool ThinkScenes { get; set; }
+        public string? SourceImageUrl { get; set; }
+    }
     private sealed class ExistingDraftRow
     { public Guid JobId { get; set; } public long ProjectId { get; set; } public string Status { get; set; } = RenderJobStatuses.Draft; }
     private static class CoreRowMapper

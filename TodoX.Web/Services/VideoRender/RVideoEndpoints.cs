@@ -16,6 +16,10 @@ public static class RVideoEndpoints
             => await RequireUserAsync(auth, async () => auth.CurrentUser is { IsCustomer: true } user && await jobs.GetByJobIdAsync(jobId, user, ct) is { Settings: { } settings } ? Results.Json(settings) : Results.NotFound()));
         group.MapPut("/jobs/{jobId:guid}/settings", async (Guid jobId, RVideoJobSettingsRequest request, IRVideoJobService jobs, RVideoJobSettingsRepository repository, AuthStateService auth, CancellationToken ct)
             => await RequireUserAsync(auth, async () => auth.CurrentUser is { IsCustomer: true } user && await jobs.ResolveProjectIdAsync(jobId, user, ct) is long projectId ? Results.Json(await repository.SaveAsync(projectId, request, ct)) : Results.NotFound()));
+        group.MapPost("/projects/{projectId:long}/recover-orphan", async (long projectId, RVideoOrphanRecoveryRequest request, IRVideoJobService jobs, AuthStateService auth, CancellationToken ct)
+            => await RequireUserAsync(auth, async () => auth.CurrentUser is { IsCustomer: true } user
+                ? Results.Json(await jobs.RecoverOrphanPromptWorkspaceAsync(projectId, request.ServiceId, request.ServiceCode, user, ct))
+                : Results.Unauthorized()));
         group.MapPost("/scenes/import", async (HttpRequest request, RVideoSceneJsonService service, AuthStateService auth, CancellationToken ct) =>
         {
             if (auth.CurrentUser?.IsAuthenticated != true) return Results.Unauthorized();

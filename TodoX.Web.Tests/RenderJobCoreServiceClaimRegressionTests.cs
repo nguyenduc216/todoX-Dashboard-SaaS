@@ -127,6 +127,43 @@ public sealed class RenderJobCoreServiceClaimRegressionTests
             < create.IndexOf("var jobId = Guid.NewGuid()", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void OrphanRecoveryLocksExistingProjectAndOnlyLinksCoreJob()
+    {
+        var source = ReadSource("TodoX.Web", "Services", "VideoRender", "RVideoJobService.cs");
+        var recovery = Extract(source, "public async Task<RVideoJobCreatedResult> RecoverOrphanPromptWorkspaceAsync", "public async Task<RVideoJobCreatedResult> CreateDraftAsync");
+
+        Assert.Contains("FOR UPDATE", recovery, StringComparison.Ordinal);
+        Assert.Contains("RVIDEO_PROJECT_NOT_FOUND", recovery, StringComparison.Ordinal);
+        Assert.Contains("RVIDEO_PROJECT_OWNERSHIP_MISMATCH", recovery, StringComparison.Ordinal);
+        Assert.Contains("RVIDEO_PROJECT_IS_NOT_PROMPT_WORKSPACE", recovery, StringComparison.Ordinal);
+        Assert.Contains("if (project.CoreJobId is Guid existingJobId)", recovery, StringComparison.Ordinal);
+        Assert.Contains("INSERT INTO render.render_jobs", recovery, StringComparison.Ordinal);
+        Assert.Contains("operationType = service.ServiceType", recovery, StringComparison.Ordinal);
+        Assert.Contains("status, current_step", recovery, StringComparison.Ordinal);
+        Assert.Contains("'draft', 'info'", recovery, StringComparison.Ordinal);
+        Assert.Contains("point_status", recovery, StringComparison.Ordinal);
+        Assert.Contains("'not_required'", recovery, StringComparison.Ordinal);
+        Assert.Contains("UPDATE video_render.video_projects SET core_job_id", recovery, StringComparison.Ordinal);
+        Assert.Contains("core_job_id IS NULL", recovery, StringComparison.Ordinal);
+        Assert.DoesNotContain("video_project_scenes", recovery, StringComparison.Ordinal);
+        Assert.DoesNotContain("scene_image", recovery, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Enqueue", recovery, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Provider", recovery, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Billing", recovery, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void OrphanRecoveryHasExplicitManualEndpointAndDoesNotRunAtStartup()
+    {
+        var endpoint = ReadSource("TodoX.Web", "Services", "VideoRender", "RVideoEndpoints.cs");
+        var program = ReadSource("TodoX.Web", "Program.cs");
+
+        Assert.Contains("recover-orphan", endpoint, StringComparison.Ordinal);
+        Assert.Contains("RecoverOrphanPromptWorkspaceAsync", endpoint, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecoverOrphanPromptWorkspaceAsync", program, StringComparison.Ordinal);
+    }
+
     private static string Extract(string source, string startMarker, string endMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);
