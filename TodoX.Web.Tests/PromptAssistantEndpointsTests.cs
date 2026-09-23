@@ -7,16 +7,36 @@ namespace TodoX.Web.Tests;
 public sealed class PromptAssistantEndpointsTests
 {
     [Fact]
-    public void BuildAgentInputUsesPhase21DefaultsAndIncludesVideoConstraints()
+    public void BuildAgentInputProvidedContentPreservesSourceAndLeavesScenePlanningToAgent()
     {
-        var request = new PromptAssistantGenerateRequest(Guid.NewGuid(), "  Create a school uniform video.  ");
+        const string source = "  First source idea, then its consequence.\nKeep this wording.  ";
+        var request = new PromptAssistantGenerateRequest(Guid.NewGuid(), source);
 
         var input = PromptAssistantEndpoints.BuildAgentInput(request);
 
-        Assert.Contains("Create a school uniform video.", input, StringComparison.Ordinal);
-        Assert.Contains("Video duration: 30 seconds", input, StringComparison.Ordinal);
-        Assert.Contains("Scene count: 7", input, StringComparison.Ordinal);
-        Assert.Contains("Return only final TodoX prompt JSON.", input, StringComparison.Ordinal);
+        Assert.Contains(source, input, StringComparison.Ordinal);
+        Assert.Contains("Do not rewrite, paraphrase, omit, or add source narration.", input, StringComparison.Ordinal);
+        Assert.Contains("punctuation", input, StringComparison.Ordinal);
+        Assert.Contains("semantic boundaries", input, StringComparison.Ordinal);
+        Assert.Contains("Decide the scene count yourself", input, StringComparison.Ordinal);
+        Assert.Contains("integer from 4 through 8", input, StringComparison.Ordinal);
+        Assert.Contains("1.0 through 1.2", input, StringComparison.Ordinal);
+        Assert.DoesNotContain("Scene count: 7", input, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildAgentInputCreativeModeUsesOnlyTheRequestedTargetDuration()
+    {
+        var request = new PromptAssistantGenerateRequest(
+            Guid.NewGuid(), "A video about patience", Duration: 30, CreativeMode: true);
+
+        var input = PromptAssistantEndpoints.BuildAgentInput(request);
+
+        Assert.Contains("CONTENT MODE: CREATIVE", input, StringComparison.Ordinal);
+        Assert.Contains("target video duration of 30 seconds", input, StringComparison.Ordinal);
+        Assert.Contains("You may create a hook", input, StringComparison.Ordinal);
+        Assert.Contains("Choose the scene count yourself", input, StringComparison.Ordinal);
+        Assert.DoesNotContain("Scene count: 7", input, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -46,6 +66,16 @@ public sealed class PromptAssistantEndpointsTests
         Assert.Equal("demo", response.PromptJson?.GetProperty("title").GetString());
         Assert.Equal(30, response.Metrics?.TotalDurationMs);
         Assert.Null(response.ErrorMessage);
+    }
+
+    [Fact]
+    public void GenerateEndpointRejectsCreativeModeWithoutTargetDuration()
+    {
+        var request = new PromptAssistantGenerateRequest(Guid.NewGuid(), "A video idea", CreativeMode: true);
+
+        var error = PromptAssistantEndpoints.ValidateRequest(request);
+
+        Assert.Equal("duration is required in creative mode.", error);
     }
 
     [Fact]

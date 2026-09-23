@@ -186,7 +186,20 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                     throw new ServicePromptProviderException("generated_json_invalid", "The scenes field must be an array.", response.SanitizedRawResponse);
                 ValidateNumericConsistency(validationDocument.RootElement, scenes, response.SanitizedRawResponse);
             }
-            status = ServicePromptGenerationStatus.Success;
+            IReadOnlyList<ServicePromptValidationError> outputErrors = videoProjectId is null
+                ? []
+                : PromptAssistantVideoOutputValidator.Validate(validationDocument.RootElement);
+            if (outputErrors.Count > 0)
+            {
+                errors.AddRange(outputErrors);
+                status = ServicePromptGenerationStatus.ValidationFailed;
+                errorCode = "generated_json_invalid";
+                errorMessage = "Generated video prompt did not pass validation.";
+            }
+            else
+            {
+                status = ServicePromptGenerationStatus.Success;
+            }
         }
         catch (ServicePromptProviderException ex)
         {

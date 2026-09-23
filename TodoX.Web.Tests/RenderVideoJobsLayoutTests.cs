@@ -233,6 +233,22 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void PromptAssistantHasTwoContentModesAndDoesNotRequestFixedSceneCount()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var promptSourceSection = Between(source, "<MudCheckBox T=\"bool\" @bind-Value=\"_aiPromptCreativeMode\"", "MudButton Variant=\"Variant.Outlined\" Color=\"Color.Primary\" OnClick=\"CheckPromptAsync\"");
+        var generateMethod = Between(source, "private async Task GenerateAiPromptAsync", "private Task OnAspectRatioChangedAsync");
+
+        Assert.Contains("@bind-Value=\"_aiPromptCreativeMode\"", promptSourceSection);
+        Assert.Contains("if (_aiPromptCreativeMode)", promptSourceSection);
+        Assert.Contains("@bind-Value=\"_aiDuration\"", promptSourceSection);
+        Assert.DoesNotContain("Scene count", promptSourceSection, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("_aiSceneCount", source, StringComparison.Ordinal);
+        Assert.Contains("CreativeMode: _aiPromptCreativeMode", generateMethod);
+        Assert.Contains("Duration: _aiPromptCreativeMode ? _aiDuration : null", generateMethod);
+    }
+
+    [Fact]
     public void PromptImportPersistsToProjectWorkspaceWithoutEnqueueingRender()
     {
         var source = File.ReadAllText(RazorPath);

@@ -156,20 +156,17 @@ else
                                     <MudText Typo="Typo.subtitle2">Tạo nội dung AI</MudText>
                                     <MudPaper Class="pa-3" Outlined="true" rounded="true">
                                         <MudStack Spacing="2">
+                                            <MudCheckBox T="bool" @bind-Value="_aiPromptCreativeMode" Color="Color.Warning" Label="TodoX sáng tạo nội dung" />
                                             <MudTextField T="string" @bind-Value="_aiPromptInput" Label="Nội dung video mong muốn" Variant="Variant.Outlined" Lines="4" />
-                                            <MudGrid>
-                                                <MudItem xs="12" sm="6">
-                                                    <MudSelect T="int" @bind-Value="_aiDuration" Label="Duration" Variant="Variant.Outlined" Dense="true">
-                                                        @foreach (var duration in AiPromptDurations)
-                                                        {
-                                                            <MudSelectItem T="int" Value="@duration">@duration giây</MudSelectItem>
-                                                        }
-                                                    </MudSelect>
-                                                </MudItem>
-                                                <MudItem xs="12" sm="6">
-                                                    <MudNumericField T="int" @bind-Value="_aiSceneCount" Label="Scene count" Variant="Variant.Outlined" Min="1" Max="100" />
-                                                </MudItem>
-                                            </MudGrid>
+                                            @if (_aiPromptCreativeMode)
+                                            {
+                                                <MudSelect T="int" @bind-Value="_aiDuration" Label="Thời lượng mục tiêu" Variant="Variant.Outlined" Dense="true">
+                                                    @foreach (var duration in AiPromptDurations)
+                                                    {
+                                                        <MudSelectItem T="int" Value="@duration">@duration giây</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                            }
                                             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="GenerateAiPromptAsync" Disabled="@(_aiGenerating || string.IsNullOrWhiteSpace(_aiPromptInput))">
                                                 @(_aiGenerating ? "Đang tạo prompt..." : "Tạo Prompt AI")
                                             </MudButton>
@@ -795,7 +792,7 @@ else
     private string _prompt = string.Empty;
     private string _aiPromptInput = string.Empty;
     private int _aiDuration = 30;
-    private int _aiSceneCount = 7;
+    private bool _aiPromptCreativeMode;
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
     private IReadOnlyList<ServicePromptGenerationDto> _promptHistory = [];
@@ -2791,7 +2788,12 @@ else
             await EnsurePromptWorkspaceProjectAsync();
             var result = await PromptAssistant.GeneratePromptAsync(
                 serviceId,
-                PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(serviceId, _aiPromptInput, _aiDuration, _aiSceneCount)),
+                PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(
+                    ServiceId: serviceId,
+                    UserInput: _aiPromptInput,
+                    Duration: _aiPromptCreativeMode ? _aiDuration : null,
+                    VideoProjectId: _projectId,
+                    CreativeMode: _aiPromptCreativeMode)),
                 AuthState.CurrentUser,
                 videoProjectId: _projectId);
 
