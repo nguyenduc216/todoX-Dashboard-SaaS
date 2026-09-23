@@ -211,9 +211,22 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains("videoProjectId: _projectId", generateMethod);
         Assert.Contains("EnsurePromptWorkspaceProjectAsync", generateMethod);
         Assert.Contains("PromptAssistantGeneratedDialog", generateMethod);
-        Assert.DoesNotContain("RVideoJobs.CreateDraftAsync", generateMethod);
         Assert.DoesNotContain("CreateQueued", generateMethod);
         Assert.DoesNotContain("Enqueue", generateMethod);
+    }
+
+    [Fact]
+    public void PromptWorkspaceCreationUsesCanonicalRVideoJobOwnershipFlow()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var workspaceMethod = Between(source, "private async Task EnsurePromptWorkspaceProjectAsync", "private Task OnAspectRatioChangedAsync");
+
+        Assert.Contains("RVideoJobs.CreateDraftAsync", workspaceMethod);
+        Assert.Contains("LogicalRequestId = _promptWorkspaceLogicalRequestId", workspaceMethod);
+        Assert.Contains("Settings = BuildRVideoSettingsRequest()", workspaceMethod);
+        Assert.Contains("_jobId = created.JobId", workspaceMethod);
+        Assert.Contains("_projectId = created.ProjectId", workspaceMethod);
+        Assert.DoesNotContain("VideoRepo.CreateProjectAsync", workspaceMethod);
     }
 
     [Fact]

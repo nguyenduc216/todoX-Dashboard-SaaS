@@ -92,6 +92,41 @@ public sealed class RenderJobCoreServiceClaimRegressionTests
         Assert.DoesNotContain("AND status NOT IN ('completed','failed','cancelled')", sync, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RVideoDraftCreationPersistsCoreJobAndProjectOwnershipAtomically()
+    {
+        var source = ReadSource("TodoX.Web", "Services", "VideoRender", "RVideoJobService.cs");
+        var create = Extract(source, "public async Task<RVideoJobCreatedResult> CreateDraftAsync", "public async Task<RVideoJobView?> GetByJobIdAsync");
+
+        Assert.Contains("using var tx = conn.BeginTransaction()", create, StringComparison.Ordinal);
+        Assert.Contains("INSERT INTO render.render_jobs", create, StringComparison.Ordinal);
+        Assert.Contains("operation_type", create, StringComparison.Ordinal);
+        Assert.Contains("operationType = service.ServiceType", create, StringComparison.Ordinal);
+        Assert.Contains("INSERT INTO video_render.video_projects", create, StringComparison.Ordinal);
+        Assert.Contains("core_job_id", create, StringComparison.Ordinal);
+        Assert.Contains("@jobId", create, StringComparison.Ordinal);
+        Assert.Contains("tenant = _tenant.TenantId", create, StringComparison.Ordinal);
+        Assert.Contains("customer = user.CustomerId", create, StringComparison.Ordinal);
+        Assert.Contains("user = user.UserId", create, StringComparison.Ordinal);
+        Assert.Contains("tx.Commit()", create, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RVideoDraftCreationReusesLogicalRequestInsteadOfCreatingDuplicateCoreJob()
+    {
+        var source = ReadSource("TodoX.Web", "Services", "VideoRender", "RVideoJobService.cs");
+        var create = Extract(source, "public async Task<RVideoJobCreatedResult> CreateDraftAsync", "public async Task<RVideoJobView?> GetByJobIdAsync");
+
+        Assert.Contains("pg_advisory_xact_lock", create, StringComparison.Ordinal);
+        Assert.Contains("j.logical_request_id=@logicalRequestId", create, StringComparison.Ordinal);
+        Assert.Contains("JOIN video_render.video_projects p", create, StringComparison.Ordinal);
+        Assert.Contains("p.core_job_id=j.id", create, StringComparison.Ordinal);
+        Assert.Contains("return new(existing.JobId, existing.ProjectId", create, StringComparison.Ordinal);
+        Assert.True(
+            create.IndexOf("return new(existing.JobId, existing.ProjectId", StringComparison.Ordinal)
+            < create.IndexOf("var jobId = Guid.NewGuid()", StringComparison.Ordinal));
+    }
+
     private static string Extract(string source, string startMarker, string endMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);

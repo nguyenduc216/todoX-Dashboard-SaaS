@@ -766,6 +766,7 @@ else
     private bool _projectDialogOpen;
     private long? _projectId;
     private Guid? _jobId;
+    private readonly string _promptWorkspaceLogicalRequestId = $"prompt-workspace-{Guid.NewGuid():N}";
     private VideoProjectDto? _project;
     private List<RenderJobDto> _jobs = new();
     private readonly List<ActiveCharacterDto> _characters = new();
@@ -2857,26 +2858,33 @@ else
             throw new InvalidOperationException("User session is required to create a prompt workspace.");
         }
 
-        var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
+        if (ServiceId is not Guid serviceId || serviceId == Guid.Empty || string.IsNullOrWhiteSpace(ServiceCode))
         {
+            throw new InvalidOperationException("Thiếu thông tin dịch vụ RVIDEO.");
+        }
+
+        var created = await RVideoJobs.CreateDraftAsync(new RVideoJobCreateRequest
+        {
+            LogicalRequestId = _promptWorkspaceLogicalRequestId,
+            ServiceId = serviceId,
+            ServiceCode = ServiceCode,
+            Title = "Prompt workspace",
             Prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish),
             AspectRatio = _aspectRatio,
-            CharacterId = _selectedCharacter?.Id,
+            Resolution = _resolution,
             SourceImageUrl = ResolveDirectSourceImageUrl(),
             TotalSeconds = Math.Max(1, _totalSeconds),
             SceneSeconds = Math.Max(1, _sceneSeconds),
             ThinkScenes = false,
-            Title = "Prompt workspace",
-            CreateEmptyProject = true
-        }, user.UserId, user.CustomerId,
+            Settings = BuildRVideoSettingsRequest()
+        }, user,
             VideoOptions.CurrentValue.StorageRoot,
             VideoOptions.CurrentValue.PublicBase,
             DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
 
-        _projectId = result.Id;
-        _project = result;
-        await RVideoSettings.SaveAsync(result.Id, BuildRVideoSettingsRequest());
-        await ProjectCreated.InvokeAsync(result.Id);
+        _jobId = created.JobId;
+        _projectId = created.ProjectId;
+        await ProjectCreated.InvokeAsync(created.ProjectId);
         await LoadPromptWorkspaceAsync();
     }
 

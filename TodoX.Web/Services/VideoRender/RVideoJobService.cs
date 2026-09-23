@@ -32,6 +32,7 @@ public sealed class RVideoJobUpdateRequest
 
 public sealed class RVideoJobCreateRequest
 {
+    public string? LogicalRequestId { get; init; }
     public Guid ServiceId { get; init; }
     public string ServiceCode { get; init; } = string.Empty;
     public string Title { get; init; } = "RVIDEO";
@@ -86,7 +87,47 @@ public sealed class RVideoJobService : IRVideoJobService
 
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
-        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));", new { lockName = $"rvideo-draft:{_tenant.TenantId}:{user.CustomerId}:{request.ServiceId}" }, tx);
+        var logicalRequestId = string.IsNullOrWhiteSpace(request.LogicalRequestId)
+            ? null
+            : request.LogicalRequestId.Trim();
+        var lockName = logicalRequestId is null
+            ? $"rvideo-draft:{_tenant.TenantId}:{user.CustomerId}:{request.ServiceId}"
+            : $"rvideo-draft:{_tenant.TenantId}:{user.CustomerId}:{request.ServiceId}:{logicalRequestId}";
+        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));", new { lockName }, tx);
+
+        if (logicalRequestId is not null)
+        {
+            var existing = await conn.QuerySingleOrDefaultAsync<ExistingDraftRow>(
+                """
+                SELECT j.id AS JobId, p.id AS ProjectId, j.status AS Status
+                  FROM render.render_jobs j
+                  JOIN video_render.video_projects p
+                    ON p.core_job_id=j.id AND p.tenant_id=j.tenant_id
+                 WHERE j.tenant_id=@tenant
+                   AND j.customer_id=@customer
+                   AND j.user_id IS NOT DISTINCT FROM @user
+                   AND j.service_id=@serviceId
+                   AND j.job_type=@jobType
+                   AND j.operation_type=@operationType
+                   AND j.logical_request_id=@logicalRequestId
+                 LIMIT 1;
+                """,
+                new
+                {
+                    tenant = _tenant.TenantId,
+                    customer = user.CustomerId,
+                    user = user.UserId,
+                    serviceId = service.Id,
+                    jobType = RenderJobTypes.CoreService,
+                    operationType = service.ServiceType,
+                    logicalRequestId
+                }, tx);
+            if (existing is not null)
+            {
+                tx.Commit();
+                return new(existing.JobId, existing.ProjectId, existing.Status, $"/jobs/rvideo/{existing.JobId}");
+            }
+        }
 
         var jobId = Guid.NewGuid();
         var snapshot = JsonSerializer.Serialize(new
@@ -110,10 +151,10 @@ public sealed class RVideoJobService : IRVideoJobService
         }, JsonOptions);
         await conn.ExecuteAsync("""
             INSERT INTO render.render_jobs
-                (id, tenant_id, customer_id, user_id, service_id, job_type, operation_type, source_type,
+                (id, tenant_id, customer_id, user_id, service_id, logical_request_id, job_type, operation_type, source_type,
                  status, current_step, progress_percent, priority, input_json, prompt_json, reference_json,
                  output_json, options, point_cost_estimate, point_cost_charged, point_status, max_attempts, queued_at, created_at)
-            VALUES (@jobId,@tenant,@customer,@user,@serviceId,@jobType,@operationType,'dashboard','draft','info',0,100,
+            VALUES (@jobId,@tenant,@customer,@user,@serviceId,@logicalRequestId,@jobType,@operationType,'dashboard','draft','info',0,100,
                     CAST(@snapshot AS jsonb),CAST(@prompt AS jsonb),'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,0,0,'not_required',1,now(),now());
             """, new
         {
@@ -122,6 +163,7 @@ public sealed class RVideoJobService : IRVideoJobService
             customer = user.CustomerId,
             user = user.UserId,
             serviceId = service.Id,
+            logicalRequestId,
             jobType = RenderJobTypes.CoreService,
             operationType = service.ServiceType,
             snapshot,
@@ -309,6 +351,8 @@ public sealed class RVideoJobService : IRVideoJobService
 
     private sealed class CoreJobRow : CoreRowMapper.Row
     { public Guid? ServiceId { get; set; } public Guid? CustomerId { get; set; } public Guid? UserId { get; set; } public string ServiceCode { get; set; } = string.Empty; }
+    private sealed class ExistingDraftRow
+    { public Guid JobId { get; set; } public long ProjectId { get; set; } public string Status { get; set; } = RenderJobStatuses.Draft; }
     private static class CoreRowMapper
     {
         internal abstract class Row { public Guid Id { get; set; } public string Status { get; set; } = "draft"; public string SourceType { get; set; } = "dashboard"; public string? OperationType { get; set; } public string? LogicalRequestId { get; set; } public string? CurrentStep { get; set; } public int ProgressPercent { get; set; } public decimal PointCostEstimate { get; set; } public decimal PointCostCharged { get; set; } public string PointStatus { get; set; } = "not_required"; public string InputJson { get; set; } = "{}"; public string OutputJson { get; set; } = "[]"; public string? ErrorCode { get; set; } public string? ErrorMessage { get; set; } public DateTime CreatedAt { get; set; } public DateTime? UpdatedAt { get; set; } public DateTime? CompletedAt { get; set; } }
