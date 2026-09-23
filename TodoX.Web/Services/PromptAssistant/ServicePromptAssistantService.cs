@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
+using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Services.PromptAssistant;
 
@@ -38,6 +39,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
     private readonly ServicePromptCompiler _compiler;
     private readonly ServicePromptOutputParser _parser;
     private readonly ServicePromptStructureValidator _validator;
+    private readonly RVideoJobSettingsRepository _videoSettings;
     private readonly ServicePromptAssistantOptions _options;
 
     public ServicePromptAssistantService(
@@ -46,6 +48,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         ServicePromptCompiler compiler,
         ServicePromptOutputParser parser,
         ServicePromptStructureValidator validator,
+        RVideoJobSettingsRepository videoSettings,
         IOptions<ServicePromptAssistantOptions> options)
     {
         _repository = repository;
@@ -53,6 +56,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         _compiler = compiler;
         _parser = parser;
         _validator = validator;
+        _videoSettings = videoSettings;
         _options = options.Value;
     }
 
@@ -169,11 +173,18 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             generatedJson = parsed.RootElement.GetRawText();
             if (parsed.RootElement.ValueKind != JsonValueKind.Object)
                 throw new ServicePromptProviderException("generated_json_invalid", "Final prompt must be a JSON object.", response.SanitizedRawResponse);
-            if (parsed.RootElement.TryGetProperty("scenes", out var scenes))
+            if (videoProjectId is long projectId)
+            {
+                generatedJson = VideoPromptReferenceEnricher.Enrich(
+                    generatedJson,
+                    await _videoSettings.GetAsync(projectId, ct));
+            }
+            using var validationDocument = JsonDocument.Parse(generatedJson);
+            if (validationDocument.RootElement.TryGetProperty("scenes", out var scenes))
             {
                 if (scenes.ValueKind != JsonValueKind.Array)
                     throw new ServicePromptProviderException("generated_json_invalid", "The scenes field must be an array.", response.SanitizedRawResponse);
-                ValidateNumericConsistency(parsed.RootElement, scenes, response.SanitizedRawResponse);
+                ValidateNumericConsistency(validationDocument.RootElement, scenes, response.SanitizedRawResponse);
             }
             status = ServicePromptGenerationStatus.Success;
         }
@@ -314,12 +325,16 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             throw new ServicePromptDomainException("generated_json_invalid", "Prompt JSON must be an object.");
 
         var assistant = await _repository.GetOrCreateAssistantAsync(serviceId, _options, ct);
+        var videoSettings = videoProjectId is long projectId
+            ? await _videoSettings.GetAsync(projectId, ct)
+            : null;
+        var finalJson = VideoPromptReferenceEnricher.Enrich(document.RootElement.GetRawText(), videoSettings);
         var generationId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var result = new ServicePromptGenerationResult
         {
             GenerationId = generationId,
-            GeneratedJson = document.RootElement.GetRawText(),
+            GeneratedJson = finalJson,
             ValidationPassed = true,
             ProviderCode = "IMPORT",
             ModelCode = string.Empty,

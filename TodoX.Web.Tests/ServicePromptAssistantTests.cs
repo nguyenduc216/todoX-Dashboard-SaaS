@@ -2,8 +2,10 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.PromptAssistant;
+using TodoX.Web.Services.VideoRender;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -143,6 +145,112 @@ public sealed class ServicePromptAssistantTests
         Assert.Throws<ArgumentException>(() => ServicePromptGenerationPersistenceContract.Validate(malformedSnapshot));
         Assert.Throws<ArgumentException>(() => ServicePromptGenerationPersistenceContract.Validate(malformedErrors));
         Assert.Throws<ArgumentException>(() => ServicePromptGenerationPersistenceContract.Validate(malformedGenerated));
+    }
+
+    [Fact]
+    public void ReferenceEnrichmentLeavesPromptUnchangedWithoutUsableReference()
+    {
+        const string prompt = """{"scenes":[{"image_prompt":"A person in a store."}]}""";
+
+        var noCharacterResult = VideoPromptReferenceEnricher.Enrich(prompt, new RVideoJobSettingsDto
+        {
+            SkipCharacter = true,
+            CharacterMode = RVideoCharacterModes.None
+        });
+        var missingUploadResult = VideoPromptReferenceEnricher.Enrich(prompt, new RVideoJobSettingsDto
+        {
+            CharacterMode = RVideoCharacterModes.Upload
+        });
+
+        Assert.Equal(prompt, noCharacterResult);
+        Assert.Equal(prompt, missingUploadResult);
+    }
+
+    [Fact]
+    public void ReferenceEnrichmentAddsInstructionToEverySceneOnlyInNormalReferenceMode()
+    {
+        const string prompt = """
+            {"title":"Demo","scenes":[
+              {"scene_index":1,"image_prompt":"A person in a store.","video_prompt":"Walk forward."},
+              {"scene_index":2,"image_prompt":"A person outside.","video_prompt":"Turn around."}
+            ]}
+            """;
+        var settings = new RVideoJobSettingsDto
+        {
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """{"fileUrl":"https://media.example/reference.png"}""",
+            UseReferenceImageForAllScenes = false
+        };
+
+        var result = VideoPromptReferenceEnricher.Enrich(prompt, settings);
+        using var document = JsonDocument.Parse(result);
+        var scenes = document.RootElement.GetProperty("scenes").EnumerateArray().ToArray();
+
+        Assert.All(scenes, scene => Assert.Contains("Use the provided reference image", scene.GetProperty("image_prompt").GetString()));
+        Assert.Equal("Walk forward.", scenes[0].GetProperty("video_prompt").GetString());
+        Assert.Equal(1, scenes[0].GetProperty("scene_index").GetInt32());
+        Assert.Equal(result, VideoPromptReferenceEnricher.Enrich(result, settings));
+    }
+
+    [Fact]
+    public void ReferenceEnrichmentDoesNotAddAiImageInstructionForSharedReferenceMode()
+    {
+        const string prompt = """{"scenes":[{"image_prompt":"A person in a store."}]}""";
+        var settings = new RVideoJobSettingsDto
+        {
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """{"storageKey":"uploads/reference.png"}""",
+            UseReferenceImageForAllScenes = true
+        };
+
+        Assert.Equal(prompt, VideoPromptReferenceEnricher.Enrich(prompt, settings));
+    }
+
+    [Theory]
+    [InlineData("Use the reference image to preserve the character identity.")]
+    [InlineData("MAIN CHARACTER IDENTITY is defined by the attached reference image.")]
+    public void ReferenceEnrichmentPreservesExistingEquivalentInstruction(string imagePrompt)
+    {
+        var prompt = JsonSerializer.Serialize(new
+        {
+            scenes = new[] { new { image_prompt = imagePrompt } }
+        });
+        var settings = new RVideoJobSettingsDto
+        {
+            CharacterMode = RVideoCharacterModes.Library,
+            SelectedCharacterId = 12,
+            CharacterSnapshotJson = """{"masterImageUrl":"https://media.example/reference.png"}"""
+        };
+
+        var result = VideoPromptReferenceEnricher.Enrich(prompt, settings);
+        using var document = JsonDocument.Parse(result);
+
+        Assert.Equal(imagePrompt, document.RootElement.GetProperty("scenes")[0].GetProperty("image_prompt").GetString());
+    }
+
+    [Fact]
+    public void ReferenceEnrichmentPreservesImportedInstructionWithoutDuplication()
+    {
+        const string imagePrompt = """
+            REFERENCE IMAGE:
+            Use the provided reference image as the main character source.
+
+            SCENE:
+            A person in a store.
+            """;
+        var prompt = JsonSerializer.Serialize(new { scenes = new[] { new { image_prompt = imagePrompt } } });
+        var settings = new RVideoJobSettingsDto
+        {
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """{"fileUrl":"https://media.example/reference.png"}"""
+        };
+
+        var result = VideoPromptReferenceEnricher.Enrich(prompt, settings);
+        using var document = JsonDocument.Parse(result);
+        var enriched = document.RootElement.GetProperty("scenes")[0].GetProperty("image_prompt").GetString();
+
+        Assert.Equal(imagePrompt, enriched);
+        Assert.Equal(1, enriched!.Split("REFERENCE IMAGE:", StringSplitOptions.None).Length - 1);
     }
 
     private static ServicePromptGenerationPersistence CreatePersistence(
