@@ -43,6 +43,27 @@ public sealed class AiPricingEngineTests
     }
 
     [Fact]
+    public void FindPrice_UsesModeAgnosticRowWhenRuntimeModeHasNoExactPrice()
+    {
+        var defaultMode = new AiModelPriceDto { Mode = null, Resolution = "720p", DurationSeconds = 10, Ratio = "9:16", Active = true };
+
+        var matched = AiPricingEngine.FindPrice([defaultMode], "normal", "720p", 10, "9:16");
+
+        Assert.Same(defaultMode, matched);
+    }
+
+    [Fact]
+    public void FindPrice_PrefersExactModeOverModeAgnosticRow()
+    {
+        var defaultMode = new AiModelPriceDto { Mode = null, Resolution = "720p", DurationSeconds = 10, Ratio = "9:16", Active = true };
+        var exactMode = new AiModelPriceDto { Mode = "normal", Resolution = "720p", DurationSeconds = 10, Ratio = "9:16", Active = true };
+
+        var matched = AiPricingEngine.FindPrice([defaultMode, exactMode], "normal", "720p", 10, "9:16");
+
+        Assert.Same(exactMode, matched);
+    }
+
+    [Fact]
     public void BuildEstimate_ReturnsPriceNotConfiguredWhenMissing()
     {
         var model = new AiProviderModelListItemDto { Id = 1, ProviderId = 2, DisplayName = "Seedance" };

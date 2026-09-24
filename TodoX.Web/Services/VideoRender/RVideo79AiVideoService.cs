@@ -21,7 +21,7 @@ public static class RVideoVideoModelPolicy
         new(0, ProviderCode, "veo_omni", "flash"),
         new(1, ProviderCode, "veo_3_1", "fast"),
         new(2, ProviderCode, "veo_3_1", "lite"),
-        new(3, ProviderCode, "grok_video_heavy", null)
+        new(3, ProviderCode, "grok_video_heavy", "normal")
     ];
 
     public static RVideoVideoModelPolicyEntry GetInitial() => Models[0];

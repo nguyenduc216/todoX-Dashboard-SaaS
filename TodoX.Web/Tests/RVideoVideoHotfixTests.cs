@@ -27,7 +27,7 @@ public sealed class RVideoVideoHotfixTests
         });
         Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetInitial().Model);
         Assert.Equal("flash", RVideoVideoModelPolicy.GetInitial().Mode);
-        Assert.Null(RVideoVideoModelPolicy.Models[3].Mode);
+        Assert.Equal("normal", RVideoVideoModelPolicy.Models[3].Mode);
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
@@ -317,15 +317,15 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Theory]
-    [InlineData(4, "1080p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new string?[] { "flash", "fast", "lite", null }, new[] { 4, 4, 4, 6 }, new[] { "1080p", "1080p", "1080p", "720p" })]
-    [InlineData(6, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new string?[] { "flash", "fast", "lite", null }, new[] { 6, 6, 6, 6 }, new[] { "720p", "720p", "720p", "720p" })]
-    [InlineData(8, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new string?[] { "flash", "fast", "lite", null }, new[] { 8, 8, 8, 10 }, new[] { "720p", "720p", "720p", "720p" })]
-    [InlineData(10, "1080p", new[] { "veo_omni", "grok_video_heavy" }, new string?[] { "flash", null }, new[] { 10, 10 }, new[] { "1080p", "720p" })]
+    [InlineData(4, "1080p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 4, 4, 4, 6 }, new[] { "1080p", "1080p", "1080p", "720p" })]
+    [InlineData(6, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 6, 6, 6, 6 }, new[] { "720p", "720p", "720p", "720p" })]
+    [InlineData(8, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 8, 8, 8, 10 }, new[] { "720p", "720p", "720p", "720p" })]
+    [InlineData(10, "1080p", new[] { "veo_omni", "grok_video_heavy" }, new[] { "flash", "normal" }, new[] { 10, 10 }, new[] { "1080p", "720p" })]
     public void ResolveFallbackCandidatesUsesPolicyOrderAndCatalogCapabilities(
         int duration,
         string resolution,
         string[] expectedModels,
-        string?[] expectedModes,
+        string[] expectedModes,
         int[] expectedDurations,
         string[] expectedResolutions)
     {
@@ -707,7 +707,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public void ConfirmedNoTaskLiteFailureFallsBackToGrokWithoutMode()
+    public void ConfirmedNoTaskLiteFailureFallsBackToGrokNormalMode()
     {
         var resolved = ResolveFallbackCandidateObjectsForTest(8, "720p");
         var liteIndex = resolved.Candidates.FindIndex(candidate =>
@@ -726,7 +726,7 @@ public sealed class RVideoVideoHotfixTests
         Assert.NotNull(next);
         var nextPolicy = GetProperty(next!, "Policy")!;
         Assert.Equal("grok_video_heavy", (string)GetProperty(nextPolicy, "Model")!);
-        Assert.Null((string?)GetProperty(nextPolicy, "Mode"));
+        Assert.Equal("normal", (string?)GetProperty(nextPolicy, "Mode"));
         Assert.Equal(10, (int)GetProperty(next!, "ProviderDurationSeconds")!);
     }
 
@@ -993,7 +993,7 @@ public sealed class RVideoVideoHotfixTests
     {
         var grok = Assert.Single(ResolveFallbackCandidatesForTest(sceneDuration, "720p"), candidate => candidate.Model == "grok_video_heavy");
 
-        Assert.Null(grok.Mode);
+        Assert.Equal("normal", grok.Mode);
         Assert.Equal(expectedProviderDuration, grok.ProviderDuration);
     }
 
@@ -1003,6 +1003,51 @@ public sealed class RVideoVideoHotfixTests
         var resolved = ResolveFallbackCandidatesForTest(16, "720p");
 
         Assert.DoesNotContain(resolved, candidate => candidate.Model == "grok_video_heavy");
+    }
+
+    [Fact]
+    public void GrokPolicyNormalModeAllowsEmptyCatalogModes()
+    {
+        var grok = Assert.Single(ResolveFallbackCandidatesForTest(8, "720p"), candidate => candidate.Model == "grok_video_heavy");
+
+        Assert.Equal("normal", grok.Mode);
+        Assert.Equal(10, grok.ProviderDuration);
+    }
+
+    [Fact]
+    public void GrokPolicyNormalModeRejectsExplicitIncompatibleCatalogMode()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidateResolution", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "grok_video_heavy",
+                MediaType = "video",
+                Enabled = true,
+                SupportedModes = ["custom"],
+                SupportedDurations = [6, 10, 12, 15],
+                SupportedResolutions = ["720p", "1080p"]
+            }
+        };
+
+        var resolution = method!.Invoke(null, new object[]
+        {
+            new SceneVideoRenderWorkItemInput { ProviderCode = "79ai", DurationSeconds = 8, Resolution = "720p" },
+            catalog
+        })!;
+        var candidates = ((System.Collections.IEnumerable)resolution.GetType().GetProperty("Candidates")!.GetValue(resolution)!)
+            .Cast<object>();
+        var diagnostics = ((System.Collections.IEnumerable)resolution.GetType().GetProperty("Diagnostics")!.GetValue(resolution)!)
+            .Cast<object>();
+        var grok = Assert.Single(diagnostics, diagnostic => (string)GetProperty(diagnostic, "Model")! == "grok_video_heavy");
+
+        Assert.Empty(candidates);
+        Assert.Equal("normal", GetProperty(grok, "Mode"));
+        Assert.Equal("catalog_mode_not_supported", GetProperty(grok, "InvalidReason"));
+        Assert.False((bool)GetProperty(grok, "Valid")!);
     }
 
     [Fact]
@@ -1228,7 +1273,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public async Task RVideo79AiGrokPayloadOmitsOptionalModeAndUsesProviderDuration()
+    public async Task RVideo79AiGrokPayloadSendsNormalModeAndUsesProviderDuration()
     {
         var client = new CapturingAi79TaskClient();
         var service = Create79AiVideoService(client);
@@ -1246,7 +1291,7 @@ public sealed class RVideoVideoHotfixTests
         Assert.NotNull(client.LastSubmit);
         Assert.Equal("grok_video_heavy", client.LastSubmit!.Model);
         Assert.Equal("10", client.LastSubmit.Options["duration"]);
-        Assert.False(client.LastSubmit.Options.ContainsKey("mode"));
+        Assert.Equal("normal", client.LastSubmit.Options["mode"]);
     }
 
     [Fact]

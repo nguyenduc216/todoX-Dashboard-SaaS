@@ -39,12 +39,25 @@ public static class AiPricingEngine
         var normalizedMode = Normalize(mode);
         var normalizedResolution = Normalize(resolution);
         var normalizedRatio = Normalize(ratio);
-        return prices.FirstOrDefault(price =>
+        return FindBestModeMatch(prices, normalizedMode, normalizedResolution, durationSeconds, normalizedRatio)
+               ?? FindBestModeMatch(prices, normalizedMode, normalizedResolution, null, normalizedRatio);
+    }
+
+    private static AiModelPriceDto? FindBestModeMatch(
+        IEnumerable<AiModelPriceDto> prices,
+        string? normalizedMode,
+        string? normalizedResolution,
+        int? durationSeconds,
+        string? normalizedRatio)
+    {
+        var candidates = prices.Where(price =>
             price.Active &&
-            EqualsOrNull(price.Mode, normalizedMode) &&
             EqualsOrNull(price.Resolution, normalizedResolution) &&
-            price.DurationSeconds is null &&
+            price.DurationSeconds == durationSeconds &&
             EqualsOrNull(price.Ratio, normalizedRatio));
+
+        return candidates.FirstOrDefault(price => EqualsOrNull(price.Mode, normalizedMode))
+               ?? candidates.FirstOrDefault(price => string.IsNullOrWhiteSpace(price.Mode));
     }
 
     public static decimal CalculateInternalUnitCostPoints(decimal providerPrice, decimal providerCreditPerInternalPoint)
