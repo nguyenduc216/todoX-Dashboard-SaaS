@@ -666,6 +666,70 @@ public sealed class RVideoVideoHotfixTests
         Assert.True(ShouldFallbackForTest("KNOWN_NO_RESOURCES"));
     }
 
+    [Fact]
+    public void RVideoGenericProviderErrorWithZeroTasksIsAConfirmedNoTaskFallbackFailure()
+    {
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit failed: provider service is unavailable.",
+            """{"countTasks":"0","domain":"79ai.net","error":"PROVIDER_UNAVAILABLE","message":"Provider service is unavailable. Please try again later."}""",
+            HttpStatusCode.OK,
+            "provider_error",
+            sanitizedRequestMetadataJson: """{"model":"veo_3_1","mode":"lite"}""");
+
+        Assert.True(IsDefinitelyNotSubmittedForTest(exception));
+        Assert.True(IsDefinitivelyRejectedSubmitForTest(exception));
+        Assert.Equal("PROVIDER_REJECTED_NO_TASK", ClassifyRVideoSubmitFailureForTest(exception));
+        Assert.True(ShouldFallbackForTest("PROVIDER_REJECTED_NO_TASK"));
+    }
+
+    [Theory]
+    [InlineData("""{"countTasks":"0","error":"PROVIDER_UNAVAILABLE","task_id":"task-accepted"}""")]
+    [InlineData("""{"countTasks":"0","error":"PROVIDER_UNAVAILABLE","id_base":"video-accepted"}""")]
+    [InlineData("""{"countTasks":"1","error":"PROVIDER_UNAVAILABLE"}""")]
+    [InlineData("""{"error":"PROVIDER_UNAVAILABLE"}""")]
+    [InlineData("""{"countTasks":"0","error":""}""")]
+    [InlineData("""{"countTasks":"0","error":false}""")]
+    [InlineData("""{"countTasks":"0","error":0}""")]
+    [InlineData("""{"countTasks":"0","code":200}""")]
+    [InlineData("not-json")]
+    [InlineData("")]
+    public void RVideoGenericProviderErrorWithoutConfirmedNoTaskEvidenceRemainsAmbiguous(string responseJson)
+    {
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit outcome is not proven safe to fallback.",
+            responseJson,
+            HttpStatusCode.OK,
+            "provider_error",
+            sanitizedRequestMetadataJson: """{"model":"veo_3_1","mode":"lite"}""");
+
+        Assert.False(IsDefinitelyNotSubmittedForTest(exception));
+        Assert.False(IsDefinitivelyRejectedSubmitForTest(exception));
+    }
+
+    [Fact]
+    public void ConfirmedNoTaskLiteFailureFallsBackToGrokWithoutMode()
+    {
+        var resolved = ResolveFallbackCandidateObjectsForTest(8, "720p");
+        var liteIndex = resolved.Candidates.FindIndex(candidate =>
+        {
+            var policy = GetProperty(candidate, "Policy")!;
+            return (string)GetProperty(policy, "Model")! == "veo_3_1"
+                   && (string?)GetProperty(policy, "Mode") == "lite";
+        });
+        var next = ResolveNextCandidateAfterFailureForTest(
+            resolved.Candidates[liteIndex],
+            "PROVIDER_REJECTED_NO_TASK",
+            liteIndex,
+            resolved.Candidates,
+            resolved.Catalog);
+
+        Assert.NotNull(next);
+        var nextPolicy = GetProperty(next!, "Policy")!;
+        Assert.Equal("grok_video_heavy", (string)GetProperty(nextPolicy, "Model")!);
+        Assert.Null((string?)GetProperty(nextPolicy, "Mode"));
+        Assert.Equal(10, (int)GetProperty(next!, "ProviderDurationSeconds")!);
+    }
+
     [Theory]
     [InlineData("""{"countTasks":"1","error":"NOT_RESOURCES"}""")]
     [InlineData("""{"countTasks":"0","error":"NOT_RESOURCES","task_id":"task-accepted"}""")]
@@ -2540,6 +2604,14 @@ public sealed class RVideoVideoHotfixTests
     {
         var method = typeof(SceneVideoWorkerHandler).GetMethod(
             "IsDefinitivelyRejectedSubmit",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        return (bool)method.Invoke(null, new object?[] { exception })!;
+    }
+
+    private static bool IsDefinitelyNotSubmittedForTest(Ai79TaskSubmitException exception)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod(
+            "IsDefinitelyNotSubmitted",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         return (bool)method.Invoke(null, new object?[] { exception })!;
     }

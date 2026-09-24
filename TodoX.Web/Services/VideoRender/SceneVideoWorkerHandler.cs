@@ -166,6 +166,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int DefaultMaxReconciliationRetries = 3;
     private const string KnownNoResourcesFailureClassification = "KNOWN_NO_RESOURCES";
+    private const string ProviderRejectedNoTaskFailureClassification = "PROVIDER_REJECTED_NO_TASK";
     private const string DurationRejectedFailureClassification = "PROVIDER_DURATION_REJECTED";
     private const string PollResourceUnavailableNoProgressFailureClassification = "POLL_RESOURCE_UNAVAILABLE_NO_PROGRESS";
 
@@ -921,7 +922,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                                 errorMessage = ai79Exception.ErrorMessage,
                                 httpStatusCode = (int?)ai79Exception.HttpStatusCode,
                                 sanitizedResponseJson = SanitizeDiagnosticJson(ai79Exception.SanitizedResponseJson),
-                                sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ai79Exception.SanitizedRequestMetadataJson)
+                                sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ai79Exception.SanitizedRequestMetadataJson),
+                                submitOutcome = "definitely_not_submitted",
+                                countTasks = 0,
+                                hasAcceptedTaskId = false,
+                                fallbackAvailable = nextCandidate is not null,
+                                nextProvider = nextCandidate?.Policy.ProviderCode,
+                                nextModel = nextCandidate?.Policy.Model,
+                                nextMode = nextCandidate?.Policy.Mode
                             }, CancellationToken.None);
                         await _versions.FailSceneVideoVersionAsync(
                             version.Id,
@@ -1028,7 +1036,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId,
                             providerTaskId = (string?)null,
-                            errorCode = ex.ErrorCode
+                            errorCode = ex.ErrorCode,
+                            submitOutcome = "ambiguous"
                         }, CancellationToken.None);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PENDING_RECONCILIATION", "warning",
                         "Scene-video submit is pending reconciliation; no duplicate provider submit will be attempted.",
@@ -3045,6 +3054,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             return true;
         }
 
+        if (IsDefinitelyNotSubmitted(exception))
+        {
+            return true;
+        }
+
         var statusCode = (int)exception.HttpStatusCode.Value;
         if (statusCode == 429 || statusCode >= 500)
         {
@@ -3060,7 +3074,31 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ? KnownNoResourcesFailureClassification
             : IsDurationRejectedError(exception)
                 ? DurationRejectedFailureClassification
-            : ClassifyProviderFailure(exception.ErrorCode, exception.ErrorMessage, exception.HttpStatusCode);
+                : IsDefinitelyNotSubmitted(exception)
+                    ? ProviderRejectedNoTaskFailureClassification
+                    : ClassifyProviderFailure(exception.ErrorCode, exception.ErrorMessage, exception.HttpStatusCode);
+
+    private static bool IsDefinitelyNotSubmitted(Ai79TaskSubmitException exception)
+    {
+        if (exception.HttpStatusCode is not { } statusCode
+            || (int)statusCode < 200
+            || (int)statusCode >= 300
+            || HasAcceptedTaskId(exception.SanitizedResponseJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(exception.SanitizedResponseJson);
+            return HasZeroCountTasks(document.RootElement)
+                   && HasExplicitProviderRejection(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     private static bool IsDurationRejectedError(Ai79TaskSubmitException exception)
     {
@@ -3210,6 +3248,108 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                || text.Contains("billing", StringComparison.Ordinal);
     }
 
+    private static bool HasExplicitProviderRejection(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if ((property.Name.Equals("error", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("errors", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("error_code", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("errorCode", StringComparison.OrdinalIgnoreCase))
+                    && IsExplicitProviderRejectionValue(property.Value))
+                {
+                    return true;
+                }
+
+                if (property.Name.Equals("code", StringComparison.OrdinalIgnoreCase)
+                    && IsExplicitProviderRejectionCode(property.Value))
+                {
+                    return true;
+                }
+
+                if ((property.Name.Equals("message", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("msg", StringComparison.OrdinalIgnoreCase))
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && HasExplicitProviderRejectionText(property.Value.GetString()))
+                {
+                    return true;
+                }
+
+                if ((property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    && HasExplicitProviderRejection(property.Value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (HasExplicitProviderRejection(item))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsExplicitProviderRejectionValue(JsonElement value)
+        => value.ValueKind switch
+        {
+            JsonValueKind.String => !string.IsNullOrWhiteSpace(value.GetString())
+                                    && !string.Equals(value.GetString()?.Trim(), "0", StringComparison.Ordinal),
+            JsonValueKind.Number => !value.TryGetInt64(out var number) || number != 0,
+            JsonValueKind.True => true,
+            JsonValueKind.Array => value.GetArrayLength() > 0,
+            JsonValueKind.Object => value.EnumerateObject().Any(),
+            _ => false
+        };
+
+    private static bool IsExplicitProviderRejectionCode(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var numericCode))
+        {
+            return numericCode is not 0 and (< 200 or >= 300);
+        }
+
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            return IsExplicitProviderRejectionValue(value);
+        }
+
+        var code = value.GetString()?.Trim();
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return false;
+        }
+
+        return int.TryParse(code, out numericCode)
+            ? numericCode is not 0 and (< 200 or >= 300)
+            : HasExplicitProviderRejectionText(code)
+              || code.Contains("error", StringComparison.OrdinalIgnoreCase)
+              || code.Contains("fail", StringComparison.OrdinalIgnoreCase)
+              || code.Contains("reject", StringComparison.OrdinalIgnoreCase)
+              || code.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+              || code.Contains("not_resources", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasExplicitProviderRejectionText(string? value)
+    {
+        var text = (value ?? string.Empty).ToLowerInvariant();
+        return text.Contains("unavailable", StringComparison.Ordinal)
+               || text.Contains("not available", StringComparison.Ordinal)
+               || text.Contains("rejected", StringComparison.Ordinal)
+               || text.Contains("provider error", StringComparison.Ordinal)
+               || text.Contains("provider_error", StringComparison.Ordinal)
+               || text.Contains("not_resources", StringComparison.Ordinal)
+               || text.Contains("no resources", StringComparison.Ordinal);
+    }
+
     private static bool HasAcceptedTaskId(string? sanitizedResponseJson)
     {
         if (string.IsNullOrWhiteSpace(sanitizedResponseJson))
@@ -3239,8 +3379,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         || property.NameEquals("taskId")
                         || property.NameEquals("videoId")
                         || property.NameEquals("video_id"))
-                    && property.Value.ValueKind == JsonValueKind.String
-                    && !string.IsNullOrWhiteSpace(property.Value.GetString()))
+                    && property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Number
+                    && !string.IsNullOrWhiteSpace(property.Value.ToString()))
                 {
                     return true;
                 }
@@ -3321,6 +3461,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             or "TRANSIENT_PROVIDER_FAILURE"
             or DurationRejectedFailureClassification
             or KnownNoResourcesFailureClassification
+            or ProviderRejectedNoTaskFailureClassification
             or PollResourceUnavailableNoProgressFailureClassification;
 
     private int GetResourceUnavailablePollThreshold()

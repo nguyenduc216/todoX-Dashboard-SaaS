@@ -607,6 +607,39 @@ public sealed class Ai79TaskClientTests
         Assert.DoesNotContain("secret-token", ex.SanitizedRequestMetadataJson, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task VideoSubmit_GenericProviderRejectionZeroTasksPreservesParsedResponse()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"countTasks":"0","domain":"79ai.net","error":"PROVIDER_UNAVAILABLE","message":"Provider service is unavailable. Please try again later."}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/create-video",
+            "secret-token",
+            "79ai.net",
+            "veo_3_1",
+            "Animate the scene.",
+            ["https://cdn.example/scene.png"],
+            new Dictionary<string, string?>
+            {
+                ["mode"] = "lite",
+                ["duration"] = "8",
+                ["ratio"] = "9:16"
+            },
+            Ai79TaskOperation.Video,
+            "image")));
+
+        Assert.Equal(HttpStatusCode.OK, ex.HttpStatusCode);
+        Assert.Equal("provider_error", ex.ErrorCode);
+        using var response = JsonDocument.Parse(ex.SanitizedResponseJson);
+        Assert.Equal("PROVIDER_UNAVAILABLE", response.RootElement.GetProperty("error").GetString());
+        Assert.Equal("0", response.RootElement.GetProperty("countTasks").GetString());
+        Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", ex.SanitizedRequestMetadataJson, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("""{"data":{"task_id":"img-task-001","status":"RUNNING"}}""")]
     [InlineData("""{"task":{"request_id":"img-task-001","state":"processing"}}""")]
