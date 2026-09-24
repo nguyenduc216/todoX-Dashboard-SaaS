@@ -427,6 +427,92 @@ public sealed class ServicePromptAssistantRepository
         return rows == 1;
     }
 
+    public async Task<ServicePromptGenerationDto?> GetActiveProjectGenerationAsync(
+        long videoProjectId,
+        CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<ServicePromptGenerationRow>(new CommandDefinition(
+            ActiveProjectGenerationSql,
+            new { videoProjectId, tenant = _tenant.TenantId },
+            cancellationToken: ct));
+        return row is null ? null : MapGeneration(row);
+    }
+
+    public async Task<bool> UpdateActiveProjectGenerationJsonAsync(
+        long videoProjectId,
+        Guid generationId,
+        string generatedJson,
+        CancellationToken ct = default)
+    {
+        using var document = JsonDocument.Parse(generatedJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("Generated prompt must be a JSON object.", nameof(generatedJson));
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var generationRows = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE settings.service_prompt_generations g
+               SET generated_json=CAST(@generatedJson AS jsonb)
+              FROM video_render.video_projects p
+             WHERE g.id=@generationId
+               AND g.video_project_id=@videoProjectId
+               AND p.id=g.video_project_id
+               AND p.tenant_id=@tenant
+               AND p.active_prompt_generation_id=g.id;
+            """,
+            new { videoProjectId, generationId, generatedJson, tenant = _tenant.TenantId },
+            tx,
+            cancellationToken: ct));
+        if (generationRows != 1)
+        {
+            tx.Rollback();
+            return false;
+        }
+
+        var projectRows = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE video_render.video_projects
+               SET original_prompt=@generatedJson, updated_at=now()
+             WHERE id=@videoProjectId
+               AND tenant_id=@tenant
+               AND active_prompt_generation_id=@generationId;
+            """,
+            new { videoProjectId, generationId, generatedJson, tenant = _tenant.TenantId },
+            tx,
+            cancellationToken: ct));
+        if (projectRows != 1)
+        {
+            tx.Rollback();
+            return false;
+        }
+
+        tx.Commit();
+        return true;
+    }
+
+    private const string ActiveProjectGenerationSql = """
+        SELECT g.id AS Id, g.service_id AS ServiceId, g.service_prompt_assistant_id AS ServicePromptAssistantId,
+               g.training_version_id AS TrainingVersionId, g.video_project_id AS VideoProjectId, g.user_input AS UserInput,
+               g.provider_code AS ProviderCode, g.model_code AS ModelCode, g.generated_json AS GeneratedJson,
+               g.validation_status AS ValidationStatus, g.validation_errors_json::text AS ValidationErrorsJson,
+               g.repair_attempt_count AS RepairAttemptCount, g.prompt_tokens AS PromptTokens,
+               g.completion_tokens AS CompletionTokens, g.total_tokens AS TotalTokens,
+               g.runtime_provider AS RuntimeProvider, g.credit AS Credit, g.first_event_ms AS FirstEventMs,
+               g.first_content_ms AS FirstContentMs, g.total_duration_ms AS TotalDurationMs,
+               g.streaming_duration_ms AS StreamingDurationMs, g.status AS Status, g.error_code AS ErrorCode,
+               g.error_message AS ErrorMessage, g.created_at AS CreatedAt,
+               EXTRACT(EPOCH FROM (g.completed_at - g.created_at)) AS LatencySeconds
+          FROM video_render.video_projects p
+          JOIN settings.service_prompt_generations g ON g.id=p.active_prompt_generation_id
+         WHERE p.id=@videoProjectId AND p.tenant_id=@tenant
+           AND g.video_project_id=p.id
+         LIMIT 1;
+        """;
+
     private const string ProjectGenerationSql = """
         SELECT g.id AS Id, g.service_id AS ServiceId, g.service_prompt_assistant_id AS ServicePromptAssistantId,
                g.training_version_id AS TrainingVersionId, g.video_project_id AS VideoProjectId, g.user_input AS UserInput,

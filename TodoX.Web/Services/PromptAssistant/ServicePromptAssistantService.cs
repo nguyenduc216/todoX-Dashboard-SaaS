@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
 using TodoX.Web.Services.VideoRender;
@@ -19,17 +20,23 @@ public interface IServicePromptAssistantService
         string userInput,
         CurrentUserSession? userSession,
         CancellationToken ct = default,
-        long? videoProjectId = null);
+        long? videoProjectId = null,
+        PromptAssistantCharacterReference? characterReference = null);
 
     Task<IReadOnlyList<ServicePromptGenerationDto>> GetProjectGenerationsAsync(long videoProjectId, CancellationToken ct = default);
     Task<ServicePromptGenerationDto?> GetProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default);
     Task<bool> SetActiveProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default);
+    Task<bool> SynchronizeActiveProjectCharacterReferenceAsync(
+        long videoProjectId,
+        PromptAssistantCharacterReference characterReference,
+        CancellationToken ct = default);
     Task<ServicePromptGenerationResult> ImportPromptAsync(
         Guid serviceId,
         long videoProjectId,
         string generatedJson,
         CurrentUserSession? userSession,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        PromptAssistantCharacterReference? characterReference = null);
 }
 
 public sealed class ServicePromptAssistantService : IServicePromptAssistantService
@@ -111,7 +118,8 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         string userInput,
         CurrentUserSession? userSession,
         CancellationToken ct = default,
-        long? videoProjectId = null)
+        long? videoProjectId = null,
+        PromptAssistantCharacterReference? characterReference = null)
     {
         if (string.IsNullOrWhiteSpace(userInput))
         {
@@ -175,9 +183,9 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                 throw new ServicePromptProviderException("generated_json_invalid", "Final prompt must be a JSON object.", response.SanitizedRawResponse);
             if (videoProjectId is long projectId)
             {
-                generatedJson = VideoPromptReferenceEnricher.Enrich(
+                generatedJson = PromptAssistantCharacterReferenceSynchronizer.Synchronize(
                     generatedJson,
-                    await _videoSettings.GetAsync(projectId, ct));
+                    characterReference ?? PromptAssistantCharacterReferenceSynchronizer.FromSettings(await _videoSettings.GetAsync(projectId, ct)));
             }
             using var validationDocument = JsonDocument.Parse(generatedJson);
             if (validationDocument.RootElement.TryGetProperty("scenes", out var scenes))
@@ -323,12 +331,35 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
     public Task<ServicePromptGenerationDto?> GetProjectGenerationAsync(long videoProjectId, Guid generationId, CancellationToken ct = default)
         => _repository.GetProjectGenerationAsync(videoProjectId, generationId, ct);
 
+    public async Task<bool> SynchronizeActiveProjectCharacterReferenceAsync(
+        long videoProjectId,
+        PromptAssistantCharacterReference characterReference,
+        CancellationToken ct = default)
+    {
+        var active = await _repository.GetActiveProjectGenerationAsync(videoProjectId, ct);
+        if (active?.GeneratedJson is not { Length: > 0 })
+        {
+            return false;
+        }
+
+        var synchronized = PromptAssistantCharacterReferenceSynchronizer.Synchronize(
+            active.GeneratedJson,
+            characterReference);
+        return JsonNode.DeepEquals(JsonNode.Parse(synchronized), JsonNode.Parse(active.GeneratedJson))
+            || await _repository.UpdateActiveProjectGenerationJsonAsync(
+                videoProjectId,
+                active.Id,
+                synchronized,
+                ct);
+    }
+
     public async Task<ServicePromptGenerationResult> ImportPromptAsync(
         Guid serviceId,
         long videoProjectId,
         string generatedJson,
         CurrentUserSession? userSession,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        PromptAssistantCharacterReference? characterReference = null)
     {
         if (string.IsNullOrWhiteSpace(generatedJson))
             throw new ArgumentException("Prompt JSON is required.", nameof(generatedJson));
@@ -341,9 +372,9 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         var videoSettings = videoProjectId is long projectId
             ? await _videoSettings.GetAsync(projectId, ct)
             : null;
-        var finalJson = VideoPromptReferenceEnricher.Enrich(
+        var finalJson = PromptAssistantCharacterReferenceSynchronizer.Synchronize(
             ServicePromptJson.Canonicalize(document.RootElement.GetRawText()),
-            videoSettings);
+            characterReference ?? PromptAssistantCharacterReferenceSynchronizer.FromSettings(videoSettings));
         var generationId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var result = new ServicePromptGenerationResult

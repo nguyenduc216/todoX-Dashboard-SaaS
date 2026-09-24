@@ -2002,13 +2002,14 @@ else
             }
         }
         _characterPrompt = _selectedCharacter?.NormalizedPrompt ?? string.Empty;
+        await SynchronizePromptCharacterReferenceAsync();
         _ = RefreshInitialEstimateAsync();
         await InvokeAsync(StateHasChanged);
     }
 
     private bool IsCharacterSelected(long characterId) => _selectedCharacter?.Id == characterId;
 
-    private Task ClearSelectedCharacterAsync()
+    private async Task ClearSelectedCharacterAsync()
     {
         _characterModeTouched = true;
         _selectedCharacterId = null;
@@ -2016,11 +2017,12 @@ else
         _characterPrompt = string.Empty;
         _skipCharacter = true;
         _characterMode = RVideoCharacterModes.None;
+        await SynchronizePromptCharacterReferenceAsync();
         _ = RefreshInitialEstimateAsync();
-        return InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
-    private Task OnCharacterModeChangedAsync(string? value)
+    private async Task OnCharacterModeChangedAsync(string? value)
     {
         _characterModeTouched = true;
         if (string.Equals(value, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase))
@@ -2039,8 +2041,9 @@ else
             _characterMode = RVideoCharacterModes.None;
         }
 
+        await SynchronizePromptCharacterReferenceAsync();
         _ = RefreshInitialEstimateAsync();
-        return InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
     private string ResolveCharacterName(long? characterId)
@@ -2624,6 +2627,7 @@ else
         }
         _project!.ActivePromptGenerationId = generation.Id;
         _prompt = generation.GeneratedJson ?? string.Empty;
+        await SynchronizePromptCharacterReferenceAsync();
         _promptParseResult = PromptParser.Parse(_prompt);
         ApplyVideoSettingsFromPrompt();
         Snackbar.Add("Đã chọn prompt làm prompt hiện tại.", Severity.Success);
@@ -2741,7 +2745,8 @@ else
                 serviceId,
                 _projectId!.Value,
                 _prompt,
-                AuthState.CurrentUser);
+                AuthState.CurrentUser,
+                characterReference: BuildPromptAssistantCharacterReference());
             await ReloadAsync();
             Snackbar.Add(
                 $"Đã nạp và lưu JSON {file.Name}.",
@@ -2796,7 +2801,8 @@ else
                     VideoProjectId: _projectId,
                     CreativeMode: _aiPromptCreativeMode)),
                 AuthState.CurrentUser,
-                videoProjectId: _projectId);
+                videoProjectId: _projectId,
+                characterReference: BuildPromptAssistantCharacterReference());
 
             if (!result.ValidationPassed || string.IsNullOrWhiteSpace(result.GeneratedJson))
             {
@@ -3120,7 +3126,7 @@ else
         return InvokeAsync(StateHasChanged);
     }
 
-    private Task OnSkipCharacterChanged(bool value)
+    private async Task OnSkipCharacterChanged(bool value)
     {
         _characterModeTouched = true;
         _skipCharacter = value;
@@ -3135,7 +3141,8 @@ else
         {
             _characterMode = RVideoCharacterModes.Library;
         }
-        return InvokeAsync(StateHasChanged);
+        await SynchronizePromptCharacterReferenceAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task UploadReferenceCharacterAsync(InputFileChangeEventArgs args)
@@ -3156,6 +3163,7 @@ else
             _characterMode = RVideoCharacterModes.Upload;
             _selectedCharacter = null;
             _selectedCharacterId = null;
+            await SynchronizePromptCharacterReferenceAsync();
             Snackbar.Add("Đã tải ảnh nhân vật tham chiếu.", Severity.Success);
         }
         catch (Exception ex)
@@ -3165,7 +3173,7 @@ else
         }
     }
 
-    private Task RemoveUploadedCharacterAsync()
+    private async Task RemoveUploadedCharacterAsync()
     {
         _uploadedCharacter = null;
         _characterModeTouched = true;
@@ -3174,7 +3182,73 @@ else
             _skipCharacter = true;
             _characterMode = RVideoCharacterModes.None;
         }
-        return InvokeAsync(StateHasChanged);
+        await SynchronizePromptCharacterReferenceAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private PromptAssistantCharacterReference BuildPromptAssistantCharacterReference()
+    {
+        if (_skipCharacter || string.Equals(_characterMode, RVideoCharacterModes.None, StringComparison.OrdinalIgnoreCase))
+        {
+            return PromptAssistantCharacterReference.None;
+        }
+
+        if (string.Equals(_characterMode, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase))
+        {
+            var image = !string.IsNullOrWhiteSpace(_uploadedCharacter?.FileUrl)
+                ? _uploadedCharacter.FileUrl
+                : _uploadedCharacter?.StorageKey;
+            return string.IsNullOrWhiteSpace(image)
+                ? PromptAssistantCharacterReference.None
+                : new PromptAssistantCharacterReference(
+                    RVideoCharacterModes.Upload,
+                    image,
+                    _uploadedCharacter?.FileName,
+                    RVideoCharacterModes.Upload);
+        }
+
+        var character = ResolveCurrentCharacter();
+        var libraryImage = !string.IsNullOrWhiteSpace(character?.MasterImageUrl)
+            ? character.MasterImageUrl
+            : character?.MasterImageObjectKey;
+        return string.IsNullOrWhiteSpace(libraryImage)
+            ? PromptAssistantCharacterReference.None
+            : new PromptAssistantCharacterReference(
+                RVideoCharacterModes.Library,
+                libraryImage,
+                character?.CharacterName,
+                RVideoCharacterModes.Library);
+    }
+
+    private async Task SynchronizePromptCharacterReferenceAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_prompt))
+        {
+            return;
+        }
+
+        try
+        {
+            var characterReference = BuildPromptAssistantCharacterReference();
+            _prompt = PromptAssistantCharacterReferenceSynchronizer.Synchronize(
+                _prompt,
+                characterReference);
+            _promptParseResult = PromptParser.Parse(_prompt);
+            if (ActivePrompt is not null)
+            {
+                ActivePrompt.GeneratedJson = _prompt;
+            }
+            if (_projectId is long projectId && ActivePrompt is not null)
+            {
+                await PromptAssistant.SynchronizeActiveProjectCharacterReferenceAsync(
+                    projectId,
+                    characterReference);
+            }
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogDebug(ex, "RVIDEO_PROMPT_CHARACTER_REFERENCE_SYNC_SKIPPED_INVALID_JSON");
+        }
     }
 
     private static bool ReadAutoFinish(string? prompt)
