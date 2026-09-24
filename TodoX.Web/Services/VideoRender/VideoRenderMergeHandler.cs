@@ -99,13 +99,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             var concat = Path.Combine(finalDir, "concat.txt");
             var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
             ValidateMergeInputs(mergeItems);
-            var lines = BuildConcatLines(mergeItems.Select(item => item.VideoPath ?? string.Empty));
+            var lines = BuildTimedConcatLines(mergeItems.Select(item => (
+                item.VideoPath ?? string.Empty,
+                item.DurationSeconds)));
             await File.WriteAllLinesAsync(concat, lines, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), ct);
             await WriteCompositionManifestAsync(finalDir, version, mergeItems, ct);
 
             var ffmpegPath = _options.CurrentValue.FfmpegPath;
             var timeout = TimeSpan.FromMinutes(Math.Max(1, _options.CurrentValue.MergeTimeoutMinutes));
-            var copyResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildCopyConcatArguments(concat, finalPath), timeout, ct);
+            var timelineDurationSeconds = RVideoRules.CalculateMergedDuration(mergeableScenes);
+            var copyResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildCopyConcatArguments(concat, finalPath, timelineDurationSeconds), timeout, ct);
             await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg-copy.log"), copyResult.ToLogText(), ct);
             if (copyResult.ExitCode != 0)
             {
@@ -123,7 +126,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_TRANSCODE_FALLBACK_STARTED", "info",
                     "Normalized final merge transcode fallback started.",
                     new { projectId = project.Id, finalVideoVersionId = version?.Id, inputCount = mergeItems.Count }, ct);
-                var fallbackResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildTranscodeConcatArguments(concat, finalPath), timeout, ct);
+                var fallbackResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildTranscodeConcatArguments(concat, finalPath, timelineDurationSeconds), timeout, ct);
                 await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg-fallback.log"), fallbackResult.ToLogText(), ct);
                 if (fallbackResult.ExitCode != 0)
                 {
@@ -228,7 +231,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         {
             finalVideoVersionId = version?.Id,
             createdAtUtc = DateTimeOffset.UtcNow,
-            items = items.Select(x => new { x.SceneId, x.ItemOrder, x.SceneVideoVersionId, x.VideoPath })
+            items = items.Select(x => new { x.SceneId, x.ItemOrder, x.SceneVideoVersionId, x.VideoPath, x.DurationSeconds })
         }, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
         return File.WriteAllTextAsync(manifestPath, json, ct);
     }
@@ -243,6 +246,9 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             "-c", "copy",
             outputPath
         ];
+
+    internal static string[] BuildCopyConcatArguments(string concatPath, string outputPath, decimal durationSeconds)
+        => BuildDurationConstrainedArguments(BuildCopyConcatArguments(concatPath, outputPath), durationSeconds);
 
     internal static string[] BuildTranscodeConcatArguments(string concatPath, string outputPath)
         =>
@@ -259,6 +265,18 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             "-movflags", "+faststart",
             outputPath
         ];
+
+    internal static string[] BuildTranscodeConcatArguments(string concatPath, string outputPath, decimal durationSeconds)
+        => BuildDurationConstrainedArguments(BuildTranscodeConcatArguments(concatPath, outputPath), durationSeconds);
+
+    private static string[] BuildDurationConstrainedArguments(IReadOnlyList<string> arguments, decimal durationSeconds)
+    {
+        var constrained = arguments.Take(arguments.Count - 1).ToList();
+        constrained.Add("-t");
+        constrained.Add(Math.Max(1m, durationSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        constrained.Add(arguments[^1]);
+        return constrained.ToArray();
+    }
 
     internal static string[] BuildMusicMixArguments(string inputVideoPath, string outputPath, string musicPath, decimal musicVolume)
         =>
@@ -296,6 +314,13 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
 
     internal static string[] BuildConcatLines(IEnumerable<string> videoPaths)
         => videoPaths.Select(BuildConcatLine).ToArray();
+
+    internal static string[] BuildTimedConcatLines(IEnumerable<(string VideoPath, int DurationSeconds)> items)
+        => items.SelectMany(item => new[]
+        {
+            BuildConcatLine(item.VideoPath),
+            $"outpoint {Math.Max(1, item.DurationSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+        }).ToArray();
 
     internal static string BuildConcatLine(string videoPath)
         => $"file '{Path.GetFullPath(videoPath).Replace('\\', '/').Replace("'", "''")}'";
@@ -365,7 +390,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         return normalized.Length <= maxChars ? normalized : normalized[^maxChars..];
     }
 
-    private sealed record MergeInput(long SceneId, int ItemOrder, Guid? SceneVideoVersionId, string? VideoPath);
+    private sealed record MergeInput(long SceneId, int ItemOrder, Guid? SceneVideoVersionId, string? VideoPath, int DurationSeconds);
 
     private sealed record FfmpegResult(int ExitCode, string Stdout, string Stderr)
     {
@@ -394,7 +419,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             var selectedVideo = await _versions.GetSelectedVideoVersionAsync(scene.Id, ct)
                 ?? throw new InvalidOperationException("Project is missing selected completed scene video versions.");
             var videoPath = selectedVideo.SourceFilePath ?? scene.SceneVideoPath;
-            items.Add(new MergeInput(scene.Id, scene.SceneIndex, selectedVideo.Id, ResolveRenderPhysicalPath(videoPath)));
+            items.Add(new MergeInput(scene.Id, scene.SceneIndex, selectedVideo.Id, ResolveRenderPhysicalPath(videoPath), scene.DurationSeconds));
         }
 
         return items;

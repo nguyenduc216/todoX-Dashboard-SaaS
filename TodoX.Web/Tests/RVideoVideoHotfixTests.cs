@@ -27,7 +27,7 @@ public sealed class RVideoVideoHotfixTests
         });
         Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetInitial().Model);
         Assert.Equal("flash", RVideoVideoModelPolicy.GetInitial().Mode);
-        Assert.Equal("normal", RVideoVideoModelPolicy.Models[3].Mode);
+        Assert.Null(RVideoVideoModelPolicy.Models[3].Mode);
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
@@ -317,15 +317,15 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Theory]
-    [InlineData(4, "1080p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 4, 4, 4, 6 }, new[] { "1080p", "1080p", "1080p", "720p" })]
-    [InlineData(6, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 6, 6, 6, 6 }, new[] { "720p", "720p", "720p", "720p" })]
-    [InlineData(8, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 8, 8, 8, 10 }, new[] { "720p", "720p", "720p", "720p" })]
-    [InlineData(10, "1080p", new[] { "veo_omni", "grok_video_heavy" }, new[] { "flash", "normal" }, new[] { 10, 10 }, new[] { "1080p", "720p" })]
+    [InlineData(4, "1080p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new string?[] { "flash", "fast", "lite", null }, new[] { 4, 4, 4, 6 }, new[] { "1080p", "1080p", "1080p", "720p" })]
+    [InlineData(6, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new string?[] { "flash", "fast", "lite", null }, new[] { 6, 6, 6, 6 }, new[] { "720p", "720p", "720p", "720p" })]
+    [InlineData(8, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new string?[] { "flash", "fast", "lite", null }, new[] { 8, 8, 8, 10 }, new[] { "720p", "720p", "720p", "720p" })]
+    [InlineData(10, "1080p", new[] { "veo_omni", "grok_video_heavy" }, new string?[] { "flash", null }, new[] { 10, 10 }, new[] { "1080p", "720p" })]
     public void ResolveFallbackCandidatesUsesPolicyOrderAndCatalogCapabilities(
         int duration,
         string resolution,
         string[] expectedModels,
-        string[] expectedModes,
+        string?[] expectedModes,
         int[] expectedDurations,
         string[] expectedResolutions)
     {
@@ -920,6 +920,61 @@ public sealed class RVideoVideoHotfixTests
         Assert.Equal(6, resolved);
     }
 
+    [Theory]
+    [InlineData(4, 6)]
+    [InlineData(8, 10)]
+    [InlineData(11, 12)]
+    [InlineData(13, 15)]
+    public void GrokProviderDurationUsesNearestSupportedCeiling(int sceneDuration, int expectedProviderDuration)
+    {
+        var grok = Assert.Single(ResolveFallbackCandidatesForTest(sceneDuration, "720p"), candidate => candidate.Model == "grok_video_heavy");
+
+        Assert.Null(grok.Mode);
+        Assert.Equal(expectedProviderDuration, grok.ProviderDuration);
+    }
+
+    [Fact]
+    public void GrokProviderDurationNeverShortensSceneBeyondMaximum()
+    {
+        var resolved = ResolveFallbackCandidatesForTest(16, "720p");
+
+        Assert.DoesNotContain(resolved, candidate => candidate.Model == "grok_video_heavy");
+    }
+
+    [Fact]
+    public void GrokDurationRejectionDiagnosticIncludesRequestedAndMaximumDurations()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidateResolution", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "grok_video_heavy",
+                MediaType = "video",
+                Enabled = true,
+                SupportedModes = [],
+                SupportedDurations = [6, 10, 12, 15],
+                SupportedResolutions = ["720p"]
+            }
+        };
+
+        var resolution = method!.Invoke(null, new object[]
+        {
+            new SceneVideoRenderWorkItemInput { ProviderCode = "79ai", DurationSeconds = 16, Resolution = "720p" },
+            catalog
+        })!;
+        var diagnostics = ((System.Collections.IEnumerable)resolution.GetType().GetProperty("Diagnostics")!.GetValue(resolution)!)
+            .Cast<object>();
+        var grok = Assert.Single(diagnostics, diagnostic => (string)GetProperty(diagnostic, "Model")! == "grok_video_heavy");
+
+        Assert.Equal(16, GetProperty(grok, "RequestedDuration"));
+        Assert.Equal(15, GetProperty(grok, "MaxSupportedDuration"));
+        Assert.Equal("duration_not_supported", GetProperty(grok, "InvalidReason"));
+        Assert.False((bool)GetProperty(grok, "Valid")!);
+    }
+
     [Fact]
     public void CompletionRequestCarriesProviderDurationSeparatelyFromSceneDuration()
     {
@@ -1106,6 +1161,28 @@ public sealed class RVideoVideoHotfixTests
             }))).SanitizedRequestJson);
         Assert.Equal(JsonValueKind.Null, sanitized.GetProperty("sourceImage").ValueKind);
         Assert.Single(sanitized.GetProperty("referenceImages").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task RVideo79AiGrokPayloadOmitsOptionalModeAndUsesProviderDuration()
+    {
+        var client = new CapturingAi79TaskClient();
+        var service = Create79AiVideoService(client);
+
+        await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
+            Create79AiRuntime(),
+            RVideoVideoModelPolicy.Models[3],
+            "Animate the scene.",
+            "9:16",
+            "720p",
+            10,
+            SourceImageAsset: null,
+            ReferenceImageAssets: Array.Empty<RVideo79AiProviderImageAsset>()));
+
+        Assert.NotNull(client.LastSubmit);
+        Assert.Equal("grok_video_heavy", client.LastSubmit!.Model);
+        Assert.Equal("10", client.LastSubmit.Options["duration"]);
+        Assert.False(client.LastSubmit.Options.ContainsKey("mode"));
     }
 
     [Fact]
@@ -2416,7 +2493,7 @@ public sealed class RVideoVideoHotfixTests
             new AiProviderModelListItemDto
             {
                 ProviderCode = "79ai", ProviderModelCode = "grok_video_heavy", MediaType = "video", Enabled = true,
-                SupportedModes = ["normal"], SupportedDurations = [6, 10, 12, 15], SupportedResolutions = ["720p"]
+                SupportedModes = [], SupportedDurations = [6, 10, 12, 15], SupportedResolutions = ["720p"]
             }
         };
 
@@ -2589,7 +2666,7 @@ public sealed class RVideoVideoHotfixTests
             new AiProviderModelListItemDto
             {
                 ProviderCode = "79ai", ProviderModelCode = "grok_video_heavy", MediaType = "video", Enabled = true,
-                SupportedModes = ["normal"], SupportedDurations = [6, 10], SupportedResolutions = ["720p"]
+                SupportedModes = [], SupportedDurations = [6, 10], SupportedResolutions = ["720p"]
             }
         };
         var items = ((System.Collections.IEnumerable)method.Invoke(null, new object[]

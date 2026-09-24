@@ -2131,6 +2131,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string? Mode,
         int RequestedDuration,
         int? ProviderDuration,
+        int? MaxSupportedDuration,
         string RequestedResolution,
         string? ProviderResolution,
         bool Valid,
@@ -2204,6 +2205,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     policy.Mode,
                     input.DurationSeconds,
                     null,
+                    null,
                     requestedResolution,
                     null,
                     false,
@@ -2226,6 +2228,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     policy.Mode,
                     input.DurationSeconds,
                     null,
+                    null,
                     requestedResolution,
                     null,
                     false,
@@ -2233,9 +2236,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(policy.Mode)
-                || model.SupportedModes.Count == 0
-                || !model.SupportedModes.Contains(policy.Mode, StringComparer.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(policy.Mode)
+                && model.SupportedModes.Count > 0
+                && !model.SupportedModes.Contains(policy.Mode, StringComparer.OrdinalIgnoreCase))
             {
                 diagnostics.Add(new FallbackCandidateDiagnostic(
                     policy.AttemptIndex,
@@ -2243,6 +2246,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     policy.Model,
                     policy.Mode,
                     input.DurationSeconds,
+                    null,
                     null,
                     requestedResolution,
                     null,
@@ -2265,6 +2269,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     policy.Mode,
                     input.DurationSeconds,
                     null,
+                    null,
                     requestedResolution,
                     null,
                     false,
@@ -2282,10 +2287,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     policy.Mode,
                     input.DurationSeconds,
                     null,
+                    supportedDurations.Max(),
                     requestedResolution,
                     null,
                     false,
-                    "requested_duration_not_supported"));
+                    "duration_not_supported"));
                 continue;
             }
 
@@ -2298,6 +2304,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 policy.Mode,
                 input.DurationSeconds,
                 duration,
+                supportedDurations.Max(),
                 requestedResolution,
                 providerResolution,
                 true,

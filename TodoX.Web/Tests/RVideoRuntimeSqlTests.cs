@@ -367,6 +367,29 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void FinalMergeManifestConstrainsEachSceneToTimelineDuration()
+    {
+        var lines = TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.BuildTimedConcatLines(new[]
+        {
+            (VideoPath: @"H:\video scenes\scene-01.mp4", DurationSeconds: 8),
+            (VideoPath: @"H:\video scenes\scene-02.mp4", DurationSeconds: 11)
+        });
+
+        Assert.Equal(
+            new[]
+            {
+                "file 'H:/video scenes/scene-01.mp4'",
+                "outpoint 8",
+                "file 'H:/video scenes/scene-02.mp4'",
+                "outpoint 11"
+            },
+            lines);
+        Assert.Equal(
+            new[] { "-y", "-f", "concat", "-safe", "0", "-i", "concat.txt", "-c", "copy", "-t", "19", "final.mp4" },
+            TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.BuildCopyConcatArguments("concat.txt", "final.mp4", 19));
+    }
+
+    [Fact]
     public void FinalMergeUsesSelectedLocalSceneVideosAndDoesNotUsePublicUrlsAsFiles()
     {
         var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
