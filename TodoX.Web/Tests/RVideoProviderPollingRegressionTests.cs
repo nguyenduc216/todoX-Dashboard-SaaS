@@ -1,12 +1,68 @@
 using System.Reflection;
 using Xunit;
 using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services.Render;
 using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Tests;
 
 public sealed class RVideoProviderPollingRegressionTests
 {
+    [Theory]
+    [InlineData(0, 1, true)]
+    [InlineData(1, 2, true)]
+    [InlineData(2, 3, false)]
+    [InlineData(3, 4, false)]
+    public void ReconciliationRetryBoundaryCountsInitialFailureAsFirstAttempt(
+        int scheduledRetries,
+        int expectedCurrentAttempt,
+        bool expectedSchedule)
+    {
+        var decision = RVideoReconciliationPolicy.EvaluateRetry(scheduledRetries, maxAttempts: 3);
+
+        Assert.Equal(expectedCurrentAttempt, decision.CurrentAttempt);
+        Assert.Equal(expectedSchedule, decision.ShouldSchedule);
+        Assert.Equal(expectedSchedule, decision.PersistentEligible);
+    }
+
+    [Fact]
+    public void ProviderPollTimeoutTransitionsToRecoverableQuarantineWithoutChangingTaskIdentity()
+    {
+        var startedAt = new DateTimeOffset(2026, 9, 19, 12, 1, 37, TimeSpan.FromHours(7));
+        var now = startedAt.AddMinutes(16);
+
+        var decision = RVideoReconciliationPolicy.EvaluateProviderPoll(
+            RenderJobStatuses.Rendering,
+            providerPollCount: 4,
+            providerPollStartedAt: startedAt,
+            providerTaskId: "3258ec973b7f885d",
+            enforceReconciliationLimit: false,
+            enforceProviderPollTimeout: true,
+            maxReconciliationRetries: 3,
+            providerPollTimeoutMinutes: 15,
+            now: now);
+
+        Assert.False(decision.ShouldSchedule);
+        Assert.Equal("provider_poll_timeout", decision.Reason);
+        Assert.Equal(RenderJobStatuses.PendingReconciliation, decision.TransitionStatus);
+        Assert.Equal("SCENE_VIDEO_PROVIDER_POLL_TIMEOUT", decision.TransitionErrorCode);
+        Assert.Equal("3258ec973b7f885d", decision.ProviderTaskId);
+    }
+
+    [Fact]
+    public void ProviderPollTimeoutQuarantineIsNotPersistentlyRescheduledAndIsVisibleAsFailure()
+    {
+        Assert.False(RVideoReconciliationPolicy.IsPersistentEligible(
+            RenderJobStatuses.PendingReconciliation,
+            "SCENE_VIDEO_PROVIDER_POLL_TIMEOUT",
+            scheduledRetries: 0,
+            maxAttempts: 3));
+        Assert.True(RVideoReconciliationPolicy.IsProviderPollTimeoutQuarantine(
+            RenderJobStatuses.PendingReconciliation,
+            "SCENE_VIDEO_PROVIDER_POLL_TIMEOUT",
+            "3258ec973b7f885d"));
+    }
+
     [Fact]
     public void PendingPollSurvivesMoreThanThreeWorkerClaims()
     {
@@ -387,6 +443,7 @@ public sealed class RVideoProviderPollingRegressionTests
         var repository = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
         var query = repository[repository.IndexOf("ListPersistentSceneVideoReconciliationJobsAsync", StringComparison.Ordinal)..];
         var scheduler = ProviderPollMethod(ReadRepoFile("Services", "Render", "RenderJobService.cs"));
+        var policy = ReadRepoFile("Services", "VideoRender", "RVideoReconciliationPolicy.cs");
 
         Assert.Contains("SCENE_VIDEO_RECONCILIATION_RETRY", query);
         Assert.Contains("maxReconciliationRetries", query);
@@ -394,19 +451,22 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("SCENE_VIDEO_PROVIDER_POLL_TIMEOUT", query);
         Assert.Contains("SET status='pending_reconciliation'", scheduler);
         Assert.Contains("providerPollStartedAt", scheduler);
-        Assert.Contains("provider_poll_timeout", scheduler);
+        Assert.Contains("RVideoReconciliationPolicy.EvaluateProviderPoll", scheduler);
+        Assert.Contains("provider_poll_timeout", policy);
     }
 
     [Fact]
     public void ProviderPollNotScheduledDiagnosticReportsTheActualBlocker()
     {
         var scheduler = ProviderPollMethod(ReadRepoFile("Services", "Render", "RenderJobService.cs"));
+        var policy = ReadRepoFile("Services", "VideoRender", "RVideoReconciliationPolicy.cs");
 
         Assert.Contains("job_not_found", scheduler);
-        Assert.Contains("status_not_pollable", scheduler);
-        Assert.Contains("reconciliation_limit_exhausted", scheduler);
-        Assert.Contains("provider_poll_timeout", scheduler);
-        Assert.Contains("concurrent_state_change", scheduler);
+        Assert.Contains("RVideoReconciliationPolicy.EvaluateProviderPoll", scheduler);
+        Assert.Contains("status_not_pollable", policy);
+        Assert.Contains("reconciliation_limit_exhausted", policy);
+        Assert.Contains("provider_poll_timeout", policy);
+        Assert.Contains("concurrent_state_change", policy);
         Assert.DoesNotContain("Provider poll was not scheduled because the render job is no longer active.", scheduler);
     }
 
@@ -759,6 +819,12 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("Ai79TaskStatusNormalizer.Failed", method);
         Assert.Contains("ResolveRuntimeAsync(item.ProviderId, item.ProviderCapabilityId, item.ProviderCode!", method);
         Assert.Contains("PollAsync(runtime, item.ProviderTaskId!", method);
+        Assert.Contains("item.ProviderTaskId!", method);
+        Assert.Contains("CompleteProviderVideoAsync", method);
+        Assert.Contains("BillingIntent: PointBillingIntent.SystemRetry", method);
+        Assert.Contains("IsRecovery: true", method);
+        Assert.DoesNotContain("SubmitAsync(", method);
+        Assert.DoesNotContain("Reserve", method);
         Assert.DoesNotContain("GetStatusAsync(", method);
     }
 

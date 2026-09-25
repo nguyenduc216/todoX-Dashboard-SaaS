@@ -2275,9 +2275,14 @@ else
     private bool IsStuckSceneVideo(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneVideoVersionDto version)
     {
         var job = ResolveSceneVideoJob(scene.Id, version.LogicalRequestId);
-        return job is not null
-               && string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo, StringComparison.OrdinalIgnoreCase)
-               && string.Equals(job.Status, RenderJobStatuses.Failed, StringComparison.OrdinalIgnoreCase)
+        if (job is null
+            || !string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return RVideoReconciliationPolicy.IsProviderPollTimeoutQuarantine(job.Status, job.ErrorCode, version.ProviderTaskId)
+               || string.Equals(job.Status, RenderJobStatuses.Failed, StringComparison.OrdinalIgnoreCase)
                && string.IsNullOrWhiteSpace(version.ProviderTaskId)
                && version.Status.Trim().ToLowerInvariant() is "queued" or "submitted" or "processing" or "pending_reconciliation" or "rendering" or "video_rendering";
     }

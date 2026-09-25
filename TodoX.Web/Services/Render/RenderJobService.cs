@@ -3,6 +3,7 @@ using Dapper;
 using Npgsql;
 using TodoX.Web.Data;
 using TodoX.Web.Services;
+using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Services.Render;
 
@@ -941,18 +942,25 @@ public sealed class RenderJobService : IRenderJobService
                 """
                 SELECT status AS Status,
                        COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) AS ProviderPollCount,
-                       input_json->>'providerPollStartedAt' AS ProviderPollStartedAt
+                       input_json->>'providerPollStartedAt' AS ProviderPollStartedAt,
+                       provider_task_id AS ProviderTaskId
                   FROM render.render_jobs
                  WHERE id=@jobId;
                 """,
                 new { jobId });
-            var scheduleBlockReason = ResolveProviderPollScheduleBlockReason(
-                state,
+            var decision = state is null
+                ? new RVideoProviderPollDecision(false, "job_not_found", null, null, null)
+                : RVideoReconciliationPolicy.EvaluateProviderPoll(
+                state.Status,
+                state.ProviderPollCount,
+                DateTimeOffset.TryParse(state.ProviderPollStartedAt, out var pollStartedAt) ? pollStartedAt : null,
+                state.ProviderTaskId,
                 enforceReconciliationLimit,
                 enforceProviderPollTimeout,
                 GetMaxProviderPolls(),
                 GetProviderPollTimeoutMinutes(),
                 DateTimeOffset.UtcNow);
+            var scheduleBlockReason = decision.Reason;
             if (state is null)
             {
                 _logger.LogWarning(
@@ -963,13 +971,13 @@ public sealed class RenderJobService : IRenderJobService
                 return false;
             }
 
-            if (scheduleBlockReason == "provider_poll_timeout")
+            if (decision.TransitionErrorCode == RVideoReconciliationPolicy.ProviderPollTimeoutErrorCode)
             {
                 await conn.ExecuteAsync(
                     """
                     UPDATE render.render_jobs
                        SET status='pending_reconciliation',
-                           error_code='SCENE_VIDEO_PROVIDER_POLL_TIMEOUT',
+                           error_code=@timeoutErrorCode,
                            error_message='Known provider task polling reached the configured elapsed-time timeout; the same provider identifiers were retained for recovery.',
                            lock_owner=NULL,
                            lock_until=NULL,
@@ -980,7 +988,12 @@ public sealed class RenderJobService : IRenderJobService
                        AND (input_json->>'providerPollStartedAt')::timestamptz
                            + (@providerPollTimeoutMinutes || ' minutes')::interval <= now();
                     """,
-                    new { jobId, providerPollTimeoutMinutes = GetProviderPollTimeoutMinutes() });
+                    new
+                    {
+                        jobId,
+                        providerPollTimeoutMinutes = GetProviderPollTimeoutMinutes(),
+                        timeoutErrorCode = RVideoReconciliationPolicy.ProviderPollTimeoutErrorCode
+                    });
             }
 
             await AddEventAsync(jobId, "JOB_PROVIDER_POLL_NOT_SCHEDULED",
@@ -995,49 +1008,12 @@ public sealed class RenderJobService : IRenderJobService
         return true;
     }
 
-    private static string ResolveProviderPollScheduleBlockReason(
-        ProviderPollScheduleState? state,
-        bool enforceReconciliationLimit,
-        bool enforceProviderPollTimeout,
-        int maxReconciliationRetries,
-        int providerPollTimeoutMinutes,
-        DateTimeOffset now)
-    {
-        if (state is null)
-        {
-            return "job_not_found";
-        }
-
-        if (state.Status is not (RenderJobStatuses.Queued
-            or RenderJobStatuses.Preparing
-            or RenderJobStatuses.Rendering
-            or RenderJobStatuses.PostProcessing
-            or RenderJobStatuses.PendingReconciliation
-            or RenderJobStatuses.Failed))
-        {
-            return "status_not_pollable";
-        }
-
-        if (enforceReconciliationLimit && state.ProviderPollCount >= maxReconciliationRetries)
-        {
-            return "reconciliation_limit_exhausted";
-        }
-
-        if (enforceProviderPollTimeout
-            && DateTimeOffset.TryParse(state.ProviderPollStartedAt, out var pollStartedAt)
-            && pollStartedAt.AddMinutes(providerPollTimeoutMinutes) <= now)
-        {
-            return "provider_poll_timeout";
-        }
-
-        return "concurrent_state_change";
-    }
-
     private sealed class ProviderPollScheduleState
     {
         public string Status { get; init; } = string.Empty;
         public int ProviderPollCount { get; init; }
         public string? ProviderPollStartedAt { get; init; }
+        public string? ProviderTaskId { get; init; }
     }
 
     public async Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default)

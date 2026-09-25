@@ -1626,7 +1626,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var retryLimit = Math.Max(1, _config.GetValue("VideoRender:MaxReconciliationRetries", DefaultMaxReconciliationRetries));
-        var currentAttempt = await _jobs.GetProviderReconciliationAttemptCountAsync(job.Id, ct) + 1;
+        var scheduledRetries = await _jobs.GetProviderReconciliationAttemptCountAsync(job.Id, ct);
+        var retryDecision = RVideoReconciliationPolicy.EvaluateRetry(scheduledRetries, retryLimit);
+        var currentAttempt = retryDecision.CurrentAttempt;
         await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_DOWNLOAD_FAILED", "warning",
             "Scene-video provider output could not be persisted locally.",
             new
@@ -1644,7 +1646,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 reconciliationAttempt = currentAttempt,
                 maxReconciliationRetries = retryLimit
             }, ct);
-        if (currentAttempt < retryLimit)
+        if (retryDecision.ShouldSchedule)
         {
             await MarkPendingReconciliationAsync(input, versionId, logicalRequestId, tariffSnapshot, errorCode, errorMessage, ct, providerTaskId, providerVideoIdBase: providerVideoIdBase);
             await _jobs.ScheduleProviderPollAsync(
