@@ -1163,7 +1163,9 @@ public sealed class VideoRenderRepository
         public Guid? ResultMediaId { get; init; }
     }
 
-    public async Task<IReadOnlyList<Guid>> ListPersistentSceneVideoReconciliationJobsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<Guid>> ListPersistentSceneVideoReconciliationJobsAsync(
+        int maxReconciliationRetries,
+        CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
@@ -1179,9 +1181,30 @@ public sealed class VideoRenderRepository
                AND btrim(v.provider_video_id_base) <> ''
                AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
                AND j.job_type='render_scene_video'
-               AND j.status NOT IN ('completed', 'cancelled');
+               AND j.status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
+               AND (
+                    (
+                        j.status IN ('pending_reconciliation', 'failed')
+                        AND COALESCE(j.error_code, '') <> 'SCENE_VIDEO_PROVIDER_POLL_TIMEOUT'
+                        AND (
+                            SELECT COUNT(*)
+                              FROM render.render_job_events e
+                             WHERE e.job_id=j.id
+                               AND e.event_type='JOB_PROVIDER_POLL_SCHEDULED'
+                               AND COALESCE(e.data_json->>'reasonCode', '')='SCENE_VIDEO_RECONCILIATION_RETRY'
+                        ) + 1 < @maxReconciliationRetries
+                    )
+                    OR
+                    (
+                        j.status NOT IN ('pending_reconciliation', 'failed')
+                    )
+               );
             """,
-            new { tenant = _tenant.TenantId });
+            new
+            {
+                tenant = _tenant.TenantId,
+                maxReconciliationRetries = Math.Max(1, maxReconciliationRetries)
+            });
         return jobs.ToList();
     }
 }

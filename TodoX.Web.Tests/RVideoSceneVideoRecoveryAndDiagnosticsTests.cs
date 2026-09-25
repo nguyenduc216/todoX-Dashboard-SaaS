@@ -502,7 +502,9 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
         var repository = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
         var jobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
 
-        Assert.Contains("j.status NOT IN ('completed', 'cancelled')", repository);
+        Assert.Contains("j.status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')", repository);
+        Assert.Contains("SCENE_VIDEO_RECONCILIATION_RETRY", repository);
+        Assert.Contains("SCENE_VIDEO_PROVIDER_POLL_TIMEOUT", repository);
         Assert.Contains("v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')", repository);
         Assert.Contains("'pending_reconciliation', 'failed'", jobs);
     }

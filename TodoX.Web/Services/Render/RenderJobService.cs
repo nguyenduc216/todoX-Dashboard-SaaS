@@ -937,9 +937,55 @@ public sealed class RenderJobService : IRenderJobService
 
         if (changed <= 0)
         {
+            var state = await conn.QuerySingleOrDefaultAsync<ProviderPollScheduleState>(
+                """
+                SELECT status AS Status,
+                       COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) AS ProviderPollCount,
+                       input_json->>'providerPollStartedAt' AS ProviderPollStartedAt
+                  FROM render.render_jobs
+                 WHERE id=@jobId;
+                """,
+                new { jobId });
+            var scheduleBlockReason = ResolveProviderPollScheduleBlockReason(
+                state,
+                enforceReconciliationLimit,
+                enforceProviderPollTimeout,
+                GetMaxProviderPolls(),
+                GetProviderPollTimeoutMinutes(),
+                DateTimeOffset.UtcNow);
+            if (state is null)
+            {
+                _logger.LogWarning(
+                    "JOB_PROVIDER_POLL_NOT_SCHEDULED jobId={JobId} scheduleBlockReason={ScheduleBlockReason} reasonCode={ReasonCode}",
+                    jobId,
+                    scheduleBlockReason,
+                    reasonCode);
+                return false;
+            }
+
+            if (scheduleBlockReason == "provider_poll_timeout")
+            {
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE render.render_jobs
+                       SET status='pending_reconciliation',
+                           error_code='SCENE_VIDEO_PROVIDER_POLL_TIMEOUT',
+                           error_message='Known provider task polling reached the configured elapsed-time timeout; the same provider identifiers were retained for recovery.',
+                           lock_owner=NULL,
+                           lock_until=NULL,
+                           updated_at=now()
+                     WHERE id=@jobId
+                       AND status IN ('queued', 'preparing', 'rendering', 'post_processing')
+                       AND input_json->>'providerPollStartedAt' IS NOT NULL
+                       AND (input_json->>'providerPollStartedAt')::timestamptz
+                           + (@providerPollTimeoutMinutes || ' minutes')::interval <= now();
+                    """,
+                    new { jobId, providerPollTimeoutMinutes = GetProviderPollTimeoutMinutes() });
+            }
+
             await AddEventAsync(jobId, "JOB_PROVIDER_POLL_NOT_SCHEDULED",
-                "Provider poll was not scheduled because the render job is no longer active.",
-                new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "warning", ct);
+                $"Provider poll was not scheduled: {scheduleBlockReason}.",
+                new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage, scheduleBlockReason }, "warning", ct);
             return false;
         }
 
@@ -947,6 +993,51 @@ public sealed class RenderJobService : IRenderJobService
             "Provider poll scheduled without consuming the application retry budget.",
             new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
         return true;
+    }
+
+    private static string ResolveProviderPollScheduleBlockReason(
+        ProviderPollScheduleState? state,
+        bool enforceReconciliationLimit,
+        bool enforceProviderPollTimeout,
+        int maxReconciliationRetries,
+        int providerPollTimeoutMinutes,
+        DateTimeOffset now)
+    {
+        if (state is null)
+        {
+            return "job_not_found";
+        }
+
+        if (state.Status is not (RenderJobStatuses.Queued
+            or RenderJobStatuses.Preparing
+            or RenderJobStatuses.Rendering
+            or RenderJobStatuses.PostProcessing
+            or RenderJobStatuses.PendingReconciliation
+            or RenderJobStatuses.Failed))
+        {
+            return "status_not_pollable";
+        }
+
+        if (enforceReconciliationLimit && state.ProviderPollCount >= maxReconciliationRetries)
+        {
+            return "reconciliation_limit_exhausted";
+        }
+
+        if (enforceProviderPollTimeout
+            && DateTimeOffset.TryParse(state.ProviderPollStartedAt, out var pollStartedAt)
+            && pollStartedAt.AddMinutes(providerPollTimeoutMinutes) <= now)
+        {
+            return "provider_poll_timeout";
+        }
+
+        return "concurrent_state_change";
+    }
+
+    private sealed class ProviderPollScheduleState
+    {
+        public string Status { get; init; } = string.Empty;
+        public int ProviderPollCount { get; init; }
+        public string? ProviderPollStartedAt { get; init; }
     }
 
     public async Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default)

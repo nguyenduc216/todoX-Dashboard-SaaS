@@ -357,6 +357,57 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("ScheduleProviderPollAsync", source);
         Assert.Contains("existing provider task", source);
         Assert.Contains("RenderQueue:Enabled", source);
+        Assert.Contains("enforceReconciliationLimit: false", source);
+        Assert.Contains("enforceProviderPollTimeout: true", source);
+    }
+
+    [Fact]
+    public void ProductionRenderingJobPollCountDoesNotConsumeReconciliationBudget()
+    {
+        const string status = "rendering";
+        const string providerTaskId = "3258ec973b7f885d";
+        const int providerPollCount = 4;
+        const int maxReconciliationRetries = 3;
+        var scheduler = ProviderPollMethod(ReadRepoFile("Services", "Render", "RenderJobService.cs"));
+        var persistentWorker = ReadRepoFile("Services", "VideoRender", "SceneVideoReconciliationWorker.cs");
+        var sceneWorker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Equal("rendering", status);
+        Assert.False(string.IsNullOrWhiteSpace(providerTaskId));
+        Assert.True(providerPollCount > maxReconciliationRetries);
+        Assert.Contains("@enforceReconciliationLimit = false", scheduler);
+        Assert.Contains("enforceReconciliationLimit: false", persistentWorker);
+        Assert.Contains("\"SCENE_VIDEO_RECONCILIATION_RETRY\"", sceneWorker);
+        Assert.Contains("enforceReconciliationLimit: false", sceneWorker);
+    }
+
+    [Fact]
+    public void PersistentReconciliationEligibilityIsBoundedByActualRecoveryAttemptsAndTimeoutQuarantine()
+    {
+        var repository = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var query = repository[repository.IndexOf("ListPersistentSceneVideoReconciliationJobsAsync", StringComparison.Ordinal)..];
+        var scheduler = ProviderPollMethod(ReadRepoFile("Services", "Render", "RenderJobService.cs"));
+
+        Assert.Contains("SCENE_VIDEO_RECONCILIATION_RETRY", query);
+        Assert.Contains("maxReconciliationRetries", query);
+        Assert.Contains(") + 1 < @maxReconciliationRetries", query);
+        Assert.Contains("SCENE_VIDEO_PROVIDER_POLL_TIMEOUT", query);
+        Assert.Contains("SET status='pending_reconciliation'", scheduler);
+        Assert.Contains("providerPollStartedAt", scheduler);
+        Assert.Contains("provider_poll_timeout", scheduler);
+    }
+
+    [Fact]
+    public void ProviderPollNotScheduledDiagnosticReportsTheActualBlocker()
+    {
+        var scheduler = ProviderPollMethod(ReadRepoFile("Services", "Render", "RenderJobService.cs"));
+
+        Assert.Contains("job_not_found", scheduler);
+        Assert.Contains("status_not_pollable", scheduler);
+        Assert.Contains("reconciliation_limit_exhausted", scheduler);
+        Assert.Contains("provider_poll_timeout", scheduler);
+        Assert.Contains("concurrent_state_change", scheduler);
+        Assert.DoesNotContain("Provider poll was not scheduled because the render job is no longer active.", scheduler);
     }
 
     [Fact]

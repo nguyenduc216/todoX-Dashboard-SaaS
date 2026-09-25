@@ -1653,7 +1653,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 "SCENE_VIDEO_RECONCILIATION_RETRY",
                 errorMessage,
                 ct,
-                enforceReconciliationLimit: true);
+                enforceReconciliationLimit: false);
             throw new RenderJobDeferredException(errorMessage);
         }
 

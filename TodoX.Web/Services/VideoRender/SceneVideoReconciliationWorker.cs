@@ -28,6 +28,8 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
 
         var delay = TimeSpan.FromSeconds(Math.Clamp(
             _configuration.GetValue("VideoRender:ReconciliationIntervalSeconds", 30), 5, 300));
+        var maxReconciliationRetries = Math.Max(1,
+            _configuration.GetValue("VideoRender:MaxReconciliationRetries", 3));
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -37,14 +39,18 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
                 await tenant.EnsureLoadedAsync(stoppingToken);
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
-                foreach (var jobId in await repository.ListPersistentSceneVideoReconciliationJobsAsync(stoppingToken))
+                foreach (var jobId in await repository.ListPersistentSceneVideoReconciliationJobsAsync(
+                             maxReconciliationRetries,
+                             stoppingToken))
                 {
                     await jobs.ScheduleProviderPollAsync(
                         jobId,
                         delay,
                         "SCENE_VIDEO_RECONCILIATION_WORKER",
                         "Persistent reconciliation worker retained the existing provider task and scheduled another poll.",
-                        stoppingToken);
+                        stoppingToken,
+                        enforceReconciliationLimit: false,
+                        enforceProviderPollTimeout: true);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
