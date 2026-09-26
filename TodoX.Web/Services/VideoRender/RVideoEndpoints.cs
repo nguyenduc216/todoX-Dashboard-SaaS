@@ -20,6 +20,12 @@ public static class RVideoEndpoints
             => await RequireUserAsync(auth, async () => auth.CurrentUser is { IsCustomer: true } user
                 ? Results.Json(await jobs.RecoverOrphanPromptWorkspaceAsync(projectId, request.ServiceId, request.ServiceCode, user, ct))
                 : Results.Unauthorized()));
+        group.MapPost("/projects/{projectId:long}/recover-audio", async (long projectId, IRVideoAudioRecoveryService recovery, AuthStateService auth, CancellationToken ct)
+            => await RequireUserAsync(auth, async () => auth.CurrentUser is { } user
+                ? await recovery.RecoverAsync(projectId, user, ct) is { } result
+                    ? Results.Json(result)
+                    : Results.NotFound()
+                : Results.Unauthorized()));
         group.MapPost("/scenes/import", async (HttpRequest request, RVideoSceneJsonService service, AuthStateService auth, CancellationToken ct) =>
         {
             if (auth.CurrentUser?.IsAuthenticated != true) return Results.Unauthorized();

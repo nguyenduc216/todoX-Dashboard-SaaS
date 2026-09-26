@@ -207,6 +207,7 @@ builder.Services.AddHttpClient<TodoX.Web.Services.VideoRender.IVbeeVoiceClient, 
         client.Timeout = options.HttpTimeout;
     });
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneAudioAutoChainService, TodoX.Web.Services.VideoRender.RVideoSceneAudioAutoChainService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoAudioRecoveryService, TodoX.Web.Services.VideoRender.RVideoAudioRecoveryService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneMediaFinalizerService, TodoX.Web.Services.VideoRender.RVideoSceneMediaFinalizerService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoCompletionService, TodoX.Web.Services.VideoRender.RVideoSceneVideoCompletionService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
