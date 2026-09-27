@@ -63,7 +63,7 @@ public static class PromptAssistantEndpoints
                 The user requests a target video duration of {targetDuration} seconds. Choose the scene count yourself; do not use a fixed scene count.
                 Keep every scene duration_seconds an integer from 4 through 8 inclusive. Get the total as close to the target as possible while prioritizing coherent content, semantic scene boundaries, and valid scene durations. Never create a scene outside that range. Set the root duration to the sum of scene durations.
 
-                For every scene return scene_purpose, duration_seconds, image_prompt, motion_prompt, voice, and tts_rate. Set tts_rate to a number from 1.0 through 1.2 inclusive; use 1.0 by default.
+                For every scene return scene_purpose, duration_seconds, image_prompt, motion_prompt, voice, and tts_rate. Set tts_rate to a positive JSON number representing speech rate; use 1.0 by default.
                 Keep the existing TodoX JSON schema and return final JSON only, with no markdown fence or explanation.
 
                 USER IDEA:
@@ -77,7 +77,7 @@ public static class PromptAssistantEndpoints
             Analyze the source into content units, using punctuation (periods, commas, questions, exclamations), line breaks, and semantic boundaries as cues. Do not create one scene per punctuation mark. Merge units that are too short and split long units at semantic boundaries while preserving the source wording and order. Decide the scene count yourself; do not use a fixed scene count.
             Keep every scene duration_seconds an integer from 4 through 8 inclusive. Never create a scene outside that range. Set the root duration to the sum of scene durations.
 
-            For every scene return scene_purpose, duration_seconds, image_prompt, motion_prompt, voice, and tts_rate. Distribute the source wording verbatim across voice fields. Set tts_rate to a number from 1.0 through 1.2 inclusive; use 1.0 by default.
+            For every scene return scene_purpose, duration_seconds, image_prompt, motion_prompt, voice, and tts_rate. Distribute the source wording verbatim across voice fields. Set tts_rate to a positive JSON number representing speech rate; use 1.0 by default.
             Keep the existing TodoX JSON schema and return final JSON only, with no markdown fence or explanation.
 
             SOURCE CONTENT:

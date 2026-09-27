@@ -27,6 +27,7 @@
 @inject TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService RVideoPayerContexts
 @inject TodoX.Web.Services.VideoRender.IRVideoSceneVideoRecoveryService RVideoSceneVideoRecovery
 @inject TodoX.Web.Services.VideoRender.IRVideoInitialPointEstimateService RVideoEstimate
+@inject TodoX.Web.Services.VideoRender.IRVideoAudioRecoveryService RVideoAudioRecovery
 @inject IServicePromptAssistantService PromptAssistant
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
@@ -69,6 +70,14 @@ else
                             <MudText Typo="Typo.caption">@ProjectHeaderMeta</MudText>
                         </MudStack>
                         <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                            @if (_projectId is not null)
+                            {
+                                <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert" aria-label="Thao tác project">
+                                    <MudMenuItem Icon="@Icons.Material.Filled.RecordVoiceOver" Disabled="@(_busy || _recoveringVoice)" OnClick="RecoverVoiceAsync">
+                                        @(_recoveringVoice ? "Đang khôi phục Voice..." : "Khôi phục Voice")
+                                    </MudMenuItem>
+                                </MudMenu>
+                            }
                             <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseProjectDialogAsync" />
                         </MudStack>
                     </MudStack>
@@ -761,6 +770,7 @@ else
 
     private int _tabIndex;
     private bool _busy;
+    private bool _recoveringVoice;
     private bool _aiGenerating;
     private string? _loadWarning;
     private bool _projectDialogOpen;
@@ -1781,6 +1791,51 @@ else
             Navigation.NavigateTo("/render-jobs", replace: true);
         }
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RecoverVoiceAsync()
+    {
+        if (_recoveringVoice || _projectId is null || AuthState.CurrentUser is not { } user)
+        {
+            return;
+        }
+
+        _recoveringVoice = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var confirmed = await DialogService.ShowMessageBoxAsync(
+                "Khôi phục Voice",
+                "Khôi phục các scene đang thiếu Voice? Video đã hoàn tất sẽ được giữ nguyên và không render lại.",
+                yesText: "Khôi phục",
+                cancelText: "Hủy");
+            if (confirmed != true)
+            {
+                return;
+            }
+
+            var result = await RVideoAudioRecovery.RecoverAsync(_projectId.Value, user);
+            if (result is null)
+            {
+                Snackbar.Add("Không tìm thấy project hoặc bạn không có quyền truy cập.", Severity.Warning);
+                return;
+            }
+
+            Snackbar.Add(
+                TodoX.Web.Services.VideoRender.RVideoAudioRecoveryPresentation.BuildSummary(result),
+                result.FailedScenes > 0 ? Severity.Warning : Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "RVIDEO_AUDIO_RECOVERY_UI_FAILED projectId={ProjectId}", _projectId);
+            Snackbar.Add("Không thể yêu cầu khôi phục Voice. Vui lòng thử lại.", Severity.Error);
+        }
+        finally
+        {
+            _recoveringVoice = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task ReloadAsync()
@@ -2811,14 +2866,19 @@ else
 
             if (!result.ValidationPassed || string.IsNullOrWhiteSpace(result.GeneratedJson))
             {
-                Snackbar.Add("Prompt Assistant không tạo được JSON hợp lệ.", Severity.Error);
+                var failureMessage = result.ErrorCode == "generated_output_validation_failed"
+                    ? "Prompt Assistant đã tạo JSON nhưng nội dung chưa đạt yêu cầu."
+                    : result.ErrorCode == "generated_json_malformed"
+                        ? "Prompt Assistant không tạo được JSON hợp lệ."
+                        : "Prompt Assistant không thể tạo nội dung.";
+                Snackbar.Add($"{failureMessage} Mã kiểm tra: {result.GenerationId}", Severity.Error);
                 return;
             }
 
             var generatedParseResult = PromptParser.Parse(result.GeneratedJson);
             if (!generatedParseResult.IsTodoXSchemaValid)
             {
-                Snackbar.Add("Prompt AI trả về JSON chưa đúng schema TodoX.", Severity.Error);
+                Snackbar.Add($"Prompt AI trả về JSON chưa đúng schema TodoX. Mã kiểm tra: {result.GenerationId}", Severity.Error);
                 return;
             }
 

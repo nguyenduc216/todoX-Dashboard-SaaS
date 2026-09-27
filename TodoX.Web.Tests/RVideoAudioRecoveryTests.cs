@@ -155,6 +155,40 @@ public sealed class RVideoAudioRecoveryTests
         Assert.Contains("TryEnqueueFinalMergeAsync(project.Id, RVideoProjectFinalizationContracts.TriggerSceneAudioReady, ct)", muxHandler, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BlazorProjectActionUsesCircuitUserAndExistingRecoveryServiceOnly()
+    {
+        var page = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+        var method = Between(page, "private async Task RecoverVoiceAsync()", "private async Task ReloadAsync()");
+
+        Assert.Contains("IRVideoAudioRecoveryService RVideoAudioRecovery", page, StringComparison.Ordinal);
+        Assert.Contains("Khôi phục Voice", page, StringComparison.Ordinal);
+        Assert.Contains("AuthState.CurrentUser is not { } user", method, StringComparison.Ordinal);
+        Assert.Contains("RVideoAudioRecovery.RecoverAsync(_projectId.Value, user)", method, StringComparison.Ordinal);
+        Assert.Contains("if (_recoveringVoice", method, StringComparison.Ordinal);
+        Assert.Contains("_recoveringVoice = true;", method, StringComparison.Ordinal);
+        Assert.Contains("_recoveringVoice = false;", method, StringComparison.Ordinal);
+        Assert.Contains("await ReloadAsync();", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("SceneImages", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("ImageRenderRouter", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("RVideoSceneVideoRecovery", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnqueueRender", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("79Ai", method, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RecoverySummaryReportsSuccessSkipsAndSafePartialFailures()
+    {
+        var success = Result(total: 5, requested: 5, skipped: 0, failed: 0);
+        var partial = Result(total: 5, requested: 3, skipped: 1, failed: 1,
+            new RVideoAudioRecoverySceneResult(545, 1, "failed", "RVIDEO_TTS_RATE_OUT_OF_RANGE"));
+
+        Assert.Equal("Đã yêu cầu khôi phục Voice cho 5/5 scene.", RVideoAudioRecoveryPresentation.BuildSummary(success));
+        Assert.Equal(
+            "Đã yêu cầu: 3 • Bỏ qua: 1 • Lỗi: 1 • Mã lỗi: RVIDEO_TTS_RATE_OUT_OF_RANGE",
+            RVideoAudioRecoveryPresentation.BuildSummary(partial));
+    }
+
     private static void InvokeRateValidation(decimal rate, decimal min, decimal max)
     {
         var method = typeof(RVideoSceneAudioAutoChainService).GetMethod("ValidateTtsRate", BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -183,6 +217,23 @@ public sealed class RVideoAudioRecoveryTests
             VoiceText = "Narration",
             ScenePrompt = $"voice: Narration | tts_rate: {rate.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
         };
+
+    private static RVideoAudioRecoveryResult Result(
+        int total,
+        int requested,
+        int skipped,
+        int failed,
+        params RVideoAudioRecoverySceneResult[] scenes)
+        => new(112, total, total, requested, skipped, failed, scenes);
+
+    private static string Between(string source, string start, string end)
+    {
+        var startIndex = source.IndexOf(start, StringComparison.Ordinal);
+        var endIndex = source.IndexOf(end, startIndex + start.Length, StringComparison.Ordinal);
+        Assert.True(startIndex >= 0, $"Missing start marker: {start}");
+        Assert.True(endIndex > startIndex, $"Missing end marker: {end}");
+        return source[startIndex..endIndex];
+    }
 
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", "..", "TodoX.Web" }.Concat(parts).ToArray()));

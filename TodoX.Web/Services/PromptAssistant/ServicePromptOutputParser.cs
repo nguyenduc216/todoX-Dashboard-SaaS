@@ -19,7 +19,7 @@ public sealed class ServicePromptOutputParser
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new ServicePromptProviderException("generated_json_invalid", "Gommo Agent returned empty content.", "{}");
+            throw new ServicePromptProviderException("generated_json_malformed", "Gommo Agent returned empty content.", "{}");
         }
 
         try
@@ -28,7 +28,7 @@ public sealed class ServicePromptOutputParser
         }
         catch (JsonException ex)
         {
-            throw new ServicePromptProviderException("generated_json_invalid", "Gommo Agent returned invalid JSON.", "{}",
+            throw new ServicePromptProviderException("generated_json_malformed", "Gommo Agent returned invalid JSON.", "{}",
                 ex);
         }
     }
