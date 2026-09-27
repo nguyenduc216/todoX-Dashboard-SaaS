@@ -29,10 +29,58 @@ public sealed class GommoPromptAssistantTests
         Assert.NotNull(result.TotalDurationMs);
         Assert.True(result.TotalDurationMs >= 0);
         Assert.DoesNotContain("secret-token", result.SanitizedRawResponse);
+        Assert.Equal("text/event-stream; charset=utf-8", result.Diagnostics?.HttpContentType);
+        Assert.Equal(5, result.Diagnostics?.SseDataCount);
+        Assert.True(result.Diagnostics?.DoneReceived);
+        Assert.Equal(result.Content.Length, result.Diagnostics?.AssembledContentLength);
+        Assert.False(result.Diagnostics?.RawResponseTruncated);
         Assert.Equal(("gommo_agent", "access_token"), credentials.LastResolve);
         Assert.Equal("base-123", handler.RequestBody!.RootElement.GetProperty("agent_id").GetString());
         Assert.NotEqual(handler.RequestBody.RootElement.GetProperty("user_message_id").GetString(), handler.RequestBody.RootElement.GetProperty("assistant_message_id").GetString());
     }
+
+    [Fact]
+    public async Task ClientMarksBoundedRawCaptureAsTruncated()
+    {
+        var largeDiagnosticEvent = System.Text.Json.JsonSerializer.Serialize(new { ignored = new string('x', 70 * 1024) });
+        var handler = new StubHandler(
+            $"data: {largeDiagnosticEvent}\n\n" +
+            $"data: {Chunk("{\"title\":\"ok\"}")}\n\n" +
+            "data: [DONE]\n\n");
+        var client = CreateClient(handler);
+
+        var result = await client.CompleteAsync(CreateRequest());
+
+        Assert.True(result.Diagnostics?.RawResponseTruncated);
+        Assert.Equal(64 * 1024, result.Diagnostics?.RawResponseCapturedLength);
+        Assert.Equal("{\"title\":\"ok\"}", result.Content);
+    }
+
+    [Fact]
+    public async Task ClientPreservesSanitizedMalformedChunkEvidenceAndDiagnostics()
+    {
+        var handler = new StubHandler("data: {\"invalid\":\"secret-token\"\n\n");
+        var client = CreateClient(handler);
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("malformed_sse_chunk", error.Code);
+        Assert.DoesNotContain("secret-token", error.SanitizedResponse, StringComparison.Ordinal);
+        Assert.Contains("***", error.SanitizedResponse, StringComparison.Ordinal);
+        Assert.Equal(1, error.Diagnostics?.SseDataCount);
+        Assert.False(error.Diagnostics?.DoneReceived);
+        Assert.NotNull(error.ParserErrorLineNumber);
+        Assert.NotNull(error.ParserErrorBytePositionInLine);
+    }
+
+    private static ServicePrompt79AiClient CreateClient(StubHandler handler)
+        => new(
+            new HttpClient(handler),
+            new StaticCredentialResolver("secret-token"),
+            Options.Create(new ServicePromptAssistantOptions { TimeoutSeconds = 30 }));
+
+    private static ServicePromptProviderRequest CreateRequest()
+        => new("https://api.gommo.net/api/v2/chat", "gommo_agent", "base-123", "make demo");
 
     private static string Chunk(string content) => System.Text.Json.JsonSerializer.Serialize(new { choices = new[] { new { delta = new { content } } } });
 

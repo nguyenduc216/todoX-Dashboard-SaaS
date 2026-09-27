@@ -20,7 +20,8 @@ public sealed class PromptAssistantEndpointsTests
         Assert.Contains("semantic boundaries", input, StringComparison.Ordinal);
         Assert.Contains("Decide the scene count yourself", input, StringComparison.Ordinal);
         Assert.Contains("integer from 4 through 8", input, StringComparison.Ordinal);
-        Assert.Contains("1.0 through 1.2", input, StringComparison.Ordinal);
+        Assert.Contains("positive JSON number", input, StringComparison.Ordinal);
+        Assert.DoesNotContain("1.0 through 1.2", input, StringComparison.Ordinal);
         Assert.DoesNotContain("Scene count: 7", input, StringComparison.Ordinal);
     }
 
@@ -36,6 +37,8 @@ public sealed class PromptAssistantEndpointsTests
         Assert.Contains("target video duration of 30 seconds", input, StringComparison.Ordinal);
         Assert.Contains("You may create a hook", input, StringComparison.Ordinal);
         Assert.Contains("Choose the scene count yourself", input, StringComparison.Ordinal);
+        Assert.Contains("positive JSON number", input, StringComparison.Ordinal);
+        Assert.DoesNotContain("1.0 through 1.2", input, StringComparison.Ordinal);
         Assert.DoesNotContain("Scene count: 7", input, StringComparison.Ordinal);
     }
 
@@ -96,5 +99,22 @@ public sealed class PromptAssistantEndpointsTests
         Assert.Equal("gommo_authentication_failed", response.ErrorCode);
         Assert.Equal("Prompt Assistant generate failed.", response.ErrorMessage);
         Assert.DoesNotContain("secret-token", JsonSerializer.Serialize(response), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("generated_json_malformed")]
+    [InlineData("generated_output_validation_failed")]
+    public void ToResponsePreservesGeneratedJsonFailureTaxonomy(string errorCode)
+    {
+        var result = new ServicePromptGenerationResult
+        {
+            GenerationId = Guid.NewGuid(),
+            ValidationPassed = false,
+            ErrorCode = errorCode
+        };
+
+        var response = PromptAssistantEndpoints.ToResponse(result);
+
+        Assert.Equal(errorCode, response.ErrorCode);
     }
 }

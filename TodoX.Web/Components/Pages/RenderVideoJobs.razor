@@ -2806,14 +2806,19 @@ else
 
             if (!result.ValidationPassed || string.IsNullOrWhiteSpace(result.GeneratedJson))
             {
-                Snackbar.Add("Prompt Assistant không tạo được JSON hợp lệ.", Severity.Error);
+                var failureMessage = result.ErrorCode == "generated_output_validation_failed"
+                    ? "Prompt Assistant đã tạo JSON nhưng nội dung chưa đạt yêu cầu."
+                    : result.ErrorCode == "generated_json_malformed"
+                        ? "Prompt Assistant không tạo được JSON hợp lệ."
+                        : "Prompt Assistant không thể tạo nội dung.";
+                Snackbar.Add($"{failureMessage} Mã kiểm tra: {result.GenerationId}", Severity.Error);
                 return;
             }
 
             var generatedParseResult = PromptParser.Parse(result.GeneratedJson);
             if (!generatedParseResult.IsTodoXSchemaValid)
             {
-                Snackbar.Add("Prompt AI trả về JSON chưa đúng schema TodoX.", Severity.Error);
+                Snackbar.Add($"Prompt AI trả về JSON chưa đúng schema TodoX. Mã kiểm tra: {result.GenerationId}", Severity.Error);
                 return;
             }
 

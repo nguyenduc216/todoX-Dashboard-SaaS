@@ -35,7 +35,33 @@ public sealed class ServicePromptAssistantTests
         Assert.Equal("ok", parsed.RootElement.GetProperty("title").GetString());
 
         var error = Assert.Throws<ServicePromptProviderException>(() => parser.Parse("{broken"));
-        Assert.Equal("generated_json_invalid", error.Code);
+        Assert.Equal("generated_json_malformed", error.Code);
+        Assert.NotNull(error.ParserErrorMessage);
+        Assert.NotNull(error.ParserErrorLineNumber);
+        Assert.NotNull(error.ParserErrorBytePositionInLine);
+        Assert.DoesNotContain("secret-token", error.ParserErrorMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OutputParserAcceptsExactVietnameseUnicodeJson()
+    {
+        const string sentence = "Khả năng tự học là năng lực quan trọng nhất đời, không cần bàn cãi.";
+        var parser = new ServicePromptOutputParser();
+
+        using var parsed = parser.Parse(JsonSerializer.Serialize(new { voice = sentence }));
+
+        Assert.Equal(sentence, parsed.RootElement.GetProperty("voice").GetString());
+    }
+
+    [Fact]
+    public void OutputParserPreservesCurrentFenceBehavior()
+    {
+        var parser = new ServicePromptOutputParser();
+
+        using var parsed = parser.Parse("```json\n{\"title\":\"ok\"}\n```");
+
+        Assert.Equal("ok", parsed.RootElement.GetProperty("title").GetString());
+        Assert.Throws<ServicePromptProviderException>(() => parser.Parse("prefix\n```json\n{\"title\":\"ok\"}\n```"));
     }
 
     [Fact]
@@ -128,6 +154,9 @@ public sealed class ServicePromptAssistantTests
         Assert.Contains("CAST(@RequestSnapshot AS jsonb)", sql, StringComparison.Ordinal);
         Assert.Contains("CAST(@GeneratedJson AS jsonb)", sql, StringComparison.Ordinal);
         Assert.Contains("CAST(@ValidationErrors AS jsonb)", sql, StringComparison.Ordinal);
+        Assert.Contains("assembled_content_sanitized", sql, StringComparison.Ordinal);
+        Assert.Contains("parser_error_line_number", sql, StringComparison.Ordinal);
+        Assert.Contains("@AssembledContent", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("@RequestSnapshot, @RawResponse", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("@GeneratedJson, @ValidationStatus", sql, StringComparison.Ordinal);
     }

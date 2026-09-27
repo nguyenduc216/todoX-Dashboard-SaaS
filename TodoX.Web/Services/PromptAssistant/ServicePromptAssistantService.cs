@@ -48,6 +48,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
     private readonly ServicePromptStructureValidator _validator;
     private readonly RVideoJobSettingsRepository _videoSettings;
     private readonly ServicePromptAssistantOptions _options;
+    private readonly ILogger<ServicePromptAssistantService> _logger;
 
     public ServicePromptAssistantService(
         ServicePromptAssistantRepository repository,
@@ -56,7 +57,8 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         ServicePromptOutputParser parser,
         ServicePromptStructureValidator validator,
         RVideoJobSettingsRepository videoSettings,
-        IOptions<ServicePromptAssistantOptions> options)
+        IOptions<ServicePromptAssistantOptions> options,
+        ILogger<ServicePromptAssistantService> logger)
     {
         _repository = repository;
         _provider = provider;
@@ -65,6 +67,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         _validator = validator;
         _videoSettings = videoSettings;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<ServicePromptAssistantWorkspace> LoadWorkspaceAsync(Guid serviceId, CancellationToken ct = default)
@@ -157,6 +160,11 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         string? errorCode = null;
         string? errorMessage = null;
         var status = ServicePromptGenerationStatus.ProviderFailed;
+        string? sanitizedAssembledContent = null;
+        ServicePromptProviderDiagnostics? providerDiagnostics = null;
+        string? parserErrorMessage = null;
+        long? parserErrorLineNumber = null;
+        long? parserErrorBytePositionInLine = null;
 
         try
         {
@@ -177,10 +185,12 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             streamingDurationMs = response.StreamingDurationMs;
             credit = response.Credit;
             runtimeProvider = response.RuntimeProvider;
+            sanitizedAssembledContent = response.SanitizedAssembledContent;
+            providerDiagnostics = response.Diagnostics;
             using var parsed = _parser.Parse(response.Content);
             generatedJson = ServicePromptJson.Canonicalize(parsed.RootElement.GetRawText());
             if (parsed.RootElement.ValueKind != JsonValueKind.Object)
-                throw new ServicePromptProviderException("generated_json_invalid", "Final prompt must be a JSON object.", response.SanitizedRawResponse);
+                throw new ServicePromptProviderException("generated_output_validation_failed", "Final prompt must be a JSON object.", response.SanitizedRawResponse);
             if (videoProjectId is long projectId)
             {
                 generatedJson = PromptAssistantCharacterReferenceSynchronizer.Synchronize(
@@ -191,7 +201,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             if (validationDocument.RootElement.TryGetProperty("scenes", out var scenes))
             {
                 if (scenes.ValueKind != JsonValueKind.Array)
-                    throw new ServicePromptProviderException("generated_json_invalid", "The scenes field must be an array.", response.SanitizedRawResponse);
+                    throw new ServicePromptProviderException("generated_output_validation_failed", "The scenes field must be an array.", response.SanitizedRawResponse);
                 ValidateNumericConsistency(validationDocument.RootElement, scenes, response.SanitizedRawResponse);
             }
             IReadOnlyList<ServicePromptValidationError> outputErrors = videoProjectId is null
@@ -201,7 +211,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             {
                 errors.AddRange(outputErrors);
                 status = ServicePromptGenerationStatus.ValidationFailed;
-                errorCode = "generated_json_invalid";
+                errorCode = "generated_output_validation_failed";
                 errorMessage = "Generated video prompt did not pass validation.";
             }
             else
@@ -211,11 +221,21 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         }
         catch (ServicePromptProviderException ex)
         {
-            status = ServicePromptGenerationStatus.ProviderFailed;
+            status = ex.Code == "generated_output_validation_failed"
+                ? ServicePromptGenerationStatus.ValidationFailed
+                : ServicePromptGenerationStatus.ProviderFailed;
             errorCode = ex.Code;
             errorMessage = ex.Message;
             errors.Add(new("$", ex.Code, ex.Message));
             rawResponses.Add(ex.SanitizedResponse);
+            sanitizedAssembledContent ??= ex.SanitizedAssembledContent;
+            providerDiagnostics ??= ex.Diagnostics;
+            parserErrorMessage = ex.ParserErrorMessage;
+            parserErrorLineNumber = ex.ParserErrorLineNumber;
+            parserErrorBytePositionInLine = ex.ParserErrorBytePositionInLine;
+            firstEventMs ??= providerDiagnostics?.FirstEventMs;
+            firstContentMs ??= providerDiagnostics?.FirstContentMs;
+            totalDurationMs ??= providerDiagnostics?.TotalDurationMs;
         }
         catch (OperationCanceledException)
         {
@@ -228,6 +248,14 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             errorMessage = ex is InvalidOperationException
                 ? ex.Message
                 : "Prompt provider request failed.";
+            _logger.LogError(
+                ex,
+                "PROMPT_ASSISTANT_GENERATION_EXCEPTION GenerationId={GenerationId} VideoProjectId={VideoProjectId} ProviderCode={ProviderCode} ModelCode={ModelCode} ErrorCode={ErrorCode}",
+                generationId,
+                videoProjectId,
+                assistant.ProviderCode,
+                assistant.ModelCode,
+                errorCode);
         }
 
         var result = new ServicePromptGenerationResult
@@ -251,7 +279,18 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             TotalDurationMs = totalDurationMs,
             StreamingDurationMs = streamingDurationMs,
             Credit = credit,
-            RuntimeProvider = runtimeProvider ?? assistant.ProviderCode
+            RuntimeProvider = runtimeProvider ?? assistant.ProviderCode,
+            Diagnostics = new ServicePromptGenerationDiagnostics(
+                sanitizedAssembledContent,
+                providerDiagnostics?.HttpContentType,
+                providerDiagnostics?.SseDataCount,
+                providerDiagnostics?.DoneReceived,
+                providerDiagnostics?.RawResponseCapturedLength,
+                providerDiagnostics?.RawResponseTruncated,
+                providerDiagnostics?.AssembledContentLength,
+                parserErrorMessage,
+                parserErrorLineNumber,
+                parserErrorBytePositionInLine)
         };
         return await PersistAndReturnAsync(
             result,
@@ -279,38 +318,68 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         string? requestSnapshot = null)
     {
         var persistence = new ServicePromptGenerationPersistence
-            {
-                Id = result.GenerationId,
-                ServiceId = serviceId,
-                AssistantId = assistant.Id,
-                TrainingVersionId = version?.Id,
-                VideoProjectId = videoProjectId,
-                UserId = userSession?.UserId,
-                CustomerId = userSession?.CustomerId,
-                ProviderCode = result.ProviderCode,
-                ModelCode = result.ModelCode,
-                UserInput = userInput ?? string.Empty,
-                RequestSnapshot = requestSnapshot ?? "{}",
-                RawResponse = rawResponse,
-                GeneratedJson = result.GeneratedJson,
-                ValidationStatus = result.ValidationPassed ? "PASS" : "FAIL",
-                ValidationErrors = JsonSerializer.Serialize(result.ValidationErrors, ServicePromptJson.Options),
-                RepairAttempts = result.RepairAttemptCount,
-                PromptTokens = result.PromptTokens,
-                CompletionTokens = result.CompletionTokens,
-                TotalTokens = result.TotalTokens,
-                RuntimeProvider = result.RuntimeProvider,
-                Credit = result.Credit,
-                FirstEventMs = result.FirstEventMs,
-                FirstContentMs = result.FirstContentMs,
-                TotalDurationMs = result.TotalDurationMs,
-                StreamingDurationMs = result.StreamingDurationMs,
-                Status = result.Status.ToString(),
-                ErrorCode = result.ErrorCode,
-                ErrorMessage = result.ErrorMessage,
-                CreatedAt = DateTime.UtcNow - result.Latency,
-                CompletedAt = DateTime.UtcNow
-            };
+        {
+            Id = result.GenerationId,
+            ServiceId = serviceId,
+            AssistantId = assistant.Id,
+            TrainingVersionId = version?.Id,
+            VideoProjectId = videoProjectId,
+            UserId = userSession?.UserId,
+            CustomerId = userSession?.CustomerId,
+            ProviderCode = result.ProviderCode,
+            ModelCode = result.ModelCode,
+            UserInput = userInput ?? string.Empty,
+            RequestSnapshot = requestSnapshot ?? "{}",
+            RawResponse = rawResponse,
+            AssembledContent = result.ValidationPassed ? null : result.Diagnostics.SanitizedAssembledContent,
+            HttpContentType = result.Diagnostics.HttpContentType,
+            SseDataCount = result.Diagnostics.SseDataCount,
+            DoneReceived = result.Diagnostics.DoneReceived,
+            RawResponseCapturedLength = result.Diagnostics.RawResponseCapturedLength,
+            RawResponseTruncated = result.Diagnostics.RawResponseTruncated,
+            AssembledContentLength = result.Diagnostics.AssembledContentLength,
+            ParserErrorMessage = result.Diagnostics.ParserErrorMessage,
+            ParserErrorLineNumber = result.Diagnostics.ParserErrorLineNumber,
+            ParserErrorBytePositionInLine = result.Diagnostics.ParserErrorBytePositionInLine,
+            GeneratedJson = result.GeneratedJson,
+            ValidationStatus = result.ValidationPassed ? "PASS" : "FAIL",
+            ValidationErrors = JsonSerializer.Serialize(result.ValidationErrors, ServicePromptJson.Options),
+            RepairAttempts = result.RepairAttemptCount,
+            PromptTokens = result.PromptTokens,
+            CompletionTokens = result.CompletionTokens,
+            TotalTokens = result.TotalTokens,
+            RuntimeProvider = result.RuntimeProvider,
+            Credit = result.Credit,
+            FirstEventMs = result.FirstEventMs,
+            FirstContentMs = result.FirstContentMs,
+            TotalDurationMs = result.TotalDurationMs,
+            StreamingDurationMs = result.StreamingDurationMs,
+            Status = result.Status.ToString(),
+            ErrorCode = result.ErrorCode,
+            ErrorMessage = result.ErrorMessage,
+            CreatedAt = DateTime.UtcNow - result.Latency,
+            CompletedAt = DateTime.UtcNow
+        };
+        if (!result.ValidationPassed)
+        {
+            _logger.LogWarning(
+                "PROMPT_ASSISTANT_GENERATION_FAILED GenerationId={GenerationId} VideoProjectId={VideoProjectId} ProviderCode={ProviderCode} ModelCode={ModelCode} RuntimeProvider={RuntimeProvider} ErrorCode={ErrorCode} ValidationStatus={ValidationStatus} HttpContentType={HttpContentType} SseDataCount={SseDataCount} DoneReceived={DoneReceived} RawResponseCapturedLength={RawResponseCapturedLength} RawResponseTruncated={RawResponseTruncated} AssembledContentLength={AssembledContentLength} ParserErrorLineNumber={ParserErrorLineNumber} ParserErrorBytePositionInLine={ParserErrorBytePositionInLine}",
+                result.GenerationId,
+                videoProjectId,
+                result.ProviderCode,
+                result.ModelCode,
+                result.RuntimeProvider,
+                result.ErrorCode,
+                persistence.ValidationStatus,
+                result.Diagnostics.HttpContentType,
+                result.Diagnostics.SseDataCount,
+                result.Diagnostics.DoneReceived,
+                result.Diagnostics.RawResponseCapturedLength,
+                result.Diagnostics.RawResponseTruncated,
+                result.Diagnostics.AssembledContentLength,
+                result.Diagnostics.ParserErrorLineNumber,
+                result.Diagnostics.ParserErrorBytePositionInLine);
+        }
         if (videoProjectId is not null && result.ValidationPassed)
         {
             await _repository.SaveGenerationAndSetActiveAsync(persistence, ct);
@@ -486,17 +555,17 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
     {
         if (root.TryGetProperty("scene_count", out var sceneCount) && sceneCount.TryGetInt32(out var expectedCount)
             && expectedCount != scenes.GetArrayLength())
-            throw new ServicePromptProviderException("generated_json_invalid", "scene_count does not match scenes length.", raw);
+            throw new ServicePromptProviderException("generated_output_validation_failed", "scene_count does not match scenes length.", raw);
 
         var durations = scenes.EnumerateArray().Select(x => x.TryGetProperty("duration_seconds", out var value) && value.TryGetInt32(out var number) ? number : (int?)null).ToList();
         if (root.TryGetProperty("duration", out var duration) && duration.TryGetInt32(out var expectedDuration) && durations.All(x => x.HasValue)
             && expectedDuration != durations.Sum(x => x!.Value))
-            throw new ServicePromptProviderException("generated_json_invalid", "duration does not match scene durations.", raw);
+            throw new ServicePromptProviderException("generated_output_validation_failed", "duration does not match scene durations.", raw);
 
         var shots = scenes.EnumerateArray().Select(x => x.TryGetProperty("shot_count", out var value) && value.TryGetInt32(out var number) ? number : (int?)null).ToList();
         if (root.TryGetProperty("total_shot_count", out var totalShots) && totalShots.TryGetInt32(out var expectedShots) && shots.All(x => x.HasValue)
             && expectedShots != shots.Sum(x => x!.Value))
-            throw new ServicePromptProviderException("generated_json_invalid", "total_shot_count does not match scene shot counts.", raw);
+            throw new ServicePromptProviderException("generated_output_validation_failed", "total_shot_count does not match scene shot counts.", raw);
     }
     private static int? Sum(int? left, int? right)
         => left is null && right is null ? null : (left ?? 0) + (right ?? 0);

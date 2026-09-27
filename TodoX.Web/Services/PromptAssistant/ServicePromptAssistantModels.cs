@@ -120,7 +120,20 @@ public sealed class ServicePromptGenerationResult
     public int? StreamingDurationMs { get; init; }
     public decimal? Credit { get; init; }
     public string RuntimeProvider { get; init; } = string.Empty;
+    public ServicePromptGenerationDiagnostics Diagnostics { get; init; } = new();
 }
+
+public sealed record ServicePromptGenerationDiagnostics(
+    string? SanitizedAssembledContent = null,
+    string? HttpContentType = null,
+    int? SseDataCount = null,
+    bool? DoneReceived = null,
+    int? RawResponseCapturedLength = null,
+    bool? RawResponseTruncated = null,
+    int? AssembledContentLength = null,
+    string? ParserErrorMessage = null,
+    long? ParserErrorLineNumber = null,
+    long? ParserErrorBytePositionInLine = null);
 
 public sealed record ServicePromptValidationError(string Path, string Code, string Message);
 
@@ -142,19 +155,51 @@ public sealed record ServicePromptProviderResponse(
     int? FirstEventMs = null,
     int? FirstContentMs = null,
     int? TotalDurationMs = null,
-    int? StreamingDurationMs = null);
+    int? StreamingDurationMs = null,
+    string? SanitizedAssembledContent = null,
+    ServicePromptProviderDiagnostics? Diagnostics = null);
+
+public sealed record ServicePromptProviderDiagnostics(
+    string? HttpContentType = null,
+    int SseDataCount = 0,
+    bool DoneReceived = false,
+    int RawResponseCapturedLength = 0,
+    bool RawResponseTruncated = false,
+    int AssembledContentLength = 0,
+    int? FirstEventMs = null,
+    int? FirstContentMs = null,
+    int? TotalDurationMs = null);
 
 public sealed class ServicePromptProviderException : InvalidOperationException
 {
-    public ServicePromptProviderException(string code, string message, string sanitizedResponse, Exception? inner = null)
+    public ServicePromptProviderException(
+        string code,
+        string message,
+        string sanitizedResponse,
+        Exception? inner = null,
+        string? sanitizedAssembledContent = null,
+        ServicePromptProviderDiagnostics? diagnostics = null)
         : base(message, inner)
     {
         Code = code;
         SanitizedResponse = sanitizedResponse;
+        SanitizedAssembledContent = sanitizedAssembledContent;
+        Diagnostics = diagnostics;
+        if (inner is JsonException jsonException)
+        {
+            ParserErrorMessage = jsonException.Message;
+            ParserErrorLineNumber = jsonException.LineNumber;
+            ParserErrorBytePositionInLine = jsonException.BytePositionInLine;
+        }
     }
 
     public string Code { get; }
     public string SanitizedResponse { get; }
+    public string? SanitizedAssembledContent { get; }
+    public ServicePromptProviderDiagnostics? Diagnostics { get; }
+    public string? ParserErrorMessage { get; }
+    public long? ParserErrorLineNumber { get; }
+    public long? ParserErrorBytePositionInLine { get; }
 }
 
 public sealed class ServicePromptDomainException : InvalidOperationException

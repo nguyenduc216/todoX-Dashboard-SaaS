@@ -614,6 +614,9 @@ internal static class ServicePromptGenerationPersistenceContract
         INSERT INTO settings.service_prompt_generations
             (id, service_id, service_prompt_assistant_id, training_version_id, video_project_id, user_id, customer_id,
              provider_code, model_code, user_input, request_snapshot_sanitized, raw_response_sanitized,
+             assembled_content_sanitized, http_content_type, sse_data_count, sse_done_received,
+             raw_response_captured_length, raw_response_truncated, assembled_content_length,
+             parser_error_message, parser_error_line_number, parser_error_byte_position_in_line,
              generated_json, validation_status, validation_errors_json, repair_attempt_count,
              prompt_tokens, completion_tokens, total_tokens, runtime_provider, credit, first_event_ms,
              first_content_ms, total_duration_ms, streaming_duration_ms, status, error_code, error_message,
@@ -621,6 +624,9 @@ internal static class ServicePromptGenerationPersistenceContract
         VALUES
             (@Id, @ServiceId, @AssistantId, @TrainingVersionId, @VideoProjectId, @UserId, @CustomerId,
              @ProviderCode, @ModelCode, @UserInput, CAST(@RequestSnapshot AS jsonb), @RawResponse,
+             @AssembledContent, @HttpContentType, @SseDataCount, @DoneReceived,
+             @RawResponseCapturedLength, @RawResponseTruncated, @AssembledContentLength,
+             @ParserErrorMessage, @ParserErrorLineNumber, @ParserErrorBytePositionInLine,
              CAST(@GeneratedJson AS jsonb), @ValidationStatus, CAST(@ValidationErrors AS jsonb), @RepairAttempts,
              @PromptTokens, @CompletionTokens, @TotalTokens, @RuntimeProvider, @Credit, @FirstEventMs,
              @FirstContentMs, @TotalDurationMs, @StreamingDurationMs, @Status, @ErrorCode, @ErrorMessage,
@@ -670,6 +676,16 @@ public sealed class ServicePromptGenerationPersistence
     public string UserInput { get; init; } = string.Empty;
     public string RequestSnapshot { get; init; } = "{}";
     public string? RawResponse { get; init; }
+    public string? AssembledContent { get; init; }
+    public string? HttpContentType { get; init; }
+    public int? SseDataCount { get; init; }
+    public bool? DoneReceived { get; init; }
+    public int? RawResponseCapturedLength { get; init; }
+    public bool? RawResponseTruncated { get; init; }
+    public int? AssembledContentLength { get; init; }
+    public string? ParserErrorMessage { get; init; }
+    public long? ParserErrorLineNumber { get; init; }
+    public long? ParserErrorBytePositionInLine { get; init; }
     public string? GeneratedJson { get; init; }
     public string ValidationStatus { get; init; } = "FAIL";
     public string ValidationErrors { get; init; } = "[]";

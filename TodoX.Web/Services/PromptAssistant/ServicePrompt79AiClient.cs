@@ -14,6 +14,8 @@ public interface IServicePromptProviderClient
 
 public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
 {
+    private const int MaxDiagnosticChars = 64 * 1024;
+
     private readonly HttpClient _http;
     private readonly IProviderCredentialResolver _credentials;
     private readonly ServicePromptAssistantOptions _options;
@@ -79,61 +81,140 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         var content = new StringBuilder(); var raw = new StringBuilder();
         int? promptTokens = null, outputTokens = null, completionTokens = null, totalTokens = null; decimal? credit = null; string? runtimeProvider = null;
         var sawSse = false; var firstEventMs = (int?)null; var firstContentMs = (int?)null; var done = false;
+        var sseDataCount = 0; var rawResponseTruncated = false;
+        var httpContentType = response.Content.Headers.ContentType?.ToString();
         try
         {
             while (await reader.ReadLineAsync(timeout.Token) is { } line)
             {
-                if (raw.Length < 64 * 1024) raw.AppendLine(line);
+                AppendBoundedLine(raw, line, ref rawResponseTruncated);
                 if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
+                sseDataCount++;
                 sawSse = true; firstEventMs ??= (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 var data = line[5..].Trim();
                 if (string.IsNullOrWhiteSpace(data)) continue;
                 if (string.Equals(data, "[DONE]", StringComparison.Ordinal)) { done = true; break; }
-                TryReadChunk(data, content, ref promptTokens, ref outputTokens, ref completionTokens, ref totalTokens, ref credit, ref runtimeProvider, ref firstContentMs, started);
+                try
+                {
+                    TryReadChunk(data, content, ref promptTokens, ref outputTokens, ref completionTokens, ref totalTokens, ref credit, ref runtimeProvider, ref firstContentMs, started);
+                }
+                catch (JsonException ex)
+                {
+                    throw new ServicePromptProviderException(
+                        "malformed_sse_chunk",
+                        "Gommo Agent returned malformed SSE data.",
+                        Sanitize(raw.ToString(), credential.Secret),
+                        ex,
+                        SanitizeAndBound(content.ToString(), credential.Secret),
+                        BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
+                            firstEventMs, firstContentMs, started));
+                }
             }
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new ServicePromptProviderException("gommo_timeout", "Gommo Agent request timed out.", "{}"); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new ServicePromptProviderException(
+                "gommo_timeout",
+                "Gommo Agent request timed out.",
+                Sanitize(raw.ToString(), credential.Secret),
+                sanitizedAssembledContent: SanitizeAndBound(content.ToString(), credential.Secret),
+                diagnostics: BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
+                    firstEventMs, firstContentMs, started));
+        }
 
         var sanitized = Sanitize(raw.ToString(), credential.Secret);
+        var sanitizedContent = SanitizeAndBound(content.ToString(), credential.Secret);
+        var diagnostics = BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
+            firstEventMs, firstContentMs, started);
         if (!sawSse || !done || !string.Equals(response.Content.Headers.ContentType?.MediaType, "text/event-stream", StringComparison.OrdinalIgnoreCase))
-            throw new ServicePromptProviderException("invalid_sse", "Gommo Agent response is not SSE.", sanitized);
-        if (content.Length == 0) throw new ServicePromptProviderException("missing_content", "Gommo Agent response contains no assistant content.", sanitized);
+            throw new ServicePromptProviderException("invalid_sse", "Gommo Agent response is not SSE.", sanitized,
+                sanitizedAssembledContent: sanitizedContent, diagnostics: diagnostics);
+        if (content.Length == 0) throw new ServicePromptProviderException("missing_content", "Gommo Agent response contains no assistant content.", sanitized,
+            sanitizedAssembledContent: sanitizedContent, diagnostics: diagnostics);
         var totalDurationMs = (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         var effectiveOutputTokens = outputTokens ?? completionTokens;
         return new ServicePromptProviderResponse(content.ToString(), promptTokens, effectiveOutputTokens, totalTokens, sanitized,
             Credit: credit, RuntimeProvider: runtimeProvider, FirstEventMs: firstEventMs, FirstContentMs: firstContentMs,
             TotalDurationMs: totalDurationMs,
-            StreamingDurationMs: firstContentMs is null ? null : Math.Max(0, totalDurationMs - firstContentMs.Value));
+            StreamingDurationMs: firstContentMs is null ? null : Math.Max(0, totalDurationMs - firstContentMs.Value),
+            SanitizedAssembledContent: sanitizedContent,
+            Diagnostics: diagnostics);
     }
 
     private static void TryReadChunk(string data, StringBuilder content, ref int? promptTokens, ref int? outputTokens, ref int? completionTokens, ref int? totalTokens, ref decimal? credit, ref string? runtimeProvider, ref int? firstContentMs, long started)
     {
-        try
+        using var document = JsonDocument.Parse(data); var root = document.RootElement;
+        if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0)
         {
-            using var document = JsonDocument.Parse(data); var root = document.RootElement;
-            if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0)
+            var choice = choices[0];
+            if (choice.TryGetProperty("delta", out var delta) && delta.TryGetProperty("content", out var token) && token.ValueKind == JsonValueKind.String)
             {
-                var choice = choices[0];
-                if (choice.TryGetProperty("delta", out var delta) && delta.TryGetProperty("content", out var token) && token.ValueKind == JsonValueKind.String)
-                { firstContentMs ??= (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds; content.Append(token.GetString()); }
-            }
-            if (root.TryGetProperty("usage", out var usage))
-            {
-                promptTokens = ReadInt(usage, "prompt_tokens") ?? promptTokens;
-                outputTokens = ReadInt(usage, "output_tokens") ?? outputTokens;
-                completionTokens = ReadInt(usage, "completion_tokens") ?? completionTokens;
-                totalTokens = ReadInt(usage, "total_tokens") ?? totalTokens;
-                credit = ReadDecimal(usage, "credit") ?? credit;
-                runtimeProvider = ReadString(usage, "provider") ?? runtimeProvider;
+                firstContentMs ??= (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                content.Append(token.GetString());
             }
         }
-        catch (JsonException ex) { throw new ServicePromptProviderException("malformed_sse_chunk", "Gommo Agent returned malformed SSE data.", "{}", ex); }
+        if (root.TryGetProperty("usage", out var usage))
+        {
+            promptTokens = ReadInt(usage, "prompt_tokens") ?? promptTokens;
+            outputTokens = ReadInt(usage, "output_tokens") ?? outputTokens;
+            completionTokens = ReadInt(usage, "completion_tokens") ?? completionTokens;
+            totalTokens = ReadInt(usage, "total_tokens") ?? totalTokens;
+            credit = ReadDecimal(usage, "credit") ?? credit;
+            runtimeProvider = ReadString(usage, "provider") ?? runtimeProvider;
+        }
     }
 
     private static int? ReadInt(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) ? result : null;
     private static decimal? ReadDecimal(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.TryGetDecimal(out var result) ? result : null;
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static string Sanitize(string raw, string secret) => string.IsNullOrWhiteSpace(secret) ? raw : raw.Replace(secret, "***", StringComparison.Ordinal);
+
+    private static string SanitizeAndBound(string value, string secret)
+    {
+        var sanitized = Sanitize(value, secret);
+        return sanitized.Length <= MaxDiagnosticChars ? sanitized : sanitized[..MaxDiagnosticChars];
+    }
+
+    private static void AppendBoundedLine(StringBuilder target, string line, ref bool truncated)
+    {
+        var value = line + Environment.NewLine;
+        var available = MaxDiagnosticChars - target.Length;
+        if (available <= 0)
+        {
+            truncated = true;
+            return;
+        }
+
+        if (value.Length > available)
+        {
+            target.Append(value.AsSpan(0, available));
+            truncated = true;
+            return;
+        }
+
+        target.Append(value);
+    }
+
+    private static ServicePromptProviderDiagnostics BuildDiagnostics(
+        string? httpContentType,
+        int sseDataCount,
+        bool doneReceived,
+        int rawResponseCapturedLength,
+        bool rawResponseTruncated,
+        int assembledContentLength,
+        int? firstEventMs,
+        int? firstContentMs,
+        long started)
+        => new(
+            httpContentType,
+            sseDataCount,
+            doneReceived,
+            rawResponseCapturedLength,
+            rawResponseTruncated,
+            assembledContentLength,
+            firstEventMs,
+            firstContentMs,
+            (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 
     private static async Task<string> ReadBoundedBodyAsync(HttpResponseMessage response, CancellationToken ct)
     {

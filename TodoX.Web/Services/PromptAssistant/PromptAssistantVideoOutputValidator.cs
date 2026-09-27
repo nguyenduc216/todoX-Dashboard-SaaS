@@ -46,10 +46,11 @@ public static class PromptAssistantVideoOutputValidator
 
             if (!TryGetProperty(scene, "tts_rate", out var speed)
                 || speed.ValueKind != JsonValueKind.Number
-                || !speed.TryGetDecimal(out var rate)
-                || rate is < 1.0m or > 1.2m)
+                || !speed.TryGetDouble(out var rate)
+                || !double.IsFinite(rate)
+                || rate <= 0)
             {
-                errors.Add(new($"{path}.tts_rate", "tts_rate_out_of_range", "tts_rate must be a number from 1.0 through 1.2."));
+                errors.Add(new($"{path}.tts_rate", "tts_rate_invalid", "tts_rate must be a positive JSON number."));
             }
 
             index++;
