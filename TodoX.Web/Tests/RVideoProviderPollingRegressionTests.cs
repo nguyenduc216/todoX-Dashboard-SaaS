@@ -405,7 +405,7 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
-    public void RVideoJobDetailAuthenticatedCustomerLoadsAfterHydration()
+    public void RVideoJobDetailAuthenticatedCustomerForwardsPersistedServiceContext()
     {
         var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
 
@@ -414,7 +414,47 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("await RVideoJobs.GetByJobIdAsync(JobId, user, timeout.Token)", source);
         Assert.Contains("_bootstrapState = RVideoDetailBootstrapState.Ready", source);
         Assert.Contains("RVIDEO_DETAIL_LOAD_SUCCESS", source);
-        Assert.Contains("<RenderVideoJobs Embedded=\"true\" JobId=\"@JobId\" ProjectId=\"@_view.Project.Id\" />", source);
+        Assert.Contains("JobId=\"@JobId\"", source);
+        Assert.Contains("ProjectId=\"@_view.Project.Id\"", source);
+        Assert.Contains("ServiceId=\"@_view.CoreJob.ServiceId\"", source);
+        Assert.Contains("ServiceCode=\"@_view.CoreJob.ServiceCode\"", source);
+        Assert.DoesNotContain("ServiceId=\"00000000-0000-0000-0000-000000000000\"", source);
+    }
+
+    [Fact]
+    public void RVideoPromptAssistantStillRejectsMissingServiceIdBeforeGeneration()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+        var method = source[source.IndexOf("private async Task GenerateAiPromptAsync()", StringComparison.Ordinal)..];
+        method = method[..method.IndexOf("private async Task EnsurePromptWorkspaceProjectAsync()", StringComparison.Ordinal)];
+
+        Assert.Contains("if (ServiceId is not Guid serviceId || serviceId == Guid.Empty)", method);
+        Assert.Contains("Thiếu thông tin dịch vụ để tạo Prompt AI.", method);
+        Assert.True(
+            method.IndexOf("if (ServiceId is not Guid serviceId || serviceId == Guid.Empty)", StringComparison.Ordinal)
+            < method.IndexOf("PromptAssistant.GeneratePromptAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RVideoOrphanRecoveryPersistsRequestedServiceIdentity()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoJobService.cs");
+        var method = source[source.IndexOf("public async Task<RVideoJobCreatedResult> RecoverOrphanPromptWorkspaceAsync", StringComparison.Ordinal)..];
+        method = method[..method.IndexOf("public async Task<RVideoJobCreatedResult> CreateDraftAsync", StringComparison.Ordinal)];
+
+        Assert.Contains("service.Id != serviceId", method);
+        Assert.Contains("(id, tenant_id, customer_id, user_id, service_id", method);
+        Assert.Contains("@serviceId", method);
+    }
+
+    [Fact]
+    public void RVideoNewJobStillForwardsQueryServiceContext()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RVideoJobCreate.razor");
+
+        Assert.Contains("<RenderVideoJobs Embedded=\"true\" ServiceId=\"@ServiceId\" ServiceCode=\"@ServiceCode\" />", source);
+        Assert.Contains("[SupplyParameterFromQuery(Name = \"serviceId\")]", source);
+        Assert.Contains("[SupplyParameterFromQuery(Name = \"serviceCode\")]", source);
     }
 
     [Fact]

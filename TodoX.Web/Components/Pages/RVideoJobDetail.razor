@@ -28,7 +28,11 @@
         }
         @if (_view is not null)
         {
-            <RenderVideoJobs Embedded="true" JobId="@JobId" ProjectId="@_view.Project.Id" />
+            <RenderVideoJobs Embedded="true"
+                             JobId="@JobId"
+                             ProjectId="@_view.Project.Id"
+                             ServiceId="@_view.CoreJob.ServiceId"
+                             ServiceCode="@_view.CoreJob.ServiceCode" />
         }
         break;
 }
