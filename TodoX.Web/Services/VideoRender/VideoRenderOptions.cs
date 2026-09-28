@@ -12,6 +12,8 @@ public sealed class VideoRenderOptions
     public int PollIntervalSeconds { get; set; } = 5;
     // PollIntervalSeconds and MaxPollDurationMinutes are the normal provider-poll policy.
     public int MaxPollDurationMinutes { get; set; } = 30;
+    // RVideo provider renders that stay non-terminal beyond this window become retryable local failures.
+    public int ProviderRenderHardTimeoutMinutes { get; set; } = 60;
     public int MaxConsecutivePollErrors { get; set; } = 5;
     public int MaxConcurrentSceneJobs { get; set; } = 3;
     public int MaxConcurrentMergeJobs { get; set; } = 1;
