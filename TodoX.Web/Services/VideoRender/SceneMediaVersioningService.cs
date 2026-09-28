@@ -199,6 +199,7 @@ public sealed class SceneVideoVersionDto
     public Guid? VoiceAudioVersionId { get; set; }
     public string? PosterUrl { get; set; }
     public string? ErrorMessage { get; set; }
+    public DateTimeOffset? SubmittedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 
@@ -907,6 +908,30 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         var version = await conn.QuerySingleAsync<SceneVideoVersionDto>(
             SelectSceneVideoVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
             new { versionId, tenant = _tenant.TenantId }, tx);
+        if (IsTerminalUnsuccessfulVersionStatus(version.Status))
+        {
+            throw new InvalidOperationException("RVIDEO_STALE_SCENE_VIDEO_VERSION_TERMINAL");
+        }
+
+        var newerSelectedCompletedVersion = await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT id
+              FROM video_render.scene_video_versions
+             WHERE scene_id=@sceneId
+               AND project_id=@projectId
+               AND tenant_id=@tenant
+               AND is_selected=true
+               AND status='completed'
+               AND version_number > @versionNumber
+             ORDER BY version_number DESC
+             LIMIT 1;
+            """,
+            new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId, version.VersionNumber }, tx);
+        if (newerSelectedCompletedVersion is not null)
+        {
+            throw new InvalidOperationException("RVIDEO_STALE_SCENE_VIDEO_VERSION_SUPERSEDED");
+        }
+
         await conn.ExecuteAsync(
             "UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
             new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId }, tx);
@@ -1978,6 +2003,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     private static bool IsErrorStatus(string? status)
         => status?.Trim().ToUpperInvariant() is "FAILED" or "FAILURE" or "ERROR" or "CANCELLED" or "CANCELED" or "EXPIRED";
 
+    private static bool IsTerminalUnsuccessfulVersionStatus(string? status)
+        => status?.Trim().ToLowerInvariant() is "failed" or "failure" or "error" or "cancelled" or "canceled" or "expired";
+
     private static string? BuildErrorJson(string? errorCode, string? errorMessage, string? responseJson)
     {
         if (!string.IsNullOrWhiteSpace(responseJson))
@@ -2352,7 +2380,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                charged_points AS ChargedPoints, refunded_points AS RefundedPoints, cost_source AS CostSource,
                render_config_json::text AS RenderConfigJson,
                voice_audio_version_id AS VoiceAudioVersionId,
-               poster_url AS PosterUrl, error_message AS ErrorMessage, created_at AS CreatedAt
+               poster_url AS PosterUrl, error_message AS ErrorMessage,
+               submitted_at AS SubmittedAt, created_at AS CreatedAt
           FROM video_render.scene_video_versions
         """;
 

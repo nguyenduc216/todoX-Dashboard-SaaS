@@ -161,7 +161,7 @@ public static class RVideoSharedBaseImagePromptGuard
         => RVideoReferenceOnlyPromptGuard.Apply(prompt, useSharedReferenceImage);
 }
 
-public sealed class SceneVideoWorkerHandler : IRenderJobHandler
+public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int DefaultMaxReconciliationRetries = 3;
@@ -1340,6 +1340,58 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                 if (status.Status is VideoProviderTaskStatus.Queued or VideoProviderTaskStatus.Processing)
                 {
+                    var providerTimeout = TimeSpan.FromMinutes(Math.Max(1,
+                        _config.GetValue("RVideo:ProviderRenderHardTimeoutMinutes", _options.ProviderRenderHardTimeoutMinutes)));
+                    var timeoutDecision = ProviderRenderHardTimeoutEvaluator.Evaluate(
+                        version,
+                        input,
+                        job,
+                        providerTimeout,
+                        DateTimeOffset.UtcNow);
+                    if (timeoutDecision.IsTimedOut)
+                    {
+                        var providerElapsed = timeoutDecision.Elapsed;
+                        var timeoutMessage = $"Video provider task remained {status.Status} for {providerElapsed.TotalMinutes:F1} minutes, exceeding the configured {providerTimeout.TotalMinutes:F0}-minute hard timeout.";
+                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RENDER_TIMEOUT", "warning",
+                            "Scene-video provider task exceeded the hard render timeout and was marked failed locally.",
+                            new
+                            {
+                                projectId = input.ProjectId,
+                                sceneId = input.SceneId,
+                                input.SceneIndex,
+                                renderJobId = job.Id,
+                                sceneVideoVersionId = version.Id,
+                                providerCode = input.ProviderCode,
+                                modelCode = policy.Model,
+                                logicalRequestId = attemptLogicalRequestId,
+                                providerTaskId,
+                                providerVideoIdBase,
+                                idBase = providerVideoIdBase,
+                                providerStatus = status.Status.ToString(),
+                                providerElapsedSeconds = (int)providerElapsed.TotalSeconds,
+                                providerRenderHardTimeoutMinutes = (int)providerTimeout.TotalMinutes,
+                                providerErrorCode = status.ErrorCode,
+                                providerErrorMessage = status.ErrorMessage,
+                                providerRawResponse = SanitizeDiagnosticJson(status.SanitizedResponseJson)
+                            }, ct);
+                        if (reservation.BillingRecordId is not null)
+                        {
+                            await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                            {
+                                LogicalRequestId = attemptLogicalRequestId,
+                                Success = false,
+                                ActualModel = status.ActualModel ?? policy.Model,
+                                ProviderTaskId = providerTaskId ?? taskId,
+                                ProviderUsageJson = status.SanitizedResponseJson,
+                                TariffSnapshotJson = tariffSnapshot,
+                                ErrorMessage = timeoutMessage
+                            }, ct);
+                        }
+                        await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, timeoutMessage, providerTaskId ?? taskId, ct, status.ActualModel ?? policy.Model, candidate.ProviderDurationSeconds);
+                        await FailAsync(project.Id, scene, version.Id, "RVIDEO_PROVIDER_RENDER_TIMEOUT", timeoutMessage, ct);
+                        throw new RenderJobTerminalFailureException(timeoutMessage);
+                    }
+
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_PROCESSING", "info",
                         $"Scene {input.SceneIndex} provider task is still processing.",
                         new
@@ -1567,7 +1619,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         job, project, scene, version.Id, input, attemptLogicalRequestId, tariffSnapshot, providerTaskId ?? taskId, providerVideoIdBase ?? taskId, ex.ErrorCode, ex.Message, ct);
                     return;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException and not RenderJobTerminalFailureException)
                 {
                     await HandleReconciliationFailureAsync(
                         job, project, scene, version.Id, input, attemptLogicalRequestId, tariffSnapshot, providerTaskId ?? taskId, providerVideoIdBase ?? taskId,
@@ -3750,6 +3802,35 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             job.Id, taskId, Math.Max(1, (int)delay.TotalSeconds));
         throw new RenderJobDeferredException(message);
     }
+
+}
+
+internal readonly record struct ProviderRenderHardTimeoutDecision(
+    bool IsTimedOut,
+    DateTimeOffset StartedAt,
+    TimeSpan Elapsed);
+
+internal static class ProviderRenderHardTimeoutEvaluator
+{
+    internal static ProviderRenderHardTimeoutDecision Evaluate(
+        SceneVideoVersionDto version,
+        SceneVideoRenderWorkItemInput input,
+        RenderJobDto job,
+        TimeSpan timeout,
+        DateTimeOffset now)
+    {
+        var startedAt = version.SubmittedAt
+                        ?? (input.CreatedAtUtc == default ? (DateTimeOffset?)null : input.CreatedAtUtc)
+                        ?? (job.StartedAt.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(job.StartedAt.Value, DateTimeKind.Utc)) : (DateTimeOffset?)null)
+                        ?? new DateTimeOffset(DateTime.SpecifyKind(job.CreatedAt, DateTimeKind.Utc));
+        var elapsed = now - startedAt;
+        return new ProviderRenderHardTimeoutDecision(elapsed >= timeout, startedAt, elapsed);
+    }
+
+}
+
+public sealed partial class SceneVideoWorkerHandler
+{
 
     private async Task MarkPendingReconciliationAsync(
         SceneVideoRenderWorkItemInput input,

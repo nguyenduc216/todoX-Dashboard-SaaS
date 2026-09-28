@@ -37,15 +37,11 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
                 await tenant.EnsureLoadedAsync(stoppingToken);
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
-                foreach (var jobId in await repository.ListPersistentSceneVideoReconciliationJobsAsync(stoppingToken))
-                {
-                    await jobs.ScheduleProviderPollAsync(
-                        jobId,
-                        delay,
-                        "SCENE_VIDEO_RECONCILIATION_WORKER",
-                        "Persistent reconciliation worker retained the existing provider task and scheduled another poll.",
-                        stoppingToken);
-                }
+                await SchedulePersistentJobsAsync(
+                    await repository.ListPersistentSceneVideoReconciliationJobsAsync(stoppingToken),
+                    jobs,
+                    delay,
+                    stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -57,6 +53,25 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
             }
 
             await Task.Delay(delay, stoppingToken);
+        }
+    }
+
+    internal static async Task SchedulePersistentJobsAsync(
+        IReadOnlyList<Guid> jobIds,
+        IRenderJobService jobs,
+        TimeSpan delay,
+        CancellationToken ct)
+    {
+        foreach (var jobId in jobIds)
+        {
+            await jobs.ScheduleProviderPollAsync(
+                jobId,
+                delay,
+                "SCENE_VIDEO_RECONCILIATION_WORKER",
+                "Persistent reconciliation worker retained the existing provider task and scheduled another poll.",
+                ct,
+                enforceReconciliationLimit: false,
+                enforceProviderPollTimeout: false);
         }
     }
 }
