@@ -99,6 +99,15 @@ Khi task yêu cầu Codex hoàn tất code:
 
 Không commit file publish/build.
 
+## GITHUB PUSH POLICY - BẮT BUỘC
+
+- Với mọi task code TodoX, hoàn thành yêu cầu: 1) build/test theo task, 2) git commit, 3) push commit lên GitHub remote branch.
+- Task CHƯA hoàn thành nếu commit chỉ nằm local.
+- Luôn báo cáo branch, commit SHA, remote, và kết quả push.
+- Không dùng force push trừ khi user cho phép rõ ràng.
+- Nếu push lỗi do auth, non-fast-forward, branch protection, network, permission hoặc conflict remote, DỪNG và báo blocker chính xác. Không được tuyên bố hoàn thành.
+- Ngoại lệ: chỉ không push khi task/user ghi rõ "DO NOT PUSH".
+
 ## Báo cáo cuối cùng bắt buộc
 
 Báo cáo bằng tiếng Việt và ngắn gọn theo cấu trúc:
