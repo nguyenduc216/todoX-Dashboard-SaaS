@@ -183,6 +183,7 @@ public sealed class VideoProjectSaveSceneDraftRequest
     public Guid? SelectedImageVersionId { get; set; }
     public Guid? SelectedVideoVersionId { get; set; }
     public string? AspectRatio { get; set; }
+    public int? DurationSeconds { get; set; }
 }
 
 public sealed class VideoProjectUpdateRequest

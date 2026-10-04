@@ -212,8 +212,14 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoCompl
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneDraftValidator, TodoX.Web.Services.VideoRender.RVideoSceneDraftValidator>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneDraftSaveAction, TodoX.Web.Services.VideoRender.RVideoSceneDraftSaveAction>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneCollectionAction, TodoX.Web.Services.VideoRender.RVideoSceneCollectionAction>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoModelOptionsService, TodoX.Web.Services.VideoRender.RVideoSceneVideoModelOptionsService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneAddDefaultResolver, TodoX.Web.Services.VideoRender.RVideoSceneAddDefaultResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService, TodoX.Web.Services.VideoRender.RVideoTrustedPayerContextService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoPromptGenerationAction, TodoX.Web.Services.VideoRender.RVideoPromptGenerationAction>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoJobService, TodoX.Web.Services.VideoRender.RVideoJobService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoProjectFinalizationService, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
