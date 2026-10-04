@@ -87,23 +87,28 @@ Nếu có thay đổi ngoài scope do working tree đã bẩn từ trước:
 - Nếu build/test fail vì lỗi ngoài scope có sẵn từ trước, báo rõ và không sửa lỗi đó nếu chưa được yêu cầu.
 - Không tuyên bố `đã hoàn thành` nếu build bắt buộc chưa pass.
 
+## Chuỗi bắt buộc TEST/VERIFY -> BUILD -> PUBLISH -> COMMIT -> PUSH -> REPORT SHA
+
+Mọi task code TodoX đã qua verification gate (ví dụ RVID-UI-V2-P3B.2) phải tuân chuỗi chuẩn hóa sau, không được rút ngắn:
+
+1. TEST/VERIFY: chạy test liên quan theo checklist (ví dụ `--filter RVideoP3B2` và `--filter RVideoP3B1` đều PASS).
+2. BUILD: `dotnet build TodoX.Web/TodoX.Web.csproj -c Release` phải 0 error mới được tiếp tục.
+3. PUBLISH TO DESIGNATED FOLDER: `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release -o artifacts/publish/todox-dashboard` và xác minh artifact `artifacts/publish/todox-dashboard/TodoX.Web.dll` tồn tại. Không commit thư mục `artifacts/publish`.
+4. COMMIT: kiểm tra diff lần cuối, chỉ stage file thuộc scope task, message ngắn đúng nội dung.
+5. PUSH: push lên đúng branch người dùng chỉ định (ví dụ `fix/prompt-assistant-tts-validation`), không force push trừ khi user cho phép.
+6. REPORT SHA: báo cáo branch, full commit SHA, remote và kết quả push trong Final Report. Task CHƯA hoàn thành nếu thiếu bất kỳ bước nào, commit chỉ nằm local, hoặc artifact chưa được xác minh.
+
+Publish mặc định: root `artifacts/publish`, dashboard app `artifacts/publish/todox-dashboard` trừ khi user yêu cầu subfolder khác.
+
 ## Commit và push
 
-Khi task yêu cầu Codex hoàn tất code:
-
-1. Build/test theo checklist.
-2. Kiểm tra diff lần cuối.
-3. Commit với message ngắn, đúng nội dung task.
-4. Push lên đúng branch người dùng chỉ định.
-5. Chỉ sau khi push thành công mới đánh `[x] Commit + push`.
-
-Không commit file publish/build.
+Khi task yêu cầu Codex hoàn tất code, thực hiện đúng chuỗi trên. Chỉ sau khi push thành công mới đánh `[x] Commit + push`. Không commit file publish/build.
 
 ## GITHUB PUSH POLICY - BẮT BUỘC
 
-- Với mọi task code TodoX, hoàn thành yêu cầu: 1) build/test theo task, 2) git commit, 3) push commit lên GitHub remote branch.
-- Task CHƯA hoàn thành nếu commit chỉ nằm local.
-- Luôn báo cáo branch, commit SHA, remote, và kết quả push.
+- Với mọi task code TodoX, hoàn thành yêu cầu chuỗi TEST/VERIFY -> BUILD -> PUBLISH TO DESIGNATED FOLDER -> COMMIT -> PUSH -> REPORT SHA.
+- Task CHƯA hoàn thành nếu commit chỉ nằm local, chưa publish tới `artifacts/publish/todox-dashboard`, hoặc chưa xác minh artifact.
+- Luôn báo cáo branch, full commit SHA, remote, và kết quả push.
 - Không dùng force push trừ khi user cho phép rõ ràng.
 - Nếu push lỗi do auth, non-fast-forward, branch protection, network, permission hoặc conflict remote, DỪNG và báo blocker chính xác. Không được tuyên bố hoàn thành.
 - Ngoại lệ: chỉ không push khi task/user ghi rõ "DO NOT PUSH".
