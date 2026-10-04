@@ -1,0 +1,19 @@
+using TodoX.Web.Models;
+using TodoX.Web.Services.VideoRender;
+using Xunit;
+namespace TodoX.Web.Tests;
+public sealed class RVideoP3B1AdditionalTests
+{
+    private static string WebRoot => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..","..","..","..","TodoX.Web"));
+    private static string Read(params string[] p) => File.ReadAllText(Path.Combine(new[]{WebRoot}.Concat(p).ToArray()));
+    [Fact] public async Task Collection_Move_InvalidDirection_Rejected(){ var a=new RVideoSceneCollectionAction(null!); var u=new CurrentUserSession{UserId=Guid.NewGuid(),CustomerId=Guid.NewGuid(),IsAuthenticated=true}; var r=await a.MoveSceneAsync(1,1,0,u); Assert.False(r.Success); Assert.Equal("INVALID_DIRECTION",r.ErrorCode); }
+    [Fact] public async Task Collection_Move_ValidDirection_AttemptsRepo(){ var a=new RVideoSceneCollectionAction(null!); var u=new CurrentUserSession{UserId=Guid.NewGuid(),CustomerId=Guid.NewGuid(),IsAuthenticated=true}; var r=await a.MoveSceneAsync(1,1,-1,u); Assert.False(r.Success); Assert.Equal("MOVE_SCENE_FAILED",r.ErrorCode); }
+    [Fact] public void Collection_Src_HasAllOps(){ var s=Read("Services","VideoRender","RVideoSceneCollectionAction.cs"); Assert.Contains("AddSceneAsync",s); Assert.Contains("DeleteSceneAsync",s); Assert.Contains("MoveSceneAsync",s); Assert.Contains("ADD_SCENE_FAILED",s); Assert.Contains("DELETE_SCENE_FAILED",s); }
+    [Fact] public void Legacy_UsesSharedActions(){ var r=Read("Components","Pages","RenderVideoJobs.razor"); Assert.Contains("IRVideoSceneDraftValidator",r); Assert.Contains("SceneDraftSave.SaveAsync",r); Assert.Contains("SceneCollection.AddSceneAsync",r); Assert.Contains("SceneCollection.MoveSceneAsync",r); }
+    [Fact] public void V2_UsesSameSharedActions_NoDirectRepo(){ var r=Read("Components","Pages","RVideo","RVideoV2Preview.razor"); Assert.Contains("IRVideoSceneDraftValidator",r); Assert.Contains("SceneDraftSave.SaveAsync",r); Assert.Contains("SceneCollection.AddSceneAsync",r); Assert.DoesNotContain("VideoRenderRepository",r); }
+    [Fact] public void ExactlyOnce_GuardsExist(){ var l=Read("Components","Pages","RenderVideoJobs.razor"); var v=Read("Components","Pages","RVideo","RVideoV2Preview.razor"); Assert.Contains("_draftSaveGate",l); Assert.Contains("WaitAsync(0)",l); Assert.Contains("_gate",v); Assert.Contains("WaitAsync(0)",v); }
+    [Fact] public void V2_Model_DisplayOnly(){ var v=Read("Components","Pages","RVideo","RVideoV2Preview.razor"); Assert.Contains("ResolveModelLabel",v); Assert.DoesNotContain("RVideoVideoModelPolicy",v); Assert.Contains("MudSelect",v); Assert.Contains("IRVideoSceneVideoModelOptionsService",v); Assert.Contains("HandleModelChangedAsync",v); }
+    [Fact] public void V2_Duration_DisplayOnly(){ var v=Read("Components","Pages","RVideo","RVideoV2Preview.razor"); Assert.Contains("DurationSeconds",v); Assert.Contains("HandleDurationChangedAsync",v); Assert.Contains("MudSelect",v); }
+    [Fact] public void EditOneField_PreservesExtra(){ var m=new ScenePromptMetadata{ScenePurpose="Intro",ImagePrompt="img A",MotionPrompt="motion A",Voice="voice A"}; m.Extra["custom_key"]="keep"; m.Extra["video_model"]="veo_omni"; var parsed=ScenePromptMetadata.Parse(m.Serialize()); parsed.MotionPrompt="edited"; var after=ScenePromptMetadata.Parse(parsed.Serialize()); Assert.Equal("keep",after.Extra["custom_key"]); Assert.Equal("edited",after.MotionPrompt); }
+    [Fact] public void AddDefaults_Consistent(){ var v2=Read("Components","Pages","RVideo","RVideoV2Preview.razor"); var legacy=Read("Components","Pages","RenderVideoJobs.razor"); var resolver=Read("Services","VideoRender","RVideoSceneAddDefaultResolver.cs"); Assert.Contains("IRVideoSceneAddDefaultResolver",v2); Assert.Contains("AddDefaults.BuildAddRequest",v2); Assert.Contains("IRVideoSceneAddDefaultResolver",legacy); Assert.Contains("SceneAddResolver",legacy); Assert.Contains("SceneSecondsDefault",resolver); Assert.Contains("project.SceneSeconds",resolver); }
+}

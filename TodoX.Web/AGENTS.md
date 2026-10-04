@@ -74,11 +74,13 @@ Before declaring completion:
 - If a database change is necessary, create a standalone SQL script and provide it to the user for manual execution.
 - Clearly state when the requested change does not require a database update.
 
-## Build and publish
+## Build and publish - mandatory chain TEST/VERIFY -> BUILD -> PUBLISH -> COMMIT -> PUSH -> REPORT SHA
 
-- After validation succeeds, build and publish the application using the repository's documented workflow.
-- Do not deploy to a server or restart production services unless explicitly requested.
-- Report the publish command, output directory, and result.
+- After validation succeeds, you MUST follow the standardized mandatory chain before declaring complete: TEST/VERIFY -> BUILD -> PUBLISH TO DESIGNATED FOLDER -> COMMIT -> PUSH -> REPORT SHA.
+- TEST/VERIFY: run relevant tests per checklist (e.g. RVideoP3B2 and RVideoP3B1 both PASS).
+- BUILD: `dotnet build TodoX.Web/TodoX.Web.csproj -c Release` must be 0 errors.
+- PUBLISH TO DESIGNATED FOLDER: `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release -o artifacts/publish/todox-dashboard` and verify `artifacts/publish/todox-dashboard/TodoX.Web.dll` exists. Do not commit `artifacts/publish`.
+- COMMIT -> PUSH -> REPORT SHA per GITHUB PUSH POLICY below. Task is NOT complete if any step is skipped, commit is local-only, or artifact is unverified.
 - Default publish root: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish`.
 - For the dashboard application, publish to `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard` unless the user explicitly requests another subfolder.
 
