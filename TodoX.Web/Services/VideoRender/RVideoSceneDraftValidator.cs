@@ -17,7 +17,8 @@ public interface IRVideoSceneDraftValidator
 
 public sealed class RVideoSceneDraftValidator : IRVideoSceneDraftValidator
 {
-    private readonly IRVideoSceneVideoModelOptionsService _optionsService;
+    private readonly IRVideoSceneVideoModelOptionsService? _optionsService;
+    public RVideoSceneDraftValidator() => _optionsService = null;
     public RVideoSceneDraftValidator(IRVideoSceneVideoModelOptionsService optionsService) => _optionsService = optionsService;
 
     public RVideoSceneDraftValidationResult Validate(ScenePromptMetadata metadata)
@@ -28,7 +29,7 @@ public sealed class RVideoSceneDraftValidator : IRVideoSceneDraftValidator
         if (string.IsNullOrWhiteSpace(metadata.ImagePrompt) && string.IsNullOrWhiteSpace(metadata.EffectiveImagePrompt))
             return RVideoSceneDraftValidationResult.Fail("SCENE_IMAGE_PROMPT_EMPTY", "Image prompt is empty.");
 
-        var cached = _optionsService.GetCachedOptions();
+        var cached = _optionsService?.GetCachedOptions();
         if (cached is not null && cached.Count > 0)
         {
             if (!metadata.Extra.TryGetValue("video_model", out var modelKey) || string.IsNullOrWhiteSpace(modelKey))
@@ -55,7 +56,7 @@ public sealed class RVideoSceneDraftValidator : IRVideoSceneDraftValidator
     {
         var baseResult = Validate(metadata);
         if (!baseResult.IsValid) return baseResult;
-        var cached = _optionsService.GetCachedOptions();
+        var cached = _optionsService?.GetCachedOptions();
         if (cached is null || cached.Count == 0) return RVideoSceneDraftValidationResult.Ok();
         if (!metadata.Extra.TryGetValue("video_model", out var modelKey) || string.IsNullOrWhiteSpace(modelKey)) return baseResult;
         var opt = cached.FirstOrDefault(x => string.Equals(x.Key, modelKey.Trim(), StringComparison.OrdinalIgnoreCase));
