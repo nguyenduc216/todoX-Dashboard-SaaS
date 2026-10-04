@@ -52,6 +52,21 @@ Before declaring completion:
 - Do not commit unless explicitly requested.
 - Do not revert changes that existed before the current task.
 
+## GITHUB PUSH POLICY
+
+- For TodoX code implementation tasks, successful completion requires:
+  1. tests/build required by the task,
+  2. git commit,
+  3. push the resulting commit to the configured GitHub remote branch.
+- A task is NOT considered complete if the commit exists only locally.
+- Always report branch name, commit SHA, remote, and push result.
+- Never use force push unless the user explicitly authorizes it.
+- If push fails because of authentication, non-fast-forward, branch protection,
+  network, permissions, or remote conflicts, STOP and report the exact blocker.
+  Do not claim the task is complete.
+- Exception: do not push only when the user/task explicitly says "DO NOT PUSH"
+  or equivalent.
+
 ## Database safety
 
 - Do not create, modify, or execute database migrations unless explicitly requested.

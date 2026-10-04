@@ -1,0 +1,179 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.VideoRender
+@inject AuthStateService AuthState
+@inject IRVideoSceneDraftValidator SceneDraftValidator
+@inject IRVideoSceneDraftSaveAction SceneDraftSave
+@inject IRVideoSceneCollectionAction SceneCollection
+@inject IRVideoSceneVideoModelOptionsService ModelOptions
+@inject IRVideoSceneAddDefaultResolver AddDefaults
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+<div class="rv2-preview">
+@if(JobView is null){<MudAlert Severity="Severity.Info" Dense="true">Chưa có project.</MudAlert>}
+else{
+<div class="rv2-preview-toolbar">
+<MudChip T="string" Size="Size.Small">@JobView.Project.Scenes.Count scene</MudChip>
+<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="HandleAddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
+</div>
+<div class="rv2-preview-desktop">
+<div class="rv2-scene-table-head"><span>#</span><span>Tham chiếu</span><span>Video</span><span>Model</span><span>Thời lượng</span><span>Trạng thái</span><span>Hành động</span></div>
+@foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex)){
+<div class="rv2-scene-row">
+<span>@s.SceneIndex</span>
+<span>@if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)){<img src="@s.StaticImageUrl" class="rv2-thumb" @onclick="@(()=>OpenRef(s.StaticImageUrl!))" />}else{<span>-</span>}</span>
+<span>@if(!string.IsNullOrWhiteSpace(s.SceneVideoUrl)){<video src="@s.SceneVideoUrl" muted class="rv2-vid-thumb"></video>}else{<span>Chưa có</span>}</span>
+<span><MudSelect T="string" Value="@ResolveModelKey(s)" ValueChanged="@(v=>HandleModelChangedAsync(s,v))" Dense="true" Style="min-width:140px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect></span><span><MudSelect T="int" Value="@s.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(s,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect></span>
+<span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@s.Status</MudChip></span>
+<span>
+<MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
+<MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleMoveAsync(s,-1))" Disabled="@(s.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleMoveAsync(s,1))" Disabled="@(s.SceneIndex>=JobView.Project.Scenes.Count || _busy)">Xuống</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleDeleteAsync(s))" Disabled="@_busy">Xóa</MudMenuItem>
+</MudMenu>
+</span>
+</div>}
+<div class="rv2-preview-summary"><span>Hoàn thành: @(JobView.Project.Scenes.Count(x=>x.Status==VideoSceneStatuses.VideoReady))/@JobView.Project.Scenes.Count</span><span>Tổng: @JobView.Project.TotalSeconds s</span></div>
+</div>
+<div class="rv2-preview-mobile">
+<div class="rv2-scene-nav">@foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex)){<button class="rv2-nav-dot rv2-status-@s.Status @(SelectedSceneId==s.Id?"rv2-nav-active":"")" @onclick="@(()=>SelectedSceneId=s.Id)">@s.SceneIndex</button>}</div>
+@if(ActiveScene is not null){
+<div class="rv2-mobile-card">
+<div class="rv2-mobile-video">
+@if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<video src="@ActiveScene.SceneVideoUrl" controls class="rv2-mobile-vid"></video>}else if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" class="rv2-mobile-img" />}else{<div>Chưa có media</div>}
+<div class="rv2-mobile-ref" @onclick="@(()=>OpenRef(ActiveScene.StaticImageUrl!))">@if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" />}</div>
+</div>
+<div class="rv2-mobile-meta"><MudChip T="string" Size="Size.Small" Color="@StatusColor(ActiveScene.Status)">@ActiveScene.Status</MudChip><MudSelect T="string" Value="@ResolveModelKey(ActiveScene)" ValueChanged="@(v=>HandleModelChangedAsync(ActiveScene,v))" Dense="true" Style="min-width:120px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect><MudSelect T="int" Value="@ActiveScene.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(ActiveScene,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(()=>_showDetail=true)">Xem chi tiết</MudButton></div>
+<div class="d-flex gap-1 mt-2">
+<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))">Chỉnh</MudButton>
+<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleSaveAsync(ActiveScene!))" Disabled="@_busy">Lưu</MudButton>
+<MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" /><MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" />
+</div>
+</div>}
+</div>
+@if(_showRef is not null){<div class="rv2-lightbox" @onclick="@(()=>_showRef=null)"><img src="@_showRef" /></div>}
+@if(_showDetail && ActiveScene is not null){<div class="rv2-sheet-backdrop" @onclick="@(()=>_showDetail=false)"></div><div class="rv2-sheet"><MudText Typo="Typo.subtitle2">Scene @ActiveScene.SceneIndex</MudText><MudText Typo="Typo.caption">@ActiveScene.ScenePrompt</MudText><div class="d-flex gap-2 mt-2"><MudButton Size="Size.Small" OnClick="@(()=>HandleEditAsync(ActiveScene!))">Chỉnh prompt</MudButton><MudButton Size="Size.Small" OnClick="@(()=>_showDetail=false)">Đóng</MudButton></div></div>}
+@if(_pendingDelete is not null){<MudOverlay Visible="true" DarkBackground="true"><MudPaper Class="pa-4"><MudText>Xóa scene @_pendingDelete.SceneIndex?</MudText><div class="d-flex gap-2 mt-2"><MudButton Color="Color.Error" OnClick="ConfirmDeleteAsync">Xác nhận</MudButton><MudButton OnClick="@(()=>_pendingDelete=null)">Hủy</MudButton></div></MudPaper></MudOverlay>}
+}
+</div>
+@code{
+[Parameter] public RVideoJobView? JobView{get;set;}
+[Parameter] public EventCallback OnReloadRequested { get; set; }
+long? SelectedSceneId; string? _showRef; bool _showDetail; bool _busy; VideoProjectSceneDto? _pendingDelete;
+private readonly SemaphoreSlim _gate = new(1,1);
+IReadOnlyList<SceneVideoModelOption> _opts = Array.Empty<SceneVideoModelOption>();
+IReadOnlyList<int> AllDurations => _opts.SelectMany(x=>x.Durations).Distinct().OrderBy(x=>x).ToArray();
+protected override async Task OnInitializedAsync(){ _opts = await ModelOptions.GetOptionsAsync(); }
+protected override async Task OnParametersSetAsync(){ if(JobView?.Project.Scenes.Count>0 && SelectedSceneId==null) SelectedSceneId=JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).First().Id; if(_opts.Count==0) _opts = await ModelOptions.GetOptionsAsync(); }
+VideoProjectSceneDto? ActiveScene=>JobView?.Project.Scenes.FirstOrDefault(x=>x.Id==SelectedSceneId);
+bool IsFirst=> JobView!=null && ActiveScene!=null && JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).First().Id==ActiveScene.Id;
+bool IsLast=> JobView!=null && ActiveScene!=null && JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).Last().Id==ActiveScene.Id;
+void PrevScene(){var o=JobView!.Project.Scenes.OrderBy(x=>x.SceneIndex).ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>0) SelectedSceneId=o[i-1].Id;}
+void NextScene(){var o=JobView!.Project.Scenes.OrderBy(x=>x.SceneIndex).ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>=0&&i<o.Count-1) SelectedSceneId=o[i+1].Id;}
+void OpenRef(string u){if(!string.IsNullOrWhiteSpace(u)) _showRef=u;}
+Color StatusColor(string s)=> s switch{VideoSceneStatuses.VideoReady=>Color.Success, VideoSceneStatuses.Failed=>Color.Error, VideoSceneStatuses.VideoRendering or VideoSceneStatuses.VideoQueued=>Color.Warning,_=>Color.Default};
+string ResolveModelLabel(VideoProjectSceneDto s){ try{ var m=ScenePromptMetadata.FromScene(s); if(m.Extra.TryGetValue("video_model", out var v)) return v; if(m.Extra.TryGetValue("model", out var v2)) return v2; }catch{} return "-";}
+
+
+async Task HandleEditAsync(VideoProjectSceneDto scene){
+ if(JobView is null) return;
+ var parameters = new DialogParameters{ [nameof(TodoX.Web.Components.Dialogs.ScenePromptEditorDialog.Metadata)] = ScenePromptMetadata.FromScene(scene) };
+ var opts = new DialogOptions{ CloseButton=true, FullWidth=true, MaxWidth=MaxWidth.Medium };
+ var dialog = await DialogService.ShowAsync<TodoX.Web.Components.Dialogs.ScenePromptEditorDialog>($"Chinh prompt scene {scene.SceneIndex}", parameters, opts);
+ var result = await dialog.Result;
+ if(result is null || result.Canceled || result.Data is not ScenePromptMetadata metadata) return;
+ await DoSaveAsync(scene, metadata, scene.DurationSeconds);
+}
+
+async Task HandleSaveAsync(VideoProjectSceneDto scene){
+ var metadata = ScenePromptMetadata.FromScene(scene);
+ await DoSaveAsync(scene, metadata, scene.DurationSeconds);
+}
+
+async Task DoSaveAsync(VideoProjectSceneDto scene, ScenePromptMetadata metadata, int? durationOverride=null){
+ if(AuthState.CurrentUser is null || JobView is null) return;
+ if(!await _gate.WaitAsync(0)){ Snackbar.Add("Dang luu, vui long doi.", Severity.Info); return; }
+ _busy=true;
+ try{
+   var pre = SceneDraftValidator.Validate(metadata, durationOverride ?? scene.DurationSeconds);
+   if(!pre.IsValid){ Snackbar.Add(pre.ErrorMessage ?? "Validation failed.", Severity.Error); return; }
+   var dur = durationOverride ?? scene.DurationSeconds;
+   var req = new VideoProjectSaveSceneDraftRequest{ SceneId=scene.Id, Status=scene.Status, Title=scene.Title, SceneIndex=scene.SceneIndex, ScenePrompt=metadata.Serialize(), ImagePrompt=metadata.ImagePrompt, VideoPrompt=metadata.MotionPrompt, ImageUrl=scene.StaticImageUrl, ImagePath=scene.StaticImagePath, VideoUrl=scene.SceneVideoUrl, VideoPath=scene.SceneVideoPath, DurationSeconds=dur, ErrorMessage=scene.ErrorMessage };
+   var res = await SceneDraftSave.SaveAsync(req, AuthState.CurrentUser.UserId, metadata);
+   if(!res.Success){ Snackbar.Add(res.ErrorMessage ?? "Khong the luu scene.", Severity.Error); return; }
+   Snackbar.Add("Da luu scene.", Severity.Success);
+   if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+ } finally { _busy=false; _gate.Release(); }
+}
+
+async Task HandleMoveAsync(VideoProjectSceneDto scene, int dir){
+ if(JobView is null || AuthState.CurrentUser is null) return;
+ if(!await _gate.WaitAsync(0)) return;
+ _busy=true;
+ try{
+   var res = await SceneCollection.MoveSceneAsync(JobView.Project.Id, scene.Id, dir, AuthState.CurrentUser);
+   if(!res.Success){ Snackbar.Add(res.ErrorMessage ?? "Khong the di chuyen scene.", Severity.Error); return; }
+   if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+ } finally { _busy=false; _gate.Release(); }
+}
+
+async Task HandleDeleteAsync(VideoProjectSceneDto scene){ _pendingDelete=scene; }
+async Task ConfirmDeleteAsync(){
+ var scene=_pendingDelete; _pendingDelete=null; if(scene is null || JobView is null || AuthState.CurrentUser is null) return;
+ if(!await _gate.WaitAsync(0)) return; _busy=true;
+ try{ var res = await SceneCollection.DeleteSceneAsync(JobView.Project.Id, scene.Id, AuthState.CurrentUser); if(!res.Success){ Snackbar.Add(res.ErrorMessage ?? "Khong the xoa scene.", Severity.Error); return; } Snackbar.Add("Da xoa scene.", Severity.Success); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); } finally { _busy=false; _gate.Release(); }
+}
+
+async Task HandleAddSceneAsync(){
+ if(JobView is null || AuthState.CurrentUser is null) return;
+ if(!await _gate.WaitAsync(0)) return;
+ _busy=true;
+ try{
+   var idx = JobView.Project.Scenes.Count + 1;
+   var req = AddDefaults.BuildAddRequest(JobView.Project, idx);
+   var res = await SceneCollection.AddSceneAsync(JobView.Project.Id, req, AuthState.CurrentUser);
+   if(!res.Success){ Snackbar.Add(res.ErrorMessage ?? "Khong the them scene.", Severity.Error); return; }
+   Snackbar.Add("Da them scene.", Severity.Success);
+   if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+ } finally { _busy=false; _gate.Release(); }
+}
+string ResolveModelKey(VideoProjectSceneDto scene){
+ var meta = ScenePromptMetadata.FromScene(scene);
+ if(meta.Extra.TryGetValue("video_model", out var k) && !string.IsNullOrWhiteSpace(k))
+ {
+   if(_opts.Any(x=>string.Equals(x.Key,k,StringComparison.OrdinalIgnoreCase))) return k;
+ }
+ return _opts.FirstOrDefault()?.Key ?? string.Empty;
+}
+async Task HandleModelChangedAsync(VideoProjectSceneDto scene, string key){
+ var opt = _opts.FirstOrDefault(x=>string.Equals(x.Key,key,StringComparison.OrdinalIgnoreCase));
+ if(opt is null){ Snackbar.Add("Model khong hop le.", Severity.Error); return; }
+ var meta = ScenePromptMetadata.FromScene(scene);
+ meta.Extra["video_model"]=opt.Key;
+ // validate duration against selected model
+ var dur = scene.DurationSeconds;
+ if(!opt.Durations.Contains(dur))
+ {
+   dur = RVideoSceneVideoModelOptionsService.ResolveNearestDuration(dur, opt.Durations);
+   meta.Extra["video_duration"]=dur.ToString();
+ }
+ else if(meta.Extra.ContainsKey("video_duration"))
+ {
+   // keep existing duration if supported
+ }
+ await DoSaveAsync(scene, meta, dur);
+}
+async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
+ var meta = ScenePromptMetadata.FromScene(scene);
+ var key = meta.Extra.TryGetValue("video_model", out var k) ? k : ResolveModelKey(scene);
+ var opt = _opts.FirstOrDefault(x=>string.Equals(x.Key,key,StringComparison.OrdinalIgnoreCase));
+ if(opt is null || !RVideoSceneVideoModelOptionsService.IsSupportedDuration(opt, dur))
+ {
+   Snackbar.Add("Duration khong duoc ho tro boi model da chon.", Severity.Error); return;
+ }
+ meta.Extra["video_model"]=opt.Key;
+ meta.Extra["video_duration"]=dur.ToString();
+ await DoSaveAsync(scene, meta, dur);
+}
+}
