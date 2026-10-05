@@ -13,6 +13,15 @@ public sealed class RVideoProviderPollingRegressionTests
         var method = typeof(Services.VideoRender.SceneVideoWorkerHandler)
             .GetMethod("ResolveNextAttemptIndex", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
+        var candidateType = typeof(Services.VideoRender.SceneVideoWorkerHandler).GetNestedType("ResolvedFallbackCandidate", BindingFlags.NonPublic);
+        Assert.NotNull(candidateType);
+        var listType = typeof(List<>).MakeGenericType(candidateType!);
+        var candidates = Activator.CreateInstance(listType);
+        var policyType = typeof(RVideoVideoModelPolicyEntry);
+        var policy = Activator.CreateInstance(policyType, 0, "79ai", "veo3", "fast");
+        var ctor = candidateType!.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)[0];
+        var candidate = ctor.Invoke(new object?[] { policy, 5, "720P", false });
+        ((dynamic)candidates!).Add((dynamic)candidate);
 
         var versions = Enumerable.Range(0, 12)
             .Select(_ => new Services.VideoRender.SceneVideoVersionDto
@@ -25,7 +34,7 @@ public sealed class RVideoProviderPollingRegressionTests
 
         for (var poll = 0; poll < 12; poll++)
         {
-            Assert.Equal(0, method!.Invoke(null, new object[] { "scene-base", versions }));
+            Assert.Equal(0, method!.Invoke(null, new object[] { "scene-base", versions, candidates! }));
             Assert.All(versions, version => Assert.Equal("a9896cf26fd2ff29", version.ProviderTaskId));
         }
     }
@@ -354,7 +363,7 @@ public sealed class RVideoProviderPollingRegressionTests
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoReconciliationWorker.cs");
 
         Assert.Contains("ListPersistentSceneVideoReconciliationJobsAsync", source);
-        Assert.Contains("ScheduleProviderPollAsync", source);
+        Assert.Contains("SchedulePersistentProviderPollAsync", source);
         Assert.Contains("existing provider task", source);
         Assert.Contains("RenderQueue:Enabled", source);
     }
@@ -1063,5 +1072,86 @@ public sealed class RVideoProviderPollingRegressionTests
         }
 
         return count;
+    }
+
+    private static string ExtractMethod(string source, string startMarker, string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+        Assert.True(end > start);
+        return source[start..end];
+    }
+
+    [Fact]
+    public void PersistentReconciliationUsesRecoverySafeScheduler()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoReconciliationWorker.cs");
+        Assert.Contains("SchedulePersistentProviderPollAsync", worker);
+        Assert.DoesNotContain("ScheduleProviderPollAsync", worker.Split("SchedulePersistentJobsAsync")[1]);
+    }
+
+    [Fact]
+    public void RecoverySafeSchedulerHasAtomicRetryAndLockGuards()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        Assert.Contains("SchedulePersistentProviderPollAsync", source);
+        var method = ExtractMethod(source, "public async Task<bool> SchedulePersistentProviderPollAsync", "public async Task SetProviderIdentifiersAsync");
+        Assert.Contains("retry_after IS NULL OR retry_after <= now()", method);
+        Assert.Contains("lock_until IS NULL OR lock_until <= now()", method);
+        Assert.Contains("status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')", method);
+        Assert.DoesNotContain("JOB_PROVIDER_POLL_NOT_SCHEDULED", method);
+        Assert.Contains("LogDebug", method);
+        Assert.Contains("JOB_PROVIDER_POLL_SCHEDULED", method);
+    }
+
+    [Fact]
+    public void PersistentRepositoryScanRequiresDueRetryAndNoLiveLock()
+    {
+        var repo = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        Assert.Contains("retry_after IS NULL OR j.retry_after <= now()", repo);
+        Assert.Contains("lock_until IS NULL OR j.lock_until <= now()", repo);
+        Assert.Contains("provider_task_id IS NOT NULL", repo);
+        Assert.Contains("provider_video_id_base IS NOT NULL", repo);
+    }
+
+    [Fact]
+    public void RecoverySafeSchedulerExcludesTerminalStatusesAndPreservesIds()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var method = ExtractMethod(source, "public async Task<bool> SchedulePersistentProviderPollAsync", "public async Task SetProviderIdentifiersAsync");
+        Assert.DoesNotContain("'completed'", method);
+        Assert.DoesNotContain("'cancelled'", method);
+        Assert.DoesNotContain("provider_task_id", method);
+        Assert.DoesNotContain("provider_video_id_base", method);
+        Assert.DoesNotContain("max_attempts", method, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("attempt_count", method, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NormalProviderPollRemainsUnchangedForVbee()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var normal = ProviderPollMethod(source);
+        Assert.Contains("@enforceReconciliationLimit", normal);
+        Assert.Contains("@enforceProviderPollTimeout", normal);
+        Assert.Contains("enforceReconciliationLimit: false", worker);
+    }
+
+    [Fact]
+    public void ClaimPredicateStillRequiresDueRetry()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        Assert.Contains("retry_after IS NULL OR retry_after <= now()", source);
+        Assert.Contains("ClaimNextInternal", source);
+    }
+
+    [Fact]
+    public void ReconciliationWorkerHasNoSubmitResubmitPath()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoReconciliationWorker.cs");
+        Assert.DoesNotContain("SubmitAsync", worker);
+        Assert.DoesNotContain("EnqueueAsync", worker);
     }
 }
