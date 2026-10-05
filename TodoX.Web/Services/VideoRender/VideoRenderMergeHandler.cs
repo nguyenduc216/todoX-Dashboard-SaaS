@@ -21,8 +21,10 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     private readonly RVideoJobSettingsRepository _settings;
     private readonly IRVideoJobService _rvideoJobs;
     private readonly IConfiguration _configuration;
+    private readonly TodoX.Web.Services.Media.IMediaFileService _media;
+    private readonly TodoX.Web.Services.TenantContext _tenant;
 
-    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, RVideoJobSettingsRepository settings, IRVideoJobService rvideoJobs, IConfiguration configuration)
+    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, RVideoJobSettingsRepository settings, IRVideoJobService rvideoJobs, IConfiguration configuration, TodoX.Web.Services.Media.IMediaFileService media, TodoX.Web.Services.TenantContext tenant)
     {
         _logger = logger;
         _options = options;
@@ -32,6 +34,8 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         _settings = settings;
         _rvideoJobs = rvideoJobs;
         _configuration = configuration;
+        _media = media;
+        _tenant = tenant;
     }
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
@@ -418,12 +422,126 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         {
             var selectedVideo = await _versions.GetSelectedVideoVersionAsync(scene.Id, ct)
                 ?? throw new InvalidOperationException("Project is missing selected completed scene video versions.");
-            var videoPath = selectedVideo.SourceFilePath ?? scene.SceneVideoPath;
-            items.Add(new MergeInput(scene.Id, scene.SceneIndex, selectedVideo.Id, ResolveRenderPhysicalPath(videoPath), scene.DurationSeconds));
+            var videoPath = await ResolveLocalMergeInputAsync(selectedVideo, scene.Id, ct);
+            items.Add(new MergeInput(scene.Id, scene.SceneIndex, selectedVideo.Id, videoPath, scene.DurationSeconds));
         }
 
         return items;
     }
+
+    /// <summary>
+    /// Resolves a selected completed scene video version into a LOCAL physical file usable by this
+    /// merge instance, without submitting or re-rendering anything with a provider.
+    /// Preference order: existing local SourceFilePath -> media-localized StorageKey/SourceFilePath ->
+    /// durable media lookup by ResultMediaId -> StorageKey -> PublicUrl. Materializes the existing
+    /// media into local upload storage when only a remote copy is reachable.
+    /// </summary>
+    internal async Task<string> ResolveLocalMergeInputAsync(SceneVideoVersionDto selectedVideo, long sceneId, CancellationToken ct)
+    {
+        // 1. Existing local physical path (same instance or shared disk).
+        if (LocalMediaResolver.TryResolveExistingLocalFile(selectedVideo.SourceFilePath, _env.ContentRootPath, _configuration, out var existingPath))
+        {
+            return existingPath;
+        }
+
+        // 2. Object-key-relative localization (shared storage root mounted at a different physical root).
+        if (!string.IsNullOrWhiteSpace(selectedVideo.StorageKey)
+            && LocalMediaResolver.TryResolveExistingLocalFile(selectedVideo.StorageKey, _env.ContentRootPath, _configuration, out var storageKeyPath))
+        {
+            return storageKeyPath;
+        }
+
+        // 3. Durable TodoX media identity: ResultMediaId then StorageKey.
+        var media = selectedVideo.ResultMediaId is Guid mediaId
+            ? await _media.GetAsync(mediaId, ct)
+            : null;
+        media ??= !string.IsNullOrWhiteSpace(selectedVideo.StorageKey)
+            ? await _media.GetByObjectKeyAsync(selectedVideo.StorageKey!, ct)
+            : null;
+
+        if (media is not null
+            && LocalMediaResolver.TryResolveExistingLocalFile(media.ObjectKey, _env.ContentRootPath, _configuration, out var mediaObjectKeyPath))
+        {
+            return mediaObjectKeyPath;
+        }
+
+        // 4. Materialize the existing media locally from its durable public URL. This reuses the SAME
+        // existing TodoX media (no provider submit, no new version, no charge): the URL points at the
+        // already-persisted scene video, and we download those exact bytes back into the local upload root.
+        if (media is not null || !string.IsNullOrWhiteSpace(selectedVideo.PublicUrl))
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            var publicUrl = media?.PublicUrl ?? media?.FileUrl ?? selectedVideo.PublicUrl;
+            var objectKey = media?.ObjectKey ?? selectedVideo.StorageKey;
+            if (!string.IsNullOrWhiteSpace(publicUrl) && !string.IsNullOrWhiteSpace(objectKey))
+            {
+                try
+                {
+                    var localized = await _media.DownloadAndSaveBinaryAtObjectKeyAsync(
+                        publicUrl!,
+                        objectKey,
+                        "video_scene_video",
+                        "video/mp4",
+                        userId: null,
+                        customerId: null,
+                        _tenant.TenantId,
+                        ct);
+                    if (LocalMediaResolver.TryResolveExistingLocalFile(localized.ObjectKey, _env.ContentRootPath, _configuration, out var localizedPath))
+                    {
+                        return localizedPath;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex,
+                        "PROJECT_MERGE_INPUT_MATERIALIZATION_FAILED sceneId={SceneId} sceneVideoVersionId={SceneVideoVersionId} mediaId={MediaId} objectKey={ObjectKey}",
+                        sceneId, selectedVideo.Id, media?.Id, objectKey);
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"RVIDEO_MERGE_INPUT_UNAVAILABLE: no locally accessible merge input and no recoverable durable media for the selected scene video. sceneId={sceneId} sceneVideoVersionId={selectedVideo.Id} resultMediaId={selectedVideo.ResultMediaId} storageKey={selectedVideo.StorageKey} publicUrl={selectedVideo.PublicUrl} sourceFilePath={selectedVideo.SourceFilePath}");
+    }
+
+    /// <summary>Local-only path resolution for merge inputs (no storage or provider access).</summary>
+    internal static class LocalMediaResolver
+    {
+        public static bool TryResolveExistingLocalFile(string? value, string contentRootPath, IConfiguration configuration, out string path)
+        {
+            path = string.Empty;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var candidate = value.Trim();
+            if (Path.IsPathRooted(candidate))
+            {
+                if (File.Exists(candidate))
+                {
+                    path = Path.GetFullPath(candidate);
+                    return true;
+                }
+
+                return false;
+            }
+
+            // Relative value: treat as an upload-root-relative object key (storage local root).
+            var uploadRoot = configuration["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
+            var absolutePath = Path.GetFullPath(Path.Combine(
+                Path.GetFullPath(Path.Combine(contentRootPath, uploadRoot)),
+                candidate.Replace('/', Path.DirectorySeparatorChar)));
+            if (!File.Exists(absolutePath))
+            {
+                return false;
+            }
+
+            path = absolutePath;
+            return true;
+        }
+    }
+
 
     private bool TryResolveBackgroundMusic(RVideoJobSettingsDto? settings, out string musicPath, out decimal musicVolume)
     {
