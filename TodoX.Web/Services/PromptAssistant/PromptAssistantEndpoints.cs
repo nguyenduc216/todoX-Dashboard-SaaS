@@ -85,6 +85,43 @@ public static class PromptAssistantEndpoints
             """;
     }
 
+    // Inverse of BuildAgentInput: recovers the user's original text from a persisted agent input.
+    internal static string? ExtractUserInput(string? agentInput)
+    {
+        if (string.IsNullOrWhiteSpace(agentInput)) return null;
+
+        if (agentInput.StartsWith("CONTENT MODE:", StringComparison.Ordinal))
+        {
+            foreach (var marker in new[] { "USER IDEA:", "SOURCE CONTENT:" })
+            {
+                var index = agentInput.IndexOf(marker, StringComparison.Ordinal);
+                while (index > 0 && agentInput[index - 1] != '\n')
+                {
+                    index = agentInput.IndexOf(marker, index + marker.Length, StringComparison.Ordinal);
+                }
+                if (index <= 0) continue;
+
+                var start = index + marker.Length;
+                if (agentInput.AsSpan(start).StartsWith("\r\n")) start += 2;
+                else if (agentInput.AsSpan(start).StartsWith("\n")) start += 1;
+                else continue;
+
+                var userInput = agentInput[start..];
+                return string.IsNullOrWhiteSpace(userInput) ? null : userInput;
+            }
+            return null;
+        }
+
+        const string legacySuffixMarker = "\n\nVideo duration: ";
+        if (agentInput.EndsWith("Return only final TodoX prompt JSON.", StringComparison.Ordinal))
+        {
+            var legacyIndex = agentInput.LastIndexOf(legacySuffixMarker, StringComparison.Ordinal);
+            if (legacyIndex > 0) return agentInput[..legacyIndex];
+        }
+
+        return null;
+    }
+
     internal static PromptAssistantGenerateResponse ToResponse(ServicePromptGenerationResult result)
     {
         if (!result.ValidationPassed || string.IsNullOrWhiteSpace(result.GeneratedJson))

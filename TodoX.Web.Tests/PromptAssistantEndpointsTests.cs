@@ -117,4 +117,114 @@ public sealed class PromptAssistantEndpointsTests
 
         Assert.Equal(errorCode, response.ErrorCode);
     }
+
+    // ------------------------------------------------------------------
+    // ExtractUserInput — inverse of BuildAgentInput, used to restore the
+    // editable "Nội dung video mong muốn" field when reopening old jobs.
+    // ------------------------------------------------------------------
+
+    public static TheoryData<string> AgentInputs => new()
+    {
+        PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(
+            Guid.NewGuid(), "Video về kiên nhẫn")),
+        PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(
+            Guid.NewGuid(), "Nội dung gốc\ngiữ nguyên thứ tự.", Duration: 30, CreativeMode: true))
+    };
+
+    [Theory]
+    [MemberData(nameof(AgentInputs))]
+    public void ExtractUserInputRecoversOriginalUserTextFromPersistedAgentInput(string agentInput)
+    {
+        var expected = agentInput.Contains("USER IDEA:", StringComparison.Ordinal)
+            ? "A video idea about patience"
+            : "Nội dung gốc\ngiữ nguyên thứ tự.";
+        // Rebuild with the exact expected user text so both current formats round-trip.
+        var input = agentInput.Contains("USER IDEA:", StringComparison.Ordinal)
+            ? PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(
+                Guid.NewGuid(), expected, Duration: 30, CreativeMode: true))
+            : PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(
+                Guid.NewGuid(), expected));
+
+        var extracted = PromptAssistantEndpoints.ExtractUserInput(input);
+
+        Assert.Equal(expected, extracted);
+    }
+
+    [Fact]
+    public void ExtractUserInputHandlesLegacyDurationSuffixFormat()
+    {
+        const string userText = "Ý tưởng video cũ";
+        var agentInput = $"{userText}\n\nVideo duration: 30 seconds. Return only final TodoX prompt JSON.";
+
+        var extracted = PromptAssistantEndpoints.ExtractUserInput(agentInput);
+
+        Assert.Equal(userText, extracted);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Random text that is not an agent input")]
+    public void ExtractUserInputReturnsNullForUnrecognizedInput(string? agentInput)
+    {
+        Assert.Null(PromptAssistantEndpoints.ExtractUserInput(agentInput));
+    }
+
+    [Fact]
+    public void ExtractUserInputDoesNotMatchMarkerInsideUserText()
+    {
+        // A marker embedded mid-line (part of user text) must not be treated as the section header.
+        var agentInput = PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(
+            Guid.NewGuid(), "Some idea USER IDEA: not a header"));
+
+        var extracted = PromptAssistantEndpoints.ExtractUserInput(agentInput);
+
+        Assert.Equal("Some idea USER IDEA: not a header", extracted);
+    }
 }
+
+public sealed class QuickPromptTranscriptMergerTests
+{
+    // RVID-UI-002 4.G — append semantics (never overwrite existing content).
+
+    [Fact]
+    public void AppendTranscriptEmptyExistingReceivesTranscriptAsIs()
+    {
+        Assert.Equal(
+            "Hãy tạo video giải thích thủ tục chuyển tiền quốc tế",
+            QuickPromptTranscriptMerger.AppendTranscript(null, "Hãy tạo video giải thích thủ tục chuyển tiền quốc tế"));
+        Assert.Equal(
+            "Hãy tạo video",
+            QuickPromptTranscriptMerger.AppendTranscript("   ", "Hãy tạo video"));
+    }
+
+    [Fact]
+    public void AppendTranscriptAppendsWithSingleSpaceSeparator()
+    {
+        var result = QuickPromptTranscriptMerger.AppendTranscript(
+            "Tôi muốn tạo video về chuyển tiền quốc tế.",
+            "Hãy tập trung vào những lỗi khách hàng thường gặp");
+
+        Assert.Equal(
+            "Tôi muốn tạo video về chuyển tiền quốc tế. Hãy tập trung vào những lỗi khách hàng thường gặp",
+            result);
+    }
+
+    [Fact]
+    public void AppendTranscriptDoesNotDoubleSeparatorWhenExistingEndsWithWhitespace()
+    {
+        var result = QuickPromptTranscriptMerger.AppendTranscript("Video dành cho MSB.  ", "Thêm nội dung");
+
+        Assert.Equal("Video dành cho MSB. Thêm nội dung", result);
+    }
+
+    [Fact]
+    public void AppendTranscriptWhitespaceOnlyTranscriptKeepsExistingText()
+    {
+        Assert.Equal(
+            "Nội dung gốc",
+            QuickPromptTranscriptMerger.AppendTranscript("Nội dung gốc", "   "));
+    }
+}
+

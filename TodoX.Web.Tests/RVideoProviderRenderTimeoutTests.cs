@@ -154,7 +154,7 @@ public sealed class RVideoProviderRenderTimeoutTests
         Assert.Contains("v.provider_task_id IS NOT NULL", repository);
         Assert.Contains("v.provider_video_id_base IS NOT NULL", repository);
         Assert.Contains("SchedulePersistentJobsAsync(", reconciliation);
-        Assert.Contains("ScheduleProviderPollAsync(", reconciliation);
+        Assert.Contains("SchedulePersistentProviderPollAsync(", reconciliation);
         Assert.Contains("'{\"providerPoll\": true}'::jsonb", jobs);
         Assert.Contains("status='queued'", jobs);
         Assert.Contains("COALESCE(input_json->>'providerPoll', 'false') = 'true'", jobs);
@@ -266,6 +266,11 @@ public sealed class RVideoProviderRenderTimeoutTests
         public Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default) => throw new NotSupportedException();
         public Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default) => throw new NotSupportedException();
         public Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> SchedulePersistentProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default)
+        {
+            ScheduledJobIds.Add(jobId);
+            return Task.FromResult(true);
+        }
         public Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default) => throw new NotSupportedException();
         public Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default) => throw new NotSupportedException();
