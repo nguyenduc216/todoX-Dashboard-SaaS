@@ -290,7 +290,9 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                 providerDiagnostics?.AssembledContentLength,
                 parserErrorMessage,
                 parserErrorLineNumber,
-                parserErrorBytePositionInLine)
+                parserErrorBytePositionInLine,
+                providerDiagnostics?.TimeoutStage,
+                providerDiagnostics?.ElapsedMsSinceLastSseEvent)
         };
         return await PersistAndReturnAsync(
             result,

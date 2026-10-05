@@ -5401,7 +5401,19 @@ else
 
                         ? "Prompt Assistant không tạo được JSON hợp lệ."
 
-                        : "Prompt Assistant không thể tạo nội dung.";
+                        : result.ErrorCode == "gommo_connect_timeout"
+
+                            ? "Prompt Assistant không kết nối được với AI trong thời gian cho phép."
+
+                            : result.ErrorCode == "gommo_stream_idle_timeout"
+
+                                ? "Prompt Assistant đã ngừng nhận dữ liệu từ AI quá lâu."
+
+                                : result.ErrorCode is "gommo_stream_hard_timeout" or "gommo_timeout"
+
+                                    ? "Prompt Assistant tạo nội dung quá lâu và đã vượt thời gian chờ."
+
+                                    : "Prompt Assistant không thể tạo nội dung.";
 
                 Snackbar.Add($"{failureMessage} Mã kiểm tra: {result.GenerationId}", Severity.Error);
 

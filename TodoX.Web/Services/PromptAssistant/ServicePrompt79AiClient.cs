@@ -33,7 +33,9 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         ResolvedProviderCredential credential;
         try
         {
-            credential = await _credentials.ResolveAsync(request.ProviderCode, "access_token", ct);
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            connectCts.CancelAfter(_options.ConnectTimeout);
+            credential = await _credentials.ResolveAsync(request.ProviderCode, "access_token", connectCts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -57,18 +59,29 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         message.Headers.Add("Gommo-Token", credential.Secret);
         message.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(_options.Timeout);
-
         var started = Stopwatch.GetTimestamp();
+        using var hardCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        hardCts.CancelAfter(_options.StreamHardTimeout);
         HttpResponseMessage response;
-        try { response = await _http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token); }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new ServicePromptProviderException("gommo_timeout", "Gommo Agent request timed out.", "{}"); }
+        try
+        {
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(hardCts.Token);
+            connectCts.CancelAfter(_options.ConnectTimeout);
+            response = await _http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, connectCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !hardCts.IsCancellationRequested)
+        {
+            throw new ServicePromptProviderException("gommo_connect_timeout", "Gommo Agent không phản hồi kết nối trong thời gian cho phép.", "{}");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new ServicePromptProviderException("gommo_stream_hard_timeout", "Prompt Assistant tạo nội dung quá lâu và đã vượt thời gian chờ tối đa.", "{}");
+        }
         catch (HttpRequestException ex) { throw new ServicePromptProviderException("gommo_http_error", "Gommo Agent request failed.", "{}", ex); }
 
         if (!response.IsSuccessStatusCode)
         {
-            var errorBody = await ReadBoundedBodyAsync(response, timeout.Token);
+            var errorBody = await ReadBoundedBodyAsync(response, hardCts.Token);
             var sanitizedError = Sanitize(errorBody, credential.Secret);
             var code = response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
                 ? "gommo_authentication_failed"
@@ -76,7 +89,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
             throw new ServicePromptProviderException(code, $"Gommo Agent returned HTTP {(int)response.StatusCode}.", sanitizedError);
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+        await using var stream = await response.Content.ReadAsStreamAsync(hardCts.Token);
         using var reader = new StreamReader(stream);
         var content = new StringBuilder(); var raw = new StringBuilder();
         int? promptTokens = null, outputTokens = null, completionTokens = null, totalTokens = null; decimal? credit = null; string? runtimeProvider = null;
@@ -85,8 +98,15 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         var httpContentType = response.Content.Headers.ContentType?.ToString();
         try
         {
-            while (await reader.ReadLineAsync(timeout.Token) is { } line)
+            using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(hardCts.Token);
+            idleCts.CancelAfter(_options.StreamIdleTimeout);
+            while (true)
             {
+                string? line;
+                try { line = await reader.ReadLineAsync(idleCts.Token); }
+                finally { idleCts.CancelAfter(_options.StreamIdleTimeout); }
+                if (line is null) break;
+                {
                 AppendBoundedLine(raw, line, ref rawResponseTruncated);
                 if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
                 sseDataCount++;
@@ -109,17 +129,30 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
                         BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
                             firstEventMs, firstContentMs, started));
                 }
+                }
             }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !hardCts.IsCancellationRequested)
+        {
+            throw new ServicePromptProviderException(
+                "gommo_stream_idle_timeout",
+                "Gommo Agent đã ngừng trả dữ liệu quá lâu.",
+                Sanitize(raw.ToString(), credential.Secret),
+                sanitizedAssembledContent: SanitizeAndBound(content.ToString(), credential.Secret),
+                diagnostics: BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
+                    firstEventMs, firstContentMs, started, "idle",
+                    elapsedMsSinceLastSseEvent: sseDataCount == 0 ? null : (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds - firstEventMs));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             throw new ServicePromptProviderException(
-                "gommo_timeout",
-                "Gommo Agent request timed out.",
+                "gommo_stream_hard_timeout",
+                "Prompt Assistant tạo nội dung quá lâu và đã vượt thời gian chờ tối đa.",
                 Sanitize(raw.ToString(), credential.Secret),
                 sanitizedAssembledContent: SanitizeAndBound(content.ToString(), credential.Secret),
                 diagnostics: BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
-                    firstEventMs, firstContentMs, started));
+                    firstEventMs, firstContentMs, started, "hard",
+                    elapsedMsSinceLastSseEvent: sseDataCount == 0 ? null : (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds - firstEventMs));
         }
 
         var sanitized = Sanitize(raw.ToString(), credential.Secret);
@@ -204,7 +237,9 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         int assembledContentLength,
         int? firstEventMs,
         int? firstContentMs,
-        long started)
+        long started,
+        string? timeoutStage = null,
+        int? elapsedMsSinceLastSseEvent = null)
         => new(
             httpContentType,
             sseDataCount,
@@ -214,7 +249,9 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
             assembledContentLength,
             firstEventMs,
             firstContentMs,
-            (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            TimeoutStage: timeoutStage,
+            ElapsedMsSinceLastSseEvent: elapsedMsSinceLastSseEvent);
 
     private static async Task<string> ReadBoundedBodyAsync(HttpResponseMessage response, CancellationToken ct)
     {

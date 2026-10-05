@@ -65,7 +65,7 @@ builder.Services.AddScoped<ServicePromptCompiler>();
 builder.Services.AddScoped<ServicePromptOutputParser>();
 builder.Services.AddScoped<ServicePromptStructureValidator>();
 builder.Services.AddScoped<IServicePromptAssistantService, ServicePromptAssistantService>();
-builder.Services.AddHttpClient<IServicePromptProviderClient, ServicePrompt79AiClient>();
+builder.Services.AddHttpClient<IServicePromptProviderClient, ServicePrompt79AiClient>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddScoped<IAiStudioCatalogService, AiStudioCatalogService>();
 builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();
 builder.Services.AddScoped<IPointPricingService, PointPricingService>();
