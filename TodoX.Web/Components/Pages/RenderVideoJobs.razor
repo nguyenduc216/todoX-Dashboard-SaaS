@@ -320,7 +320,7 @@ else
 
                                             <div class="prompt-input-toolbar">
 
-                                                <MudText Typo="Typo.caption" Class="prompt-input-toolbar-label">N?i dung video mong mu?n</MudText>
+                                                <MudText Typo="Typo.caption" Class="prompt-input-toolbar-label">Nội dung video mong muốn</MudText>
 
                                                 <div class="prompt-input-toolbar-actions">
 
@@ -413,7 +413,7 @@ else
 
                                         <MudDivider Class="my-2" />
 
-                                        <MudText Typo="Typo.subtitle2">Prompt hi?n t?i</MudText>
+                                        <MudText Typo="Typo.subtitle2">Prompt hiện tại</MudText>
 
                                         @if (ActivePrompt is not null)
 
@@ -491,7 +491,7 @@ else
 
                                     <MudSelect T="string" Label="Tỉ lệ video của project" Value="@_aspectRatio" ValueChanged="OnAspectRatioChangedAsync" Variant="Variant.Outlined" Dense="true" Required="true">
 
-                                        <MudSelectItem T="string" Value="@string.Empty">Ch?n t? l? tru?c khi t?o scene</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@string.Empty">Chọn tỉ lệ trước khi tạo scene</MudSelectItem>
 
                                         <MudSelectItem T="string" Value="@AspectRatioLandscape">16:9 — video ngang</MudSelectItem>
 
@@ -587,9 +587,9 @@ else
 
                                         <MudRadioGroup T="string" @bind-Value="_executionMode">
 
-                                            <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning">Duy?t t?ng bu?c</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning">Duyệt từng bước</MudRadio>
 
-                                            <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning">T? d?ng th?c hi?n</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning">Tự động thực hiện</MudRadio>
 
                                         </MudRadioGroup>
 
@@ -613,7 +613,7 @@ else
 
                                             <MudRadio T="string" Value="@RVideoVoiceModes.Native">AI Native Voice + Lip-sync</MudRadio>
 
-                                            <MudRadio T="string" Value="@RVideoVoiceModes.Library">Gi?ng d?c t? Voice Library</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoVoiceModes.Library">Giọng đọc từ Voice Library</MudRadio>
 
                                         </MudRadioGroup>
 
@@ -655,13 +655,13 @@ else
 
                                     <MudPaper Class="pa-3" Outlined="true" rounded="true">
 
-                                        <MudText Typo="Typo.subtitle1">Nh?c n?n</MudText>
+                                        <MudText Typo="Typo.subtitle1">Nhạc nền</MudText>
 
                                         <MudRadioGroup T="string" Value="@_musicMode" ValueChanged="OnMusicModeChanged">
 
                                             <MudRadio T="string" Value="@RVideoMusicModes.None">Không dùng</MudRadio>
 
-                                            <MudRadio T="string" Value="@RVideoMusicModes.Library">Ch?n t? Music Library</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoMusicModes.Library">Chọn từ Music Library</MudRadio>
 
                                             <MudRadio T="string" Value="@RVideoMusicModes.Upload">Tải lên file MP3</MudRadio>
 
@@ -759,7 +759,7 @@ else
 
                                                     <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ContentCopy" OnClick="CopyDebugLogAsync" aria-label="Sao chép log kỹ thuật" />
 
-                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Download" OnClick="DownloadDebugLogAsync" aria-label="T?i log k? thu?t" />
+                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Download" OnClick="DownloadDebugLogAsync" aria-label="Tải log kỹ thuật" />
 
                                                 </MudStack>
 
@@ -823,7 +823,7 @@ else
 
             </MudTabPanel>
 
-            <MudTabPanel Text="Xem tru?c">
+            <MudTabPanel Text="Xem trước">
 
                 <div class="scene-image-tab">
 
@@ -867,11 +867,11 @@ else
 
                             <MudTooltip Text="Tạo video cho các scene đã có ảnh">
 
-                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Movie" OnClick="EnqueueRenderAllScenesAsync" Disabled="@(!CanEnqueueSceneVideos())">T?o video</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Movie" OnClick="EnqueueRenderAllScenesAsync" Disabled="@(!CanEnqueueSceneVideos())">Tạo video</MudButton>
 
                             </MudTooltip>
 
-                            <MudTooltip Text="T?i l?i scene">
+                            <MudTooltip Text="Tải lại scene">
 
                                 <MudIconButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Icon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="@_busy" aria-label="Refresh scene" />
 
@@ -895,15 +895,15 @@ else
 
                                         {
 
-                                            <MudText Typo="Typo.caption" Color="Color.Warning">Thi?u @FormatPoints(_initialEstimate.MissingPoints) di?m</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Warning">Thiếu @FormatPoints(_initialEstimate.MissingPoints) điểm</MudText>
 
                                         }
 
                                     </MudStack>
 
-                                    <MudTooltip Text="Xem chi ti?t di?m">
+                                    <MudTooltip Text="Xem chi tiết điểm">
 
-                                        <MudIconButton Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Info" OnClick="OpenInitialEstimateDetailAsync" aria-label="Chi ti?t di?m d? ki?n" />
+                                        <MudIconButton Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Info" OnClick="OpenInitialEstimateDetailAsync" aria-label="Chi tiết điểm dự kiến" />
 
                                     </MudTooltip>
 
@@ -967,17 +967,17 @@ else
 
                                                     <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Luu scene</MudMenuItem>
 
-                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_useReferenceImageForAllScenes || IsSceneRendering(scene))" OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "T?o ?nh" : "Render l?i ?nh")</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_useReferenceImageForAllScenes || IsSceneRendering(scene))" OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
 
-                                                <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Ch?nh s?a prompt ?nh</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
 
-                                                <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))">L?ch s? ?nh</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
 
                                                 <MudDivider />
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
 
-                                                <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowDown" Disabled="@(_busy || _project is null || scene.SceneIndex >= _project.Scenes.Count)" OnClick="@(() => MoveSceneDownAsync(scene))">Xu?ng</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowDown" Disabled="@(_busy || _project is null || scene.SceneIndex >= _project.Scenes.Count)" OnClick="@(() => MoveSceneDownAsync(scene))">Xuống</MudMenuItem>
 
                                                 <MudDivider />
 
@@ -1025,11 +1025,11 @@ else
 
                                                     <MudTooltip Text="Xem prompt video"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Motion))" aria-label="Xem prompt video" /></MudTooltip>
 
-                                                    <MudTooltip Text="Xem l?i tho?i"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Voice))" aria-label="Xem l?i tho?i" /></MudTooltip>
+                                                    <MudTooltip Text="Xem lời thoại"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Voice))" aria-label="Xem lời thoại" /></MudTooltip>
 
-                                                    <MudTooltip Text="L?ch s? ?nh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))" aria-label="L?ch s? ?nh" /></MudTooltip>
+                                                    <MudTooltip Text="Lịch sử ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))" aria-label="Lịch sử ảnh" /></MudTooltip>
 
-                                                    <MudTooltip Text="Hu?ng d?n gi?ng d?c"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Audiotrack" OnClick="@(() => OpenSceneVoiceInstruction(scene))" aria-label="Xem hu?ng d?n gi?ng d?c" /></MudTooltip>
+                                                    <MudTooltip Text="Hướng dẫn giọng đọc"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Audiotrack" OnClick="@(() => OpenSceneVoiceInstruction(scene))" aria-label="Xem hướng dẫn giọng đọc" /></MudTooltip>
 
                                                 </MudStack>
 
@@ -1089,7 +1089,7 @@ else
 
                                                     </MudButton>
 
-                                                    <MudTooltip Text="T?o video scene">
+                                                    <MudTooltip Text="Tạo video scene">
 
                                                         <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
 
@@ -1097,7 +1097,7 @@ else
 
                                                                        OnClick="@(() => RenderSceneVideoAsync(scene))"
 
-                                                                       aria-label="T?o video scene" />
+                                                                       aria-label="Tạo video scene" />
 
                                                     </MudTooltip>
 
@@ -1325,7 +1325,7 @@ else
 
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 pt-2">
 
-                                        <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download" Disabled="@string.IsNullOrWhiteSpace(_project.FinalVideoUrl)" OnClick="@(() => OpenUrl(_project.FinalVideoUrl!))">T?i video</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download" Disabled="@string.IsNullOrWhiteSpace(_project.FinalVideoUrl)" OnClick="@(() => OpenUrl(_project.FinalVideoUrl!))">Tải video</MudButton>
 
                                         @if (string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
 
@@ -1343,9 +1343,9 @@ else
 
                                         }
 
-                                        <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => _tabIndex = 1)">Xem l?i scene</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => _tabIndex = 1)">Xem lỗi scene</MudButton>
 
-                                        <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">T?o project m?i</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo project mới</MudButton>
 
                                         <MudButton Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyJobIdAsync())">Sao chép Job ID</MudButton>
 
@@ -1413,7 +1413,7 @@ else
 
                     <MudExpansionPanels Class="mt-4" Elevation="0">
 
-                        <MudExpansionPanel Text="Chi ti?t k? thu?t">
+                        <MudExpansionPanel Text="Chi tiết kỹ thuật">
 
                             <MudStack Spacing="2">
 
@@ -1763,7 +1763,7 @@ else
 
     private const string PromptWorkspaceTitle = "Prompt workspace";
 
-    private static readonly string[] PlaceholderVideoTitles = [PromptWorkspaceTitle, "RVIDEO", "Video project r?ng"];
+    private static readonly string[] PlaceholderVideoTitles = [PromptWorkspaceTitle, "RVIDEO", "Video project rỗng"];
 
     private string? _videoTitleOverride;
 
@@ -2445,11 +2445,11 @@ else
 
     }
 
-    private string ProjectAspectRatio => HasProjectAspectRatio ? _aspectRatio : "Chua ch?n";
+    private string ProjectAspectRatio => HasProjectAspectRatio ? _aspectRatio : "Chưa chọn";
 
     private bool HasProjectAspectRatio => IsSupportedAspectRatio(_aspectRatio);
 
-    private string ProjectResolution => HasProjectResolution ? _resolution : "Chua ch?n";
+    private string ProjectResolution => HasProjectResolution ? _resolution : "Chưa chọn";
 
     private bool HasProjectResolution => IsSupportedResolution(_resolution);
 
@@ -2457,7 +2457,7 @@ else
 
         => string.IsNullOrWhiteSpace(_prompt)
 
-            ? "Chua n?p file JSON"
+            ? "Chưa nạp file JSON"
 
             : $"{_promptParseResult.Summary.SceneCount} scene · {_prompt.Length:n0} ký tự";
 
@@ -3009,7 +3009,7 @@ else
 
                 ThinkScenes = false,
 
-                Title = ResolveVideoTitleForSave() ?? "Video project r?ng",
+                Title = ResolveVideoTitleForSave() ?? "Video project rỗng",
 
                 CreateEmptyProject = true
 
@@ -3597,13 +3597,13 @@ else
 
             $"Voice: {voiceLine}",
 
-            $"T?ng: {FormatPoints(estimate.TotalPoints)}",
+            $"Tổng: {FormatPoints(estimate.TotalPoints)}",
 
             $"Điểm khả dụng: {FormatPoints(estimate.AvailablePoints)}",
 
             $"Còn lại: {FormatPoints(estimate.RemainingPoints)}",
 
-            $"Thi?u: {FormatPoints(estimate.MissingPoints)}"
+            $"Thiếu: {FormatPoints(estimate.MissingPoints)}"
 
         });
 
@@ -4317,7 +4317,7 @@ else
 
             "voice_mux_pending" => "Đang ghép giọng",
 
-            "voice_failed" => "Gi?ng l?i",
+            "voice_failed" => "Giọng lỗi",
 
             VideoSceneStatuses.Failed => "Lỗi render",
 
@@ -4381,9 +4381,9 @@ else
 
             ScenePromptKind.Image => "Xem prompt ?nh",
 
-            ScenePromptKind.Motion => "Xem prompt chuy?n d?ng",
+            ScenePromptKind.Motion => "Xem prompt chuyển động",
 
-            ScenePromptKind.Voice => "Xem l?i tho?i",
+            ScenePromptKind.Voice => "Xem lời thoại",
 
             _ => "Prompt"
 
@@ -4413,7 +4413,7 @@ else
 
         var metadata = ScenePromptMetadata.FromScene(scene);
 
-        var title = "Xem hu?ng d?n gi?ng d?c";
+        var title = "Xem hướng dẫn giọng đọc";
 
         var parameters = new DialogParameters
 
@@ -4443,7 +4443,7 @@ else
 
         {
 
-            <MudTooltip Text="Click d? xem chi ti?t l?i">
+            <MudTooltip Text="Click để xem chi tiết lỗi">
 
                 <span class="scene-failed-status-trigger"
 
@@ -4451,9 +4451,9 @@ else
 
                       tabindex="0"
 
-                      title="Click d? xem chi ti?t l?i"
+                      title="Click để xem chi tiết lỗi"
 
-                      aria-label="@($"Click d? xem chi ti?t l?i Scene {scene.SceneIndex:00}")"
+                      aria-label="@($"Click để xem chi tiết lỗi Scene {scene.SceneIndex:00}")"
 
                       @onclick:stopPropagation="true"
 
@@ -4531,7 +4531,7 @@ else
 
         var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large, CloseOnEscapeKey = true };
 
-        await DialogService.ShowAsync<SceneRenderErrorDetailDialog>($"Chi ti?t l?i Scene {scene.SceneIndex:00}", parameters, options);
+        await DialogService.ShowAsync<SceneRenderErrorDetailDialog>($"Chi tiết lỗi Scene {scene.SceneIndex:00}", parameters, options);
 
     }
 
@@ -4605,15 +4605,15 @@ else
 
         => string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) && !(_useReferenceImageForAllScenes && HasSharedReferenceImage)
 
-            ? "C?n ch?n/render ?nh tru?c"
+            ? "Cần chọn/render ảnh trước"
 
             : string.IsNullOrWhiteSpace(draft.MotionPrompt)
 
-                ? "C?n nh?p prompt video"
+                ? "Cần nhập prompt video"
 
             : !HasProjectAspectRatio
 
-                ? "C?n ch?n t? l? video"
+                ? "Cần chọn tỉ lệ video"
 
             : !HasProjectResolution
 
@@ -4643,7 +4643,7 @@ else
 
             : !HasProjectAspectRatio
 
-                ? "C?n ch?n t? l? video"
+                ? "Cần chọn tỉ lệ video"
 
             : !HasProjectResolution
 
@@ -5081,7 +5081,7 @@ else
 
             : !_promptParseResult.IsTodoXPrompt
 
-                ? "JSON h?p l? nhung chua nh?n di?n schema TodoX."
+                ? "JSON hợp lệ nhưng chưa nhận diện schema TodoX."
 
                 : !_promptParseResult.IsTodoXSchemaValid
 
@@ -5213,7 +5213,7 @@ else
 
         var dialog = await DialogService.ShowAsync<Components.Dialogs.QuickPromptDialog>(
 
-            "T?o Prompt AI nhanh",
+            "Tạo Prompt AI nhanh",
 
             new DialogParameters
 
@@ -5347,13 +5347,13 @@ else
 
         var confirmed = await DialogService.ShowMessageBoxAsync(
 
-            title: "T?o l?i Prompt AI?",
+            title: "Tạo lại Prompt AI?",
 
             message: "Việc tạo Prompt AI sẽ gọi dịch vụ AI và tiêu tốn điểm. Prompt hiện tại (nếu có) sẽ được thay thế sau khi tạo thành công.",
 
-            yesText: "TI?P T?C T?O",
+            yesText: "TIẾP TỤC TẠO",
 
-            cancelText: "H?Y");
+            cancelText: "HỦY");
 
         if (confirmed != true)
 
@@ -6317,7 +6317,7 @@ else
 
             Logger.LogError(ex, "VIDEO_RENDER_LOAD_JOBS_FAILED logCode={LogCode}", logCode);
 
-            await AddDebugAsync("jobs_failed", "T?i job th?t b?i", "FAILED", ex.Message, ex.ToString());
+            await AddDebugAsync("jobs_failed", "Tải job thất bại", "FAILED", ex.Message, ex.ToString());
 
             return;
 
@@ -6651,7 +6651,7 @@ else
 
             Snackbar.Add(ex.Message, Severity.Error);
 
-            await AddDebugAsync("job_save_failed", "Luu job th?t b?i", "FAILED", ex.Message, ex.ToString());
+            await AddDebugAsync("job_save_failed", "Lưu job thất bại", "FAILED", ex.Message, ex.ToString());
 
         }
 
@@ -6685,7 +6685,7 @@ else
 
             Snackbar.Add($"Không thể lưu draft RVIDEO: {ex.Message}", Severity.Error);
 
-            await AddDebugAsync("rvideo_draft_save_failed", "Luu draft th?t b?i", "FAILED", ex.Message, ex.ToString());
+            await AddDebugAsync("rvideo_draft_save_failed", "Lưu draft thất bại", "FAILED", ex.Message, ex.ToString());
 
             return false;
 
@@ -7577,7 +7577,7 @@ else
 
         {
 
-            Snackbar.Add("C?n nh?p prompt ?nh tru?c khi render.", Severity.Warning);
+            Snackbar.Add("Cần nhập prompt ảnh trước khi render.", Severity.Warning);
 
             return;
 
@@ -7835,7 +7835,7 @@ else
 
             Logger.LogError(ex, "VIDEO_RENDER_SCENE_RERENDER_FAILED projectId={ProjectId} sceneId={SceneId}", _project.Id, scene.Id);
 
-            await LogProjectEvent("SCENE_IMAGE_RERENDER_ENQUEUE_FAILED", "error", $"Enqueue render lại Ảnh scene {scene.SceneIndex} l?i.",
+            await LogProjectEvent("SCENE_IMAGE_RERENDER_ENQUEUE_FAILED", "error", $"Enqueue render lại Ảnh scene {scene.SceneIndex} lỗi.",
 
                 new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = ex.Message });
 
@@ -7907,7 +7907,7 @@ else
 
             yesText: "Xác nhận render lại",
 
-            cancelText: "H?y");
+            cancelText: "Hủy");
 
         if (confirmed == true)
 
@@ -8235,11 +8235,11 @@ else
 
             MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading => "Đang tạo giọng đọc",
 
-            MediaRenderState.Ready => "Nghe gi?ng d?c",
+            MediaRenderState.Ready => "Nghe giọng đọc",
 
-            MediaRenderState.Failed => "T?o gi?ng d?c th?t b?i",
+            MediaRenderState.Failed => "Tạo giọng đọc thất bại",
 
-            _ => "Gi?ng d?c"
+            _ => "Giọng đọc"
 
         };
 
@@ -8533,11 +8533,11 @@ else
 
                             <MudText Typo="Typo.caption">Provider: @version.ProviderCode | Model: @version.ModelName | Task: @version.ProviderTaskId</MudText>
 
-                            <MudText Typo="Typo.caption">USD d? ki?n: @FormatMoney(version.EstimatedUsd) | USD th?c t?: @FormatMoney(version.ActualUsd)</MudText>
+                            <MudText Typo="Typo.caption">USD dự kiến: @FormatMoney(version.EstimatedUsd) | USD thực tế: @FormatMoney(version.ActualUsd)</MudText>
 
-                            <MudText Typo="Typo.caption">Prompt g?c: @ShortText(version.ImagePromptSnapshot)</MudText>
+                            <MudText Typo="Typo.caption">Prompt gốc: @ShortText(version.ImagePromptSnapshot)</MudText>
 
-                            <MudText Typo="Typo.caption">Prompt g?i provider: @ShortText(version.CompiledImagePromptSnapshot)</MudText>
+                            <MudText Typo="Typo.caption">Prompt gửi provider: @ShortText(version.CompiledImagePromptSnapshot)</MudText>
 
                             <MudText Typo="Typo.caption">Prompt video: @ShortText(version.VideoPromptSnapshot)</MudText>
 
@@ -8545,7 +8545,7 @@ else
 
                             {
 
-                                <MudText Typo="Typo.caption" Color="Color.Error">L?i: @version.ErrorMessage</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
 
                             }
 
@@ -8645,7 +8645,7 @@ else
 
                             {
 
-                                <MudText Typo="Typo.caption" Color="Color.Error">L?i: @version.ErrorMessage</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
 
                             }
 
@@ -8737,7 +8737,7 @@ else
 
                             {
 
-                                <MudText Typo="Typo.caption" Color="Color.Error">L?i: @version.ErrorMessage</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
 
                             }
 
@@ -8763,7 +8763,7 @@ else
 
     {
 
-        if (string.IsNullOrWhiteSpace(value)) return "(tr?ng)";
+        if (string.IsNullOrWhiteSpace(value)) return "(trống)";
 
         var text = value.Trim();
 
@@ -8779,7 +8779,7 @@ else
 
         => value.ToString("#,0");
 
-    private static string FormatEstimateLine(int quantity, decimal rate, decimal points, string unit = "lu?t")
+    private static string FormatEstimateLine(int quantity, decimal rate, decimal points, string unit = "lượt")
 
         => $"{quantity:n0} {unit} × {rate:n0} = {FormatPoints(points)} điểm";
 
@@ -8949,7 +8949,7 @@ else
 
         if (_project is null) return;
 
-        // Events are returned newest-first; walk oldest?newest so the last write wins per scene.
+        // Events are returned newest-first; walk oldest→newest so the last write wins per scene.
 
         foreach (var ev in _project.Events.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id))
 
@@ -10035,7 +10035,7 @@ else
 
             Snackbar.Add(ex.Message, Severity.Error);
 
-            await LogProjectEvent("SCENE_VIDEO_ENQUEUE_FAILED", "error", $"Enqueue render video scene {scene.SceneIndex} l?i.",
+            await LogProjectEvent("SCENE_VIDEO_ENQUEUE_FAILED", "error", $"Enqueue render video scene {scene.SceneIndex} lỗi.",
 
                 new { projectId = _project.Id, sceneId = scene.Id, scene.SceneIndex, error = ex.Message });
 
@@ -10131,7 +10131,7 @@ else
 
             yesText: confirmText,
 
-            cancelText: "H?y");
+            cancelText: "Hủy");
 
         return confirmed == true;
 
@@ -10193,7 +10193,7 @@ else
 
             yesText: confirmText,
 
-            cancelText: "H?y");
+            cancelText: "Hủy");
 
         return confirmed == true;
 
@@ -10225,9 +10225,9 @@ else
 
         "voice_mux_pending" => "Đang ghép giọng",
 
-        "voice_failed" => "Gi?ng l?i",
+        "voice_failed" => "Giọng lỗi",
 
-        VideoSceneStatuses.Failed => "L?i",
+        VideoSceneStatuses.Failed => "Lỗi",
 
         _ => status
 
