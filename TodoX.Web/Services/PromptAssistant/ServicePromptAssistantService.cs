@@ -166,30 +166,42 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         long? parserErrorLineNumber = null;
         long? parserErrorBytePositionInLine = null;
 
+        var repairAttempts = 0;
+
         try
         {
-            var response = await _provider.CompleteAsync(
+            var outcome = await RunGenerationRepairLoopAsync(
+                input => _provider.CompleteAsync(
                     new ServicePromptProviderRequest(
                         _options.ApiUrl,
                         assistant.ProviderCode,
                         assistant.GommoAgentIdBase,
-                        userInput),
-                    ct);
-            rawResponses.Add(response.SanitizedRawResponse);
-            promptTokens = response.PromptTokens;
-            completionTokens = response.CompletionTokens;
-            totalTokens = response.TotalTokens;
-            firstEventMs = response.FirstEventMs;
-            firstContentMs = response.FirstContentMs;
-            totalDurationMs = response.TotalDurationMs;
-            streamingDurationMs = response.StreamingDurationMs;
-            credit = response.Credit;
-            runtimeProvider = response.RuntimeProvider;
+                        input),
+                    ct),
+                userInput,
+                Math.Clamp(assistant.MaxRepairAttempts, 0, 3),
+                parserError => _logger.LogWarning(
+                    "PROMPT_ASSISTANT_JSON_MALFORMED GenerationId={GenerationId} ProviderCode={ProviderCode} ModelCode={ModelCode} ParserError={ParserError}",
+                    generationId,
+                    assistant.ProviderCode,
+                    assistant.ModelCode,
+                    parserError));
+            repairAttempts = outcome.RepairAttempts;
+            rawResponses.AddRange(outcome.RawResponses);
+            promptTokens = outcome.PromptTokens;
+            completionTokens = outcome.CompletionTokens;
+            totalTokens = outcome.TotalTokens;
+            firstEventMs = outcome.FirstEventMs;
+            firstContentMs = outcome.FirstContentMs;
+            totalDurationMs = outcome.TotalDurationMs;
+            streamingDurationMs = outcome.StreamingDurationMs;
+            credit = outcome.Credit;
+            runtimeProvider = outcome.RuntimeProvider;
+            var response = outcome.FinalResponse;
             sanitizedAssembledContent = response.SanitizedAssembledContent;
             providerDiagnostics = response.Diagnostics;
-            using var parsed = _parser.Parse(response.Content);
-            generatedJson = ServicePromptJson.Canonicalize(parsed.RootElement.GetRawText());
-            if (parsed.RootElement.ValueKind != JsonValueKind.Object)
+            generatedJson = outcome.GeneratedJson;
+            if (!IsJsonObject(generatedJson))
                 throw new ServicePromptProviderException("generated_output_validation_failed", "Final prompt must be a JSON object.", response.SanitizedRawResponse);
             if (videoProjectId is long projectId)
             {
@@ -264,7 +276,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             GeneratedJson = generatedJson,
             ValidationPassed = status == ServicePromptGenerationStatus.Success,
             ValidationErrors = errors,
-            RepairAttemptCount = 0,
+            RepairAttemptCount = repairAttempts,
             PromptTokens = promptTokens,
             CompletionTokens = completionTokens,
             TotalTokens = totalTokens,
@@ -569,6 +581,109 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             && expectedShots != shots.Sum(x => x!.Value))
             throw new ServicePromptProviderException("generated_output_validation_failed", "total_shot_count does not match scene shot counts.", raw);
     }
+    internal sealed record ServicePromptGenerationLoopOutcome(
+        ServicePromptProviderResponse FinalResponse,
+        string GeneratedJson,
+        int RepairAttempts,
+        IReadOnlyList<string> RawResponses,
+        int? PromptTokens = null,
+        int? CompletionTokens = null,
+        int? TotalTokens = null,
+        int? FirstEventMs = null,
+        int? FirstContentMs = null,
+        int? TotalDurationMs = null,
+        int? StreamingDurationMs = null,
+        decimal? Credit = null,
+        string? RuntimeProvider = null);
+
+    internal static async Task<ServicePromptGenerationLoopOutcome> RunGenerationRepairLoopAsync(
+        Func<string, Task<ServicePromptProviderResponse>> complete,
+        string userInput,
+        int maxRepairAttempts,
+        Action<string>? logMalformed = null)
+    {
+        var requestInput = userInput;
+        var rawResponses = new List<string>();
+        var repairAttempts = 0;
+        var promptTokens = (int?)null;
+        var completionTokens = (int?)null;
+        var totalTokens = (int?)null;
+        var firstEventMs = (int?)null;
+        var firstContentMs = (int?)null;
+        var totalDurationMs = (int?)null;
+        var streamingDurationMs = (int?)null;
+        decimal? credit = null;
+        string? runtimeProvider = null;
+        while (true)
+        {
+            var response = await complete(requestInput);
+            rawResponses.Add(response.SanitizedRawResponse);
+            promptTokens = Sum(promptTokens, response.PromptTokens);
+            completionTokens = Sum(completionTokens, response.CompletionTokens);
+            totalTokens = Sum(totalTokens, response.TotalTokens);
+            firstEventMs ??= response.FirstEventMs;
+            firstContentMs ??= response.FirstContentMs;
+            totalDurationMs = Sum(totalDurationMs, response.TotalDurationMs);
+            streamingDurationMs = Sum(streamingDurationMs, response.StreamingDurationMs);
+            credit ??= response.Credit;
+            runtimeProvider ??= response.RuntimeProvider;
+            try
+            {
+                using var parsed = new ServicePromptOutputParser().Parse(response.Content);
+                var generatedJson = ServicePromptJson.Canonicalize(parsed.RootElement.GetRawText());
+                return new ServicePromptGenerationLoopOutcome(
+                    response,
+                    generatedJson,
+                    repairAttempts,
+                    rawResponses,
+                    promptTokens,
+                    completionTokens,
+                    totalTokens,
+                    firstEventMs,
+                    firstContentMs,
+                    totalDurationMs,
+                    streamingDurationMs,
+                    credit,
+                    runtimeProvider);
+            }
+            catch (ServicePromptProviderException ex) when (ex.Code == "generated_json_malformed"
+                && repairAttempts < maxRepairAttempts
+                && !string.IsNullOrWhiteSpace(response.Content))
+            {
+                repairAttempts++;
+                logMalformed?.Invoke(ex.ParserErrorMessage ?? ex.Message);
+                requestInput = BuildRepairUserInput(response.Content, ex);
+            }
+        }
+    }
+
+    private static bool IsJsonObject(string json)
+    {
+        var trimmed = (json ?? string.Empty).TrimStart();
+        return trimmed.StartsWith("{", StringComparison.Ordinal);
+    }
+
+    internal static string BuildRepairUserInput(string malformedContent, ServicePromptProviderException parserError)
+    {
+        var parserDetail = string.IsNullOrWhiteSpace(parserError.ParserErrorMessage)
+            ? string.Empty
+            : $"parser error: {parserError.ParserErrorMessage}\nline number: {parserError.ParserErrorLineNumber}\nbyte position in line: {parserError.ParserErrorBytePositionInLine}\n";
+        return
+            """
+            The previous response is incomplete or invalid JSON.
+
+            Repair it into ONE complete valid JSON object.
+
+            Preserve the existing semantic content and field structure as much as possible.
+
+            Do not add commentary.
+            Do not add Markdown fences.
+            Do not explain the repair.
+            Return valid JSON only.
+
+            """ + parserDetail + "\nThe previous response was:\n" + malformedContent;
+    }
+
     private static int? Sum(int? left, int? right)
         => left is null && right is null ? null : (left ?? 0) + (right ?? 0);
 }
