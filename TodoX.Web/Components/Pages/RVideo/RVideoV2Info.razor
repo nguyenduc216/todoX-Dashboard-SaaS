@@ -1,0 +1,266 @@
+@using TodoX.Web.Services.VideoRender
+@using TodoX.Web.Services.PromptAssistant
+@using TodoX.Web.Components.Dialogs
+@inject TodoX.Web.Services.IAiStudioCatalogService Catalog
+@inject IRVideoJobService RVideoJobs
+@inject IRVideoPromptGenerationAction PromptAction
+@inject IServicePromptAssistantService PromptAssistant
+@inject AuthStateService AuthState
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject ILogger<RVideoV2Info> Logger
+@implements IAsyncDisposable
+<div class="rv2-info">
+  <div class="rv2-info-grid">
+    <section class="rv2-info-main">
+      <MudTextField T="string" @bind-Value="_titleWorking" Label="Tiêu đề" Variant="Variant.Outlined" Immediate="true" OnBlur="HandleTitleBlurAsync" />
+      <div class="rv2-section-head mt-2">
+        <MudText Typo="Typo.subtitle2">Nội dung video mong muốn</MudText>
+        <MudIconButton Icon="@Icons.Material.Filled.Mic" Size="Size.Small" Disabled="@(!_speechSupported)" OnClick="ToggleSpeechAsync" />
+        <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" OnClick="OpenQuickPromptAsync" Disabled="@_generating" />
+      </div>
+      <MudTextField T="string" @bind-Value="_workingInput" Immediate="true" Variant="Variant.Outlined" Lines="8" Placeholder="Hãy mô tả video..." />
+      <div class="rv2-info-cta">
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Disabled="@(_generating || string.IsNullOrWhiteSpace(_workingInput))" OnClick="HandleGenerateAsync">Tạo Prompt AI</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="HandleReloadAsync" Disabled="@_generating">Làm mới</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="HandleHistoryAsync" Disabled="@_generating">Lịch sử</MudButton>
+      </div>
+      @if (_generating) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" /> }
+      @if (!string.IsNullOrWhiteSpace(_status)) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@_status</MudAlert> }
+      @if (JobView is null) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Chưa chọn job.</MudAlert> }
+    </section>
+    <section class="rv2-info-side">
+      <MudText Typo="Typo.subtitle2" Class="mb-2">Nhân vật &amp; tham chiếu (@FilteredRefs.Count)</MudText>
+      @if (JobView?.Settings is { } st)
+      {
+        <div class="rv2-char-box">
+          @if (st.CharacterMode != RVideoCharacterModes.None && !st.SkipCharacter)
+          {
+            <MudChip T="string" Size="Size.Small" Color="Color.Primary">Nhân vật: @CharacterLabel(st.CharacterMode)</MudChip>
+          }
+          else
+          {
+            <MudChip T="string" Size="Size.Small" Color="Color.Default">Không dùng nhân vật</MudChip>
+          }
+          @if (st.UseReferenceImageForAllScenes)
+          {
+            <MudChip T="string" Size="Size.Small" Color="Color.Secondary">Áp tham chiếu cho mọi scene</MudChip>
+          }
+        </div>
+      }
+      <div class="rv2-ref-filters">
+        <MudChip T="string" Size="Size.Small" Color="@(_f==0?Color.Primary:Color.Default)" OnClick="@(()=>_f=0)">Tất cả</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="@(_f==1?Color.Primary:Color.Default)" OnClick="@(()=>_f=1)">Hình ảnh</MudChip>
+      </div>
+      <div class="rv2-ref-grid">
+        @foreach(var r in FilteredRefs){
+          <div class="rv2-ref-card">
+            @if(!string.IsNullOrWhiteSpace(r.Url)){<img src="@r.Url" alt="@r.Label" />}
+            else{<div class="rv2-ref-ph">@r.Label</div>}
+            <span>@r.Label</span>
+          </div>
+        }
+      </div>
+    </section>
+  </div>
+  <MudExpansionPanels Elevation="0" Dense="true" Class="rv2-advanced">
+    <MudExpansionPanel Text="Cài đặt nâng cao" Expanded="@_adv" ExpandedChanged="@(v=>_adv=v)">
+      <MudGrid Class="mt-2">
+        <MudItem xs="12" sm="4"><MudNumericField T="int" Value="_advTotalSeconds" ValueChanged="@(async v=>await HandleAdvancedTotalSecondsChangedAsync(v))" Label="Tổng giây" Variant="Variant.Outlined" Min="1" Disabled="@_advSaving"/></MudItem>
+        <MudItem xs="12" sm="4"><MudNumericField T="int" Value="_advSceneSeconds" ValueChanged="@(async v=>await HandleAdvancedSceneSecondsChangedAsync(v))" Label="Giây/scene" Variant="Variant.Outlined" Min="1" Disabled="@_advSaving"/></MudItem>
+        <MudItem xs="12" sm="4"><MudSelect T="string" Value="_advAspect" ValueChanged="@(async v=>await HandleAdvancedAspectChangedAsync(v))" Label="Tỷ lệ" Variant="Variant.Outlined" Disabled="@_advSaving"><MudSelectItem Value="@("16:9")">16:9</MudSelectItem><MudSelectItem Value="@("9:16")">9:16</MudSelectItem></MudSelect></MudItem>
+        <MudItem xs="12" sm="4"><MudSelect T="string" Value="_advResolution" ValueChanged="@(async v=>await HandleAdvancedResolutionChangedAsync(v))" Label="Độ phân giải" Variant="Variant.Outlined" Disabled="@_advSaving"><MudSelectItem Value="@("720p")">720p</MudSelectItem><MudSelectItem Value="@("1080p")">1080p</MudSelectItem></MudSelect></MudItem>
+        <MudItem xs="12" sm="4"><MudSwitch T="bool" Value="_advThinkScenes" ValueChanged="@(async v=>await HandleAdvancedThinkScenesChangedAsync(v))" Label="Tự tách scene (ThinkScenes)" Color="Color.Primary" Disabled="@_advSaving"/></MudItem>
+        <MudItem xs="12" sm="4">
+          <MudText Typo="Typo.caption" Class="rv2-adv-label">Chế độ xử lý</MudText>
+          <MudRadioGroup T="string" Value="_advExecutionMode" ValueChanged="@(async v=>await HandleAdvancedExecutionModeChangedAsync(v))">
+            <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning" Size="Size.Small">Duyệt từng bước</MudRadio>
+            <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning" Size="Size.Small">Tự động thực hiện</MudRadio>
+          </MudRadioGroup>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+          <MudText Typo="Typo.caption" Class="rv2-adv-label">Chế độ giọng đọc</MudText>
+          <MudRadioGroup T="string" Value="_advVoiceMode" ValueChanged="@(async v=>await HandleAdvancedVoiceModeChangedAsync(v))">
+            <MudRadio T="string" Value="@RVideoVoiceModes.None" Size="Size.Small">Không dùng giọng đọc</MudRadio>
+            <MudRadio T="string" Value="@RVideoVoiceModes.Native" Size="Size.Small">AI Native Voice</MudRadio>
+            <MudRadio T="string" Value="@RVideoVoiceModes.Library" Size="Size.Small">Giọng từ thư viện</MudRadio>
+          </MudRadioGroup>
+        </MudItem>
+        @if (_advVoiceMode == RVideoVoiceModes.Library)
+        {
+          <MudItem xs="12" sm="4">
+            <MudSelect T="string" Value="_advVoiceCode" ValueChanged="@(async v=>await HandleAdvancedVoiceCodeChangedAsync(v))" Label="Giọng đọc" Variant="Variant.Outlined" Dense="true" Disabled="@_advSaving">
+              @foreach (var v in _voices) { <MudSelectItem Value="@v.Code">@v.Name (@v.Code)</MudSelectItem> }
+            </MudSelect>
+          </MudItem>
+          <MudItem xs="12" sm="4"><MudNumericField T="decimal" Value="_advTtsRate" ValueChanged="@(async v=>await HandleAdvancedTtsRateChangedAsync(v))" Label="Tốc độ đọc" Variant="Variant.Outlined" Min="0.5m" Max="2.0m" Step="0.1m" Disabled="@_advSaving"/></MudItem>
+        }
+        <MudItem xs="12" sm="4">
+          <MudSelect T="string" Value="_advMusicCode" ValueChanged="@(async v=>await HandleAdvancedMusicCodeChangedAsync(v))" Label="Nhạc nền" Variant="Variant.Outlined" Dense="true" Disabled="@_advSaving" Clearable="true">
+            @foreach (var m in _music) { <MudSelectItem Value="@m.Code">@m.Name (@m.Code)</MudSelectItem> }
+          </MudSelect>
+        </MudItem>
+        @if (!string.IsNullOrWhiteSpace(_advMusicCode))
+        {
+          <MudItem xs="12" sm="4"><MudNumericField T="decimal" Value="_advMusicVolume" ValueChanged="@(async v=>await HandleAdvancedMusicVolumeChangedAsync(v))" Label="Âm lượng nhạc" Variant="Variant.Outlined" Min="0m" Max="1m" Step="0.1m" Disabled="@_advSaving"/></MudItem>
+        }
+      </MudGrid>
+    </MudExpansionPanel>
+  </MudExpansionPanels>
+</div>
+@code{
+
+  [Parameter] public RVideoJobView? JobView{get;set;}
+  [Parameter] public Guid? JobId{get;set;}
+  [Parameter] public EventCallback OnReloadRequested{get;set;}
+  private int _f; private bool _adv=false;
+  private string _titleWorking=string.Empty;
+  private string _workingInput=string.Empty;
+  private bool _generating; private string? _status;
+  private bool _speechSupported; private string? _prevTitle;
+  private PromptSpeechHandler? _speech;
+  private readonly List<TodoX.Web.Models.AiStudioVoiceDto> _voices = new();
+  private readonly List<TodoX.Web.Models.AiStudioMusicDto> _music = new();
+  private string _advExecutionMode = RVideoExecutionModes.Manual;
+  private string _advVoiceMode = RVideoVoiceModes.None;
+  private string? _advVoiceCode;
+  private decimal _advTtsRate = 1.0m;
+  private string? _advMusicCode;
+  private decimal _advMusicVolume = 0.8m;
+  protected override async Task OnInitializedAsync(){
+    _speech = new PromptSpeechHandler(JS, "rvideo-v2-info", async t=>{ _workingInput = QuickPromptTranscriptMerger.AppendTranscript(_workingInput,t); await InvokeAsync(StateHasChanged); }, async ()=> await InvokeAsync(StateHasChanged));
+    await _speech.InitializeAsync(); _speechSupported = _speech.IsSupported;
+  }
+  private long? _lastWorkingProjectId; private Guid? _lastWorkingActiveId;
+  private async Task LoadCatalogsAsync(){
+    if(_voices.Count==0){ try{ _voices.AddRange(await Catalog.ListVoicesAsync(activeOnly:true)); }catch{} }
+    if(_music.Count==0){ try{ _music.AddRange(await Catalog.ListMusicAsync(activeOnly:true)); }catch{} }
+  }
+  private static string CharacterLabel(string mode)=> mode switch{
+    RVideoCharacterModes.Upload=>"Upload ảnh",
+    RVideoCharacterModes.Library=>"Character Library",
+    _=>"Không dùng"
+  };
+  protected override async Task OnParametersSetAsync(){
+    await LoadCatalogsAsync();
+    var t = JobView?.Project.Title ?? string.Empty;
+    if(_prevTitle != t){ _prevTitle=t; _titleWorking=t; }
+    if(JobView!=null && (_lastWorkingProjectId != JobView.Project.Id || _lastWorkingActiveId != JobView.Project.ActivePromptGenerationId)){
+      _lastWorkingProjectId = JobView.Project.Id; _lastWorkingActiveId = JobView.Project.ActivePromptGenerationId;
+      await RefreshWorkingInputFromActiveAsync();
+    }
+    SyncAdvFromView();
+  }
+  private static bool LooksLikeJson(string? s){ if(string.IsNullOrWhiteSpace(s)) return false; var tt=s.Trim(); return tt.StartsWith('{') && tt.EndsWith('}'); }
+  private async Task RefreshWorkingInputFromActiveAsync(){
+    if(JobView==null) return;
+    var pid = JobView.Project.Id; var aid = JobView.Project.ActivePromptGenerationId;
+    if(aid.HasValue && aid.Value != Guid.Empty){
+      try{ var ag = await PromptAssistant.GetProjectGenerationAsync(pid, aid.Value);
+        if(ag != null){ _workingInput = ag.UserInput ?? string.Empty; return; }
+      }catch{}
+      try{ var gens = await PromptAssistant.GetProjectGenerationsAsync(pid);
+        var match = gens.FirstOrDefault(g=>g.Id==aid.Value);
+        if(match != null){ _workingInput = match.UserInput ?? string.Empty; return; }
+      }catch{}
+      return;
+    }
+    if(!string.IsNullOrWhiteSpace(_workingInput)) return;
+    var op = JobView.Project.OriginalPrompt;
+    if(!LooksLikeJson(op)) _workingInput = op ?? string.Empty;
+    else _workingInput = string.Empty;
+  }
+  public async ValueTask DisposeAsync(){ if(_speech!=null) await _speech.DisposeAsync(); }
+
+
+  private async Task HandleTitleBlurAsync(){
+    if(JobView==null||JobId==null||AuthState.CurrentUser==null) return;
+    var v=(_titleWorking??string.Empty).Trim(); if(string.IsNullOrWhiteSpace(v)||v==JobView.Project.Title) return;
+    var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, titleOverride:v);
+    await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+  }
+  private async Task HandleGenerateAsync(){
+    if(_generating) return; if(string.IsNullOrWhiteSpace(_workingInput)) return;
+    if(JobId==null||JobView==null||AuthState.CurrentUser==null) return;
+    var sid=JobView.CoreJob.ServiceId; if(sid==null||sid==Guid.Empty){ Snackbar.Add("Thiếu ServiceId.",Severity.Warning); return; }
+    var ok=await JS.InvokeAsync<bool>("confirm","Tạo prompt AI sẽ ghi đè nội dung hiện tại. Tiếp tục?");
+    if(!ok) return; if(_generating) return;
+    _generating=true; _status="Đang tạo prompt..."; StateHasChanged();
+    try{
+      var outcome=await PromptAction.GenerateAsync(new RVideoPromptGenerationRequest(sid.Value,_workingInput,AuthState.CurrentUser,JobView.Project.Id),CancellationToken.None);
+      if(!outcome.Result.ValidationPassed || string.IsNullOrWhiteSpace(outcome.Result.GeneratedJson)){ Snackbar.Add("Tạo prompt thất bại.",Severity.Error); return; }
+      var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, promptOverride:outcome.Result.GeneratedJson!);
+      await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+      Snackbar.Add("Đã tạo prompt.",Severity.Success); _status="Đã tạo prompt.";
+    }catch(Exception ex){ Logger.LogWarning(ex,"generate failed"); Snackbar.Add("Lỗi tạo prompt.",Severity.Error); }
+    finally{ _generating=false; StateHasChanged(); }
+  }
+  private async Task HandleReloadAsync(){ if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); _status="Đã làm mới."; }
+  private async Task HandleHistoryAsync(){
+    if(JobView==null) return;
+    var gens=await PromptAssistant.GetProjectGenerationsAsync(JobView.Project.Id);
+    if(gens.Count==0){ Snackbar.Add("Chưa có lịch sử.",Severity.Info); return; }
+    var last=gens.OrderByDescending(g=>g.CreatedAt).First();
+    await PromptAssistant.SetActiveProjectGenerationAsync(JobView.Project.Id, last.Id);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+    Snackbar.Add("Đã áp dụng bản mới nhất.",Severity.Success);
+  }
+  private async Task ToggleSpeechAsync(){ if(_speech!=null) await _speech.ToggleAsync(); }
+  private async Task OpenQuickPromptAsync(){
+    var p=new DialogParameters{ ["CanonicalInput"]=_workingInput, ["OnApplyInput"]=(Func<string,Task>)(async v=>{ _workingInput=v; await InvokeAsync(StateHasChanged); }), ["OnGenerate"]=(Func<Task>)(async ()=>await HandleGenerateAsync()), ["Generating"]=_generating };
+    await Dialogs.ShowAsync<QuickPromptDialog>("",p,new DialogOptions{ MaxWidth=MaxWidth.Large, FullWidth=true });
+  }
+  private int _advTotalSeconds; private int _advSceneSeconds; private string _advAspect="9:16"; private string _advResolution="720p"; private bool _advThinkScenes; private bool _advSaving;
+  protected void SyncAdvFromView(){ if(JobView==null) return; _advTotalSeconds=JobView.Project.TotalSeconds; _advSceneSeconds=JobView.Project.SceneSeconds; _advThinkScenes=JobView.Project.ThinkScenes;
+    var s=JobView.Settings; if(s!=null){ _advExecutionMode=s.ExecutionMode; _advVoiceMode=s.VoiceMode; _advVoiceCode=s.VoiceCatalogCode; _advTtsRate=s.DefaultTtsRate; _advMusicCode=s.MusicCatalogCode; _advMusicVolume=s.MusicVolume; }
+    try{ var u=RVideoJobUpdateHelper.BuildSafeUpdate(JobView); _advAspect=u.AspectRatio; _advResolution=u.Resolution; }catch{} }
+  private async Task HandleAdvancedTotalSecondsChangedAsync(int v){ if(JobView==null||JobId==null||AuthState.CurrentUser==null) return; _advSaving=true; try{ var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, totalSecondsOverride:v); await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }finally{ _advSaving=false; } }
+  private async Task HandleAdvancedSceneSecondsChangedAsync(int v){ if(JobView==null||JobId==null||AuthState.CurrentUser==null) return; _advSaving=true; try{ var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, sceneSecondsOverride:v); await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }finally{ _advSaving=false; } }
+  private async Task HandleAdvancedAspectChangedAsync(string v){ if(JobView==null||JobId==null||AuthState.CurrentUser==null) return; _advSaving=true; try{ var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, aspectRatioOverride:v); await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }finally{ _advSaving=false; } }
+  private async Task HandleAdvancedResolutionChangedAsync(string v){ if(JobView==null||JobId==null||AuthState.CurrentUser==null) return; _advSaving=true; try{ var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, resolutionOverride:v); await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }finally{ _advSaving=false; } }
+  private async Task HandleAdvancedThinkScenesChangedAsync(bool v){ if(JobView==null||JobId==null||AuthState.CurrentUser==null) return; _advSaving=true; try{ var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, thinkScenesOverride:v); await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }finally{ _advSaving=false; } }
+  private RVideoJobSettingsRequest BuildSettingsOverride(){
+    var s=JobView?.Settings;
+    return new RVideoJobSettingsRequest{
+      ExecutionMode=_advExecutionMode,
+      SkipCharacter=s?.SkipCharacter??false,
+      UseReferenceImageForAllScenes=s?.UseReferenceImageForAllScenes??false,
+      CharacterMode=s?.CharacterMode??RVideoCharacterModes.None,
+      SelectedCharacterId=s?.SelectedCharacterId,
+      CharacterSnapshot=string.IsNullOrWhiteSpace(s?.CharacterSnapshotJson)?null:System.Text.Json.JsonSerializer.Deserialize<object>(s!.CharacterSnapshotJson!),
+      VoiceMode=_advVoiceMode,
+      VoiceCatalogCode=_advVoiceMode==RVideoVoiceModes.Library?_advVoiceCode:null,
+      VoiceSnapshot=s?.VoiceSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s!.VoiceSnapshotJson!):null,
+      DefaultTtsRate=_advTtsRate,
+      MusicCatalogCode=string.IsNullOrWhiteSpace(_advMusicCode)?null:_advMusicCode,
+      MusicSnapshot=s?.MusicSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s!.MusicSnapshotJson!):null,
+      MusicVolume=_advMusicVolume
+    };
+  }
+  private async Task SaveSettingsAsync(){
+    if(JobView==null||JobId==null||AuthState.CurrentUser==null) return;
+    _advSaving=true;
+    try{
+      var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, settingsOverride:BuildSettingsOverride());
+      await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser);
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+    } finally { _advSaving=false; }
+  }
+  private async Task HandleAdvancedExecutionModeChangedAsync(string v){ if(string.Equals(v,_advExecutionMode)) return; _advExecutionMode=v; await SaveSettingsAsync(); }
+  private async Task HandleAdvancedVoiceModeChangedAsync(string v){ if(string.Equals(v,_advVoiceMode)) return; _advVoiceMode=v; if(v!=RVideoVoiceModes.Library){ _advVoiceCode=null; } await SaveSettingsAsync(); }
+  private async Task HandleAdvancedVoiceCodeChangedAsync(string v){ if(string.Equals(v,_advVoiceCode)) return; _advVoiceCode=v; await SaveSettingsAsync(); }
+  private async Task HandleAdvancedTtsRateChangedAsync(decimal v){ if(v==_advTtsRate) return; _advTtsRate=v; await SaveSettingsAsync(); }
+  private async Task HandleAdvancedMusicCodeChangedAsync(string? v){ if(string.Equals(v,_advMusicCode)) return; _advMusicCode=v; await SaveSettingsAsync(); }
+  private async Task HandleAdvancedMusicVolumeChangedAsync(decimal v){ if(v==_advMusicVolume) return; _advMusicVolume=v; await SaveSettingsAsync(); }
+  private List<RefItem> FilteredRefs{ get{
+    var list=new List<RefItem>(); var pr=JobView?.Project; if(pr==null) return list;
+    if(!string.IsNullOrWhiteSpace(pr.UploadedCharacterUrl)) list.Add(new(pr.UploadedCharacterUrl,"Nhân vật","character"));
+    if(!string.IsNullOrWhiteSpace(pr.SourceImageUrl)) list.Add(new(pr.SourceImageUrl,"Hình ảnh","image"));
+    foreach(var s in pr.Scenes) if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)) list.Add(new(s.StaticImageUrl,$"Scene {s.SceneIndex}","image"));
+    return _f==1?list.Where(x=>x.Kind=="image").ToList():list;
+  }}
+  private sealed record RefItem(string Url,string Label,string Kind);
+}

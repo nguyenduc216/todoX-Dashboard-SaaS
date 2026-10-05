@@ -207,8 +207,8 @@ public class RenderVideoJobsLayoutTests
         var source = File.ReadAllText(RazorPath);
         var generateMethod = Between(source, "private async Task GenerateAiPromptAsync", "private Task OnAspectRatioChangedAsync");
 
-        Assert.Contains("PromptAssistant.GeneratePromptAsync", generateMethod);
-        Assert.Contains("videoProjectId: _projectId", generateMethod);
+        Assert.Contains("RVideoPromptAction.GenerateAsync", generateMethod);
+        Assert.Contains("_projectId", generateMethod);
         Assert.Contains("EnsurePromptWorkspaceProjectAsync", generateMethod);
         Assert.Contains("PromptAssistantGeneratedDialog", generateMethod);
         Assert.DoesNotContain("CreateQueued", generateMethod);
@@ -235,7 +235,9 @@ public class RenderVideoJobsLayoutTests
         var source = File.ReadAllText(RazorPath);
         var promptSourceSection = Between(source, "Dịch vụ đã chọn:", "MudButton Variant=\"Variant.Outlined\" Color=\"Color.Primary\" OnClick=\"CheckPromptAsync\"");
 
-        Assert.Contains("Tạo nội dung AI", promptSourceSection);
+        // RVID-UI-001 renamed the section heading from "Tạo nội dung AI" to "Cài đặt dịch vụ";
+        // the AI generation block stays above the advanced JSON import panel.
+        Assert.Contains("Cài đặt dịch vụ", promptSourceSection);
         Assert.Contains("Tạo Prompt AI", promptSourceSection);
         Assert.Contains("Nâng cao: Import JSON thủ công", promptSourceSection);
         Assert.Contains("<MudExpansionPanel Text=\"Nâng cao: Import JSON thủ công\">", promptSourceSection);
@@ -258,7 +260,7 @@ public class RenderVideoJobsLayoutTests
         Assert.DoesNotContain("Scene count", promptSourceSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("_aiSceneCount", source, StringComparison.Ordinal);
         Assert.Contains("CreativeMode: _aiPromptCreativeMode", generateMethod);
-        Assert.Contains("Duration: _aiPromptCreativeMode ? _aiDuration : null", generateMethod);
+        Assert.Contains("DurationSeconds: _aiPromptCreativeMode ? aiDuration : null", generateMethod);
     }
 
     [Fact]

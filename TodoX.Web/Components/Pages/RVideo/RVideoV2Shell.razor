@@ -1,0 +1,151 @@
+@page "/r-video"
+@page "/r-video/{JobId:guid}"
+@using TodoX.Web.Services.VideoRender
+@inject NavigationManager Navigation
+@inject AuthStateService AuthState
+@inject IRVideoJobService RVideoJobs
+@inject ILogger<RVideoV2Shell> Logger
+
+<PageTitle>RVideo V2 — TodoX</PageTitle>
+
+<div class="rv2-shell">
+    <div class="rv2-header">
+        <div class="rv2-header-top">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="GoBackLegacy" aria-label="Quay lại" />
+            <div class="rv2-title-block">
+                <div class="rv2-title-row">
+                    <MudText Typo="Typo.h6" Class="rv2-title">@DisplayTitle</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Class="rv2-title-edit" />
+                </div>
+                <div class="rv2-meta-row">
+                    <span class="rv2-meta-item">@JobIdShort</span>
+                    <span class="rv2-meta-sep">|</span>
+                    <span class="rv2-meta-item">@ServiceLabel</span>
+                    <span class="rv2-meta-sep">|</span>
+                    <span class="rv2-meta-item">@StageLabel</span>
+                </div>
+            </div>
+            <div class="rv2-header-actions">
+                <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                    <span class="rv2-tech-meta">@AspectRatio | @Resolution | @TotalSeconds giây | @SceneCount scene</span>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="true">Cài đặt nâng cao</MudButton>
+                    <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Disabled="true" />
+                </MudHidden>
+                <MudHidden Breakpoint="Breakpoint.MdAndUp">
+                    <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Disabled="true" />
+                </MudHidden>
+            </div>
+        </div>
+
+        <MudTabs Class="rv2-tabs" Rounded="true" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_tabIndex">
+            <MudTabPanel Text="THÔNG TIN" />
+            <MudTabPanel Text="XEM TRƯỚC" />
+            <MudTabPanel Text="KẾT QUẢ" />
+        </MudTabs>
+        <MudHidden Breakpoint="Breakpoint.MdAndUp">
+            <div class="rv2-mobile-techbar">
+                <span>@AspectRatio | @Resolution | @TotalSeconds giây | @SceneCount scene</span>
+            </div>
+        </MudHidden>
+    </div>
+
+    <div class="rv2-body">
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        }
+        else if (!string.IsNullOrWhiteSpace(_loadWarning))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@_loadWarning</MudAlert>
+        }
+
+        @if (_tabIndex == 0)
+        {
+            <RVideoV2Info JobView="_jobView" JobId="JobId" />
+        }
+        else if (_tabIndex == 1)
+        {
+            <RVideoV2Preview JobView="_jobView" OnReloadRequested="ReloadAsync" />
+        }
+        else
+        {
+            <RVideoV2Result JobView="_jobView" />
+        }
+    </div>
+
+    <div class="rv2-footer-nav">
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="GoBackLegacy">Quay lại giao diện cũ</MudButton>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid? JobId { get; set; }
+
+    private int _tabIndex;
+    private bool _loading;
+    private string? _loadWarning;
+    private RVideoJobView? _jobView;
+
+    private string DisplayTitle => _jobView?.Project.Title ?? "Video chưa có tiêu đề";
+    private string JobIdShort => JobId?.ToString("N").Substring(0, 8) ?? "—";
+    private string ServiceLabel => _jobView?.CoreJob.ServiceCode ?? "rvideo";
+    private string StageLabel => _jobView?.Project.Status ?? "draft";
+    private string AspectRatio => ExtractAspectRatio() ?? "—";
+    private string Resolution => ExtractResolution() ?? "—";
+    private string? ExtractAspectRatio(){ if(_jobView is null) return null; try{ return new TodoXVideoPromptParser().Parse(_jobView.Project.OriginalPrompt).Model.AspectRatio;}catch{return null;}}
+    private string? ExtractResolution(){ if(_jobView is null) return null; try{ return new TodoXVideoPromptParser().Parse(_jobView.Project.OriginalPrompt).Model.Resolution;}catch{return null;}}
+    private string TotalSeconds => (_jobView?.Project.TotalSeconds ?? 0) == 0 ? "—" : _jobView!.Project.TotalSeconds.ToString();
+    private string SceneCount => (_jobView?.Project.Scenes.Count ?? 0).ToString();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (JobId is null) return;
+        if (AuthState.CurrentUser is null) return;
+        await ReloadAsync();
+    }
+
+    internal async Task ReloadAsync()
+    {
+        if (JobId is null || AuthState.CurrentUser is null) return;
+        _loading = true;
+        _loadWarning = null;
+        try
+        {
+            _jobView = await RVideoJobs.GetByJobIdAsync(JobId.Value, AuthState.CurrentUser);
+            if (_jobView is null) _loadWarning = "Không tìm thấy job.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVideo V2 load job failed {JobId}", JobId);
+            _loadWarning = "Không tải được job.";
+        }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task HandleTitleChanged(string title)
+    {
+        if (JobId is null || AuthState.CurrentUser is null || _jobView is null) return;
+        var trimmed = title?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmed)) return;
+        if (string.Equals(trimmed, _jobView.Project.Title, StringComparison.Ordinal)) return;
+        var req = RVideoJobUpdateHelper.BuildSafeUpdate(_jobView, titleOverride: trimmed);
+        await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+        await ReloadAsync();
+    }
+
+    private async Task HandleAdvancedSaved(int totalSeconds, int sceneSeconds)
+    {
+        if (JobId is null || AuthState.CurrentUser is null || _jobView is null) return;
+        var req = RVideoJobUpdateHelper.BuildSafeUpdate(_jobView, totalSecondsOverride: totalSeconds, sceneSecondsOverride: sceneSeconds);
+        await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+        await ReloadAsync();
+    }
+
+    private void GoBackLegacy()
+    {
+        if (JobId is not null)
+            Navigation.NavigateTo($"/render-job?jobId={JobId}");
+        else
+            Navigation.NavigateTo("/render-job");
+    }
+}

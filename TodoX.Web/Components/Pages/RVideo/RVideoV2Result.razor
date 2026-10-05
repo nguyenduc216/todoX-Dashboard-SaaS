@@ -1,0 +1,53 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.VideoRender
+<div class="rv2-result">
+@if(JobView is null){<MudAlert Severity="Severity.Info" Dense="true">Chưa có video — hãy hoàn tất project ở tab Xem trước.</MudAlert>}
+else{
+<div class="rv2-result-grid">
+<section class="rv2-result-video">
+<MudText Typo="Typo.subtitle2" Class="mb-2">Video hoàn chỉnh</MudText>
+@if(!string.IsNullOrWhiteSpace(JobView.Project.FinalVideoUrl)){
+<video src="@JobView.Project.FinalVideoUrl" controls playsinline class="rv2-final-video"></video>
+}else{<div class="rv2-final-ph">Chưa có final video</div>}
+<div class="rv2-result-summary">
+<div class="rv2-summary-item"><span>Tổng điểm</span><strong>@ScoreDisplay</strong></div>
+<div class="rv2-summary-item"><span>Kích thước file</span><strong>@FileSizeDisplay</strong></div>
+<div class="rv2-summary-item"><span>Định dạng</span><strong>@FormatDisplay</strong></div>
+<div class="rv2-summary-item"><span>Thời gian hoàn thành</span><strong>@CompletedDisplay</strong></div>
+</div>
+<div class="rv2-result-actions">
+@if(!string.IsNullOrWhiteSpace(JobView.Project.FinalVideoUrl)){
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Href="@JobView.Project.FinalVideoUrl" Target="_blank">Tải video</MudButton>
+}else{
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="true">Tải video</MudButton>
+}
+<MudButton Variant="Variant.Outlined" Disabled="true">Tải từng scene ZIP</MudButton>
+<MudButton Variant="Variant.Outlined" Disabled="true">Chia sẻ</MudButton>
+<MudButton Variant="Variant.Outlined" Disabled="true">Tạo video mới</MudButton>
+</div>
+</section>
+<section class="rv2-result-info">
+<MudText Typo="Typo.subtitle2">Thông tin video</MudText>
+<MudText Typo="Typo.caption">Tiêu đề: @(JobView.Project.Title??"—")</MudText>
+<MudText Typo="Typo.caption">Trạng thái: @JobView.Project.Status</MudText>
+<MudText Typo="Typo.caption">Scene: @JobView.Project.Scenes.Count</MudText>
+<MudText Typo="Typo.caption">Tổng giây: @JobView.Project.TotalSeconds</MudText>
+<MudText Typo="Typo.caption">Job: @(JobView.CoreJob.JobId.ToString())</MudText>
+<MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(()=>_showDetail=true)">Chi tiết</MudButton>
+<MudMenu Label="Thêm" Variant="Variant.Text" Size="Size.Small">
+<MudMenuItem Disabled="true">Tải ZIP</MudMenuItem>
+<MudMenuItem Disabled="true">Chia sẻ</MudMenuItem>
+</MudMenu>
+</section>
+</div>
+@if(_showDetail){<div class="rv2-sheet-backdrop" @onclick="@(()=>_showDetail=false)"></div><div class="rv2-sheet"><MudText Typo="Typo.subtitle2">Chi tiết video</MudText><MudText Typo="Typo.caption">URL: @(JobView.Project.FinalVideoUrl??"—")</MudText><MudButton Size="Size.Small" OnClick="@(()=>_showDetail=false)">Đóng</MudButton></div>}
+}
+</div>
+@code{
+[Parameter] public RVideoJobView? JobView{get;set;}
+bool _showDetail;
+string ScoreDisplay=> "—";
+string FileSizeDisplay=> "—";
+string FormatDisplay=> "mp4";
+string CompletedDisplay=> JobView?.Project.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—";
+}

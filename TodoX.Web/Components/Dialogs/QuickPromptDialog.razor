@@ -1,0 +1,55 @@
+@implements IAsyncDisposable
+@using TodoX.Web.Services.PromptAssistant
+@inject IJSRuntime JS
+
+<MudDialog Class="quick-prompt-dialog quick-prompt-fullscreen">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Tạo Prompt AI nhanh</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="quick-prompt-workspace">
+            <MudTextField T="string" @bind-Value="_workingInput" Immediate="true" Label="Nội dung video mong muốn" Variant="Variant.Outlined" Lines="18" Class="quick-prompt-textarea" Placeholder="Hãy tạo video chia sẻ về..." />
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap quick-prompt-mic-row">
+                <MudTooltip Text="@(IsListening ? "Dừng ghi âm" : "Nhập nội dung bằng giọng nói")">
+                    <MudIconButton Icon="@(IsListening ? Icons.Material.Filled.Stop : Icons.Material.Filled.Mic)" Color="@(IsListening ? Color.Error : Color.Default)" Size="Size.Medium" Disabled="@(!SpeechSupported || IsRequesting || Generating)" OnClick="ToggleSpeechAsync" />
+                </MudTooltip>
+                <MudText Typo="Typo.caption" Class="speech-status-text">
+                    @if (IsRequesting) { @("Đang xin quyền microphone...") }
+                    else if (IsListening) { @("Đang nghe...") }
+                    else if (!string.IsNullOrEmpty(SpeechError)) { @SpeechError }
+                    else if (!SpeechSupported) { @("Trình duyệt hiện tại chưa hỗ trợ nhập nội dung bằng giọng nói.") }
+                </MudText>
+            </MudStack>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel" Disabled="@Generating">HỦY</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@(Generating ? null : Icons.Material.Filled.AutoAwesome)" Disabled="@(Generating || string.IsNullOrWhiteSpace(_workingInput))" OnClick="GenerateAsync">@(Generating ? "Đang tạo prompt..." : "TẠO PROMPT AI")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? CanonicalInput { get; set; }
+    [Parameter] public Func<string, Task> OnApplyInput { get; set; } = _ => Task.CompletedTask;
+    [Parameter] public Func<Task> OnGenerate { get; set; } = () => Task.CompletedTask;
+    [Parameter] public bool Generating { get; set; }
+    private string _workingInput = string.Empty;
+    private PromptSpeechHandler? _speech;
+    private bool SpeechSupported => _speech?.IsSupported ?? false;
+    private bool IsListening => _speech?.State == PromptSpeechState.Listening;
+    private bool IsRequesting => _speech?.State == PromptSpeechState.RequestingPermission;
+    private string? SpeechError => _speech?.State == PromptSpeechState.Error ? _speech.ErrorMessage : null;
+    protected override async Task OnInitializedAsync()
+    {
+        _workingInput = CanonicalInput ?? string.Empty;
+        _speech = new PromptSpeechHandler(JS, "rvideo-quick-prompt",
+            async transcript => { _workingInput = QuickPromptTranscriptMerger.AppendTranscript(_workingInput, transcript); await InvokeAsync(StateHasChanged); },
+            async () => await InvokeAsync(StateHasChanged));
+        await _speech.InitializeAsync();
+    }
+    private async Task ToggleSpeechAsync() { if (_speech is null) return; await _speech.ToggleAsync(); await InvokeAsync(StateHasChanged); }
+    private async Task GenerateAsync() { await OnApplyInput(_workingInput); await OnGenerate(); }
+    private void Cancel() => MudDialog.Cancel();
+    public async ValueTask DisposeAsync() { if (_speech is not null) await _speech.DisposeAsync(); }
+}
