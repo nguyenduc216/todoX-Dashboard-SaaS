@@ -388,8 +388,16 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             || !string.IsNullOrWhiteSpace(context.CharacterReferenceObjectKey)
             || !string.IsNullOrWhiteSpace(context.CharacterReferenceUrl);
         var hasReference = references.Length > 0 || referenceMediaIds.Length > 0;
-        string? referenceImageBase64 = null;
-        if (referenceRequested && factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        var referenceImageBase64 = null as string;
+        // Existing 79AI provider task recovery: when a provider task already exists (worker retry of the
+        // same logical render), do NOT re-resolve/re-validate the reference image or re-submit. The
+        // provider router polls the existing task (ProviderTaskId) instead, so an unavailable local
+        // reference must not block the poll of an existing provider task. Reference preparation and
+        // validation only applies to the FIRST submit, where the provider genuinely requires it.
+        var hasExistingProviderTask = !string.IsNullOrWhiteSpace(context.ProviderTaskId);
+        if (!hasExistingProviderTask
+            && referenceRequested
+            && factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
         {
             var media = context.CharacterReferenceMediaId is Guid mediaId
                 ? await _media.GetAsync(mediaId, ct)
