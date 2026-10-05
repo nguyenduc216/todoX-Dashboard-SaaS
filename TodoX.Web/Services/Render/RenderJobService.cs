@@ -43,6 +43,17 @@ public interface IRenderJobService
         CancellationToken ct = default,
         bool enforceReconciliationLimit = true,
         bool enforceProviderPollTimeout = false);
+
+    /// <summary>
+    /// Recovery-safe persistent reconciliation path. Atomic guards: retry_after must be due (NULL or &lt;= now())
+    /// and lock must not be live (lock_until IS NULL OR &lt;= now()). Does not emit event on no-op. Idempotent across instances.
+    /// </summary>
+    Task<bool> SchedulePersistentProviderPollAsync(
+        Guid jobId,
+        TimeSpan delay,
+        string reasonCode,
+        string reasonMessage,
+        CancellationToken ct = default);
     Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default);
     Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default);
     Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default);
@@ -948,6 +959,54 @@ public sealed class RenderJobService : IRenderJobService
             new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
         return true;
     }
+
+    public async Task<bool> SchedulePersistentProviderPollAsync(
+        Guid jobId,
+        TimeSpan delay,
+        string reasonCode,
+        string reasonMessage,
+        CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        var delaySeconds = Math.Max(1, (int)delay.TotalSeconds);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status='queued',
+                   input_json=jsonb_set(
+                       jsonb_set(
+                           COALESCE(input_json, '{}'::jsonb) || '{"providerPoll": true}'::jsonb,
+                           '{providerPollCount}',
+                           to_jsonb(COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) + 1),
+                           true),
+                       '{providerPollStartedAt}',
+                       COALESCE(input_json->'providerPollStartedAt', to_jsonb(now())),
+                       true),
+                   retry_after=now() + (@delaySeconds || ' seconds')::interval,
+                   error_code=@reasonCode,
+                   error_message=@reasonMessage,
+                   lock_owner=NULL,
+                   lock_until=NULL,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
+               AND (retry_after IS NULL OR retry_after <= now())
+               AND (lock_until IS NULL OR lock_until <= now());
+            """,
+            new { jobId, delaySeconds, reasonCode, reasonMessage });
+
+        if (changed <= 0)
+        {
+            _logger.LogDebug("Persistent reconciliation no-op for job {JobId}: future retry_after or live lock or terminal status.", jobId);
+            return false;
+        }
+
+        await AddEventAsync(jobId, "JOB_PROVIDER_POLL_SCHEDULED",
+            "Provider poll scheduled without consuming the application retry budget.",
+            new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
+        return true;
+    }
+
 
     public async Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default)
     {

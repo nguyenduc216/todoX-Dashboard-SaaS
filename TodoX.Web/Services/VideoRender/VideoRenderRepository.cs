@@ -699,6 +699,7 @@ public sealed class VideoRenderRepository
                        scene_video_path=COALESCE(@videoPath, scene_video_path),
                        selected_image_version_id=COALESCE(@selectedImageVersionId, selected_image_version_id),
                        selected_video_version_id=COALESCE(@selectedVideoVersionId, selected_video_version_id),
+                       duration_seconds=COALESCE(@durationSeconds, duration_seconds),
                        status=@status,
                        error_message=@errorMessage,
                        updated_at=now()
@@ -722,6 +723,7 @@ public sealed class VideoRenderRepository
                     videoPath = request.VideoPath,
                     selectedImageVersionId = request.SelectedImageVersionId,
                     selectedVideoVersionId = request.SelectedVideoVersionId,
+                    durationSeconds = request.DurationSeconds is > 0 ? request.DurationSeconds : null,
                     status = string.IsNullOrWhiteSpace(request.Status) ? VideoSceneStatuses.Draft : request.Status,
                     errorMessage = request.ErrorMessage
                 }, tx);
@@ -1179,7 +1181,9 @@ public sealed class VideoRenderRepository
                AND btrim(v.provider_video_id_base) <> ''
                AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
                AND j.job_type='render_scene_video'
-               AND j.status NOT IN ('completed', 'cancelled');
+               AND j.status NOT IN ('completed', 'cancelled')
+               AND (j.retry_after IS NULL OR j.retry_after <= now())
+               AND (j.lock_until IS NULL OR j.lock_until <= now());
             """,
             new { tenant = _tenant.TenantId });
         return jobs.ToList();

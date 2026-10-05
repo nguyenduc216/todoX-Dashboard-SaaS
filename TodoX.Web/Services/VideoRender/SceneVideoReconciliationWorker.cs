@@ -64,14 +64,12 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
     {
         foreach (var jobId in jobIds)
         {
-            await jobs.ScheduleProviderPollAsync(
+            await jobs.SchedulePersistentProviderPollAsync(
                 jobId,
                 delay,
                 "SCENE_VIDEO_RECONCILIATION_WORKER",
                 "Persistent reconciliation worker retained the existing provider task and scheduled another poll.",
-                ct,
-                enforceReconciliationLimit: false,
-                enforceProviderPollTimeout: false);
+                ct);
         }
     }
 }
