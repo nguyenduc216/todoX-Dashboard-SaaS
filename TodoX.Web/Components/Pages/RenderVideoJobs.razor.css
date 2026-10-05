@@ -393,4 +393,13 @@
     .scene-card-grid {
         grid-template-columns: minmax(0, 1fr);
     }
+
+.prompt-input-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:-4px}
+.prompt-input-toolbar-label{font-weight:600;opacity:.85}
+.prompt-input-toolbar-actions{display:flex;align-items:center;gap:2px}
+.quick-prompt-workspace{display:flex;flex-direction:column;gap:12px;min-height:52vh}
+.quick-prompt-workspace .quick-prompt-textarea textarea{min-height:42vh}
+@media(min-width:900px){.quick-prompt-workspace .quick-prompt-textarea textarea{min-height:58vh}}
+@media(max-width:700px){.quick-prompt-workspace{min-height:62dvh}.quick-prompt-workspace .quick-prompt-textarea textarea{min-height:55dvh}}
+
 }
