@@ -22,6 +22,9 @@ public sealed class GommoPromptAssistantTimeoutTests
     private static ServicePrompt79AiClient CreateClient(HttpMessageHandler handler, ServicePromptAssistantOptions options)
         => new(new HttpClient(handler), new StaticResolver("secret-token"), Options.Create(options));
 
+    private static ServicePrompt79AiClient CreateClient(HttpMessageHandler handler, ServicePromptAssistantOptions options, IProviderCredentialResolver resolver)
+        => new(new HttpClient(handler), resolver, Options.Create(options));
+
     private static ServicePromptProviderRequest CreateRequest()
         => new("https://api.gommo.net/api/v2/chat", "gommo_agent", "base-123", "make demo");
 
@@ -144,10 +147,82 @@ public sealed class GommoPromptAssistantTimeoutTests
         Assert.Equal("malformed_sse_chunk", error.Code);
     }
 
+    [Fact]
+    public async Task CredentialTimeoutUsesConnectTimeoutTaxonomy()
+    {
+        var handler = new StubHandler($"data: {Chunk("{}")}\n\ndata: [DONE]\n\n");
+        var client = CreateClient(handler, CreateOptions(connectSeconds: 1), new DelayedResolver(TimeSpan.FromSeconds(2)));
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("gommo_connect_timeout", error.Code);
+    }
+
+    [Fact]
+    public async Task NoSseEventTimeoutDiagnosticIsNull()
+    {
+        // Stream opens (headers) but emits no data: line and stalls -> idle timeout with no SSE data event.
+        var handler = new StubHandlerWithStalledStream("");
+        var client = CreateClient(handler, CreateOptions(connectSeconds: 5, idleSeconds: 1, hardSeconds: 30));
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("gommo_stream_idle_timeout", error.Code);
+        Assert.Null(error.Diagnostics?.ElapsedMsSinceLastSseEvent);
+    }
+
+    [Fact]
+    public async Task IdleTimeoutElapsedSinceLastSseEventReflectsLastEventNotFirst()
+    {
+        // Event at t1 (fast), event at t2 (after ~400ms), stall, idle timeout fires 1s after t2.
+        // ElapsedMsSinceLastSseEvent must be ~idle timeout (~1000ms), NOT ~1400ms (since first event).
+        var handler = new StubHandlerWithDelayedLinesThenStall(
+            new[] { $"data: {Chunk("a")}", $"data: {Chunk("b")}" },
+            interLineDelay: TimeSpan.FromMilliseconds(400));
+        var client = CreateClient(handler, CreateOptions(connectSeconds: 5, idleSeconds: 1, hardSeconds: 30));
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("gommo_stream_idle_timeout", error.Code);
+        Assert.Equal("idle", error.Diagnostics?.TimeoutStage);
+        var elapsed = error.Diagnostics?.ElapsedMsSinceLastSseEvent;
+        Assert.NotNull(elapsed);
+        // Close to the 1s idle window measured from the LAST event; with tolerance since
+        // first event would give ~1400ms and the last-event gap gives ~1000ms.
+        Assert.InRange(elapsed!.Value, 700, 1200);
+    }
+
+    [Fact]
+    public async Task HardTimeoutElapsedSinceLastSseEventReflectsRecentChunkGap()
+    {
+        // Chunks arrive continuously every 60ms; hard timeout fires at 1s.
+        // ElapsedSinceLastSseEvent should be the small gap since last chunk (< total duration).
+        var handler = new StubHandlerInfiniteChunkStream(interChunkDelay: TimeSpan.FromMilliseconds(60));
+        var client = CreateClient(handler, CreateOptions(connectSeconds: 5, idleSeconds: 5, hardSeconds: 1));
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("gommo_stream_hard_timeout", error.Code);
+        Assert.Equal("hard", error.Diagnostics?.TimeoutStage);
+        var elapsed = error.Diagnostics?.ElapsedMsSinceLastSseEvent;
+        Assert.NotNull(elapsed);
+        Assert.True(elapsed!.Value < error.Diagnostics!.TotalDurationMs, $"elapsed {elapsed} should be < total {error.Diagnostics.TotalDurationMs}");
+        Assert.InRange(elapsed!.Value, 0, 400); // recent chunk gap, not stream age
+    }
+
     private sealed class StaticResolver(string secret) : IProviderCredentialResolver
     {
         public Task<ResolvedProviderCredential> ResolveAsync(string providerCode, string credentialRole, CancellationToken ct = default)
             => Task.FromResult(new ResolvedProviderCredential { ProviderAccountId = Guid.NewGuid(), ProviderCode = providerCode, CredentialRole = credentialRole, Secret = secret });
+    }
+
+    private sealed class DelayedResolver(TimeSpan delay) : IProviderCredentialResolver
+    {
+        public async Task<ResolvedProviderCredential> ResolveAsync(string providerCode, string credentialRole, CancellationToken ct = default)
+        {
+            await Task.Delay(delay, ct);
+            throw new InvalidOperationException("unreachable");
+        }
     }
 
     private sealed class StubHandler(string body, TimeSpan? delayBeforeHeaders = null) : HttpMessageHandler
@@ -176,6 +251,17 @@ public sealed class GommoPromptAssistantTimeoutTests
             => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StreamContent(new DelayedLinesSseStream(lines, interLineDelay))
+                { Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream") } }
+            });
+    }
+
+    /// <summary>Emits the given SSE lines with delay between them, then stalls (no more data, stream stays open).</summary>
+    private sealed class StubHandlerWithDelayedLinesThenStall(string[] lines, TimeSpan interLineDelay) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new DelayedThenStalledSseStream(lines, interLineDelay))
                 { Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream") } }
             });
     }
@@ -249,6 +335,39 @@ public sealed class GommoPromptAssistantTimeoutTests
             var take = Math.Min(count, bytes.Length);
             Array.Copy(bytes, 0, buffer, offset, take);
             _lineIndex++;
+            return take;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>Emits the given lines with delay before each, then stalls forever (read blocks until cancelled).</summary>
+    private sealed class DelayedThenStalledSseStream(string[] lines, TimeSpan delay) : Stream
+    {
+        private int _lineIndex;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            if (_lineIndex >= lines.Length)
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return 0; // unreachable
+            }
+            await Task.Delay(delay, cancellationToken);
+            var bytes = System.Text.Encoding.UTF8.GetBytes(lines[_lineIndex] + "\n\n");
+            _lineIndex++;
+            var take = Math.Min(count, bytes.Length);
+            Array.Copy(bytes, 0, buffer, offset, take);
             return take;
         }
 

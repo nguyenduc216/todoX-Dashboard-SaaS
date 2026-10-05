@@ -39,7 +39,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new ServicePromptProviderException("gommo_timeout", "Gommo Agent credential lookup timed out.", "{}");
+            throw new ServicePromptProviderException("gommo_connect_timeout", "Gommo Agent credential lookup timed out.", "{}");
         }
         catch (InvalidOperationException ex)
         {
@@ -93,7 +93,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         using var reader = new StreamReader(stream);
         var content = new StringBuilder(); var raw = new StringBuilder();
         int? promptTokens = null, outputTokens = null, completionTokens = null, totalTokens = null; decimal? credit = null; string? runtimeProvider = null;
-        var sawSse = false; var firstEventMs = (int?)null; var firstContentMs = (int?)null; var done = false;
+        var sawSse = false; var firstEventMs = (int?)null; var firstContentMs = (int?)null; var lastSseEventMs = (int?)null; var done = false;
         var sseDataCount = 0; var rawResponseTruncated = false;
         var httpContentType = response.Content.Headers.ContentType?.ToString();
         try
@@ -110,7 +110,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
                 AppendBoundedLine(raw, line, ref rawResponseTruncated);
                 if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
                 sseDataCount++;
-                sawSse = true; firstEventMs ??= (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                sawSse = true; var nowMs = (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds; firstEventMs ??= nowMs; lastSseEventMs = nowMs;
                 var data = line[5..].Trim();
                 if (string.IsNullOrWhiteSpace(data)) continue;
                 if (string.Equals(data, "[DONE]", StringComparison.Ordinal)) { done = true; break; }
@@ -141,7 +141,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
                 sanitizedAssembledContent: SanitizeAndBound(content.ToString(), credential.Secret),
                 diagnostics: BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
                     firstEventMs, firstContentMs, started, "idle",
-                    elapsedMsSinceLastSseEvent: sseDataCount == 0 ? null : (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds - firstEventMs));
+                    elapsedMsSinceLastSseEvent: lastSseEventMs is null ? null : (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds - lastSseEventMs));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -152,7 +152,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
                 sanitizedAssembledContent: SanitizeAndBound(content.ToString(), credential.Secret),
                 diagnostics: BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
                     firstEventMs, firstContentMs, started, "hard",
-                    elapsedMsSinceLastSseEvent: sseDataCount == 0 ? null : (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds - firstEventMs));
+                    elapsedMsSinceLastSseEvent: lastSseEventMs is null ? null : (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds - lastSseEventMs));
         }
 
         var sanitized = Sanitize(raw.ToString(), credential.Secret);
