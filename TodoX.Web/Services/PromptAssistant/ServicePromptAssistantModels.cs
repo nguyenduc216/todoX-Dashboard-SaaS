@@ -12,10 +12,16 @@ public sealed class ServicePromptAssistantOptions
     public string ProviderCode { get; set; } = "gommo_agent";
     public string ApiUrl { get; set; } = "https://api.gommo.net/api/v2/chat";
     public int TimeoutSeconds { get; set; } = 300;
+    public int ConnectTimeoutSeconds { get; set; } = 60;
+    public int StreamIdleTimeoutSeconds { get; set; } = 90;
+    public int StreamHardTimeoutSeconds { get; set; } = 600;
     public int MaxTemplateBytes { get; set; } = 2_000_000;
     public int MaxDescriptionBytes { get; set; } = 1_000_000;
 
     public TimeSpan Timeout => TimeSpan.FromSeconds(Math.Clamp(TimeoutSeconds, 5, 600));
+    public TimeSpan ConnectTimeout => TimeSpan.FromSeconds(Math.Clamp(ConnectTimeoutSeconds, 1, 300));
+    public TimeSpan StreamIdleTimeout => TimeSpan.FromSeconds(Math.Clamp(StreamIdleTimeoutSeconds, 1, 600));
+    public TimeSpan StreamHardTimeout => TimeSpan.FromSeconds(Math.Clamp(StreamHardTimeoutSeconds, 1, 3600));
     public int TemplateLimit => Math.Clamp(MaxTemplateBytes, 1_024, 10_000_000);
     public int DescriptionLimit => Math.Clamp(MaxDescriptionBytes, 1_024, 10_000_000);
 }
@@ -133,7 +139,9 @@ public sealed record ServicePromptGenerationDiagnostics(
     int? AssembledContentLength = null,
     string? ParserErrorMessage = null,
     long? ParserErrorLineNumber = null,
-    long? ParserErrorBytePositionInLine = null);
+    long? ParserErrorBytePositionInLine = null,
+    string? TimeoutStage = null,
+    int? ElapsedMsSinceLastSseEvent = null);
 
 public sealed record ServicePromptValidationError(string Path, string Code, string Message);
 
@@ -168,7 +176,12 @@ public sealed record ServicePromptProviderDiagnostics(
     int AssembledContentLength = 0,
     int? FirstEventMs = null,
     int? FirstContentMs = null,
-    int? TotalDurationMs = null);
+    int? TotalDurationMs = null,
+    string? TimeoutStage = null,
+    int? ConnectTimeoutMs = null,
+    int? StreamIdleTimeoutMs = null,
+    int? StreamHardTimeoutMs = null,
+    int? ElapsedMsSinceLastSseEvent = null);
 
 public sealed class ServicePromptProviderException : InvalidOperationException
 {
