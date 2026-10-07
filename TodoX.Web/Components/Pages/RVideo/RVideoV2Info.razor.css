@@ -17,8 +17,8 @@
 .rv2-ref-btn:focus-visible{outline:2px solid var(--mud-palette-primary,#ffb700);outline-offset:2px}
 .rv2-ref-btn--active{border-color:var(--mud-palette-primary,#ffb700);background:rgba(255,183,0,.14);color:var(--mud-palette-primary,#ffb700)}
 .rv2-ref-btn--disabled{cursor:not-allowed;opacity:.5;pointer-events:none}
-/* Native file input stays in the DOM (to receive the change event) but is fully hidden:
-   no "Chọn tệp" / "Không có tệp nào được chọn" text is ever rendered. */
-.rv2-ref-file{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;border:0!important;white-space:nowrap!important;opacity:0!important;pointer-events:none!important}
+/* Native file input lives outside any visible button and is fully hidden via off-screen positioning.
+   JS triggers it programmatically via .click() — no native file-input chrome ever renders. */
+.rv2-ref-file{position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none}
 .rv2-advanced{margin-top:16px}
 @media(max-width:900px){.rv2-info-grid{grid-template-columns:1fr}.rv2-ref-btn{min-width:40px;min-height:40px}}
