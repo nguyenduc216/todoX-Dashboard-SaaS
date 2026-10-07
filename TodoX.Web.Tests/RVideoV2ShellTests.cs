@@ -16,6 +16,24 @@ public class RVideoV2ShellTests
     [Fact] public void V2_Route_Exists(){ var t=File.ReadAllText(ShellPath); Assert.Contains("@page \"/r-video\"",t); Assert.Contains("@page \"/r-video/{JobId:guid}\"",t); }
     [Fact] public void Legacy_HasDemoLink(){ var t=File.ReadAllText(LegacyPath); Assert.Contains("Xem demo giao diện mới",t); Assert.Contains("/r-video",t); }
     [Fact] public void V2_Has3Tabs(){ var t=File.ReadAllText(ShellPath); Assert.Equal(3, Regex.Matches(t, "MudTabPanel").Count); Assert.Contains("THÔNG TIN",t); Assert.Contains("XEM TRƯỚC",t); Assert.Contains("KẾT QUẢ",t); }
+    [Fact] public void V2_NoDuplicateTopJobHeading(){ var t=File.ReadAllText(ShellPath);
+        // RVID-UI-V2-PHASE3A.1: the redundant top job-heading block (title + edit/menu + id/service/status) is removed.
+        Assert.DoesNotContain("rv2-title-block",t);
+        Assert.DoesNotContain("rv2-title-row",t);
+        Assert.DoesNotContain("rv2-meta-row",t);
+        Assert.DoesNotContain("rv2-header-top",t);
+        Assert.DoesNotContain("Typo.h6",t);
+        Assert.DoesNotContain("MoreVert",t);
+        // Navigation + back affordance survive.
+        Assert.Contains("rv2-nav-row",t);
+        Assert.Contains("GoBackLegacy",t);
+    }
+    [Fact] public void V2_ShellCss_NoDeadHeadingClasses(){ var css=File.ReadAllText(Path.ChangeExtension(ShellPath,".razor.css"));
+        Assert.DoesNotContain(".rv2-header-top",css);
+        Assert.DoesNotContain(".rv2-title-block",css);
+        Assert.DoesNotContain(".rv2-meta-row",css);
+        Assert.Contains(".rv2-nav-row",css);
+    }
     [Fact] public void Info_Advanced_CollapsedDefault(){ var t=File.ReadAllText(InfoPath); Assert.Contains("_adv=false",t); }
     [Fact] public void Preview_HasDesktopAndMobile(){ var t=File.ReadAllText(PreviewPath); Assert.Contains("rv2-preview-desktop",t); Assert.Contains("rv2-preview-mobile",t); Assert.Contains("rv2-scene-nav",t); }
     [Fact] public void Preview_StatusColors(){ var t=File.ReadAllText(PreviewPath); Assert.Contains("VideoSceneStatuses.VideoReady",t); }
@@ -28,7 +46,7 @@ public class RVideoV2ShellTests
     private static string PreviewText=>File.ReadAllText(PreviewPath);
     private static string MediaPreviewPath=>Path.Combine(WebRoot,"Components","Dialogs","RVideoV2MediaPreviewDialog.razor");
 
-    [Fact] public void Info_HasCharacterReferenceBlock(){ var t=InfoText; Assert.Contains("Nhân vật &amp; tham chiếu",t); Assert.Contains("UploadedCharacterUrl",t); Assert.Contains("SourceImageUrl",t); }
+    [Fact] public void Info_HasCharacterReferenceBlock(){ var t=InfoText; Assert.Contains("Hình ảnh tham chiếu",t); Assert.Contains("UploadedCharacterUrl",t); Assert.Contains("SourceImageUrl",t); }
     [Fact] public void Info_Advanced_HasProcessingVoiceMusicModes(){ var t=InfoText; Assert.Contains("RVideoExecutionModes.Auto",t); Assert.Contains("RVideoVoiceModes.Library",t); Assert.Contains("ListMusicAsync",t); Assert.Contains("ListVoicesAsync",t); Assert.Contains("MusicVolume",t); Assert.Contains("DefaultTtsRate",t); }
     [Fact] public void Info_Advanced_DefaultCollapsed(){ var t=InfoText; Assert.DoesNotContain("_adv=true",t); }
     [Fact] public void Preview_HasSceneContentEditor(){ var t=PreviewText; Assert.Contains("Nội dung",t); Assert.Contains("HandleContentChangedAsync",t); Assert.Contains("ScenePromptMetadata.FromScene",t); }

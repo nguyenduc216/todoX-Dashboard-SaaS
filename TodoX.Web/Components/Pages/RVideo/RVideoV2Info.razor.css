@@ -1,14 +1,24 @@
 .rv2-info-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
 .rv2-info-side{display:flex;flex-direction:column}
-.rv2-char-box{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .rv2-adv-label{margin-bottom:2px}
 .rv2-section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .rv2-info-cta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.rv2-ref-filters{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.rv2-ref-filters{display:none}
 .rv2-ref-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
 .rv2-ref-card{border:1px solid var(--mud-palette-lines-default,#333);border-radius:8px;overflow:hidden;display:flex;flex-direction:column}
 .rv2-ref-card img{width:100%;aspect-ratio:1;object-fit:cover}
 .rv2-ref-ph{aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#222;font-size:.7rem;opacity:.6}
-.rv2-ref-card span{font-size:.7rem;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rv2-ref-foot{display:flex;align-items:center;gap:4px;padding:2px 4px 2px 6px}
+.rv2-ref-kind{font-size:.6rem;text-transform:uppercase;letter-spacing:.03em;padding:1px 5px;border-radius:999px;background:var(--mud-palette-surface,#2a2a2a);opacity:.85;flex:0 0 auto}
+.rv2-ref-name{font-size:.7rem;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rv2-ref-empty{opacity:.6;font-style:italic}
+.rv2-ref-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:36px;min-height:36px;padding:0;border:1px solid var(--mud-palette-lines-default,#3a3a3a);border-radius:8px;background:transparent;color:inherit;cursor:pointer;line-height:1}
+.rv2-ref-btn:hover{border-color:var(--mud-palette-primary,#ffb700);color:var(--mud-palette-primary,#ffb700)}
+.rv2-ref-btn:focus-visible{outline:2px solid var(--mud-palette-primary,#ffb700);outline-offset:2px}
+.rv2-ref-btn--active{border-color:var(--mud-palette-primary,#ffb700);background:rgba(255,183,0,.14);color:var(--mud-palette-primary,#ffb700)}
+.rv2-ref-btn--disabled{cursor:not-allowed;opacity:.5;pointer-events:none}
+/* Native file input stays in the DOM (to receive the change event) but is fully hidden:
+   no "Chọn tệp" / "Không có tệp nào được chọn" text is ever rendered. */
+.rv2-ref-file{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;border:0!important;white-space:nowrap!important;opacity:0!important;pointer-events:none!important}
 .rv2-advanced{margin-top:16px}
-@media(max-width:900px){.rv2-info-grid{grid-template-columns:1fr}}
+@media(max-width:900px){.rv2-info-grid{grid-template-columns:1fr}.rv2-ref-btn{min-width:40px;min-height:40px}}

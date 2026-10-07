@@ -1,10 +1,14 @@
 @using TodoX.Web.Services.VideoRender
 @using TodoX.Web.Services.PromptAssistant
+@using TodoX.Web.Services.AiCharacters
 @using TodoX.Web.Components.Dialogs
 @inject TodoX.Web.Services.IAiStudioCatalogService Catalog
 @inject IRVideoJobService RVideoJobs
 @inject IRVideoPromptGenerationAction PromptAction
 @inject IServicePromptAssistantService PromptAssistant
+@inject IAiCharacterService Characters
+@inject TodoX.Web.Services.Media.IMediaFileService MediaFiles
+@inject TenantContext Tenant
 @inject AuthStateService AuthState
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
@@ -17,12 +21,18 @@
       <MudTextField T="string" @bind-Value="_titleWorking" Label="Tiêu đề" Variant="Variant.Outlined" Immediate="true" OnBlur="HandleTitleBlurAsync" />
       <div class="rv2-section-head mt-2">
         <MudText Typo="Typo.subtitle2">Nội dung video mong muốn</MudText>
-        <MudIconButton Icon="@Icons.Material.Filled.Mic" Size="Size.Small" Disabled="@(!_speechSupported)" OnClick="ToggleSpeechAsync" />
-        <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" OnClick="OpenQuickPromptAsync" Disabled="@_generating" />
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+          <MudTooltip Text="Nhập nội dung bằng giọng nói">
+            <MudIconButton Icon="@Icons.Material.Filled.Mic" Size="Size.Small" Disabled="@(!_speechSupported)" OnClick="ToggleSpeechAsync" />
+          </MudTooltip>
+          <MudTooltip Text="Tạo Prompt AI nhanh">
+            <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" OnClick="OpenQuickPromptAsync" Disabled="@_generating" />
+          </MudTooltip>
+        </MudStack>
       </div>
-      <MudTextField T="string" @bind-Value="_workingInput" Immediate="true" Variant="Variant.Outlined" Lines="8" Placeholder="Hãy mô tả video..." />
+      <MudTextField T="string" Value="_workingInput" ValueChanged="HandleWorkingInputChanged" Immediate="true" Variant="Variant.Outlined" Lines="8" Placeholder="Hãy mô tả video..." />
       <div class="rv2-info-cta">
-        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Disabled="@(_generating || string.IsNullOrWhiteSpace(_workingInput))" OnClick="HandleGenerateAsync">Tạo Prompt AI</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Disabled="@(!CanGenerate)" OnClick="HandleGenerateAsync">Tạo Prompt AI</MudButton>
         <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="HandleReloadAsync" Disabled="@_generating">Làm mới</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="HandleHistoryAsync" Disabled="@_generating">Lịch sử</MudButton>
       </div>
@@ -31,37 +41,58 @@
       @if (JobView is null) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Chưa chọn job.</MudAlert> }
     </section>
     <section class="rv2-info-side">
-      <MudText Typo="Typo.subtitle2" Class="mb-2">Nhân vật &amp; tham chiếu (@FilteredRefs.Count)</MudText>
-      @if (JobView?.Settings is { } st)
+      <div class="rv2-section-head mb-2">
+        <MudText Typo="Typo.subtitle2">Hình ảnh tham chiếu (@InputReferences.Count)</MudText>
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+          @* Compact reference-source controls: exactly two icon-only buttons (Upload + Character).
+             Upload uses a hidden native <input type=file> triggered via JS; the input is fully
+             clipped so no native file-input chrome ever renders. Character opens the picker dialog. *@
+          <MudTooltip Text="Tải ảnh tham chiếu">
+            <span class="rv2-ref-btn @(ActiveReferenceSource=="upload" ? "rv2-ref-btn--active" : null) @(_uploading || JobView is null ? "rv2-ref-btn--disabled" : null)"
+                  role="button" tabindex="@(_uploading || JobView is null ? -1 : 0)"
+                  aria-label="Tải ảnh tham chiếu" aria-pressed="@(ActiveReferenceSource=="upload")"
+                  title="Tải ảnh tham chiếu"
+                  @onclick="TriggerUploadPickerAsync" @onkeydown="HandleUploadKeyDownAsync">
+              <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+              <InputFile Class="rv2-ref-file" OnChange="UploadReferenceAsync" accept="image/png,image/jpeg,image/webp"
+                         disabled="@(_uploading || JobView is null)" aria-hidden="true" tabindex="-1" />
+            </span>
+          </MudTooltip>
+          <MudTooltip Text="Chọn từ Character">
+            <span class="rv2-ref-btn @(ActiveReferenceSource=="character" ? "rv2-ref-btn--active" : null) @(_uploading || JobView is null ? "rv2-ref-btn--disabled" : null)"
+                  role="button" tabindex="@(_uploading || JobView is null ? -1 : 0)"
+                  aria-label="Chọn từ Character" aria-pressed="@(ActiveReferenceSource=="character")"
+                  title="Chọn từ Character"
+                  @onclick="OpenCharacterPickerAsync">
+              <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Size="Size.Small" />
+            </span>
+          </MudTooltip>
+        </MudStack>
+      </div>
+      @if (_uploading) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mb-2" /> }
+      @if (InputReferences.Count == 0)
       {
-        <div class="rv2-char-box">
-          @if (st.CharacterMode != RVideoCharacterModes.None && !st.SkipCharacter)
+        <MudText Typo="Typo.caption" Class="rv2-ref-empty">Chưa có ảnh tham chiếu.</MudText>
+      }
+      else
+      {
+        <div class="rv2-ref-grid">
+          @foreach (var r in InputReferences)
           {
-            <MudChip T="string" Size="Size.Small" Color="Color.Primary">Nhân vật: @CharacterLabel(st.CharacterMode)</MudChip>
-          }
-          else
-          {
-            <MudChip T="string" Size="Size.Small" Color="Color.Default">Không dùng nhân vật</MudChip>
-          }
-          @if (st.UseReferenceImageForAllScenes)
-          {
-            <MudChip T="string" Size="Size.Small" Color="Color.Secondary">Áp tham chiếu cho mọi scene</MudChip>
+            <div class="rv2-ref-card">
+              @if (!string.IsNullOrWhiteSpace(r.Url)) { <img src="@r.Url" alt="@r.Label" /> }
+              else { <div class="rv2-ref-ph">@r.Label</div> }
+              <div class="rv2-ref-foot">
+                <span class="rv2-ref-kind">@r.KindLabel</span>
+                <span class="rv2-ref-name" title="@r.Label">@r.Label</span>
+                <MudTooltip Text="Gỡ tham chiếu">
+                  <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Disabled="@_uploading" OnClick="@(() => RemoveReferenceAsync(r))" />
+                </MudTooltip>
+              </div>
+            </div>
           }
         </div>
       }
-      <div class="rv2-ref-filters">
-        <MudChip T="string" Size="Size.Small" Color="@(_f==0?Color.Primary:Color.Default)" OnClick="@(()=>_f=0)">Tất cả</MudChip>
-        <MudChip T="string" Size="Size.Small" Color="@(_f==1?Color.Primary:Color.Default)" OnClick="@(()=>_f=1)">Hình ảnh</MudChip>
-      </div>
-      <div class="rv2-ref-grid">
-        @foreach(var r in FilteredRefs){
-          <div class="rv2-ref-card">
-            @if(!string.IsNullOrWhiteSpace(r.Url)){<img src="@r.Url" alt="@r.Label" />}
-            else{<div class="rv2-ref-ph">@r.Label</div>}
-            <span>@r.Label</span>
-          </div>
-        }
-      </div>
     </section>
   </div>
   <MudExpansionPanels Elevation="0" Dense="true" Class="rv2-advanced">
@@ -114,9 +145,12 @@
   [Parameter] public RVideoJobView? JobView{get;set;}
   [Parameter] public Guid? JobId{get;set;}
   [Parameter] public EventCallback OnReloadRequested{get;set;}
-  private int _f; private bool _adv=false;
+  private bool _adv=false;
   private string _titleWorking=string.Empty;
   private string _workingInput=string.Empty;
+  private string _baselineInput=string.Empty;
+  private bool _hasBaseline;
+  private bool _uploading;
   private bool _generating; private string? _status;
   private bool _speechSupported; private string? _prevTitle;
   private PromptSpeechHandler? _speech;
@@ -148,30 +182,53 @@
     if(_prevTitle != t){ _prevTitle=t; _titleWorking=t; }
     if(JobView!=null && (_lastWorkingProjectId != JobView.Project.Id || _lastWorkingActiveId != JobView.Project.ActivePromptGenerationId)){
       _lastWorkingProjectId = JobView.Project.Id; _lastWorkingActiveId = JobView.Project.ActivePromptGenerationId;
-      await RefreshWorkingInputFromActiveAsync();
+      await HydratePromptFromActiveAsync();
     }
     SyncAdvFromView();
   }
-  private static bool LooksLikeJson(string? s){ if(string.IsNullOrWhiteSpace(s)) return false; var tt=s.Trim(); return tt.StartsWith('{') && tt.EndsWith('}'); }
-  private async Task RefreshWorkingInputFromActiveAsync(){
+  private async Task HydratePromptFromActiveAsync(){
     if(JobView==null) return;
     var pid = JobView.Project.Id; var aid = JobView.Project.ActivePromptGenerationId;
     if(aid.HasValue && aid.Value != Guid.Empty){
-      try{ var ag = await PromptAssistant.GetProjectGenerationAsync(pid, aid.Value);
-        if(ag != null){ _workingInput = ag.UserInput ?? string.Empty; return; }
-      }catch{}
-      try{ var gens = await PromptAssistant.GetProjectGenerationsAsync(pid);
-        var match = gens.FirstOrDefault(g=>g.Id==aid.Value);
-        if(match != null){ _workingInput = match.UserInput ?? string.Empty; return; }
-      }catch{}
+      ServicePromptGenerationDto? ag = null;
+      try{ ag = await PromptAssistant.GetProjectGenerationAsync(pid, aid.Value); }catch{}
+      if(ag is null){ try{ var gens = await PromptAssistant.GetProjectGenerationsAsync(pid); ag = gens.FirstOrDefault(g=>g.Id==aid.Value); }catch{} }
+      if(ag is null){
+        // Active generation is missing/unloadable: surface honest empty-state, never fall back to generated content.
+        _workingInput = string.Empty; _baselineInput = string.Empty; _hasBaseline = true; _status = "Không tải được nội dung prompt đang active.";
+        return;
+      }
+      // Canonical source = persisted raw user_input of the active generation.
+      // The producer stores the ASSEMBLED agent input (BuildAgentInput wrapper); recover the
+      // user's original text with the verified inverse (PromptAssistantEndpoints.ExtractUserInput),
+      // exactly as the legacy RVideo route does. Never surface the wrapper or generated JSON here.
+      _workingInput = ResolveRawUserInput(ag.UserInput);
+      _baselineInput = _workingInput; _hasBaseline = true;
       return;
     }
-    if(!string.IsNullOrWhiteSpace(_workingInput)) return;
-    var op = JobView.Project.OriginalPrompt;
-    if(!LooksLikeJson(op)) _workingInput = op ?? string.Empty;
-    else _workingInput = string.Empty;
+    // No active generation yet: keep any in-progress edit; otherwise start empty without reconstructing from generated JSON.
+    if(!_hasBaseline && string.IsNullOrWhiteSpace(_workingInput)){ _workingInput = string.Empty; _baselineInput = string.Empty; _hasBaseline = true; }
   }
-  public async ValueTask DisposeAsync(){ if(_speech!=null) await _speech.DisposeAsync(); }
+  // Recovers the raw user-entered source from a persisted generation user_input.
+  // Older generations stored the assembled agent input (BuildAgentInput wrapper); we unwrap it with the
+  // verified inverse used by the legacy route (PromptAssistantEndpoints.ExtractUserInput). When the value
+  // is a recognized wrapper but the raw source cannot be recovered, we surface an honest empty state
+  // instead of ever putting instructions/wrapper text into the editor. Values that are not a recognized
+  // wrapper (already-raw rows) are returned verbatim, so no user content is stripped.
+  private static string ResolveRawUserInput(string? storedUserInput, string fallback = ""){
+    var stored = storedUserInput ?? string.Empty;
+    if(string.IsNullOrWhiteSpace(stored)) return fallback;
+    var extracted = PromptAssistantEndpoints.ExtractUserInput(stored);
+    if(extracted is not null) return extracted;
+    if(stored.StartsWith("CONTENT MODE:", StringComparison.Ordinal)) return fallback;
+    return stored;
+  }
+  private void HandleWorkingInputChanged(string v){
+    _workingInput = v ?? string.Empty; _status = null;
+  }
+  private bool CanGenerate => !_generating && RVideoPromptBaseline.IsDirty(_workingInput, _baselineInput, _hasBaseline);
+  private bool CanGenerateFirstTime => !_generating && !RVideoPromptBaseline.IsEmpty(_workingInput);
+  public async ValueTask DisposeAsync(){ if(_speech!=null) await _speech.DisposeAsync(); if(_module is not null){ try{ await _module.DisposeAsync(); }catch{} } }
 
 
   private async Task HandleTitleBlurAsync(){
@@ -182,7 +239,9 @@
     if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
   }
   private async Task HandleGenerateAsync(){
-    if(_generating) return; if(string.IsNullOrWhiteSpace(_workingInput)) return;
+    if(_generating) return;
+    if(!CanGenerate && !CanGenerateFirstTime) return;
+    if(RVideoPromptBaseline.IsEmpty(_workingInput)) return;
     if(JobId==null||JobView==null||AuthState.CurrentUser==null) return;
     var sid=JobView.CoreJob.ServiceId; if(sid==null||sid==Guid.Empty){ Snackbar.Add("Thiếu ServiceId.",Severity.Warning); return; }
     var ok=await JS.InvokeAsync<bool>("confirm","Tạo prompt AI sẽ ghi đè nội dung hiện tại. Tiếp tục?");
@@ -193,18 +252,40 @@
       if(!outcome.Result.ValidationPassed || string.IsNullOrWhiteSpace(outcome.Result.GeneratedJson)){ Snackbar.Add("Tạo prompt thất bại.",Severity.Error); return; }
       var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, promptOverride:outcome.Result.GeneratedJson!);
       await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+      // Confirm the new generation is active, then advance baseline to the persisted user_input.
       if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+      var reloaded = await WaitForActiveGenerationAsync(outcome.Result.GenerationId);
+      if(reloaded is not null){
+        _workingInput = ResolveRawUserInput(reloaded.UserInput, fallback:_workingInput);
+        _baselineInput = _workingInput; _hasBaseline = true;
+      } else {
+        // Reload not confirmed: keep the user's edit and do NOT advance baseline.
+        Snackbar.Add("Đã tạo prompt nhưng chưa xác nhận được bản active. Tải lại trang để kiểm tra.",Severity.Warning);
+      }
       Snackbar.Add("Đã tạo prompt.",Severity.Success); _status="Đã tạo prompt.";
     }catch(Exception ex){ Logger.LogWarning(ex,"generate failed"); Snackbar.Add("Lỗi tạo prompt.",Severity.Error); }
     finally{ _generating=false; StateHasChanged(); }
   }
-  private async Task HandleReloadAsync(){ if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); _status="Đã làm mới."; }
+  private async Task<ServicePromptGenerationDto?> WaitForActiveGenerationAsync(Guid generationId){
+    try{
+      var ag = await PromptAssistant.GetProjectGenerationAsync(JobView!.Project.Id, generationId);
+      if(ag is not null) return ag;
+    }catch{}
+    try{
+      var gens = await PromptAssistant.GetProjectGenerationsAsync(JobView!.Project.Id);
+      return gens.FirstOrDefault(g=>g.Id==generationId);
+    }catch{ return null; }
+  }
+  private async Task HandleReloadAsync(){ if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); await HydratePromptFromActiveAsync(); _status="Đã làm mới."; }
   private async Task HandleHistoryAsync(){
     if(JobView==null) return;
     var gens=await PromptAssistant.GetProjectGenerationsAsync(JobView.Project.Id);
     if(gens.Count==0){ Snackbar.Add("Chưa có lịch sử.",Severity.Info); return; }
     var last=gens.OrderByDescending(g=>g.CreatedAt).First();
-    await PromptAssistant.SetActiveProjectGenerationAsync(JobView.Project.Id, last.Id);
+    var applied=await PromptAssistant.SetActiveProjectGenerationAsync(JobView.Project.Id, last.Id);
+    if(!applied){ Snackbar.Add("Không áp dụng được bản lịch sử.",Severity.Error); return; }
+    await PromptAssistant.GetProjectGenerationAsync(JobView.Project.Id, last.Id);
+    _workingInput = ResolveRawUserInput(last.UserInput); _baselineInput = _workingInput; _hasBaseline = true;
     if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
     Snackbar.Add("Đã áp dụng bản mới nhất.",Severity.Success);
   }
@@ -255,12 +336,182 @@
   private async Task HandleAdvancedTtsRateChangedAsync(decimal v){ if(v==_advTtsRate) return; _advTtsRate=v; await SaveSettingsAsync(); }
   private async Task HandleAdvancedMusicCodeChangedAsync(string? v){ if(string.Equals(v,_advMusicCode)) return; _advMusicCode=v; await SaveSettingsAsync(); }
   private async Task HandleAdvancedMusicVolumeChangedAsync(decimal v){ if(v==_advMusicVolume) return; _advMusicVolume=v; await SaveSettingsAsync(); }
-  private List<RefItem> FilteredRefs{ get{
+  // INPUT references only: a single canonical reference slot (Upload XOR Character).
+  // Scene static images are generated OUTPUTS and intentionally NOT projected here.
+  // Exactly one card is produced so the list can never show two entries for the same image:
+  // an active character slot (CharacterMode != None && !SkipCharacter) wins; otherwise the
+  // project upload URL is used; otherwise the list is empty.
+  private List<RefItem> InputReferences{ get{
     var list=new List<RefItem>(); var pr=JobView?.Project; if(pr==null) return list;
-    if(!string.IsNullOrWhiteSpace(pr.UploadedCharacterUrl)) list.Add(new(pr.UploadedCharacterUrl,"Nhân vật","character"));
-    if(!string.IsNullOrWhiteSpace(pr.SourceImageUrl)) list.Add(new(pr.SourceImageUrl,"Hình ảnh","image"));
-    foreach(var s in pr.Scenes) if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)) list.Add(new(s.StaticImageUrl,$"Scene {s.SceneIndex}","image"));
-    return _f==1?list.Where(x=>x.Kind=="image").ToList():list;
+    var s=JobView?.Settings;
+    if(s!=null && !s.SkipCharacter && !string.Equals(s.CharacterMode,RVideoCharacterModes.None,StringComparison.OrdinalIgnoreCase)){
+      var snap=ParseCharacterSnapshot(s.CharacterSnapshotJson);
+      var isUploadMode=string.Equals(s.CharacterMode,RVideoCharacterModes.Upload,StringComparison.OrdinalIgnoreCase);
+      var url = isUploadMode
+        ? ReadSnapshot(snap,"fileUrl","url","storageKey","objectKey")
+        : ReadSnapshot(snap,"masterImageUrl","fileUrl","url","masterImageObjectKey","storageKey","objectKey");
+      // Fall back to the project upload URL only in Upload mode (same physical source as the character slot).
+      if(string.IsNullOrWhiteSpace(url) && isUploadMode) url = pr.UploadedCharacterUrl ?? pr.SourceImageUrl;
+      var name = ReadSnapshot(snap,"name","characterName") ?? (isUploadMode ? "Ảnh tải lên" : CharacterLabel(s.CharacterMode));
+      var kind = isUploadMode ? "Upload" : "Character";
+      var source = isUploadMode ? "upload" : "character";
+      if(!string.IsNullOrWhiteSpace(url)) list.Add(new(url!,name!,kind,source));
+      return list;
+    }
+    if(!string.IsNullOrWhiteSpace(pr.UploadedCharacterUrl))
+      list.Add(new(pr.UploadedCharacterUrl!,"Ảnh tải lên","Upload","upload"));
+    else if(!string.IsNullOrWhiteSpace(pr.SourceImageUrl))
+      list.Add(new(pr.SourceImageUrl!,"Ảnh nguồn","Upload","upload"));
+    return list;
   }}
-  private sealed record RefItem(string Url,string Label,string Kind);
+  // Canonical contract exposes a single character slot (CharacterMode + SelectedCharacterId + snapshot).
+  private const int MaxCharacterReferences = 1;
+  // Exactly one reference source may be active at a time: Character XOR Upload.
+  // Returns "upload", "character", or null when no reference is set.
+  private string? ActiveReferenceSource{
+    get{
+      var s=JobView?.Settings;
+      if(s!=null && !s.SkipCharacter && !string.Equals(s.CharacterMode,RVideoCharacterModes.None,StringComparison.OrdinalIgnoreCase)){
+        return string.Equals(s.CharacterMode,RVideoCharacterModes.Upload,StringComparison.OrdinalIgnoreCase) ? "upload" : "character";
+      }
+      var pr=JobView?.Project;
+      if(pr!=null && (!string.IsNullOrWhiteSpace(pr.UploadedCharacterUrl) || !string.IsNullOrWhiteSpace(pr.SourceImageUrl))) return "upload";
+      return null;
+    }
+  }
+  private bool CanUploadReference => !_uploading && JobView is not null;
+  // Keyboard parity for the upload control: a non-native button element does not forward
+  // Enter/Space to the hidden file input, so trigger the picker explicitly.
+  private async Task HandleUploadKeyDownAsync(KeyboardEventArgs e){
+    if(!CanUploadReference) return;
+    if(e.Key=="Enter" || e.Key==" " || e.Key=="Spacebar"){ await TriggerUploadPickerAsync(); }
+  }
+  private IJSObjectReference? _module;
+  private async Task<IJSObjectReference?> GetModuleAsync(){
+    if(_module is not null) return _module;
+    try{ _module = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/RVideo/RVideoV2Info.razor.js"); }
+    catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_MODULE_IMPORT_FAILED"); }
+    return _module;
+  }
+  private async Task TriggerUploadPickerAsync(){
+    if(!CanUploadReference) return;
+    try{ var m=await GetModuleAsync(); if(m is not null) await m.InvokeVoidAsync("triggerFileInput", ".rv2-ref-file"); }
+    catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_UPLOAD_TRIGGER_FAILED"); }
+  }
+  private IReadOnlyCollection<long> SelectedCharacterIds{
+    get{
+      var s=JobView?.Settings;
+      var ids=new List<long>();
+      if(s?.SelectedCharacterId is long id) ids.Add(id);
+      return ids;
+    }
+  }
+  private static System.Text.Json.Nodes.JsonObject? ParseCharacterSnapshot(string? json){
+    if(string.IsNullOrWhiteSpace(json)) return null;
+    try{ return System.Text.Json.Nodes.JsonNode.Parse(json) as System.Text.Json.Nodes.JsonObject; }catch{ return null; }
+  }
+  private static string? ReadSnapshot(System.Text.Json.Nodes.JsonObject? src, params string[] names){
+    if(src is null) return null;
+    foreach(var n in names){ var v=src[n]?.GetValue<string>(); if(!string.IsNullOrWhiteSpace(v)) return v; }
+    return null;
+  }
+private async Task UploadReferenceAsync(InputFileChangeEventArgs args){
+    if(JobView==null||JobId==null||AuthState.CurrentUser==null) return;
+    _uploading=true; _status=null; StateHasChanged();
+    try{
+      var file=args.File;
+      await using var stream=file.OpenReadStream(12*1024*1024);
+      using var memory=new MemoryStream(); await stream.CopyToAsync(memory);
+      await Tenant.EnsureLoadedAsync();
+      var media=await MediaFiles.SaveAsync(memory.ToArray(), file.Name, file.ContentType, "rvideo_character",
+        AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, Tenant.TenantId);
+      var url=media.PublicUrl ?? media.FileUrl ?? string.Empty;
+      if(string.IsNullOrWhiteSpace(url)){ Snackbar.Add("Tải ảnh thất bại: không nhận được URL.",Severity.Error); return; }
+      // Canonical upload mutation: persist the reference as the project SourceImageUrl + Upload character snapshot.
+      var snapshot=new UploadedCharacterSnapshot("UPLOAD", file.Name, media.ObjectKey ?? string.Empty, url);
+      var settings=BuildReferenceSettings(RVideoCharacterModes.Upload, null, snapshot);
+      var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, sourceImageUrlOverride:url, settingsOverride:settings);
+      await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+      Snackbar.Add("Đã tải ảnh tham chiếu.",Severity.Success);
+    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_UPLOAD_REFERENCE_FAILED"); Snackbar.Add(ex.Message,Severity.Error); }
+    finally{ _uploading=false; StateHasChanged(); }
+  }
+  private async Task OpenCharacterPickerAsync(){
+    if(JobView==null||JobId==null||AuthState.CurrentUser==null) return;
+    var p=new DialogParameters{ ["SelectedIds"]=SelectedCharacterIds, ["MaxSelectable"]=(int?)MaxCharacterReferences };
+    var dlg=await Dialogs.ShowAsync<RVideoCharacterPickerDialog>("",p,new DialogOptions{ MaxWidth=MaxWidth.Medium, FullWidth=true });
+    var result=await dlg.Result;
+    if(result is null || result.Canceled) return; // Cancel = no mutation.
+    if(result.Data is not List<long> picked || picked.Count==0) return;
+    if(picked.Count > MaxCharacterReferences){
+      Snackbar.Add($"Chỉ hỗ trợ tối đa {MaxCharacterReferences} Character cho mỗi job.",Severity.Warning);
+      return;
+    }
+    var characterId=picked[0];
+    ActiveCharacterDto? character=null;
+    try{ var active=await Characters.GetActiveCharactersAsync(AuthState.CurrentUser); character=active.FirstOrDefault(c=>c.Id==characterId); }
+    catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_CHARACTER_LOOKUP_FAILED"); }
+    if(character is null){ Snackbar.Add("Không tìm thấy Character đã chọn.",Severity.Warning); return; }
+    var snap=new { source="LIBRARY", id=character.Id, name=character.CharacterName, masterImageUrl=character.MasterImageUrl, storageKey=character.MasterImageObjectKey };
+    var settings=BuildReferenceSettings(RVideoCharacterModes.Library, character.Id, snap);
+    try{
+      var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, settingsOverride:settings);
+      await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+      Snackbar.Add("Đã chọn Character tham chiếu.",Severity.Success);
+    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_CHARACTER_APPLY_FAILED"); Snackbar.Add(ex.Message,Severity.Error); }
+  }
+// Builds the canonical settings request for a reference change, carrying all untouched settings forward.
+  private RVideoJobSettingsRequest BuildReferenceSettings(string characterMode, long? selectedCharacterId, object? characterSnapshot){
+    var s=JobView?.Settings;
+    return new RVideoJobSettingsRequest{
+      ExecutionMode=s?.ExecutionMode??RVideoExecutionModes.Manual,
+      SkipCharacter=false,
+      UseReferenceImageForAllScenes=s?.UseReferenceImageForAllScenes??false,
+      CharacterMode=characterMode,
+      SelectedCharacterId=selectedCharacterId,
+      CharacterSnapshot=characterSnapshot,
+      VoiceMode=s?.VoiceMode??RVideoVoiceModes.None,
+      VoiceCatalogCode=s?.VoiceCatalogCode,
+      VoiceSnapshot=s?.VoiceSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s.VoiceSnapshotJson!):null,
+      DefaultTtsRate=s?.DefaultTtsRate??1.0m,
+      MusicCatalogCode=s?.MusicCatalogCode,
+      MusicSnapshot=s?.MusicSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s.MusicSnapshotJson!):null,
+      MusicVolume=s?.MusicVolume??0.8m
+    };
+  }
+  private RVideoJobSettingsRequest BuildClearedReferenceSettings(){
+    var s=JobView?.Settings;
+    return new RVideoJobSettingsRequest{
+      ExecutionMode=s?.ExecutionMode??RVideoExecutionModes.Manual,
+      SkipCharacter=true,
+      UseReferenceImageForAllScenes=s?.UseReferenceImageForAllScenes??false,
+      CharacterMode=RVideoCharacterModes.None,
+      SelectedCharacterId=null,
+      CharacterSnapshot=null,
+      VoiceMode=s?.VoiceMode??RVideoVoiceModes.None,
+      VoiceCatalogCode=s?.VoiceCatalogCode,
+      VoiceSnapshot=s?.VoiceSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s.VoiceSnapshotJson!):null,
+      DefaultTtsRate=s?.DefaultTtsRate??1.0m,
+      MusicCatalogCode=s?.MusicCatalogCode,
+      MusicSnapshot=s?.MusicSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s.MusicSnapshotJson!):null,
+      MusicVolume=s?.MusicVolume??0.8m
+    };
+  }
+  private async Task RemoveReferenceAsync(RefItem item){
+    if(JobView==null||JobId==null||AuthState.CurrentUser==null) return;
+    _uploading=true; StateHasChanged();
+    try{
+      var settings=BuildClearedReferenceSettings();
+      var req=string.Equals(item.Source,"upload",StringComparison.OrdinalIgnoreCase)
+        ? RVideoJobUpdateHelper.BuildSafeUpdate(JobView, sourceImageUrlOverride:string.Empty, settingsOverride:settings)
+        : RVideoJobUpdateHelper.BuildSafeUpdate(JobView, settingsOverride:settings);
+      await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+      Snackbar.Add("Đã gỡ tham chiếu.",Severity.Success);
+    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_REMOVE_REFERENCE_FAILED"); Snackbar.Add(ex.Message,Severity.Error); }
+    finally{ _uploading=false; StateHasChanged(); }
+  }
+  private sealed record RefItem(string Url,string Label,string KindLabel,string Source);
 }

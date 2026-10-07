@@ -1,0 +1,109 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.AiCharacters
+@inject IAiCharacterService Characters
+@inject AuthStateService AuthState
+@inject ILogger<RVideoCharacterPickerDialog> Logger
+
+<MudDialog Class="rv2-char-dialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Chọn Character tham chiếu</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="rv2-char-dialog-body">
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+            }
+            else if (_loadError is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">@_loadError</MudAlert>
+            }
+            else if (_characters.Count == 0)
+            {
+                <MudText Typo="Typo.body2">Chưa có Character khả dụng.</MudText>
+            }
+            else
+            {
+                @foreach (var c in _characters)
+                {
+                    var charId = c.Id;
+                    var selected = _selectedIds.Contains(charId);
+                    <div class="rv2-char-row @(selected ? "rv2-char-row-selected" : null)" @onclick="@(() => Toggle(charId))">
+                        <MudCheckBox T="bool" Value="selected" ValueChanged="@(v => Toggle(charId))" Color="Color.Warning" Dense="true" />
+                        @if (!string.IsNullOrWhiteSpace(c.MasterImageUrl))
+                        {
+                            <img class="rv2-char-thumb" src="@c.MasterImageUrl" alt="@c.CharacterName" />
+                        }
+                        else
+                        {
+                            <div class="rv2-char-thumb rv2-char-thumb-ph">@((c.CharacterName ?? "?").Substring(0, 1))</div>
+                        }
+                        <div class="rv2-char-meta">
+                            <span class="rv2-char-name">@c.CharacterName</span>
+                            @if (!string.IsNullOrWhiteSpace(c.Description))
+                            {
+                                <span class="rv2-char-desc">@c.Description</span>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+        @if (_maxSelectable is int max && _selectedIds.Count > max)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">Chỉ hỗ trợ tối đa @(max) Character cho mỗi job. Hãy bỏ chọn bớt.</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">HỦY</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(!CanConfirm)" OnClick="Confirm">THÊM ĐÃ CHỌN (@_selectedIds.Count)</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Character IDs currently referenced by the job (pre-selected in the dialog).</summary>
+    [Parameter] public IReadOnlyCollection<long> SelectedIds { get; set; } = Array.Empty<long>();
+
+    /// <summary>
+    /// Backend-supported maximum number of character references for a single job.
+    /// Null = the canonical contract supports an unbounded/unknown count (still multi-select).
+    /// </summary>
+    [Parameter] public int? MaxSelectable { get; set; }
+
+    private readonly List<ActiveCharacterDto> _characters = new();
+    private readonly HashSet<long> _selectedIds = new();
+    private bool _loading = true;
+    private string? _loadError;
+    private int? _maxSelectable;
+
+    private bool CanConfirm => _selectedIds.Count > 0 && (_maxSelectable is not int m || _selectedIds.Count <= m);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _maxSelectable = MaxSelectable;
+        foreach (var id in SelectedIds) _selectedIds.Add(id);
+        if (AuthState.CurrentUser is null) { _loading = false; _loadError = "Cần đăng nhập."; return; }
+        try
+        {
+            var items = await Characters.GetActiveCharactersAsync(AuthState.CurrentUser);
+            _characters.AddRange(items);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVIDEO_V2_CHARACTER_PICKER_LOAD_FAILED");
+            _loadError = "Không tải được danh sách Character.";
+        }
+        finally { _loading = false; }
+    }
+
+    private void Toggle(long id)
+    {
+        if (!_selectedIds.Remove(id)) _selectedIds.Add(id);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(_selectedIds.ToList()));
+}
