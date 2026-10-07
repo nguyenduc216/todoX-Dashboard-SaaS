@@ -11,10 +11,11 @@ public sealed class RVideoPhase3AStructuralTests
     private static string Js=>Rp("wwwroot","js","todox-speech-input.js");
     private static string Action=>Rp("Services","VideoRender","RVideoPromptGenerationAction.cs");
     [Fact] public void Adv_DefaultsFalse(){Assert.Contains("_adv=false",V2Info);}
-    [Fact] public void WorkingInput_Guards(){Assert.Contains("_lastWorkingProjectId",V2Info);Assert.Contains("_lastWorkingActiveId",V2Info);Assert.Contains("RefreshWorkingInputFromActiveAsync",V2Info);Assert.Contains("LooksLikeJson",V2Info);Assert.Contains("GetProjectGenerationAsync",V2Info);Assert.Contains("GetProjectGenerationsAsync",V2Info);}
-    [Fact] public void WorkingInput_ActiveWins(){Assert.Contains("UserInput",V2Info);Assert.Contains("OriginalPrompt",V2Info);}
+    [Fact] public void WorkingInput_Guards(){Assert.Contains("_lastWorkingProjectId",V2Info);Assert.Contains("_lastWorkingActiveId",V2Info);Assert.Contains("HydratePromptFromActiveAsync",V2Info);Assert.DoesNotContain("LooksLikeJson",V2Info);Assert.Contains("GetProjectGenerationAsync",V2Info);Assert.Contains("GetProjectGenerationsAsync",V2Info);}
+    [Fact] public void WorkingInput_ActiveWins(){Assert.Contains("UserInput",V2Info);Assert.DoesNotContain("OriginalPrompt",V2Info);}
+    [Fact] public void Prompt_DirtyAware(){Assert.Contains("RVideoPromptBaseline",V2Info);Assert.Contains("RVideoPromptBaseline.IsDirty",V2Info);Assert.Contains("HandleWorkingInputChanged",V2Info);Assert.Contains("_baselineInput",V2Info);}
     [Fact] public void History_Chain(){Assert.Contains("SetActiveProjectGenerationAsync",V2Info);Assert.Contains("OnReloadRequested",V2Info);Assert.Contains("HandleHistoryAsync",V2Info);}
-    [Fact] public void ExactlyOnce_Guard(){Assert.Contains("_generating",V2Info);Assert.Contains("string.IsNullOrWhiteSpace(_workingInput)",V2Info);Assert.Contains("confirm",V2Info);Assert.Contains("PromptAction.GenerateAsync",V2Info);}
+    [Fact] public void ExactlyOnce_Guard(){Assert.Contains("_generating",V2Info);Assert.Contains("RVideoPromptBaseline.IsEmpty(_workingInput)",V2Info);Assert.Contains("confirm",V2Info);Assert.Contains("PromptAction.GenerateAsync",V2Info);}
     [Fact] public void SharedAction_V2UsesAction(){Assert.Contains("IRVideoPromptGenerationAction",V2Info);Assert.Contains("PromptAction.GenerateAsync",V2Info);}
     [Fact] public void SharedAction_V2NotDirectAssistantForGenerate(){var seg=V2Info.Substring(V2Info.IndexOf("HandleGenerateAsync",StringComparison.Ordinal));Assert.DoesNotContain("PromptAssistant.GeneratePromptAsync",seg);}
     [Fact] public void SharedAction_LegacyUsesAction(){Assert.Contains("IRVideoPromptGenerationAction",Legacy);Assert.Contains("RVideoPromptAction.GenerateAsync",Legacy);}
@@ -25,6 +26,7 @@ public sealed class RVideoPhase3AStructuralTests
     [Fact] public void Speech_JsModule(){Assert.Contains("todoXSpeechInput",Js);Assert.Contains("isSupported",Js);Assert.Contains("invokeMethodAsync",Js);}
     [Fact] public void QuickPrompt_Contracts(){Assert.Contains("CanonicalInput",Quick);Assert.Contains("CanonicalInput",V2Info);Assert.Contains("HandleGenerateAsync",V2Info);}
     [Fact] public void Advanced_PreservedViaHelper(){Assert.Contains("RVideoJobUpdateHelper.BuildSafeUpdate",V2Info);Assert.Contains("HandleAdvancedTotalSecondsChangedAsync",V2Info);}
-    [Fact] public void References_ReadOnly(){Assert.Contains("FilteredRefs",V2Info);Assert.Contains("UploadedCharacterUrl",V2Info);Assert.Contains("SourceImageUrl",V2Info);Assert.Contains("StaticImageUrl",V2Info);Assert.DoesNotContain("HandleUpload",V2Info);Assert.DoesNotContain("DeleteRef",V2Info);}
+    [Fact] public void References_InputSourcesOnly(){Assert.Contains("InputReferences",V2Info);Assert.Contains("UploadedCharacterUrl",V2Info);Assert.Contains("SourceImageUrl",V2Info);Assert.DoesNotContain("StaticImageUrl",V2Info);Assert.DoesNotContain("FilteredRefs",V2Info);}
+    [Fact] public void References_CanonicalWrites(){Assert.Contains("UploadReferenceAsync",V2Info);Assert.Contains("OpenCharacterPickerAsync",V2Info);Assert.Contains("RemoveReferenceAsync",V2Info);Assert.Contains("RVideoCharacterPickerDialog",V2Info);Assert.Contains("MediaFiles.SaveAsync",V2Info);}
     [Fact] public void Action_WrapsAssistant(){Assert.Contains("IServicePromptAssistantService",Action);Assert.Contains("GeneratePromptAsync",Action);Assert.Contains("RVideoPromptGenerationRequest",Action);}
 }

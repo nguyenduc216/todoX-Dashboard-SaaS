@@ -9,39 +9,18 @@
 <PageTitle>RVideo V2 — TodoX</PageTitle>
 
 <div class="rv2-shell">
+    @* RVID-UI-V2-PHASE3A.1: the redundant top job-heading block (title + edit/menu + id/service/status)
+       was removed so the V2 route no longer renders a duplicate job heading above the navigation.
+       The editable "Tiêu đề" field lives in the THÔNG TIN tab; the compact back affordance stays here. *@
     <div class="rv2-header">
-        <div class="rv2-header-top">
-            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="GoBackLegacy" aria-label="Quay lại" />
-            <div class="rv2-title-block">
-                <div class="rv2-title-row">
-                    <MudText Typo="Typo.h6" Class="rv2-title">@DisplayTitle</MudText>
-                    <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Class="rv2-title-edit" />
-                </div>
-                <div class="rv2-meta-row">
-                    <span class="rv2-meta-item">@JobIdShort</span>
-                    <span class="rv2-meta-sep">|</span>
-                    <span class="rv2-meta-item">@ServiceLabel</span>
-                    <span class="rv2-meta-sep">|</span>
-                    <span class="rv2-meta-item">@StageLabel</span>
-                </div>
-            </div>
-            <div class="rv2-header-actions">
-                <MudHidden Breakpoint="Breakpoint.SmAndDown">
-                    <span class="rv2-tech-meta">@AspectRatio | @Resolution | @TotalSeconds giây | @SceneCount scene</span>
-                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="true">Cài đặt nâng cao</MudButton>
-                    <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Disabled="true" />
-                </MudHidden>
-                <MudHidden Breakpoint="Breakpoint.MdAndUp">
-                    <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Disabled="true" />
-                </MudHidden>
-            </div>
+        <div class="rv2-nav-row">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="GoBackLegacy" aria-label="Quay lại" title="Quay lại" />
+            <MudTabs Class="rv2-tabs" Rounded="true" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_tabIndex">
+                <MudTabPanel Text="THÔNG TIN" />
+                <MudTabPanel Text="XEM TRƯỚC" />
+                <MudTabPanel Text="KẾT QUẢ" />
+            </MudTabs>
         </div>
-
-        <MudTabs Class="rv2-tabs" Rounded="true" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_tabIndex">
-            <MudTabPanel Text="THÔNG TIN" />
-            <MudTabPanel Text="XEM TRƯỚC" />
-            <MudTabPanel Text="KẾT QUẢ" />
-        </MudTabs>
         <MudHidden Breakpoint="Breakpoint.MdAndUp">
             <div class="rv2-mobile-techbar">
                 <span>@AspectRatio | @Resolution | @TotalSeconds giây | @SceneCount scene</span>
@@ -86,10 +65,6 @@
     private string? _loadWarning;
     private RVideoJobView? _jobView;
 
-    private string DisplayTitle => _jobView?.Project.Title ?? "Video chưa có tiêu đề";
-    private string JobIdShort => JobId?.ToString("N").Substring(0, 8) ?? "—";
-    private string ServiceLabel => _jobView?.CoreJob.ServiceCode ?? "rvideo";
-    private string StageLabel => _jobView?.Project.Status ?? "draft";
     private string AspectRatio => ExtractAspectRatio() ?? "—";
     private string Resolution => ExtractResolution() ?? "—";
     private string? ExtractAspectRatio(){ if(_jobView is null) return null; try{ return new TodoXVideoPromptParser().Parse(_jobView.Project.OriginalPrompt).Model.AspectRatio;}catch{return null;}}
