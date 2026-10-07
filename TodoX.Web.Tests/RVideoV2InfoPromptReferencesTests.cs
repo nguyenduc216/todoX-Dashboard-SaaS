@@ -391,8 +391,8 @@ public sealed class RVideoV2InfoPromptReferencesTests
         Assert.Contains(".rv2-ref-file", InfoCss);
         Assert.Contains(".rv2-ref-foot", InfoCss);
         Assert.Contains(".rv2-ref-kind", InfoCss);
-        // Native file input is fully hidden (clip technique) so it can never show filename text.
-        Assert.Contains("clip-path:inset(50%)", InfoCss);
+        // Native file input is fully hidden (off-screen positioning) so it can never show filename text.
+        Assert.Contains("left:-9999px", InfoCss);
         Assert.DoesNotContain(".rv2-upload-wrap", InfoCss);
     }
 

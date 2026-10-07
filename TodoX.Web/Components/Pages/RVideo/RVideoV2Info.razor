@@ -54,8 +54,6 @@
                   title="Tải ảnh tham chiếu"
                   @onclick="TriggerUploadPickerAsync" @onkeydown="HandleUploadKeyDownAsync">
               <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-              <InputFile Class="rv2-ref-file" OnChange="UploadReferenceAsync" accept="image/png,image/jpeg,image/webp"
-                         disabled="@(_uploading || JobView is null)" aria-hidden="true" tabindex="-1" />
             </span>
           </MudTooltip>
           <MudTooltip Text="Chọn từ Character">
@@ -69,6 +67,12 @@
           </MudTooltip>
         </MudStack>
       </div>
+      @* Hidden native file input — lives outside any visible button so the browser never renders
+         its filename chrome. JS triggers it via the .rv2-ref-file class selector.
+         Inline style guarantees hiding even if CSS isolation fails to scope. *@
+      <InputFile Class="rv2-ref-file" OnChange="UploadReferenceAsync" accept="image/png,image/jpeg,image/webp"
+                 disabled="@(_uploading || JobView is null)" aria-hidden="true" tabindex="-1"
+                 style="position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none" />
       @if (_uploading) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mb-2" /> }
       @if (InputReferences.Count == 0)
       {
