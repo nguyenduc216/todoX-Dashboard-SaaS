@@ -12,11 +12,16 @@
 .rv2-preview-summary{display:flex;gap:16px;padding:10px;font-size:.8rem;opacity:.7}
 .rv2-preview-mobile{display:none}
 .rv2-scene-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-.rv2-nav-dot{width:32px;height:32px;border-radius:50%;border:1px solid #444;background:#222;color:#fff;cursor:pointer}
+.rv2-nav-dot{width:32px;height:32px;border-radius:50%;border:2px solid #444;background:#222;color:#fff;cursor:pointer;font-weight:600;transition:all .2s ease;display:flex;align-items:center;justify-content:center;position:relative}
 .rv2-nav-dot.rv2-status-video_ready{background:#2e7d32;border-color:#2e7d32}
 .rv2-nav-dot.rv2-status-failed{background:#c62828;border-color:#c62828}
 .rv2-nav-dot.rv2-status-video_rendering,.rv2-nav-dot.rv2-status-video_queued{background:#f9a825;border-color:#f9a825;color:#000}
-.rv2-nav-active{outline:2px solid #ffca28}
+/* RVID-UI-V2-PREVIEW-LOAD.2: active scene ring must read clearly on mobile regardless of
+   status color. Higher specificity (.rv2-nav-dot.rv2-nav-active) beats .rv2-nav-dot.rv2-status-*
+   and pairs a bright yellow ring with an outline halo + gap + check badge so the active scene is
+   identifiable by shape, not just color. */
+.rv2-nav-dot.rv2-nav-active{border-color:#ffca28;border-width:3px;box-shadow:0 0 0 3px rgba(255,202,40,.35),0 0 10px 3px rgba(255,202,40,.55);transform:scale(1.22);background:rgba(255,202,40,.22);color:#fff}
+.rv2-nav-dot.rv2-nav-active::after{content:"\2713";position:absolute;right:-4px;bottom:-4px;width:14px;height:14px;border-radius:50%;background:#ffca28;color:#111;font-size:10px;line-height:14px;font-weight:700;text-align:center}
 .rv2-mobile-card{border:1px solid #333;border-radius:12px;overflow:hidden}
 .rv2-mobile-video{position:relative;background:#000;min-height:200px;display:flex;align-items:center;justify-content:center}
 .rv2-mobile-vid,.rv2-mobile-img{width:100%;max-height:52vh;object-fit:contain}
@@ -29,3 +34,21 @@
 .rv2-sheet{position:fixed;left:0;right:0;bottom:0;background:#1e1e1e;border-radius:16px 16px 0 0;padding:16px;z-index:9999;max-height:60vh;overflow:auto}
 @media(max-width:700px){.rv2-preview-desktop{display:none}.rv2-preview-mobile{display:block}}
 @media(orientation:landscape) and (max-width:900px){.rv2-preview-mobile .rv2-mobile-vid{max-height:70vh}}
+
+/* RVID-UI-V2-PREVIEW-LOAD.1: skeleton + lazy media + error/retry states */
+.rv2-scene-row{cursor:pointer}
+.rv2-scene-row--active{background:rgba(255,202,40,.06)}
+.rv2-skeleton-grid{display:flex;flex-direction:column;gap:10px;padding:8px}
+.rv2-skeleton-bar,.rv2-skeleton-row{background:linear-gradient(90deg,#2a2a2a 25%,#3a3a3a 37%,#2a2a2a 63%);background-size:400% 100%;animation:rv2-shimmer 1.4s ease infinite;border-radius:8px}
+.rv2-skeleton-bar{height:36px;max-width:220px}
+.rv2-skeleton-row{height:64px}
+@keyframes rv2-shimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.rv2-media-placeholder{width:100px;height:56px;border-radius:6px;background:#222;border:1px solid #333}
+.rv2-media-lg{width:100%;height:200px}
+.rv2-text-skeleton{height:32px;border-radius:6px;background:#222;border:1px solid #333}
+.rv2-select-skeleton{height:36px;border-radius:6px;background:#222;border:1px solid #333}
+.rv2-select-narrow{max-width:80px}
+.rv2-vid-lazy{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100px;height:56px;border-radius:6px;background:#151515;border:1px dashed #444;color:#888;font-size:.65rem;cursor:pointer}
+.rv2-vid-lazy-label{line-height:1}
+.rv2-media-error{display:flex;align-items:center;justify-content:center;gap:4px;width:100px;height:56px;border-radius:6px;background:#2a1515;border:1px solid #5a2020}
+.rv2-media-error-lg{flex-direction:column;width:100%;height:200px;gap:6px}
