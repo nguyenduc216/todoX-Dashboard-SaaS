@@ -8,9 +8,61 @@
 @inject IRVideoSceneAddDefaultResolver AddDefaults
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@implements IDisposable
+
 <div class="rv2-preview">
-@if(JobView is null){<MudAlert Severity="Severity.Info" Dense="true">Chưa có project.</MudAlert>}
-else{
+@if(JobView is null)
+{
+  <div class="rv2-skeleton-grid">
+    <div class="rv2-skeleton-bar"></div>
+    <div class="rv2-skeleton-row"></div>
+    <div class="rv2-skeleton-row"></div>
+    <div class="rv2-skeleton-row"></div>
+  </div>
+}
+else if(!_optsReady)
+{
+  @* Shell has loaded JobView but model options are still loading — show scene metadata immediately *@
+  <div class="rv2-preview-toolbar">
+    <MudChip T="string" Size="Size.Small">@JobView.Project.Scenes.Count scene</MudChip>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="HandleAddSceneAsync" Disabled="true">Thêm scene</MudButton>
+  </div>
+  <div class="rv2-preview-desktop">
+    <div class="rv2-scene-table-head"><span>#</span><span>Tham chiếu</span><span>Video</span><span>Nội dung</span><span>Model</span><span>Thời lượng</span><span>Trạng thái</span><span>Hành động</span></div>
+    @foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex))
+    {
+      <div class="rv2-scene-row">
+        <span>@s.SceneIndex</span>
+        <span>@if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)){<img src="@s.StaticImageUrl" class="rv2-thumb" loading="lazy" />}else{<span>-</span>}</span>
+        <span><div class="rv2-media-placeholder"></div></span>
+        <span><div class="rv2-text-skeleton"></div></span>
+        <span><div class="rv2-select-skeleton"></div></span>
+        <span><div class="rv2-select-skeleton rv2-select-narrow"></div></span>
+        <span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@s.Status</MudChip></span>
+        <span><MudIcon Icon="@Icons.Material.Filled.MoreHoriz" Size="Size.Small" /></span>
+      </div>
+    }
+  </div>
+  <div class="rv2-preview-mobile">
+    <div class="rv2-scene-nav">@foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex)){<button class="rv2-nav-dot rv2-status-@s.Status @(SelectedSceneId==s.Id?"rv2-nav-active":"")" @onclick="@(()=>SelectScene(s.Id))">@s.SceneIndex</button>}</div>
+    @if(ActiveScene is not null)
+    {
+      <div class="rv2-mobile-card rv2-fade-in">
+        <div class="rv2-mobile-video"><div class="rv2-media-placeholder rv2-media-lg"></div></div>
+        <div class="rv2-mobile-meta">
+          <MudChip T="string" Size="Size.Small" Color="@StatusColor(ActiveScene.Status)">@ActiveScene.Status</MudChip>
+          @{ var _earlyMeta = ScenePromptMetadata.FromScene(ActiveScene); var _earlyModel = _earlyMeta.Extra.TryGetValue("video_model", out var _emk) ? _emk : "—"; var _earlyDur = ActiveScene.DurationSeconds; }
+          <span style="font-size:.75rem;opacity:.7">@_earlyModel / @_earlyDur s</span>
+        </div>
+        <div class="rv2-mobile-content" style="padding:8px 10px">
+          <div class="rv2-text-skeleton" style="height:48px;width:100%"></div>
+        </div>
+      </div>
+    }
+  </div>
+}
+else
+{
 <div class="rv2-preview-toolbar">
 <MudChip T="string" Size="Size.Small">@JobView.Project.Scenes.Count scene</MudChip>
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="HandleAddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
@@ -18,14 +70,40 @@ else{
 <div class="rv2-preview-desktop">
 <div class="rv2-scene-table-head"><span>#</span><span>Tham chiếu</span><span>Video</span><span>Nội dung</span><span>Model</span><span>Thời lượng</span><span>Trạng thái</span><span>Hành động</span></div>
 @foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex)){
-<div class="rv2-scene-row">
+<div class="rv2-scene-row @(SelectedSceneId==s.Id?"rv2-scene-row--active":"")" @onclick="@(()=>SelectScene(s.Id))">
 <span>@s.SceneIndex</span>
-<span>@if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)){<img src="@s.StaticImageUrl" class="rv2-thumb" @onclick="@(()=>OpenRef(s.StaticImageUrl!))" />}else{<span>-</span>}</span>
-<span>@if(!string.IsNullOrWhiteSpace(s.SceneVideoUrl)){<button class="rv2-vid-play" title="Xem video scene @s.SceneIndex" @onclick="@(()=>OpenVideoAsync(s.SceneVideoUrl!, s.SceneIndex))"><video src="@s.SceneVideoUrl" muted preload="metadata" class="rv2-vid-thumb"></video><span class="rv2-play-badge"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" /></span></button>}else{<span>Chưa có</span>}</span>
-<span><MudTextField T="string" Class="rv2-content-input" Value="@UserSceneText(s)" ValueChanged="@(v=>HandleContentChangedAsync(s,v))" Variant="Variant.Text" Lines="2" Placeholder="Nội dung scene..." FullWidth="true" Margin="Margin.Dense" /></span>
-<span><MudSelect T="string" Value="@ResolveModelKey(s)" ValueChanged="@(v=>HandleModelChangedAsync(s,v))" Dense="true" Style="min-width:140px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect></span><span><MudSelect T="int" Value="@s.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(s,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect></span>
-<span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@s.Status</MudChip></span>
+<span>@if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)){<img src="@s.StaticImageUrl" class="rv2-thumb" loading="lazy" @onclick:stopPropagation="true" @onclick="@(()=>OpenRef(s.StaticImageUrl!))" />}else{<span>-</span>}</span>
 <span>
+@if(SelectedSceneId==s.Id && !string.IsNullOrWhiteSpace(s.SceneVideoUrl))
+{
+  @if(_mediaErrors.TryGetValue(s.Id, out var mErr) && mErr)
+  {
+    <div class="rv2-media-error" @onclick:stopPropagation="true">
+      <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Size="Size.Small" Color="Color.Error" />
+      <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="@(()=>RetryMediaLoad(s.Id))" />
+    </div>
+  }
+  else
+  {
+    <button class="rv2-vid-play" title="Xem video scene @s.SceneIndex" @onclick:stopPropagation="true" @onclick="@(()=>OpenVideoAsync(s.SceneVideoUrl!, s.SceneIndex))">
+      <video src="@s.SceneVideoUrl" muted preload="metadata" class="rv2-vid-thumb" @onerror="@(()=>OnMediaError(s.Id))"></video>
+      <span class="rv2-play-badge"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" /></span>
+    </button>
+  }
+}
+else if(!string.IsNullOrWhiteSpace(s.SceneVideoUrl))
+{
+  <div class="rv2-vid-lazy" @onclick:stopPropagation="true" @onclick="@(()=>SelectScene(s.Id))">
+    <MudIcon Icon="@Icons.Material.Filled.Videocam" Size="Size.Small" />
+    <span class="rv2-vid-lazy-label">Scene @s.SceneIndex</span>
+  </div>
+}
+else{<span>Chưa có</span>}
+</span>
+<span @onclick:stopPropagation="true"><MudTextField T="string" Class="rv2-content-input" Value="@UserSceneText(s)" ValueChanged="@(v=>HandleContentChangedAsync(s,v))" Variant="Variant.Text" Lines="2" Placeholder="Nội dung scene..." FullWidth="true" Margin="Margin.Dense" /></span>
+<span @onclick:stopPropagation="true"><MudSelect T="string" Value="@ResolveModelKey(s)" ValueChanged="@(v=>HandleModelChangedAsync(s,v))" Dense="true" Style="min-width:140px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect></span><span @onclick:stopPropagation="true"><MudSelect T="int" Value="@s.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(s,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect></span>
+<span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@s.Status</MudChip></span>
+<span @onclick:stopPropagation="true">
 <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
@@ -38,12 +116,20 @@ else{
 <div class="rv2-preview-summary"><span>Hoàn thành: @(JobView.Project.Scenes.Count(x=>x.Status==VideoSceneStatuses.VideoReady))/@JobView.Project.Scenes.Count</span><span>Tổng: @JobView.Project.TotalSeconds s</span></div>
 </div>
 <div class="rv2-preview-mobile">
-<div class="rv2-scene-nav">@foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex)){<button class="rv2-nav-dot rv2-status-@s.Status @(SelectedSceneId==s.Id?"rv2-nav-active":"")" @onclick="@(()=>SelectedSceneId=s.Id)">@s.SceneIndex</button>}</div>
+<div class="rv2-scene-nav">@foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex)){<button class="rv2-nav-dot rv2-status-@s.Status @(SelectedSceneId==s.Id?"rv2-nav-active":"")" @onclick="@(()=>SelectScene(s.Id))">@s.SceneIndex</button>}</div>
 @if(ActiveScene is not null){
 <div class="rv2-mobile-card">
 <div class="rv2-mobile-video">
-@if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv2-mobile-play" @onclick="@(()=>OpenVideoAsync(ActiveScene.SceneVideoUrl!, ActiveScene.SceneIndex))"><video src="@ActiveScene.SceneVideoUrl" muted preload="metadata" playsinline class="rv2-mobile-vid"></video><span class="rv2-play-badge rv2-play-badge-lg"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Large" /></span></button>}else if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" class="rv2-mobile-img" />}else{<div>Chưa có media</div>}
-<div class="rv2-mobile-ref" @onclick="@(()=>OpenRef(ActiveScene.StaticImageUrl!))">@if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" />}</div>
+@if(_mediaErrors.TryGetValue(ActiveScene.Id, out var mobErr) && mobErr)
+{
+  <div class="rv2-media-error rv2-media-error-lg">
+    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" />
+    <MudText Typo="Typo.caption">Không tải được media</MudText>
+    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(()=>RetryMediaLoad(ActiveScene.Id))">Thử lại</MudButton>
+  </div>
+}
+else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv2-mobile-play" @onclick="@(()=>OpenVideoAsync(ActiveScene.SceneVideoUrl!, ActiveScene.SceneIndex))"><video src="@ActiveScene.SceneVideoUrl" muted preload="metadata" playsinline class="rv2-mobile-vid" @onerror="@(()=>OnMediaError(ActiveScene.Id))"></video><span class="rv2-play-badge rv2-play-badge-lg"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Large" /></span></button>}else if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" class="rv2-mobile-img" loading="lazy" />}else{<div>Chưa có media</div>}
+<div class="rv2-mobile-ref" @onclick="@(()=>OpenRef(ActiveScene.StaticImageUrl!))">@if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" loading="lazy" />}</div>
 </div>
 <div class="rv2-mobile-meta"><MudChip T="string" Size="Size.Small" Color="@StatusColor(ActiveScene.Status)">@ActiveScene.Status</MudChip><MudSelect T="string" Value="@ResolveModelKey(ActiveScene)" ValueChanged="@(v=>HandleModelChangedAsync(ActiveScene,v))" Dense="true" Style="min-width:120px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect><MudSelect T="int" Value="@ActiveScene.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(ActiveScene,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(()=>_showDetail=true)">Xem chi tiết</MudButton></div>
 <div class="rv2-mobile-content">
@@ -68,14 +154,61 @@ else{
 long? SelectedSceneId; string? _showRef; bool _showDetail; bool _busy; VideoProjectSceneDto? _pendingDelete;
 private readonly SemaphoreSlim _gate = new(1,1);
 IReadOnlyList<SceneVideoModelOption> _opts = Array.Empty<SceneVideoModelOption>();
+bool _optsReady;
+Task<IReadOnlyList<SceneVideoModelOption>>? _optsTask; // in-flight options fetch (started off the render path)
+int _sceneVersion; // version guard for rapid scene switching
+readonly Dictionary<long,bool> _mediaErrors = new();
 IReadOnlyList<int> AllDurations => _opts.SelectMany(x=>x.Durations).Distinct().OrderBy(x=>x).ToArray();
-protected override async Task OnInitializedAsync(){ _opts = await ModelOptions.GetOptionsAsync(); }
-protected override async Task OnParametersSetAsync(){ if(JobView?.Project.Scenes.Count>0 && SelectedSceneId==null) SelectedSceneId=JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).First().Id; if(_opts.Count==0) _opts = await ModelOptions.GetOptionsAsync(); }
+
+protected override void OnParametersSet()
+{
+  // Select first/selected scene immediately from metadata — no async wait.
+  if(JobView?.Project.Scenes.Count > 0 && SelectedSceneId == null)
+    SelectedSceneId = JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).First().Id;
+  // Use cached options synchronously if available (avoids blocking first render).
+  if(!_optsReady)
+  {
+    var cached = ModelOptions.GetCachedOptions();
+    if(cached is { Count: > 0 }) { _opts = cached; _optsReady = true; }
+    // RVID-UI-V2-PREVIEW-LOAD.2: start the single background fetch off the render path and
+    // reuse it in OnAfterRenderAsync, removing the skeleton-content flicker on entry.
+    else if(_optsTask is null) { _optsTask = ModelOptions.GetOptionsAsync(); }
+  }
+}
+
+protected override async Task OnAfterRenderAsync(bool firstRender)
+{
+  if(firstRender && !_optsReady)
+  {
+    // Load model options in background — UI already rendered with skeleton/metadata.
+    try
+    {
+      _optsTask ??= ModelOptions.GetOptionsAsync();
+      _opts = await _optsTask;
+      _optsReady = true;
+      StateHasChanged();
+    }
+    catch { /* options will remain empty; selects show no items but scene metadata is visible */ }
+  }
+}
+
+void SelectScene(long id)
+{
+  if(SelectedSceneId == id) return;
+  _sceneVersion++;
+  SelectedSceneId = id;
+  // Clear media error for newly selected scene so it retries on mount.
+  _mediaErrors.Remove(id);
+}
+
+void OnMediaError(long sceneId) => _mediaErrors[sceneId] = true;
+void RetryMediaLoad(long sceneId) { _mediaErrors.Remove(sceneId); }
+
 VideoProjectSceneDto? ActiveScene=>JobView?.Project.Scenes.FirstOrDefault(x=>x.Id==SelectedSceneId);
 bool IsFirst=> JobView!=null && ActiveScene!=null && JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).First().Id==ActiveScene.Id;
 bool IsLast=> JobView!=null && ActiveScene!=null && JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).Last().Id==ActiveScene.Id;
-void PrevScene(){var o=JobView!.Project.Scenes.OrderBy(x=>x.SceneIndex).ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>0) SelectedSceneId=o[i-1].Id;}
-void NextScene(){var o=JobView!.Project.Scenes.OrderBy(x=>x.SceneIndex).ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>=0&&i<o.Count-1) SelectedSceneId=o[i+1].Id;}
+void PrevScene(){var o=JobView!.Project.Scenes.OrderBy(x=>x.SceneIndex).ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>0) SelectScene(o[i-1].Id);}
+void NextScene(){var o=JobView!.Project.Scenes.OrderBy(x=>x.SceneIndex).ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>=0&&i<o.Count-1) SelectScene(o[i+1].Id);}
 void OpenRef(string u){if(!string.IsNullOrWhiteSpace(u)) _showRef=u;}
 async Task OpenVideoAsync(string url,int sceneIndex){
   var p=new DialogParameters{ ["Title"]=$"Video scene {sceneIndex}", ["VideoUrl"]=url };
@@ -198,4 +331,5 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
  meta.Extra["video_duration"]=dur.ToString();
  await DoSaveAsync(scene, meta, dur);
 }
+public void Dispose(){ _gate.Dispose(); }
 }
