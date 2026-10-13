@@ -185,7 +185,10 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                     generationId,
                     assistant.ProviderCode,
                     assistant.ModelCode,
-                    parserError));
+                    parserError),
+                validateOutput: videoProjectId is null ? null : root => PromptAssistantVideoOutputValidator.Validate(root),
+                onRepairAttempt: count => repairAttempts = count,
+                logStage: (stage, detail) => _logger.LogWarning("PROMPT_ASSISTANT_STAGE GenerationId={GenerationId} Stage={Stage} Detail={Detail}", generationId, stage, detail));
             repairAttempts = outcome.RepairAttempts;
             rawResponses.AddRange(outcome.RawResponses);
             promptTokens = outcome.PromptTokens;
@@ -233,6 +236,8 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         }
         catch (ServicePromptProviderException ex)
         {
+            _logger.LogWarning("PROMPT_ASSISTANT_STAGE GenerationId={GenerationId} Stage={Stage} ErrorCode={ErrorCode} RepairAttempts={RepairAttempts}",
+                generationId, ex.Code == "generated_json_malformed" ? "parser" : ex.Code == "generated_output_validation_failed" ? "validation" : "provider", ex.Code, repairAttempts);
             status = ex.Code == "generated_output_validation_failed"
                 ? ServicePromptGenerationStatus.ValidationFailed
                 : ServicePromptGenerationStatus.ProviderFailed;
@@ -600,7 +605,10 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         Func<string, Task<ServicePromptProviderResponse>> complete,
         string userInput,
         int maxRepairAttempts,
-        Action<string>? logMalformed = null)
+        Action<string>? logMalformed = null,
+        Func<JsonElement, IReadOnlyList<ServicePromptValidationError>>? validateOutput = null,
+        Action<int>? onRepairAttempt = null,
+        Action<string, string>? logStage = null)
     {
         var requestInput = userInput;
         var rawResponses = new List<string>();
@@ -614,6 +622,9 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
         var streamingDurationMs = (int?)null;
         decimal? credit = null;
         string? runtimeProvider = null;
+        string? previousValidJson = null;
+        IReadOnlyList<ServicePromptValidationError> previousErrors = [];
+        maxRepairAttempts = Math.Clamp(maxRepairAttempts, 0, 3);
         while (true)
         {
             var response = await complete(requestInput);
@@ -631,6 +642,30 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             {
                 using var parsed = new ServicePromptOutputParser().Parse(response.Content);
                 var generatedJson = ServicePromptJson.Canonicalize(parsed.RootElement.GetRawText());
+                if (previousValidJson is not null)
+                {
+                    generatedJson = PreserveValidFields(previousValidJson, generatedJson, previousErrors);
+                    logStage?.Invoke("normalization", "valid_fields_preserved");
+                }
+                using var candidate = JsonDocument.Parse(generatedJson);
+                var validationErrors = validateOutput?.Invoke(candidate.RootElement) ?? [];
+                if (validationErrors.Count > 0)
+                {
+                    logStage?.Invoke(repairAttempts == 0 ? "model_output" : "repair_output", "incomplete_production_content");
+                    logStage?.Invoke("validation", JsonSerializer.Serialize(validationErrors, ServicePromptJson.Options));
+                    if (repairAttempts < maxRepairAttempts)
+                    {
+                        previousValidJson = generatedJson;
+                        previousErrors = validationErrors;
+                        requestInput = userInput + "\nRepair the previous JSON. Fill only invalid or missing fields with real production content. No placeholders. Preserve all valid fields, voice, scene count, durations and references. Return one complete JSON object only.\nValidation errors:\n"
+                            + JsonSerializer.Serialize(validationErrors, ServicePromptJson.Options) + "\nPrevious JSON:\n" + generatedJson;
+                        repairAttempts++;
+                        onRepairAttempt?.Invoke(repairAttempts);
+                        logStage?.Invoke("repair", $"attempt={repairAttempts}");
+                        continue;
+                    }
+                    logStage?.Invoke("repair", maxRepairAttempts == 0 ? "disabled" : "attempts_exhausted");
+                }
                 return new ServicePromptGenerationLoopOutcome(
                     response,
                     generatedJson,
@@ -651,10 +686,45 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                 && !string.IsNullOrWhiteSpace(response.Content))
             {
                 repairAttempts++;
+                onRepairAttempt?.Invoke(repairAttempts);
+                logStage?.Invoke("parser", ex.Code);
                 logMalformed?.Invoke(ex.ParserErrorMessage ?? ex.Message);
                 requestInput = BuildRepairUserInput(response.Content, ex);
             }
         }
+    }
+
+    private static string PreserveValidFields(string previous, string repaired, IReadOnlyList<ServicePromptValidationError> errors)
+    {
+        var original = JsonNode.Parse(previous);
+        var replacement = JsonNode.Parse(repaired);
+        // Replace only fields rejected by validation; retain every other value verbatim.
+        if (original is not JsonObject root || replacement is not JsonObject next) return previous;
+        if (errors.Any(e => e.Code == "required_scenes"))
+        {
+            root["scenes"] = next["scenes"]?.DeepClone();
+            foreach (var name in new[] { "scene_count", "duration", "total_shot_count" })
+                if (next[name] is not null) root[name] = next[name]!.DeepClone();
+        }
+        else if (root["scenes"] is JsonArray scenes && next["scenes"] is JsonArray replacements && scenes.Count == replacements.Count)
+        {
+            for (var i = 0; i < scenes.Count; i++)
+            {
+                if (replacements[i] is not JsonObject updated) continue;
+                if (scenes[i] is not JsonObject scene)
+                {
+                    if (errors.Any(e => e.Path == $"$.scenes[{i}]" && e.Code == "wrong_type"))
+                        scenes[i] = updated.DeepClone();
+                    continue;
+                }
+                foreach (var error in errors.Where(e => e.Path.StartsWith($"$.scenes[{i}].", StringComparison.Ordinal)))
+                {
+                    var field = error.Path[(error.Path.LastIndexOf('.') + 1)..];
+                    if (updated[field] is not null) scene[field] = updated[field]!.DeepClone();
+                }
+            }
+        }
+        return root.ToJsonString(ServicePromptJson.Options);
     }
 
     private static bool IsJsonObject(string json)

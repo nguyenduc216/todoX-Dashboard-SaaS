@@ -128,7 +128,7 @@ public sealed class ServicePromptAssistantJsonRepairTests
                 _ => { calls++; return Task.FromResult(Respond("")); },
                 "user request", 3));
 
-        Assert.Equal("generated_json_malformed", error.Code);
+        Assert.Equal("missing_content", error.Code);
         Assert.Equal(1, calls);
     }
 

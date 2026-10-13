@@ -54,7 +54,7 @@ public static class PromptAssistantCharacterReferenceSynchronizer
 
             var scenePrompt = RemoveReferenceContract(original);
             var applies = HasExplicitTrue(scene, "main_character_present");
-            scene["image_prompt"] = active is not null && applies
+            scene["image_prompt"] = active is not null && applies && !string.IsNullOrWhiteSpace(scenePrompt)
                 ? BuildContract(active, scenePrompt)
                 : scenePrompt;
         }
@@ -98,7 +98,7 @@ public static class PromptAssistantCharacterReferenceSynchronizer
         if (text.StartsWith(Header, StringComparison.OrdinalIgnoreCase))
         {
             var scene = text.IndexOf(SceneMarker, Header.Length, StringComparison.OrdinalIgnoreCase);
-            return scene >= 0 ? text[(scene + SceneMarker.Length)..].TrimStart() : string.Empty;
+            return scene >= 0 ? text[(scene + SceneMarker.Length)..].TrimStart() : text;
         }
 
         if (text.StartsWith("REFERENCE IMAGE:", StringComparison.OrdinalIgnoreCase)
@@ -106,7 +106,7 @@ public static class PromptAssistantCharacterReferenceSynchronizer
             || text.StartsWith(LegacyInstruction, StringComparison.OrdinalIgnoreCase))
         {
             var scene = text.IndexOf(SceneMarker, StringComparison.OrdinalIgnoreCase);
-            return scene >= 0 ? text[(scene + SceneMarker.Length)..].TrimStart() : string.Empty;
+            return scene >= 0 ? text[(scene + SceneMarker.Length)..].TrimStart() : text;
         }
 
         return text.Replace(LegacyInstruction, string.Empty, StringComparison.OrdinalIgnoreCase).Trim();

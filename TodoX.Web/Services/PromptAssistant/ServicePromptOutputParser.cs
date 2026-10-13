@@ -19,7 +19,7 @@ public sealed class ServicePromptOutputParser
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new ServicePromptProviderException("generated_json_malformed", "Gommo Agent returned empty content.", "{}");
+            throw new ServicePromptProviderException("missing_content", "Gommo Agent returned empty content.", "{}");
         }
 
         try
