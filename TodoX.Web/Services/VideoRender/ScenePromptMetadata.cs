@@ -267,7 +267,7 @@ public sealed class ScenePromptMetadata
     private static string? TrimOrNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static bool IsPlaceholder(string? value)
+    internal static bool IsPlaceholder(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -277,7 +277,7 @@ public sealed class ScenePromptMetadata
         var text = value.Trim();
         return text.Contains("[[", StringComparison.OrdinalIgnoreCase)
             || text.Contains("PLACEHOLDER", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("TODO", StringComparison.OrdinalIgnoreCase)
+            || System.Text.RegularExpressions.Regex.IsMatch(text, @"(?<![\p{L}\p{N}_])TODO\s*(?::|\])", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)
             || text.Contains("THAY BẰNG", StringComparison.OrdinalIgnoreCase)
             || text.Contains("THAY BANG", StringComparison.OrdinalIgnoreCase);
     }
