@@ -1626,6 +1626,9 @@ else
     private string _aspectRatio = AspectRatioLandscape;
 
     private string _resolution = Resolution720p;
+    private string? _persistedResolution;
+    private bool _resolutionDirty;
+    private long? _resolutionProjectId;
 
     private int _totalSeconds = 16;
 
@@ -2051,7 +2054,7 @@ else
 
             AspectRatio = _aspectRatio,
 
-            Resolution = _resolution,
+            Resolution = _persistedResolution ?? _resolution,
 
             UserId = AuthState.CurrentUser?.UserId,
 
@@ -3232,6 +3235,9 @@ else
         _aspectRatio = AspectRatioLandscape;
 
         _resolution = Resolution720p;
+        _persistedResolution = null;
+        _resolutionDirty = false;
+        _resolutionProjectId = null;
 
         _characterPrompt = string.Empty;
 
@@ -3366,6 +3372,20 @@ else
                 _thinkScenes = _project.ThinkScenes;
 
                 _prompt = _project.OriginalPrompt;
+
+                if (_resolutionProjectId != _project.Id)
+                {
+                    _resolutionDirty = false;
+                    _resolutionProjectId = _project.Id;
+                }
+
+                _persistedResolution = PromptParser.Parse(_project.OriginalPrompt).Model.Resolution;
+                if (_jobId is Guid resolutionJobId)
+                {
+                    var savedJob = await RVideoJobs.GetByJobIdAsync(resolutionJobId, AuthState.CurrentUser);
+                    if (savedJob?.CoreJob.Input.TryGetProperty("resolution", out var savedResolution) == true && savedResolution.ValueKind == JsonValueKind.String)
+                        _persistedResolution = NormalizeResolution(savedResolution.GetString()) ?? _persistedResolution;
+                }
 
                 await LoadPromptWorkspaceAsync();
 
@@ -4729,7 +4749,7 @@ else
 
         _promptParseResult = PromptParser.Parse(_prompt);
 
-        ApplyVideoSettingsFromPrompt();
+        SynchronizeResolutionDiagnostics();
 
         return InvokeAsync(StateHasChanged);
 
@@ -5598,6 +5618,8 @@ else
     {
 
         _resolution = NormalizeResolution(value) ?? string.Empty;
+        _resolutionDirty = true;
+        SynchronizeResolutionDiagnostics();
 
         _ = RefreshInitialEstimateAsync();
 
@@ -5619,7 +5641,7 @@ else
 
         }
 
-        var resolution = NormalizeResolution(_promptParseResult.Model.Resolution);
+        var resolution = _resolutionDirty ? _resolution : _persistedResolution ?? NormalizeResolution(_promptParseResult.Model.Resolution);
 
         if (!string.IsNullOrWhiteSpace(resolution))
 
@@ -5628,6 +5650,8 @@ else
             _resolution = resolution;
 
         }
+
+        SynchronizeResolutionDiagnostics();
 
         if (_promptParseResult.Summary.DeclaredDurationSeconds is int declaredDuration && declaredDuration > 0)
 
@@ -5661,6 +5685,15 @@ else
 
         }
 
+    }
+
+    private void SynchronizeResolutionDiagnostics()
+    {
+        var selected = _resolutionDirty ? NormalizeResolution(_resolution) : _persistedResolution;
+        if (selected is null || !_promptParseResult.IsJsonValid || !TryExtractJsonRange(_prompt, out var start, out var end)) return;
+        if (JsonNode.Parse(_prompt[start..(end + 1)]) is not JsonObject root) return;
+        root["resolution"] = selected;
+        _promptParseResult = PromptParser.Parse(root.ToJsonString());
     }
 
     private bool EnsureAspectRatioSelected()
@@ -6741,7 +6774,9 @@ else
 
             }
 
+            _resolution = NormalizeResolution(_resolution) ?? throw new InvalidOperationException("RVIDEO_RESOLUTION_INVALID");
             _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
+            _promptParseResult = PromptParser.Parse(_prompt);
 
             await AddDebugAsync("rvideo_draft_save_begin", "Luu draft RVIDEO", "STARTED", $"Job={_jobId?.ToString() ?? "new"}, Project={_projectId?.ToString() ?? "new"}");
 
@@ -6784,6 +6819,8 @@ else
                 await AddDebugAsync("rvideo_draft_created", "Đã tạo draft RVIDEO", "SUCCESS", $"Job={created.JobId}, Project={created.ProjectId}");
 
                 await ProjectCreated.InvokeAsync(created.ProjectId);
+
+                _resolutionDirty = false;
 
                 await ReloadAsync();
 
@@ -6886,6 +6923,16 @@ else
             }
 
             await LogProjectEvent("JOB_SAVED", "info", "Luu video project render-job.", snapshot);
+
+            if (_jobId is Guid savedJobId)
+            {
+                var saved = await RVideoJobs.GetByJobIdAsync(savedJobId, AuthState.CurrentUser);
+                if (saved is null || !saved.CoreJob.Input.TryGetProperty("resolution", out var confirmed)
+                    || NormalizeResolution(confirmed.GetString()) != _resolution)
+                    throw new InvalidOperationException("RVIDEO_RESOLUTION_SAVE_NOT_CONFIRMED");
+            }
+            _persistedResolution = _resolution;
+            _resolutionDirty = false;
 
             await AddDebugAsync("rvideo_draft_updated", "Đã cập nhật draft RVIDEO", "SUCCESS", $"Job={_jobId?.ToString() ?? "unknown"}, Project={_project.Id}");
 
