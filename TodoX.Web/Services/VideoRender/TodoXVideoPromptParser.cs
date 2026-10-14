@@ -383,19 +383,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
     }
 
     private static bool IsPlaceholder(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var text = value.Trim();
-        return text.Contains("[[", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("PLACEHOLDER", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("TODO", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("THAY BẰNG", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("THAY BANG", StringComparison.OrdinalIgnoreCase);
-    }
+        => ScenePromptMetadata.IsPlaceholder(value);
 
     private static string? FirstUsablePrompt(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value) && !IsPlaceholder(value))?.Trim();
