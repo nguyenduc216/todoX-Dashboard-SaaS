@@ -33,7 +33,8 @@
                     <MudSelectItem Value="@("CLICK_TO_PLAY")">Nhấn để phát</MudSelectItem>
                     <MudSelectItem Value="@("AUTOPLAY_ONCE")">Tự phát một lần</MudSelectItem>
                 </MudSelect>
-                <MudSwitch T="bool" @bind-Value="_settings.MutedByDefault" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Tắt tiếng mặc định khi nhấn phát" />
+                <MudSwitch T="bool" @bind-Value="_settings.MutedByDefault" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Tắt tiếng mặc định khi người xem nhấn Play" />
+                <MudText Typo="Typo.caption">Video tự phát ban đầu sẽ tắt tiếng theo hạn chế của trình duyệt. Người xem có thể bật tiếng bằng nút âm thanh khi hiển thị điều khiển.</MudText>
                 <MudSwitch T="bool" @bind-Value="_settings.ShowControls" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Hiển thị điều khiển" />
                 @if (!string.IsNullOrWhiteSpace(_settings.VideoUrl))
                 {

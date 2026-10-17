@@ -20,20 +20,30 @@
       video.poster = mediaUrl(config.posterUrl) ? config.posterUrl : '/img/landing/chatstaff-hero-phone.png';
       video.loop = config.playbackMode === 'AUTOPLAY_LOOP';
       video.muted = true;
+      let selectedMuted = null;
+      const syncSound = () => {
+        sound.textContent = video.muted ? '🔇' : '🔊';
+        sound.setAttribute('aria-label', video.muted ? 'Bật tiếng' : 'Tắt tiếng');
+      };
+      const start = (manual, resume = false) => {
+        if (manual && !resume) video.muted = selectedMuted ?? !!config.mutedByDefault;
+        syncSound();
+        video.play().then(() => setState('playing')).catch(() => setState('poster'));
+      };
+      syncSound();
       video.preload = config.playbackMode === 'CLICK_TO_PLAY' ? 'none' : 'metadata';
       video.src = config.videoUrl;
       sound.hidden = !config.showControls;
-      sound.onclick = () => { video.muted = !video.muted; sound.textContent = video.muted ? '🔇' : '🔊'; sound.setAttribute('aria-label', video.muted ? 'Bật tiếng' : 'Tắt tiếng'); };
+      sound.onclick = () => { video.muted = !video.muted; selectedMuted = video.muted; syncSound(); };
       play.onclick = () => {
-        if (state === 'paused') { video.play().then(() => setState('playing')).catch(() => setState('poster')); return; }
-        video.muted = config.playbackMode !== 'CLICK_TO_PLAY' || config.mutedByDefault;
-        video.play().then(() => setState('playing')).catch(() => setState('poster'));
+        start(true, state === 'paused');
       };
       video.onclick = () => { if (video.paused) play.click(); else { video.pause(); setState('paused'); } };
       video.onended = () => setState('ended');
+      video.onvolumechange = syncSound;
       video.onerror = () => { video.removeAttribute('src'); screen.classList.remove('intro-ready'); sound.hidden = true; setState('poster'); };
       if (config.playbackMode !== 'CLICK_TO_PLAY' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !navigator.connection?.saveData) {
-        video.play().then(() => setState('playing')).catch(() => setState('poster'));
+        start(false);
       }
     }).catch(() => {});
 })();
