@@ -1,0 +1,10 @@
+# Landing UI V1.4
+
+- Branch: `feature/real-estate-landing-page`, base `d280aa08ffe6ad8ccd7686a9569fab2ce60ac676`.
+- Removed only the `/bat-dong-san` collaboration process section. Existing services, lead form and footer remain.
+- Removed homepage phone text overlay markup and its dedicated CSS; video element, player controls and API logic remain unchanged.
+- Added a highlighted native `/bat-dong-san` link as the first of seven compact Hero industry blocks; responsive grid places blocks beside the phone on desktop/tablet and below it on mobile. No new animation.
+- QA uses local disabled database and a mocked Intro configuration pointing to isolated local media. It validates browser playback and layout, not production settings, live media or lead persistence. Screenshots and results are untracked under `qa-artifacts/real-estate-landing/v1.4/`.
+- Pre-existing modified `design-reference/bat-dong-san-v1/assets/service-*.jpg` and untracked QA folders were not modified or included in the release commit.
+- Production IIS remains DEPLOY_BLOCKED pending authorized live physical-path inspection, full backup and production-only file comparison. Staging publish is not a production deployment.
+- Verification: Release build/publish and targeted Landing Node tests (2/2) passed; Playwright browser checks at 1440×900, 768×1024, 390×844 and 375×812 passed (including HTTP 200, Enter navigation, sound/play/pause, overflow and pageerror). Desktop/mobile Hero and real-estate screenshots inspected. `git diff --check` passed; staged publish hashes match source for three changed wwwroot files. Broader `TodoX.Web.Phase1B.Tests` failed 19/607 (588 passed) outside this Landing-only change; existing ImageSharp vulnerability warnings were emitted. No production verification or database integration was performed.
