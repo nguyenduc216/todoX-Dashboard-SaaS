@@ -5,6 +5,46 @@ using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.Landing;
 
+public enum IntroUploadError { TooLarge, InvalidFile, StreamInterrupted, StorageUnavailable, Other }
+
+public sealed class IntroUploadException(IntroUploadError category, string message, Exception? inner = null)
+    : InvalidOperationException(message, inner)
+{
+    public IntroUploadError Category { get; } = category;
+}
+
+public static class IntroUploadDiagnostics
+{
+    public static string SafeFileName(string? name)
+    {
+        var leaf = (name ?? "").Replace('\\', '/').Split('/').Last();
+        var safe = new string(leaf.Where(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_').Take(80).ToArray());
+        return string.IsNullOrEmpty(safe) ? "unknown" : safe;
+    }
+
+    public static IntroUploadError Classify(Exception ex) => ex switch
+    {
+        IntroUploadException upload => upload.Category,
+        UnauthorizedAccessException or System.Security.SecurityException => IntroUploadError.StorageUnavailable,
+        IOException => IntroUploadError.StorageUnavailable,
+        OperationCanceledException => IntroUploadError.StreamInterrupted,
+        _ => IntroUploadError.Other
+    };
+
+    public static string Message(IntroUploadError error, long maxBytes) => error switch
+    {
+        IntroUploadError.TooLarge => $"Tệp vượt quá giới hạn {maxBytes / (1024 * 1024)} MB. Vui lòng chọn tệp nhỏ hơn.",
+        IntroUploadError.InvalidFile => "Tệp không hợp lệ. Kiểm tra định dạng, nội dung và dung lượng tệp.",
+        IntroUploadError.StreamInterrupted => "Truyền tệp bị gián đoạn. Vui lòng thử tải lại.",
+        IntroUploadError.StorageUnavailable => "Không thể ghi tệp vào SharedMedia. Vui lòng liên hệ quản trị hệ thống.",
+        _ => "Không thể tải tệp lên. Vui lòng thử lại hoặc liên hệ quản trị hệ thống."
+    };
+
+    public static IntroUploadError Classify(Exception ex, bool storageAvailable)
+        => ex is IntroUploadException or OperationCanceledException ? Classify(ex)
+            : !storageAvailable ? IntroUploadError.StorageUnavailable : Classify(ex);
+}
+
 public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, IOptions<SharedMediaOptions> options, AuthStateService auth)
 {
     public async Task<string> UploadAsync(IBrowserFile file, bool video, CancellationToken ct = default)
@@ -24,10 +64,12 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         try
         {
             await using (var input = file.OpenReadStream(limit))
+            {
                 await CopyOriginalAsync(input, source, ct);
+            }
             var header = new byte[16];
             await using (var stream = File.OpenRead(source)) _ = await stream.ReadAsync(header, ct);
-            if (!HasValidHeader(ext, header)) throw new InvalidOperationException("Nội dung file không hợp lệ.");
+            if (!HasValidHeader(ext, header)) throw new IntroUploadException(IntroUploadError.InvalidFile, "Nội dung file không hợp lệ.");
             var filename = token + ext;
             File.Move(source, Path.Combine(destination, filename));
             return paths.GetIntroPublicUrl(folder, filename);
@@ -41,7 +83,15 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
     public static async Task CopyOriginalAsync(Stream input, string path, CancellationToken ct = default)
     {
         await using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        await input.CopyToAsync(output, ct);
+        var buffer = new byte[81920];
+        while (true)
+        {
+            int count;
+            try { count = await input.ReadAsync(buffer, ct); }
+            catch (IOException ex) { throw new IntroUploadException(IntroUploadError.StreamInterrupted, "Upload stream interrupted.", ex); }
+            if (count == 0) break;
+            await output.WriteAsync(buffer.AsMemory(0, count), ct);
+        }
     }
 
     public static void ValidateUpload(string name, string contentType, long size, bool video, long limit)
@@ -49,9 +99,9 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         var ext = Path.GetExtension(name).ToLowerInvariant();
         var mime = video ? ext switch { ".mp4" => "video/mp4", ".webm" => "video/webm", _ => null }
             : ext switch { ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png", ".webp" => "image/webp", _ => null };
-        if (mime is null || !string.Equals(mime, contentType, StringComparison.OrdinalIgnoreCase)
-            || size <= 0 || size > limit)
-            throw new InvalidOperationException("Định dạng hoặc dung lượng file không hợp lệ.");
+        if (size > limit) throw new IntroUploadException(IntroUploadError.TooLarge, "Tệp vượt quá dung lượng cho phép.");
+        if (mime is null || !string.Equals(mime, contentType, StringComparison.OrdinalIgnoreCase) || size <= 0)
+            throw new IntroUploadException(IntroUploadError.InvalidFile, "Định dạng hoặc dung lượng file không hợp lệ.");
     }
 
     public static bool HasValidHeader(string ext, byte[] header)

@@ -1,5 +1,7 @@
 @page "/landing/intro-video"
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.Extensions.Options
+@using System.Diagnostics
 @using TodoX.Web.Models
 @using TodoX.Web.Models.Landing
 @using TodoX.Web.Services
@@ -11,6 +13,8 @@
 @inject LandingIntroVideoMediaService Media
 @inject SharedMediaPathService Paths
 @inject ISnackbar Snackbar
+@inject ILogger<LandingIntroVideo> Logger
+@inject IOptions<SharedMediaOptions> MediaOptions
 
 <PageTitle>Video Intro Landing</PageTitle>
 <MudStack Spacing="3">
@@ -78,7 +82,18 @@
             else _settings.PosterUrl = url;
             Snackbar.Add("Upload thành công. Nhấn Lưu cấu hình để kích hoạt.", Severity.Success);
         }
-        catch (Exception) { _error = "Upload thất bại. Kiểm tra định dạng, dung lượng và SharedMedia."; }
+        catch (Exception ex)
+        {
+            var maxBytes = video ? MediaOptions.Value.IndustrySolutions.MaxVideoBytes : MediaOptions.Value.IndustrySolutions.MaxThumbnailBytes;
+            var storageAvailable = Paths.IsConfigured && Paths.CanWrite();
+            var category = IntroUploadDiagnostics.Classify(ex, storageAvailable);
+            var correlationId = Activity.Current?.Id;
+            Logger.LogError(ex,
+                "Landing intro upload failed. FileName={FileName} FileSize={FileSize} UploadType={UploadType} MaxBytes={MaxBytes} StorageAvailable={StorageAvailable} ExceptionType={ExceptionType} ErrorCategory={ErrorCategory} CorrelationId={CorrelationId}",
+                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, video ? "video" : "poster",
+                maxBytes, storageAvailable, ex.GetType().Name, category, correlationId);
+            _error = IntroUploadDiagnostics.Message(category, maxBytes);
+        }
         finally { _busy = false; }
     }
 

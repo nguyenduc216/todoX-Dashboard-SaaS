@@ -81,7 +81,7 @@ public sealed class LandingIntroVideoTests
     public void UploadMetadataIsChecked(string name, string mime, long bytes, bool video, bool allowed)
     {
         if (allowed) LandingIntroVideoMediaService.ValidateUpload(name, mime, bytes, video, 200);
-        else Assert.Throws<InvalidOperationException>(() => LandingIntroVideoMediaService.ValidateUpload(name, mime, bytes, video, 200));
+        else Assert.Throws<IntroUploadException>(() => LandingIntroVideoMediaService.ValidateUpload(name, mime, bytes, video, 200));
     }
 
     [Fact]
@@ -119,7 +119,9 @@ public sealed class LandingIntroVideoTests
         await File.WriteAllBytesAsync(active, [1, 2, 3]);
         try
         {
-            await Assert.ThrowsAsync<IOException>(() => LandingIntroVideoMediaService.CopyOriginalAsync(new ThrowingStream(), incoming));
+            var ex = await Assert.ThrowsAsync<IntroUploadException>(() => LandingIntroVideoMediaService.CopyOriginalAsync(new ThrowingStream(), incoming));
+            Assert.Equal(IntroUploadError.StreamInterrupted, ex.Category);
+            Assert.IsType<IOException>(ex.InnerException);
             Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(active));
         }
         finally { Directory.Delete(folder, recursive: true); }
@@ -129,6 +131,32 @@ public sealed class LandingIntroVideoTests
     {
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
             => ValueTask.FromException<int>(new IOException("Simulated upload failure"));
+    }
+
+    [Theory]
+    [InlineData("../secret.mp4", "secret.mp4")]
+    [InlineData("C:\\private\\video.mp4", "video.mp4")]
+    [InlineData("my\nclip.mp4", "myclip.mp4")]
+    public void DiagnosticFileNameDoesNotExposePathsOrControlCharacters(string input, string expected)
+        => Assert.Equal(expected, IntroUploadDiagnostics.SafeFileName(input));
+
+    [Fact]
+    public void OversizedVideoGetsSpecificCategoryAndConfiguredLimit()
+    {
+        const long limit = 200L * 1024 * 1024;
+        var ex = Assert.Throws<IntroUploadException>(() => LandingIntroVideoMediaService.ValidateUpload("a.mp4", "video/mp4", limit + 1, true, limit));
+        Assert.Equal(IntroUploadError.TooLarge, IntroUploadDiagnostics.Classify(ex));
+        Assert.Contains("200 MB", IntroUploadDiagnostics.Message(ex.Category, limit));
+    }
+
+    [Fact]
+    public void StorageAndStreamingFailuresHaveDistinctSafeMessages()
+    {
+        Assert.Equal(IntroUploadError.StorageUnavailable, IntroUploadDiagnostics.Classify(new UnauthorizedAccessException("C:\\private")));
+        Assert.Equal(IntroUploadError.StorageUnavailable, IntroUploadDiagnostics.Classify(new IOException("C:\\private")));
+        Assert.Equal(IntroUploadError.StreamInterrupted, IntroUploadDiagnostics.Classify(new IntroUploadException(IntroUploadError.StreamInterrupted, "C:\\private")));
+        Assert.DoesNotContain("C:\\private", IntroUploadDiagnostics.Message(IntroUploadError.StorageUnavailable, 1));
+        Assert.DoesNotContain("C:\\private", IntroUploadDiagnostics.Message(IntroUploadError.StreamInterrupted, 1));
     }
 
     [Fact]
