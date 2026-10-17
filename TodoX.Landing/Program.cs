@@ -205,5 +205,7 @@ app.MapPost("/api/contact-leads", async (
     }
 }).RequireRateLimiting("contact-leads");
 
+// Serve the marketing deep link as its own document, including on refresh.
+app.MapGet("/bat-dong-san", () => Results.File(Path.Combine(app.Environment.WebRootPath, "bat-dong-san.html"), "text/html; charset=utf-8"));
 app.MapFallbackToFile("index.html");
 app.Run();
