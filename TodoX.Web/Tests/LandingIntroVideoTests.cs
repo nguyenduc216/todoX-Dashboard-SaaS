@@ -94,14 +94,41 @@ public sealed class LandingIntroVideoTests
         Assert.True(LandingIntroVideoMediaService.HasValidHeader(".webm", [0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
     }
 
-    [Theory]
-    [InlineData(".mp4")]
-    [InlineData(".webm")]
-    public void TranscodeNeverOverwritesInput(string extension)
+    [Fact]
+    public async Task OriginalVideoBytesAreCopiedWithoutModification()
     {
-        var (source, output) = LandingIntroVideoMediaService.GetTemporaryPaths("temp", "123", extension);
-        Assert.NotEqual(source, output);
-        Assert.EndsWith("-encoded.mp4", output);
+        var bytes = new byte[4096];
+        Random.Shared.NextBytes(bytes);
+        var path = Path.Combine(Path.GetTempPath(), $"intro-video-test-{Guid.NewGuid():N}.mp4");
+        try
+        {
+            await LandingIntroVideoMediaService.CopyOriginalAsync(new MemoryStream(bytes), path);
+            Assert.Equal(System.Security.Cryptography.SHA256.HashData(bytes),
+                System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path)));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task FailedCopyDoesNotReplaceExistingVideo()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"intro-video-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        var active = Path.Combine(folder, "active.mp4");
+        var incoming = Path.Combine(folder, "incoming.mp4");
+        await File.WriteAllBytesAsync(active, [1, 2, 3]);
+        try
+        {
+            await Assert.ThrowsAsync<IOException>(() => LandingIntroVideoMediaService.CopyOriginalAsync(new ThrowingStream(), incoming));
+            Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(active));
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    private sealed class ThrowingStream : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.FromException<int>(new IOException("Simulated upload failure"));
     }
 
     [Fact]

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Services.SharedMedia;
@@ -21,50 +20,29 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         Directory.CreateDirectory(temp);
         Directory.CreateDirectory(destination);
         var token = Guid.NewGuid().ToString("N");
-        var (source, output) = GetTemporaryPaths(temp, token, ext);
-        var transcode = settings.VideoTranscode;
-        var useFfmpeg = video && transcode.Enabled;
+        var source = Path.Combine(temp, token + ext);
         try
         {
-            await using (var stream = File.Create(source))
             await using (var input = file.OpenReadStream(limit))
-                await input.CopyToAsync(stream, ct);
+                await CopyOriginalAsync(input, source, ct);
             var header = new byte[16];
             await using (var stream = File.OpenRead(source)) _ = await stream.ReadAsync(header, ct);
             if (!HasValidHeader(ext, header)) throw new InvalidOperationException("Nội dung file không hợp lệ.");
-            if (useFfmpeg)
-            {
-                var psi = new ProcessStartInfo(transcode.FfmpegPath) { RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-                foreach (var arg in new[] { "-hide_banner", "-loglevel", "error", "-y", "-i", source, "-map", "0:v:0", "-map", "0:a?", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", transcode.Preset, "-crf", transcode.Crf.ToString(), "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-c:a", "aac", "-b:a", $"{transcode.AudioBitrateKbps}k", output }) psi.ArgumentList.Add(arg);
-                using var process = Process.Start(psi) ?? throw new InvalidOperationException("FFmpeg unavailable.");
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, transcode.TimeoutSeconds)));
-                var errors = process.StandardError.ReadToEndAsync(timeout.Token);
-                try { await process.WaitForExitAsync(timeout.Token); }
-                catch (OperationCanceledException)
-                {
-                    if (!process.HasExited) process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync();
-                    throw;
-                }
-                _ = await errors;
-                if (process.ExitCode != 0 || !File.Exists(output) || new FileInfo(output).Length == 0)
-                    throw new InvalidOperationException("Không thể xử lý video.");
-            }
-            var finalExtension = useFfmpeg ? ".mp4" : ext;
-            var filename = token + finalExtension;
-            File.Move(useFfmpeg ? output : source, Path.Combine(destination, filename));
+            var filename = token + ext;
+            File.Move(source, Path.Combine(destination, filename));
             return paths.GetIntroPublicUrl(folder, filename);
         }
         finally
         {
             if (File.Exists(source)) File.Delete(source);
-            if (File.Exists(output)) File.Delete(output);
         }
     }
 
-    public static (string Source, string Output) GetTemporaryPaths(string folder, string token, string extension)
-        => (Path.Combine(folder, token + extension), Path.Combine(folder, token + "-encoded.mp4"));
+    public static async Task CopyOriginalAsync(Stream input, string path, CancellationToken ct = default)
+    {
+        await using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await input.CopyToAsync(output, ct);
+    }
 
     public static void ValidateUpload(string name, string contentType, long size, bool video, long limit)
     {

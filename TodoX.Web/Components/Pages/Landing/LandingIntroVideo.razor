@@ -36,7 +36,7 @@
                     <MudText>Video hiện tại: @_settings.VideoUrl</MudText>
                     <video src="@_settings.VideoUrl" poster="@_settings.PosterUrl" controls playsinline preload="metadata" style="max-width:220px;max-height:390px;width:100%;object-fit:cover"></video>
                 }
-                <MudText>Chọn video MP4/WebM để thay thế (tối đa 200 MB theo cấu hình SharedMedia):</MudText>
+                <MudText>Chọn video MP4/WebM đã hoàn thiện, dùng codec tương thích trình duyệt (tối đa 200 MB theo cấu hình SharedMedia). Video được lưu nguyên bản, không chuyển mã:</MudText>
                 <InputFile OnChange="UploadVideoAsync" accept=".mp4,.webm,video/mp4,video/webm" disabled="@(!CanUpdate || _busy)" />
                 @if (!string.IsNullOrWhiteSpace(_settings.PosterUrl)) { <img src="@_settings.PosterUrl" alt="Poster" style="max-width:160px" /> }
                 <MudText>Chọn poster JPG/PNG/WebP:</MudText>
@@ -78,7 +78,7 @@
             else _settings.PosterUrl = url;
             Snackbar.Add("Upload thành công. Nhấn Lưu cấu hình để kích hoạt.", Severity.Success);
         }
-        catch (Exception) { _error = "Upload thất bại. Kiểm tra định dạng, dung lượng, FFmpeg và SharedMedia."; }
+        catch (Exception) { _error = "Upload thất bại. Kiểm tra định dạng, dung lượng và SharedMedia."; }
         finally { _busy = false; }
     }
 
