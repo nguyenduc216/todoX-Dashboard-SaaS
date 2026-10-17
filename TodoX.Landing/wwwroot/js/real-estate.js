@@ -22,6 +22,7 @@
   let state = 'poster';
   const setState = next => {
     state = next;
+    frame.classList.toggle('is-playing', next === 'playing');
     play.hidden = next === 'playing';
     const label = next === 'ended' ? 'Phát lại video' : next === 'paused' ? 'Tiếp tục video' : 'Phát video';
     play.setAttribute('aria-label', label);
@@ -34,14 +35,14 @@
   const start = (manual, resume = false) => {
     if (manual && !resume) video.muted = selectedMuted ?? !!settings.mutedByDefault;
     syncSound();
-    video.play().then(() => setState('playing')).catch(() => setState('poster'));
+    video.play().then(() => setState('playing')).catch(() => { hint.textContent = 'Video hiện chưa sẵn sàng. Vui lòng thử lại sau.'; setState('poster'); });
   };
   fetch('/api/landing/intro-video', { credentials: 'same-origin' })
     .then(response => { if (!response.ok) throw new Error('Video unavailable'); return response.json(); })
     .then(config => {
       if (!config.enabled || !validMedia(config.videoUrl) || !['AUTOPLAY_LOOP', 'AUTOPLAY_ONCE', 'CLICK_TO_PLAY'].includes(config.playbackMode)) return;
       settings = config;
-      if (validMedia(config.posterUrl)) { video.poster = config.posterUrl; frame.classList.add('has-poster'); }
+      if (validMedia(config.posterUrl)) { frame.style.setProperty('--intro-poster', `url("${config.posterUrl}")`); frame.classList.add('has-poster'); }
       video.loop = config.playbackMode === 'AUTOPLAY_LOOP';
       video.muted = true;
       video.preload = config.playbackMode === 'CLICK_TO_PLAY' ? 'none' : 'metadata';
@@ -51,6 +52,7 @@
       syncSound();
       play.addEventListener('click', () => start(true, state === 'paused'));
       video.addEventListener('click', () => { if (video.paused) start(true, state === 'paused'); else { video.pause(); setState('paused'); } });
+      video.addEventListener('pause', () => { if (!video.ended) setState('paused'); });
       sound.addEventListener('click', () => { video.muted = !video.muted; selectedMuted = video.muted; syncSound(); });
       fullscreen.addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen(); else if (frame.requestFullscreen) frame.requestFullscreen(); });
       video.addEventListener('volumechange', syncSound);
