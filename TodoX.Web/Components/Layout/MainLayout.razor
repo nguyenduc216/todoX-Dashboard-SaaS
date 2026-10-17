@@ -595,7 +595,7 @@
             list.Add(BuildAiAssetsGroup());
         }
 
-        if (!existingCodes.Contains("landing_contacts") || !existingCodes.Contains("landing_industries"))
+        if (!existingCodes.Contains("landing_contacts") || !existingCodes.Contains("landing_industries") || !existingCodes.Contains("landing_intro_video"))
         {
             list.Add(BuildLandingPageGroup(existingCodes));
         }
@@ -1057,6 +1057,16 @@
                 VisibilityPolicy = "always",
                 MatchAll = false,
                 SortOrder = 20
+            });
+        }
+
+        if (!existingCodes.Contains("landing_intro_video"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(), GroupId = groupId, Code = "landing_intro_video",
+                Title = "Video Intro", Href = "/landing/intro-video", IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(), VisibilityPolicy = "always", MatchAll = false, SortOrder = 30
             });
         }
 

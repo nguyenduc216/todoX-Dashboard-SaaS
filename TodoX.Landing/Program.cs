@@ -23,6 +23,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 builder.Services.AddSingleton<LandingConnectionFactory>();
 builder.Services.AddScoped<LandingContactRepository>();
 builder.Services.AddScoped<IndustrySolutionRepository>();
+builder.Services.AddScoped<IntroVideoRepository>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddRateLimiter(options =>
 {
@@ -139,6 +140,9 @@ app.MapGet("/health/ready", async (
 
 app.MapGet("/api/industry-solutions", async (IndustrySolutionRepository repository, CancellationToken ct) =>
     Results.Ok(await repository.ListPublicAsync(ct)));
+
+app.MapGet("/api/landing/intro-video", async (IntroVideoRepository repository, CancellationToken ct) =>
+    Results.Ok(await repository.GetPublicAsync(ct)));
 
 app.MapPost("/api/contact-leads", async (
     HttpContext http,

@@ -25,7 +25,7 @@
   <link rel="stylesheet" href="vendor/swiper/swiper-bundle.min.css">
   <link rel="stylesheet" href="vendor/aos/aos.css">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
-  <link rel="stylesheet" href="css/landing.css?v=20260811-5">
+  <link rel="stylesheet" href="css/landing.css?v=20261017-1">
   <script async src="https://chat-api.genstaff.net/widget/chatstaff-widget.js" data-channel-key="wlc_Z1RU-uztGV-CChNMsOyMOS1N2eN8Gpyb" data-lang="vi"></script>
   <script type="application/ld+json">
   {
@@ -88,7 +88,9 @@
           <div class="orbit"></div>
           <div class="phone">
             <div class="phone-screen">
-              <button class="play" aria-label="Phát video"><i class="fa-solid fa-play"></i></button>
+              <video class="intro-video" playsinline webkit-playsinline preload="none" aria-label="Video giới thiệu TodoX"></video>
+              <button class="play" type="button" aria-label="Phát video"><i class="fa-solid fa-play"></i></button>
+              <button class="intro-sound" type="button" aria-label="Bật tiếng" hidden>🔇</button>
               <div class="phone-content">
                 <span class="mini-tag">CHUYÊN GIA AI</span>
                 <h3>Xây kênh triệu view chuyển đổi cao bằng Video AI</h3>
@@ -403,6 +405,7 @@
   <script src="vendor/tsparticles/tsparticles.bundle.min.js" defer></script>
   <script src="vendor/swiper/swiper-bundle.min.js" defer></script>
   <script src="vendor/aos/aos.js" defer></script>
-  <script src="js/landing.js?v=20260811-2" defer></script>
+<script src="js/landing.js?v=20260811-2" defer></script>
+<script src="js/landing-intro-video.js?v=20261017-1" defer></script>
 </body>
 </html>
