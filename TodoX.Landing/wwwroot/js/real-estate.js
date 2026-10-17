@@ -42,7 +42,12 @@
     .then(config => {
       if (!config.enabled || !validMedia(config.videoUrl) || !['AUTOPLAY_LOOP', 'AUTOPLAY_ONCE', 'CLICK_TO_PLAY'].includes(config.playbackMode)) return;
       settings = config;
-      if (validMedia(config.posterUrl)) { frame.style.setProperty('--intro-poster', `url("${config.posterUrl}")`); frame.classList.add('has-poster'); }
+      if (validMedia(config.posterUrl)) {
+        const poster = new Image();
+        poster.onload = () => { frame.style.setProperty('--intro-poster', `url("${config.posterUrl}")`); frame.classList.add('has-poster'); };
+        poster.onerror = () => { frame.classList.remove('has-poster'); frame.style.removeProperty('--intro-poster'); };
+        poster.src = config.posterUrl;
+      }
       video.loop = config.playbackMode === 'AUTOPLAY_LOOP';
       video.muted = true;
       video.preload = config.playbackMode === 'CLICK_TO_PLAY' ? 'none' : 'metadata';
