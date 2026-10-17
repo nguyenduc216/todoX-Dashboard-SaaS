@@ -26,7 +26,7 @@ public sealed class IntroVideoRepository(LandingConnectionFactory db, ILogger<In
                        playback_mode as PlaybackMode, muted_by_default as MutedByDefault,
                        show_controls as ShowControls from landing.intro_video_settings where id = 1
                 """, cancellationToken: ct));
-            if (row is null || row.PlaybackMode is not ("AUTOPLAY_LOOP" or "CLICK_TO_PLAY" or "AUTOPLAY_ONCE")
+            if (row is null || !row.Enabled || row.PlaybackMode is not ("AUTOPLAY_LOOP" or "CLICK_TO_PLAY" or "AUTOPLAY_ONCE")
                 || string.IsNullOrWhiteSpace(row.VideoUrl) || !ValidUrl(row.VideoUrl, "videos"))
                 return new();
             if (row.PosterUrl is not null && !ValidUrl(row.PosterUrl, "posters")) row.PosterUrl = null;

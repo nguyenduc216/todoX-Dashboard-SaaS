@@ -93,4 +93,30 @@ public sealed class LandingIntroVideoTests
         Assert.True(LandingIntroVideoMediaService.HasValidHeader(".mp4", mp4));
         Assert.True(LandingIntroVideoMediaService.HasValidHeader(".webm", [0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
     }
+
+    [Theory]
+    [InlineData(".mp4")]
+    [InlineData(".webm")]
+    public void TranscodeNeverOverwritesInput(string extension)
+    {
+        var (source, output) = LandingIntroVideoMediaService.GetTemporaryPaths("temp", "123", extension);
+        Assert.NotEqual(source, output);
+        Assert.EndsWith("-encoded.mp4", output);
+    }
+
+    [Fact]
+    public void UnauthenticatedAdministratorCannotWrite()
+    {
+        Assert.Throws<UnauthorizedAccessException>(() => LandingIntroVideoWriteAccess.Demand(new CurrentUserSession
+        {
+            Role = TodoXUserRole.Admin, Permissions = [LandingIndustryPermissions.Update]
+        }));
+    }
+
+    [Theory]
+    [InlineData("/media/landing/intro/videos/0123456789abcdef0123456789abcdef.mp4?x=1")]
+    [InlineData("/media/landing/intro/videos/0123456789abcdef0123456789abcdef.mp4/../../secret")]
+    [InlineData("//evil.example/media/landing/intro/videos/0123456789abcdef0123456789abcdef.mp4")]
+    public void MediaUrlCannotContainQueryOrTraversal(string url)
+        => Assert.Throws<ArgumentException>(() => LandingIntroVideoRepository.Validate(new LandingIntroVideoSettings { VideoUrl = url }));
 }

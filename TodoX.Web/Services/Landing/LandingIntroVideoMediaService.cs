@@ -21,8 +21,7 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         Directory.CreateDirectory(temp);
         Directory.CreateDirectory(destination);
         var token = Guid.NewGuid().ToString("N");
-        var source = Path.Combine(temp, token + ext);
-        var output = Path.Combine(temp, token + ".mp4");
+        var (source, output) = GetTemporaryPaths(temp, token, ext);
         var transcode = settings.VideoTranscode;
         var useFfmpeg = video && transcode.Enabled;
         try
@@ -41,7 +40,13 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, transcode.TimeoutSeconds)));
                 var errors = process.StandardError.ReadToEndAsync(timeout.Token);
-                await process.WaitForExitAsync(timeout.Token);
+                try { await process.WaitForExitAsync(timeout.Token); }
+                catch (OperationCanceledException)
+                {
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                    throw;
+                }
                 _ = await errors;
                 if (process.ExitCode != 0 || !File.Exists(output) || new FileInfo(output).Length == 0)
                     throw new InvalidOperationException("Không thể xử lý video.");
@@ -57,6 +62,9 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
             if (File.Exists(output)) File.Delete(output);
         }
     }
+
+    public static (string Source, string Output) GetTemporaryPaths(string folder, string token, string extension)
+        => (Path.Combine(folder, token + extension), Path.Combine(folder, token + "-encoded.mp4"));
 
     public static void ValidateUpload(string name, string contentType, long size, bool video, long limit)
     {
