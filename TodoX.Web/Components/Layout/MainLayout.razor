@@ -595,10 +595,7 @@
             list.Add(BuildAiAssetsGroup());
         }
 
-        if (!existingCodes.Contains("landing_contacts") || !existingCodes.Contains("landing_industries") || !existingCodes.Contains("landing_intro_video"))
-        {
-            list.Add(BuildLandingPageGroup(existingCodes));
-        }
+        LandingPageMenuMerge.Merge(list, BuildLandingPageGroup(existingCodes));
 
         if (!existingCodes.Contains("customer_create_video") || !existingCodes.Contains("customer_jobs"))
         {
