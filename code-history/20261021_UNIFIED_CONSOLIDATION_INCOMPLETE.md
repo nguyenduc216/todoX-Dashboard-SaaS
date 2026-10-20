@@ -1,0 +1,7 @@
+# Unified consolidation checkpoint (incomplete)
+
+- Baseline: `1af791f5dd6ff8bfed92798450c0bd00c68cb8a8` (`fix/video-rerender-release`). This baseline retains the RVideo V2 pages, video submit-intent guard, operator SQL package and the previously completed Prompt Assistant fixes; `origin/main` deletes V2 pages.
+- Added the tracked `TodoX.Landing` tree from `feature/real-estate-landing-page` at `4e655d25ea599c7e5f73b4250e2e1a45fcfca0e0`, including `/bat-dong-san`, landing intro and static tests. This does not include uncommitted changes in that worktree.
+- Not integrated: dirty image-rerender changes (service and UI patches do not apply cleanly to the video baseline); dirty Video Showcase changes (PostgreSQL schema/operator approval pending). Neither feature is approved for production activation by this checkpoint.
+- No production database SQL was executed; no worker was enabled. Existing video submit-intent migration preflight remains mandatory. Existing SceneVideo test baseline includes three known failures and must not be presented as fully passing.
+- This is a source checkpoint, NOT an approved unified release or merge-ready PR. Resolve image/video semantic overlaps and showcase schema gates before release.
