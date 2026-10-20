@@ -3,6 +3,7 @@ using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 using Microsoft.Extensions.Logging;
+using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
 
@@ -1187,5 +1188,137 @@ public sealed class VideoRenderRepository
             """,
             new { tenant = _tenant.TenantId });
         return jobs.ToList();
+    }
+
+    public async Task<HashSet<long>> ListManualReviewSceneIdsAsync(long projectId, IReadOnlyCollection<long> sceneIds, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<long>(
+            """
+            SELECT DISTINCT v.scene_id
+              FROM video_render.scene_video_versions v
+              JOIN render.render_jobs j ON j.id=v.render_job_id AND j.tenant_id=v.tenant_id
+             WHERE v.tenant_id=@tenant AND v.project_id=@projectId
+               AND v.scene_id=ANY(@sceneIds)
+               AND j.job_type='render_scene_video'
+               AND j.status='pending_reconciliation'
+               AND (j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
+                    OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt');
+            """, new { tenant = _tenant.TenantId, projectId, sceneIds = sceneIds.ToArray() });
+        return rows.ToHashSet();
+    }
+
+    // An ambiguous submit cannot be polled without both identifiers. Escalate once,
+    public async Task<bool> HasSceneVideoManualReviewAsync(long projectId, long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM video_render.video_project_scenes s
+                JOIN render.render_jobs j ON j.tenant_id=s.tenant_id
+                 AND j.job_type='render_scene_video'
+                 AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=s.id::text
+                WHERE s.id=@sceneId AND s.project_id=@projectId AND s.tenant_id=@tenant
+                  AND j.status='pending_reconciliation'
+                  AND (j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
+                       OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'));
+            """, new { projectId, sceneId, tenant = _tenant.TenantId });
+    }
+
+    // An ambiguous submit cannot be polled without both identifiers. Escalate once,
+    // without changing the job status, version identifiers or billing reservation.
+    public async Task<int> EscalateUnidentifiedSceneVideoJobsAsync(TimeSpan timeout, string workerIdentity, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var candidates = (await conn.QueryAsync<(Guid Id, long SceneId)>(
+            """
+            SELECT j.id AS Id, v.scene_id AS SceneId
+              FROM render.render_jobs j
+              JOIN video_render.scene_video_versions v ON v.render_job_id=j.id AND v.tenant_id=j.tenant_id
+             WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
+               AND j.status='pending_reconciliation'
+               AND j.updated_at <= now() - (@timeoutSeconds * interval '1 second')
+               AND (NULLIF(btrim(v.provider_task_id), '') IS NULL
+                    OR NULLIF(btrim(v.provider_video_id_base), '') IS NULL)
+             ORDER BY v.scene_id, j.id;
+            """, new { tenant = _tenant.TenantId, timeoutSeconds = Math.Max(1, (long)timeout.TotalSeconds) })).ToList();
+        var count = 0;
+        foreach (var candidate in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var tx = conn.BeginTransaction();
+            // Always acquire the scene advisory lock before the scene row and render job row.
+            await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+                new { lockName = RenderJobService.BuildSceneJobLockName(RenderJobTypes.RenderSceneVideo, candidate.SceneId) }, tx);
+            var owned = await conn.ExecuteScalarAsync<bool>(
+                """
+                SELECT EXISTS (SELECT 1 FROM video_render.video_project_scenes s
+                    JOIN video_render.video_projects p ON p.id=s.project_id AND p.tenant_id=s.tenant_id
+                    WHERE s.id=@sceneId AND s.tenant_id=@tenant);
+                """, new { sceneId = candidate.SceneId, tenant = _tenant.TenantId }, tx);
+            if (!owned) { tx.Commit(); continue; }
+            count += await conn.QuerySingleAsync<int>(
+            """
+            WITH eligible AS (
+                SELECT j.id, v.project_id, v.scene_id, v.id AS version_id,
+                       j.input_json->>'logicalRequestId' AS logical_request_id,
+                       j.status AS previous_status
+                  FROM render.render_jobs j
+                  JOIN LATERAL (
+                      SELECT v.project_id, v.scene_id, v.id, v.provider_task_id, v.provider_video_id_base
+                        FROM video_render.scene_video_versions v
+                       WHERE v.render_job_id=j.id AND v.tenant_id=j.tenant_id
+                       ORDER BY v.version_number DESC LIMIT 1
+                  ) v ON true
+                 WHERE j.tenant_id=@tenant
+                    AND j.id=@jobId
+                    AND v.scene_id=@sceneId
+                   AND j.job_type='render_scene_video'
+                    AND NULLIF(btrim(j.provider_task_id), '') IS NULL
+                    AND NULLIF(btrim(j.provider_video_id_base), '') IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM render.scene_video_submit_intents i
+                        WHERE i.tenant_id=j.tenant_id AND i.scene_id=v.scene_id
+                          AND i.submit_state='CONFIRMED_PROVIDER_TASK')
+                   AND j.status='pending_reconciliation'
+                   AND NOT (COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt')
+                   AND (NULLIF(btrim(v.provider_task_id), '') IS NULL
+                        OR NULLIF(btrim(v.provider_video_id_base), '') IS NULL)
+                   AND j.updated_at <= now() - (@timeoutSeconds * interval '1 second')
+                   AND (j.lock_until IS NULL OR j.lock_until <= now())
+                 FOR UPDATE OF j SKIP LOCKED
+            ), changed AS (
+                UPDATE render.render_jobs j
+                   SET input_json=jsonb_set(COALESCE(j.input_json, '{}'::jsonb),
+                                           '{sceneVideoManualReviewAt}', to_jsonb(now()), true),
+                       error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED',
+                       error_message='Provider submit outcome is ambiguous; manual reconciliation required before retry.',
+                       updated_at=now()
+                  FROM eligible e
+                 WHERE j.id=e.id AND j.status='pending_reconciliation'
+                 RETURNING j.id, j.tenant_id
+            ), events AS (
+                INSERT INTO video_render.video_project_events
+                    (project_id, tenant_id, event_type, level, message, data_json, created_at)
+                SELECT e.project_id, c.tenant_id, 'RVIDEO_VIDEO_MANUAL_REVIEW_REQUIRED', 'warning',
+                       'Ambiguous scene video submit requires manual reconciliation.',
+                       jsonb_build_object('renderJobId', c.id, 'sceneId', e.scene_id,
+                           'sceneVideoVersionId', e.version_id,
+                           'logicalRequestId', e.logical_request_id,
+                           'previousStatus', e.previous_status, 'newStatus', 'pending_reconciliation',
+                           'reason', 'missing_provider_identifier_after_timeout',
+                           'workerIdentity', @workerIdentity, 'escalatedAt', now()), now()
+                  FROM changed c JOIN eligible e ON e.id=c.id
+                RETURNING 1
+            )
+            SELECT count(*) FROM events;
+            """,
+            new { tenant = _tenant.TenantId, jobId = candidate.Id, sceneId = candidate.SceneId,
+                timeoutSeconds = Math.Max(1, (long)timeout.TotalSeconds), workerIdentity }, tx);
+            tx.Commit();
+        }
+        return count;
     }
 }

@@ -224,6 +224,7 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoJobService, Tod
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoProjectFinalizationService, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoRenderAction, TodoX.Web.Services.VideoRender.RVideoSceneVideoRenderAction>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoRecoveryService, TodoX.Web.Services.VideoRender.RVideoSceneVideoRecoveryService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideo79AiVideoService, TodoX.Web.Services.VideoRender.RVideo79AiVideoService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoProviderRoutingService, TodoX.Web.Services.VideoRender.VideoProviderRoutingService>();
@@ -254,6 +255,7 @@ builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.Sce
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneAudioRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneAudioMuxHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.SceneVideoSubmitCoordinator>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
 builder.Services.AddScoped<IRVideoInitialPointEstimateService, RVideoInitialPointEstimateService>();
 builder.Services.AddScoped<IRVideoSceneVideoAutoChainService, RVideoSceneVideoAutoChainService>();

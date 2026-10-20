@@ -71,7 +71,8 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
                     errorCode = result.ErrorCode,
                     triggerSource
                 }, ct);
-            if (result.Status == VideoRenderEligibilityStatus.AlreadyActive)
+            if (result.Status == VideoRenderEligibilityStatus.AlreadyActive
+                && result.ErrorCode != SceneVideoManualReview.ErrorCode)
             {
                 await _repo.UpdateSceneAsync(sceneId, VideoSceneStatuses.VideoQueued,
                     errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt,
