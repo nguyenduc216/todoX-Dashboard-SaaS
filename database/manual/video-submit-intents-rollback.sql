@@ -1,0 +1,5 @@
+-- Operator only. NEVER run while coordinator-enabled workers are active.
+-- Export and reconcile all rows (especially SUBMIT_IN_FLIGHT/AMBIGUOUS_SUBMIT)
+-- against provider records before removal. Dropping guard rows can cause duplicate submits.
+-- After all workers are stopped and reconciled, run the following manually:
+-- DROP TABLE render.scene_video_submit_intents;

@@ -322,7 +322,10 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     {
         var eligibility = await _eligibility.GetVideoRenderEligibilityAsync(project.Id, new[] { scene.Id }, ct);
         var sceneEligibility = eligibility.Results.FirstOrDefault();
-        if (sceneEligibility is not null && sceneEligibility.Status != VideoRenderEligibilityStatus.Eligible)
+        if (sceneEligibility is not null
+            && sceneEligibility.Status != VideoRenderEligibilityStatus.Eligible
+            && !(input.BillingIntent == PointBillingIntent.UserRerender
+                 && sceneEligibility.Status == VideoRenderEligibilityStatus.AlreadyCompleted))
         {
             await _repo.AddProjectEventAsync(project.Id,
                 sceneEligibility.Status switch

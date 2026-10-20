@@ -1081,7 +1081,7 @@ else
 
                                                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
 
-                                                               Disabled="@(_sceneVideoRetrying.Contains(scene.Id) || (!CanCreateSceneVideo(scene, draft) && !CanRetrySceneVideo(scene)))"
+                                                               Disabled="@(_sceneVideoRetrying.Contains(scene.Id) || !CanRerenderSceneVideo(scene, draft))"
 
                                                                OnClick="@(() => RerenderSceneVideoAsync(scene))">
 
@@ -1614,6 +1614,15 @@ else
     private int _aiCustomDuration = 12;
 
     private bool _aiPromptCreativeMode;
+
+    private bool _creativeModeDirty;
+
+    private long? _creativeModeProjectId;
+
+    private void OnCreativeModeChanged()
+    {
+        _creativeModeDirty = true;
+    }
 
     private string _characterPrompt = string.Empty;
 
@@ -4605,6 +4614,17 @@ else
 
            && IsSceneVideoPromptValid(scene, draft);
 
+    private bool CanRerenderSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
+        => !HasActiveSceneVideoJob(scene.Id)
+           && !string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
+           && (CanCreateSceneVideo(scene, draft) || CanRetrySceneVideo(scene)
+               || (HasCompletedVideoVersion(scene)
+                   && (!string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) || (_useReferenceImageForAllScenes && HasSharedReferenceImage))
+                   && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
+                   && HasProjectAspectRatio && HasProjectResolution
+                   && _defaultImageToVideoProvider is not null
+                   && IsSceneVideoPromptValid(scene, draft)));
+
     private bool CanRetrySceneVideo(VideoProjectSceneDto scene)
 
     {
@@ -4864,6 +4884,8 @@ else
         _aiPromptInput = string.Empty;
 
         _aiPromptCreativeMode = false;
+        _creativeModeDirty = false;
+        _creativeModeProjectId = null;
 
         _aiDuration = 8;
 
@@ -6892,6 +6914,9 @@ else
 
             await RVideoSettings.SaveAsync(_project.Id, settingsRequest);
 
+            if (_creativeModeProjectId == _project.Id && _aiPromptCreativeMode == settingsRequest.CreativeMode)
+                _creativeModeDirty = false;
+
             if (_jobId is Guid jobId)
 
             {
@@ -6961,6 +6986,8 @@ else
         => new()
 
         {
+
+            CreativeMode = _aiPromptCreativeMode,
 
             ExecutionMode = _executionMode,
 
@@ -7079,6 +7106,18 @@ else
         {
 
             var settings = await RVideoSettings.GetAsync(projectId);
+
+            if (_project?.Id != projectId)
+                return;
+
+            if (_creativeModeProjectId != projectId)
+            {
+                _creativeModeProjectId = projectId;
+                _creativeModeDirty = false;
+            }
+
+            if (!_creativeModeDirty)
+                _aiPromptCreativeMode = settings?.CreativeMode ?? false;
 
             _executionMode = RVideoRules.NormalizeExecutionMode(settings?.ExecutionMode);
 
@@ -9924,7 +9963,7 @@ else
 
         {
 
-            if (!CanCreateSceneVideo(scene, draft))
+            if (!CanRerenderSceneVideo(scene, draft))
 
             {
 

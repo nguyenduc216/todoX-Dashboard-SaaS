@@ -920,6 +920,20 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void SceneVideoSubmitIntentAllowsCompletedTaskAndExplicitlyRejectedFallbackOnly()
+    {
+        var coordinator = ReadRepoFile("Services", "VideoRender", "SceneVideoSubmitCoordinator.cs");
+        Assert.Contains("i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status='completed'", coordinator);
+        Assert.Contains("i.submit_state='CONFIRMED_NO_TASK' AND i.render_job_id=@jobId", coordinator);
+        Assert.Contains("SUBMIT_IN_FLIGHT", coordinator);
+        Assert.Contains("AMBIGUOUS_SUBMIT", coordinator);
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        Assert.Contains("ClaimSubmitAsync", worker);
+        Assert.Contains("BeginSubmitAsync", worker);
+        Assert.Contains("Provider submission outcome requires reconciliation before retry.", worker);
+    }
+
+    [Fact]
     public void RVideoSubmitFailureClassifiesExplicitDurationRejectionForDurationFallback()
     {
         var exception = new Ai79TaskSubmitException(
@@ -2851,7 +2865,7 @@ public sealed class RVideoVideoHotfixTests
 
         return new SceneMediaVersioningService(
             new TodoXConnectionFactory(configuration),
-            new TenantContext(new TodoXConnectionFactory(configuration), configuration));
+            new TenantContext(new TodoXConnectionFactory(configuration), configuration), configuration);
     }
 
     private static string ReadRepoFile(params string[] parts)

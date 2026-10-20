@@ -7,6 +7,7 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SceneVideoReconciliationWorker> _logger;
+    private readonly string _workerIdentity = $"{Environment.MachineName}-scene-video-review-{Guid.NewGuid():N}";
 
     public SceneVideoReconciliationWorker(
         IServiceScopeFactory scopeFactory,
@@ -37,6 +38,12 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
                 await tenant.EnsureLoadedAsync(stoppingToken);
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
+                var escalated = await repository.EscalateUnidentifiedSceneVideoJobsAsync(
+                    TimeSpan.FromMinutes(Math.Max(1, _configuration.GetValue("VideoRender:UnidentifiedSubmitReviewMinutes", 60))),
+                    _workerIdentity,
+                    stoppingToken);
+                if (escalated > 0)
+                    _logger.LogWarning("Scene video ambiguous submissions requiring manual reconciliation: {Count}", escalated);
                 await SchedulePersistentJobsAsync(
                     await repository.ListPersistentSceneVideoReconciliationJobsAsync(stoppingToken),
                     jobs,

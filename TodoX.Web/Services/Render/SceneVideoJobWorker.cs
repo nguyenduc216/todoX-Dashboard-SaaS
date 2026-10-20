@@ -72,8 +72,7 @@ public sealed class SceneVideoJobWorker : BackgroundService
                         throw new RenderJobTerminalFailureException("Render job attempt budget exceeded.");
                     }
 
-                    await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Rendering, ct: stoppingToken);
-                    await dispatcher.DispatchAsync(job, stoppingToken);
+                    await DispatchClaimAsync(jobs, dispatcher, job, workerKey, stoppingToken);
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Completed, ct: stoppingToken);
                 }
                 catch (RenderJobPendingReconciliationException ex)
@@ -87,6 +86,11 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 {
                     await jobs.AddEventAsync(job.Id, "JOB_DEFERRED", ex.Message,
                         new { job.AttemptCount, job.MaxAttempts }, "info", stoppingToken);
+                }
+                catch (InvalidOperationException ex) when (ex.Message is "RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED" or "RVIDEO_JOB_STATUS_REJECTED" or "RVIDEO_JOB_SCENE_IDENTITY_REQUIRED" or "RVIDEO_JOB_CALLER_OWNERSHIP_LOST")
+                {
+                    var quarantined = await QuarantineRejectedClaimAsync(jobs, job, workerKey, ex.Message, stoppingToken);
+                    _logger.LogWarning("Scene video rejected jobId={JobId} attempt={AttemptCount} reason={Reason} quarantined={Quarantined}; dispatch and retry skipped.", job.Id, job.AttemptCount, ex.Message, quarantined);
                 }
                 catch (RenderJobTerminalFailureException ex)
                 {
@@ -129,6 +133,17 @@ public sealed class SceneVideoJobWorker : BackgroundService
             }
         }
     }
+
+    internal static async Task DispatchClaimAsync(IRenderJobService jobs, IRenderJobDispatcher dispatcher,
+        RenderJobDto job, string workerKey, CancellationToken ct)
+    {
+        await jobs.MarkSceneVideoClaimRenderingAsync(job, workerKey, ct);
+        await dispatcher.DispatchAsync(job, ct);
+    }
+
+    internal static Task<bool> QuarantineRejectedClaimAsync(IRenderJobService jobs, RenderJobDto job,
+        string workerKey, string reason, CancellationToken ct)
+        => jobs.QuarantineRejectedSceneVideoClaimAsync(job, workerKey, reason, ct);
 
     private static async Task AddAi79SubmitDiagnosticsAsync(
         IRenderJobService jobs,

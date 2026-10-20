@@ -6,6 +6,8 @@
 @inject IRVideoSceneCollectionAction SceneCollection
 @inject IRVideoSceneVideoModelOptionsService ModelOptions
 @inject IRVideoSceneAddDefaultResolver AddDefaults
+@inject IRVideoSceneVideoRenderAction SceneVideoRender
+@inject ISceneMediaVersioningService SceneVersions
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @implements IDisposable
@@ -107,6 +109,7 @@ else{<span>Chưa có</span>}
 <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleRerenderVideoAsync(s))" Disabled="@_busy">Tạo lại video</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,-1))" Disabled="@(s.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,1))" Disabled="@(s.SceneIndex>=JobView.Project.Scenes.Count || _busy)">Xuống</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleDeleteAsync(s))" Disabled="@_busy">Xóa</MudMenuItem>
@@ -139,6 +142,7 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
 <div class="d-flex gap-1 mt-2">
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))">Chỉnh</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleSaveAsync(ActiveScene!))" Disabled="@_busy">Lưu</MudButton>
+<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(()=>HandleRerenderVideoAsync(ActiveScene!))" Disabled="@_busy">Tạo lại video</MudButton>
 <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" /><MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" />
 </div>
 </div>}
@@ -330,6 +334,34 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
  meta.Extra["video_model"]=opt.Key;
  meta.Extra["video_duration"]=dur.ToString();
  await DoSaveAsync(scene, meta, dur);
+}
+async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
+{
+ if(JobView is null || AuthState.CurrentUser is null || !await _gate.WaitAsync(0)) return;
+ _busy = true;
+ try
+ {
+  var user = AuthState.CurrentUser;
+  var versions = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, user);
+  if(versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault()?.Status == "pending_reconciliation")
+  { Snackbar.Add("Lần gửi trước cần đối soát thủ công; không tạo video mới.", Severity.Warning); return; }
+  var latest = versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault();
+  var request = new RVideoSceneVideoRenderRequest(JobView.Project.Id, scene, ScenePromptMetadata.FromScene(scene), JobView.CoreJob.ServiceId,
+   latest?.Id, latest?.RenderJobId);
+  var estimate = await SceneVideoRender.EstimateAsync(request);
+  if(!estimate.CanStart)
+  { Snackbar.Add("Không đủ điểm hoặc không thể ước tính chi phí video.", Severity.Warning); return; }
+  var confirm = await DialogService.ShowMessageBoxAsync("Render lại video",
+   $"Scene {scene.SceneIndex:00}: {estimate.EstimatedPoints:0.##} điểm; hiện có {estimate.AvailablePoints:0.##} điểm.",
+   yesText: "Xác nhận render lại", cancelText: "Hủy");
+  if(confirm != true) return;
+  var result = await SceneVideoRender.EnqueueRerenderAsync(request, user);
+  if(!result.Success) { Snackbar.Add(result.ErrorMessage ?? "Không thể render lại video.", Severity.Error); return; }
+  Snackbar.Add(result.AlreadyActive ? "Scene đang có job video." : "Đã gửi render lại video.", result.AlreadyActive ? Severity.Info : Severity.Success);
+  if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+ }
+ catch(Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+ finally { _busy = false; _gate.Release(); }
 }
 public void Dispose(){ _gate.Dispose(); }
 }

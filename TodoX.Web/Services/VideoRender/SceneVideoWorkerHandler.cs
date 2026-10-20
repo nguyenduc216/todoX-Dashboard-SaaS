@@ -171,6 +171,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
     private const string PollResourceUnavailableNoProgressFailureClassification = "POLL_RESOURCE_UNAVAILABLE_NO_PROGRESS";
 
     private readonly VideoRenderRepository _repo;
+    private readonly SceneVideoSubmitCoordinator _submitCoordinator;
     private readonly ISceneMediaVersioningService _versions;
     private readonly IAiImageBillingService _billing;
     private readonly IAiProviderService _providers;
@@ -192,6 +193,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
     public SceneVideoWorkerHandler(
         VideoRenderRepository repo,
+        SceneVideoSubmitCoordinator submitCoordinator,
         ISceneMediaVersioningService versions,
         IAiImageBillingService billing,
         IAiProviderService providers,
@@ -210,6 +212,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         ILogger<SceneVideoWorkerHandler> logger)
     {
         _repo = repo;
+        _submitCoordinator = submitCoordinator;
         _versions = versions;
         _billing = billing;
         _providers = providers;
@@ -714,6 +717,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 throw new RenderJobPendingReconciliationException("Missing provider_task_id for scene video reconciliation.");
             }
 
+            Guid? submitToken = null;
             if (string.IsNullOrWhiteSpace(taskId))
             {
                 await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoRendering,
@@ -774,6 +778,9 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId
                         }, ct);
+                    submitToken = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);
+                    if (submitToken is null || !await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))
+                        throw new RenderJobPendingReconciliationException(SceneVideoManualReview.Message);
                     var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
                         input.ProviderId,
                         input.ProviderCapabilityId,
@@ -792,24 +799,15 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     providerVideoIdBase = RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
                         ? (string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase) ? null : submit.ProviderVideoIdBase.Trim())
                         : providerTaskId;
+                    if (string.IsNullOrWhiteSpace(providerTaskId) || string.IsNullOrWhiteSpace(providerVideoIdBase))
+                    {
+                        await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
+                        throw new RenderJobPendingReconciliationException("Provider submit result requires manual reconciliation.");
+                    }
+                    if (!await _submitCoordinator.ConfirmSubmittedAsync(submitToken.Value, providerTaskId, providerVideoIdBase, CancellationToken.None))
+                        throw new RenderJobPendingReconciliationException("Provider submit intent could not be confirmed.");
                     taskId = providerVideoIdBase;
                     await _jobs.SetProviderIdentifiersAsync(job.Id, providerTaskId, providerVideoIdBase, ct);
-                    if (string.IsNullOrWhiteSpace(taskId))
-                    {
-                        await MarkPendingReconciliationAsync(
-                            input,
-                            version.Id,
-                            attemptLogicalRequestId,
-                            tariffSnapshot,
-                            "missing_video_id_base",
-                            "79AI accepted a provider task but did not return the id_base required for polling.",
-                            CancellationToken.None,
-                            null,
-                            policy.Model,
-                            providerVideoIdBase);
-                        throw new RenderJobPendingReconciliationException(
-                            "79AI accepted a provider task without the id_base required for polling.");
-                    }
 
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_SUCCESS", "info",
                         "Scene-video source image handoff completed.",
@@ -873,6 +871,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         && IsDefinitivelyRejectedSubmit(structuredException);
                     if (canFallback)
                     {
+                        // Only an explicitly rejected submit can release this attempt for fallback.
+                        // Keep the durable intent even after rejection so a restart cannot resubmit it.
+                        if (!await _submitCoordinator.ConfirmNoTaskAsync(submitToken.Value, CancellationToken.None))
+                            throw new RenderJobPendingReconciliationException("Submit intent ownership changed; manual reconciliation required.");
                         var ai79Exception = structuredException!;
                         var failureClassification = ClassifyRVideoSubmitFailure(ai79Exception);
                         var nextCandidate = ResolveNextCandidateAfterFailure(
@@ -1010,6 +1012,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             submitException.Message,
                             structuredException?.ErrorCode,
                             submitException);
+                    if (submitToken is { } ambiguousToken)
+                        await _submitCoordinator.MarkAmbiguousAsync(ambiguousToken, CancellationToken.None);
                     var diagnostics = BuildSubmitFailureDiagnostics(ex);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
                         "Scene-video provider submit did not complete.",
@@ -1058,8 +1062,19 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         "Video provider submit outcome is unknown; reconciliation is required before another submit.",
                         ex);
                 }
+                catch (OperationCanceledException) when (submitToken is not null)
+                {
+                    await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
+                    throw;
+                }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    if (submitToken is not null)
+                    {
+                        await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
+                        throw new RenderJobPendingReconciliationException(
+                            "Provider submission outcome requires reconciliation before retry.", ex);
+                    }
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_FAILED", "error",
                         "Scene-video source image handoff or provider submit failed.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name, imageInputMode = ResolveImageInputMode(input).ToString() }, CancellationToken.None);
@@ -1636,10 +1651,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         "SCENE_VIDEO_POLL_TRANSIENT", "Temporary provider poll failure; the same task ID will be retried.", CancellationToken.None);
                 }
                 else
-                {
-                    await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
-                        "SCENE_VIDEO_POLL_TRANSIENT", "Temporary provider poll failure before provider submission; application retry will resubmit.", CancellationToken.None);
-                }
+                    throw new RenderJobPendingReconciliationException(
+                        "Provider task identity is missing; manual reconciliation required before retry.", ex);
                 return;
             }
         }
@@ -1861,11 +1874,17 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     providerConfigJson: input.ProviderConfigJson,
                     capabilityConfigJson: input.CapabilityConfigJson);
 
+                var submitToken = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, input.LogicalRequestId, job.Id, ct);
+                if (submitToken is null || !await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))
+                    throw new RenderJobPendingReconciliationException(SceneVideoManualReview.Message);
                 var submit = await _tasks.SubmitAsync(payload, ct);
                 taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();
+                if (taskId is not null && !await _submitCoordinator.ConfirmSubmittedAsync(submitToken.Value, taskId, taskId, CancellationToken.None))
+                    throw new RenderJobPendingReconciliationException("Provider submit result requires manual reconciliation.");
                 if (string.IsNullOrWhiteSpace(taskId))
                 {
-                    throw new InvalidOperationException("Provider submit response is missing task_id.");
+                    await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
+                    throw new RenderJobPendingReconciliationException("Provider submit response is missing task_id; manual reconciliation required.");
                 }
 
                 await _versions.MarkSceneVideoVersionSubmittedAsync(
