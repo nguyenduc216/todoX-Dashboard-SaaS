@@ -7817,6 +7817,22 @@ else
 
                     billingOperationId = operationId }));
 
+            var existingJobId = await SceneVersions.FindImageRenderJobAsync(version.Id);
+            if (existingJobId is Guid existingId)
+            {
+                var existingJob = await RenderJobs.GetAsync(existingId);
+                if (existingJob?.Status == RenderJobStatuses.Draft)
+                {
+                    if (!await SceneVersions.TryActivateImageRenderJobAsync(version.Id, existingId))
+                        throw new InvalidOperationException("SCENE_IMAGE_JOB_ACTIVATION_UNKNOWN");
+                }
+                else if (existingJob?.Status is not (RenderJobStatuses.Queued or RenderJobStatuses.Rendering or RenderJobStatuses.Completed))
+                    throw new InvalidOperationException("SCENE_IMAGE_JOB_OUTCOME_UNKNOWN");
+                _sceneEventState[scene.Id] = RenderSceneImageVisualState.Queued;
+                await StartPolling();
+                return;
+            }
+
             await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
 
                 title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
@@ -7828,6 +7844,7 @@ else
             {
 
                 JobType = TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler.JobTypeName,
+                InitialStatus = RenderJobStatuses.Draft,
 
                 UserId = AuthState.CurrentUser.UserId,
 
@@ -7906,6 +7923,9 @@ else
                 PointStatus = RenderPointStatuses.NotRequired
 
             });
+
+            if (!await SceneVersions.TryActivateImageRenderJobAsync(version.Id, job.Id))
+                throw new InvalidOperationException("SCENE_IMAGE_JOB_ACTIVATION_UNKNOWN");
 
             _sceneEventState[scene.Id] = RenderSceneImageVisualState.Queued;
 

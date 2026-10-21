@@ -150,6 +150,7 @@ public sealed class SceneImageVersionDto
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
     public Guid? ResultMediaId { get; set; }
+    public Guid? RenderJobId { get; set; }
     public string? ImagePromptSnapshot { get; set; }
     public string? CompiledImagePromptSnapshot { get; set; }
     public string? VideoPromptSnapshot { get; set; }
@@ -164,6 +165,38 @@ public sealed class SceneImageVersionDto
     public decimal RefundedPoints { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// TODOX-20261015-RVIDEO-IMAGE-ATOMIC-ENQUEUE-001: minimal job row inserted in the same transaction as
+/// the queued scene-image version. The owning job service keeps authority over job semantics; this record
+/// only carries the columns required to create a draft row that the worker can later claim.
+/// </summary>
+public sealed record SceneImageJobDraft(
+    string JobType,
+    Guid? UserId,
+    Guid? CustomerId,
+    long? ProjectId,
+    string LogCode,
+    string Title,
+    string? ErrorCode,
+    string? ErrorMessage,
+    int MaxAttempts,
+    string InputJson,
+    string? PromptJson,
+    string? ReferenceJson);
+
+/// <summary>
+/// TODOX-20261015-RVIDEO-IMAGE-ATOMIC-ENQUEUE-001: outcome of the single-transaction image enqueue.
+/// <see cref="Version"/> and <see cref="RenderJobId"/> are both non-null only when the transaction committed.
+/// </summary>
+public sealed record SceneImageEnqueueOutcome(
+    bool AlreadyActive,
+    SceneImageVersionDto? Version,
+    Guid? RenderJobId)
+{
+    public static SceneImageEnqueueOutcome Active(SceneImageVersionDto? version) => new(true, version, version?.RenderJobId);
+    public static SceneImageEnqueueOutcome Created(SceneImageVersionDto version, Guid renderJobId) => new(false, version, renderJobId);
 }
 
 public sealed class SceneVideoVersionDto
@@ -312,6 +345,13 @@ public interface ISceneMediaVersioningService
 {
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
     Task<SceneImageVersionDto> CreateQueuedImageVersionAsync(SceneImageVersionCreateRequest request, CancellationToken ct = default);
+    /// <summary>
+    /// TODOX-20261015-RVIDEO-IMAGE-ATOMIC-ENQUEUE-001: creates the queued image version and its
+    /// <c>render_scene_image</c> job on one PostgreSQL connection/transaction, binds the FK and moves the
+    /// job from draft to queued, then commits once. Either everything lands or nothing does, so a retry
+    /// after an unknown outcome reconciles against a single durable state instead of a stranded version.
+    /// </summary>
+    Task<SceneImageEnqueueOutcome> CreateQueuedImageVersionWithJobAsync(SceneImageVersionCreateRequest request, SceneImageJobDraft jobDraft, CancellationToken ct = default);
     Task CompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
     Task<bool> TryCompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
     Task FailImageVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
@@ -323,6 +363,7 @@ public interface ISceneMediaVersioningService
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<bool> HasActiveImageVersionAsync(long sceneId, CancellationToken ct = default);
     Task<Guid?> FindImageRenderJobAsync(Guid versionId, CancellationToken ct = default);
+    Task<bool> TryActivateImageRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default);
     Task MarkImageEnqueueUnknownAsync(Guid versionId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectImageVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
@@ -450,7 +491,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """
             SELECT EXISTS (SELECT 1 FROM video_render.scene_image_versions
               WHERE project_id=@projectId AND scene_id=@sceneId AND tenant_id=@tenant
-                AND status IN ('queued','submitted','processing','pending_reconciliation'));
+                AND status IN ('queued','submitted','pending','processing','pending_reconciliation'));
             """,
             new { request.ProjectId, request.SceneId, tenant = _tenant.TenantId }, tx);
         if (active)
@@ -507,6 +548,158 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             Status = "queued",
             StorageKey = storageKey
         };
+    }
+
+    // TODOX-20261015-RVIDEO-IMAGE-ATOMIC-ENQUEUE-001:
+    // One connection + one transaction for: version INSERT, job-draft INSERT, FK bind and draft->queued.
+    // The intermediate state (version queued without a bound/activated job) is therefore unreachable, and a
+    // retry after an unknown commit reconciles against a single durable row instead of a stranded version.
+    public async Task<SceneImageEnqueueOutcome> CreateQueuedImageVersionWithJobAsync(
+        SceneImageVersionCreateRequest request, SceneImageJobDraft jobDraft, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+
+        await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId, _tenant.TenantId);
+
+        // 1. Idempotent lookup by logical request id (stable per user-initiated rerender attempt).
+        var existing = await conn.QuerySingleOrDefaultAsync<SceneImageVersionDto>(
+            SelectImageVersionSql + " WHERE logical_request_id=@logicalRequestId AND tenant_id=@tenant;",
+            new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
+        if (existing is not null)
+        {
+            // Already enqueued by this attempt: report the bound job so callers never double-enqueue.
+            var knownJobId = await conn.ExecuteScalarAsync<Guid?>(
+                """
+                SELECT id FROM render.render_jobs
+                 WHERE tenant_id=@tenant AND job_type='render_scene_image'
+                   AND input_json->>'imageVersionId'=@versionIdText
+                 ORDER BY created_at DESC LIMIT 1;
+                """,
+                new { versionIdText = existing.Id.ToString(), tenant = _tenant.TenantId }, tx);
+            tx.Commit();
+            existing.RenderJobId = knownJobId;
+            return SceneImageEnqueueOutcome.Active(existing);
+        }
+
+        // 2. Refuse a second active attempt for the same scene while holding the scene lock.
+        var active = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM video_render.scene_image_versions
+              WHERE project_id=@projectId AND scene_id=@sceneId AND tenant_id=@tenant
+                AND status IN ('queued','submitted','pending','processing','pending_reconciliation'));
+            """,
+            new { request.ProjectId, request.SceneId, tenant = _tenant.TenantId }, tx);
+        if (active)
+            throw new InvalidOperationException("SCENE_IMAGE_ACTIVE");
+
+        var versionNumber = await conn.ExecuteScalarAsync<int>(
+            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_image_versions WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { request.SceneId, request.ProjectId, tenant = _tenant.TenantId }, tx);
+        var versionId = Guid.NewGuid();
+        var storageKey = SceneMediaStorageKeys.SceneImageOutput(_tenant.TenantId, request.ProjectId, request.SceneId, versionId, "png");
+
+        // 3. Insert the queued version.
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO video_render.scene_image_versions
+                (id, project_id, scene_id, tenant_id, customer_id, created_by, version_number,
+                 logical_request_id, render_job_id, image_prompt_snapshot, compiled_image_prompt_snapshot, video_prompt_snapshot,
+                 negative_prompt_snapshot, scene_snapshot_json, reference_snapshot_json, render_config_json,
+                 storage_key, status, created_at, updated_at)
+            VALUES
+                (@id, @projectId, @sceneId, @tenant, @customer, @user, @versionNumber,
+                 @logicalRequestId, NULL, @imagePrompt, @compiledImagePrompt, @videoPrompt,
+                 @negativePrompt, CAST(@sceneSnapshot AS jsonb), CAST(@referenceSnapshot AS jsonb),
+                 CAST(@renderConfig AS jsonb), @storageKey, 'queued', now(), now());
+            """,
+            new
+            {
+                id = versionId,
+                request.ProjectId,
+                request.SceneId,
+                tenant = _tenant.TenantId,
+                customer = request.CustomerId,
+                user = request.UserId,
+                versionNumber,
+                logicalRequestId = request.LogicalRequestId,
+                imagePrompt = request.ImagePromptSnapshot,
+                compiledImagePrompt = request.CompiledImagePromptSnapshot,
+                videoPrompt = request.VideoPromptSnapshot,
+                negativePrompt = request.NegativePromptSnapshot,
+                sceneSnapshot = ToJson(request.SceneSnapshot),
+                referenceSnapshot = ToJson(request.ReferenceSnapshot),
+                renderConfig = ToJson(request.RenderConfigSnapshot),
+                storageKey
+            }, tx);
+
+        // 4. Insert the render job as draft, still uncommitted: it cannot be claimed before activation.
+        var jobId = Guid.NewGuid();
+        var inserted = await conn.ExecuteAsync(
+            """
+            INSERT INTO render.render_jobs
+                (id, tenant_id, user_id, customer_id, project_id, job_type, status, priority,
+                 input_json, prompt_json, reference_json, log_code, error_code, error_message,
+                 attempts, max_attempts, created_at, updated_at)
+            SELECT @jobId, @tenant, @userId, @customerId, @projectId, @jobType, 'draft', 0,
+                   CAST(@input AS jsonb), CAST(@prompt AS jsonb), CAST(@refs AS jsonb),
+                   @logCode, @errorCode, @errorMessage, 0, @maxAttempts, now(), now()
+             WHERE EXISTS (SELECT 1 FROM video_render.scene_image_versions v
+                            WHERE v.id=@versionId AND v.tenant_id=@tenant AND v.status='queued');
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                userId = jobDraft.UserId,
+                customerId = jobDraft.CustomerId,
+                projectId = jobDraft.ProjectId,
+                jobType = jobDraft.JobType,
+                input = jobDraft.InputJson,
+                prompt = jobDraft.PromptJson,
+                refs = jobDraft.ReferenceJson,
+                logCode = jobDraft.LogCode,
+                errorCode = jobDraft.ErrorCode,
+                errorMessage = jobDraft.ErrorMessage,
+                maxAttempts = jobDraft.MaxAttempts,
+                versionId
+            }, tx);
+        if (inserted != 1)
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_ENQUEUE_UNKNOWN");
+
+        // 5. Bind FK and activate draft->queued inside the same transaction.
+        var bound = await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_image_versions v
+               SET render_job_id=@jobId, updated_at=now()
+             WHERE v.id=@versionId AND v.tenant_id=@tenant AND v.status='queued'
+               AND EXISTS (SELECT 1 FROM render.render_jobs j
+                            WHERE j.id=@jobId AND j.tenant_id=v.tenant_id AND j.status='draft'
+                              AND j.input_json->>'imageVersionId'=@versionIdText);
+            """,
+            new { jobId, versionId, versionIdText = versionId.ToString(), tenant = _tenant.TenantId }, tx);
+        if (bound != 1)
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_BIND_FAILED");
+
+        var activated = await conn.ExecuteAsync(
+            "UPDATE render.render_jobs SET status='queued', updated_at=now() WHERE id=@jobId AND tenant_id=@tenant AND status='draft';",
+            new { jobId, tenant = _tenant.TenantId }, tx);
+        if (activated != 1)
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_ACTIVATION_FAILED");
+
+        tx.Commit();
+        return SceneImageEnqueueOutcome.Created(new SceneImageVersionDto
+        {
+            Id = versionId,
+            ProjectId = request.ProjectId,
+            SceneId = request.SceneId,
+            VersionNumber = versionNumber,
+            LogicalRequestId = request.LogicalRequestId,
+            Status = "queued",
+            StorageKey = storageKey,
+            RenderJobId = jobId
+        }, jobId);
     }
 
     public async Task CompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default)
@@ -671,6 +864,33 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         await UpdateVersionFailureAsync("video_render.scene_image_versions", versionId, errorCode, errorMessage, ct);
     }
 
+    public async Task<bool> TryActivateImageRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var status = await conn.ExecuteScalarAsync<string?>(
+            "SELECT status FROM render.render_jobs WHERE id=@renderJobId AND tenant_id=@tenant AND job_type='render_scene_image' AND input_json->>'imageVersionId'=@versionIdText FOR UPDATE;",
+            new { renderJobId, versionIdText = versionId.ToString(), tenant = _tenant.TenantId }, tx);
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase)) return false;
+        var bound = await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_image_versions v SET render_job_id=@renderJobId, updated_at=now()
+             WHERE v.id=@versionId AND v.tenant_id=@tenant AND v.status='queued'
+               AND (v.render_job_id IS NULL OR v.render_job_id=@renderJobId)
+               AND EXISTS (SELECT 1 FROM render.render_jobs j WHERE j.id=@renderJobId
+                             AND j.tenant_id=v.tenant_id AND j.status='draft'
+                             AND j.input_json->>'imageVersionId'=@versionIdText);
+            """, new { versionId, renderJobId, versionIdText = versionId.ToString(), tenant = _tenant.TenantId }, tx);
+        if (bound != 1) return false;
+        var activated = await conn.ExecuteAsync(
+            "UPDATE render.render_jobs SET status='queued', updated_at=now() WHERE id=@renderJobId AND tenant_id=@tenant AND status='draft';",
+            new { renderJobId, tenant = _tenant.TenantId }, tx);
+        if (activated != 1) return false;
+        tx.Commit();
+        return true;
+    }
+
     public async Task MarkSceneImageVersionRequestedAsync(Guid versionId, string requestedModel, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(requestedModel)) return;
@@ -773,15 +993,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
-        return await conn.ExecuteScalarAsync<Guid?>(
+        var matches = (await conn.QueryAsync<Guid>(
             """
             SELECT j.id FROM render.render_jobs j
             JOIN video_render.scene_image_versions v
               ON v.id=@versionId AND v.tenant_id=@tenant
             WHERE j.tenant_id=@tenant AND j.job_type='render_scene_image'
               AND j.input_json->>'imageVersionId'=v.id::text
-            ORDER BY j.created_at DESC LIMIT 1;
-            """, new { versionId, tenant = _tenant.TenantId });
+             ORDER BY j.created_at DESC LIMIT 2;
+            """, new { versionId, tenant = _tenant.TenantId })).ToArray();
+        if (matches.Length > 1) throw new InvalidOperationException("SCENE_IMAGE_DUPLICATE_JOBS_RECONCILIATION_REQUIRED");
+        return matches.Length == 0 ? null : matches[0];
     }
 
     // RVID-UI-V2-SCENE-RERENDER-HISTORY / TODOX-20261014-RVIDEO-RERENDER-HARDENING-001:
