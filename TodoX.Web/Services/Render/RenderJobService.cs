@@ -1301,17 +1301,36 @@ public sealed class RenderJobService : IRenderJobService
                           AND j.input_json->>'projectId'=@projectId
                           AND j.input_json->>'sceneId'=@sceneId
                           AND NULLIF(j.input_json->>'logicalRequestId', '') IS NOT NULL
+                          -- Ownership is decided for THIS operation only. Whether the scene has ever
+                          -- produced a version is irrelevant: a rerender of a scene that already holds
+                          -- V1..Vn is a fresh operation and must be claimable before its own V(n+1) row
+                          -- exists. The operation must not already own a version under its own logical
+                          -- request id, which is what stops the same operation from claiming twice.
                           AND NOT EXISTS (
                               SELECT 1 FROM video_render.scene_video_versions v
                               WHERE v.tenant_id=@tenant AND v.project_id=@projectId::bigint
-                                AND v.scene_id=@sceneId::bigint)
+                                AND v.scene_id=@sceneId::bigint
+                                AND v.logical_request_id=j.input_json->>'logicalRequestId')
                           AND NOT EXISTS (
-                              SELECT 1 FROM render.render_jobs newer
-                              WHERE newer.tenant_id=@tenant AND newer.job_type='render_scene_video'
-                                AND newer.input_json->>'projectId'=@projectId
-                                AND newer.input_json->>'sceneId'=@sceneId
-                                AND newer.id <> j.id
-                                AND (newer.created_at, newer.id) > (j.created_at, j.id))
+                              SELECT 1 FROM render.render_jobs other
+                              WHERE other.tenant_id=@tenant AND other.job_type='render_scene_video'
+                                AND other.id <> j.id
+                                AND other.input_json->>'projectId'=@projectId
+                                AND other.input_json->>'sceneId'=@sceneId
+                                AND (
+                                    (other.status IN ('queued','preparing','rendering','post_processing')
+                                        AND (NULLIF(btrim(other.lock_owner), '') IS NOT NULL
+                                             OR NULLIF(btrim(other.worker_key), '') IS NOT NULL
+                                             OR (other.lock_until IS NOT NULL AND other.lock_until > now())))
+                                    OR (other.status NOT IN ('completed','failed','cancelled')
+                                        AND (NULLIF(btrim(other.provider_task_id), '') IS NOT NULL
+                                             OR NULLIF(btrim(other.provider_video_id_base), '') IS NOT NULL))
+                                    OR EXISTS (
+                                        SELECT 1 FROM render.scene_video_submit_intents i
+                                        WHERE i.render_job_id=other.id AND i.tenant_id=other.tenant_id
+                                          AND (i.submit_state IN ('SUBMIT_IN_FLIGHT','AMBIGUOUS_SUBMIT')
+                                               OR (i.submit_state='SUBMIT_INTENT_PERSISTED'
+                                                   AND other.status NOT IN ('completed','failed'))))))
                     );
                     """, new
                     {
