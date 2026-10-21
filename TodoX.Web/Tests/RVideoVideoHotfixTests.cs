@@ -934,6 +934,65 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void SceneVideoPreHttpGuardRejectionIsClassifiedAsDefiniteFailure()
+    {
+        var coordinator = ReadRepoFile("Services", "VideoRender", "SceneVideoSubmitCoordinator.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        // The coordinator must expose a three-state claim so the caller can distinguish
+        // "guard refused before HTTP" from "in-flight but outcome unknown".
+        Assert.Contains("enum SceneVideoSubmitClaimOutcome", coordinator);
+        Assert.Contains("Claimed,", coordinator);
+        Assert.Contains("Blocked,", coordinator);
+        Assert.Contains("AlreadyClaimed", coordinator);
+        Assert.Contains("public async Task<SceneVideoSubmitClaim> ClaimSubmitAsync", coordinator);
+        Assert.Contains("return SceneVideoSubmitClaim.Blocked;", coordinator);
+        Assert.Contains(": SceneVideoSubmitClaim.AlreadyClaimed;", coordinator);
+
+        // A refused claim proves no provider request was sent, so it must be a terminal failure
+        // rather than a pending-reconciliation (manual review) outcome.
+        Assert.Contains("SceneVideoSubmitGuard.ErrorCodeGuardRejected", worker);
+        Assert.Contains("SceneVideoSubmitGuard.ErrorCodeDuplicate", worker);
+        Assert.Contains("SceneVideoSubmitGuard.ErrorCodeIntentTransitionFailed", worker);
+        Assert.Contains("\"RVIDEO_VIDEO_SUBMIT_BLOCKED\"", worker);
+        Assert.Contains("providerRequestSent = false", worker);
+        Assert.Contains("throw new RenderJobTerminalFailureException(claimMessage);", worker);
+
+        // The ambiguous-submit flag must only be reachable after the provider call.
+        var blockedIndex = worker.IndexOf("\"RVIDEO_VIDEO_SUBMIT_BLOCKED\"", StringComparison.Ordinal);
+        var ambiguousIndex = worker.IndexOf("MarkAmbiguousAsync(submitToken", StringComparison.Ordinal);
+        Assert.True(blockedIndex >= 0);
+        Assert.True(ambiguousIndex > blockedIndex,
+            "MarkAmbiguousAsync must not run before the pre-HTTP guard classification.");
+        Assert.DoesNotContain(
+            "if (submitToken is null || !await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))\n                        throw new RenderJobPendingReconciliationException(SceneVideoManualReview.Message);",
+            worker);
+    }
+
+    [Fact]
+    public void SceneVideoPreHttpGuardNeverMarksManualReviewForRejectedClaim()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        var claimIndex = worker.IndexOf("var claim = await _submitCoordinator.ClaimSubmitAsync", StringComparison.Ordinal);
+        Assert.True(claimIndex >= 0, "Worker must consume the structured claim."); 
+
+        var firstGuardBranchEnd = worker.IndexOf("var submit = await adapter.SubmitAsync", claimIndex, StringComparison.Ordinal);
+        Assert.True(firstGuardBranchEnd > claimIndex);
+
+        var guardBranch = worker[claimIndex..firstGuardBranchEnd];
+        Assert.Contains("throw new RenderJobTerminalFailureException", guardBranch);
+        Assert.DoesNotContain("throw new RenderJobPendingReconciliationException", guardBranch);
+        Assert.DoesNotContain("MarkAmbiguousAsync", guardBranch);
+        Assert.Contains("SceneVideoSubmitGuard.MessageGuardRejected", guardBranch);
+
+        // Failure classification stored against the version must match the guard code.
+        Assert.Contains(
+            "claimErrorCode, claimMessage, CancellationToken.None, null, policy.Model);",
+            guardBranch);
+    }
+
+    [Fact]
     public void RVideoSubmitFailureClassifiesExplicitDurationRejectionForDurationFallback()
     {
         var exception = new Ai79TaskSubmitException(

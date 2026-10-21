@@ -6,6 +6,53 @@ namespace TodoX.Web.Services.VideoRender;
 
 public sealed record SceneVideoSubmitState(string SubmitState, Guid OwnerToken, string? ProviderTaskId, string? ProviderVideoIdBase);
 
+/// <summary>
+/// Canonical classification for scene-video submits refused before any provider HTTP request.
+/// These codes are definite failures, never ambiguous outcomes.
+/// </summary>
+public static class SceneVideoSubmitGuard
+{
+    /// <summary>The scene guard or a pre-existing durable intent refused the new submit.</summary>
+    public const string ErrorCodeGuardRejected = "SCENE_VIDEO_SUBMIT_GUARD_REJECTED";
+
+    /// <summary>The same logical request ID was already persisted; this attempt must not resend.</summary>
+    public const string ErrorCodeDuplicate = "SCENE_VIDEO_SUBMIT_DUPLICATE_ATTEMPT";
+
+    /// <summary>The durable intent existed but could not be moved to the in-flight state.</summary>
+    public const string ErrorCodeIntentTransitionFailed = "SCENE_VIDEO_SUBMIT_INTENT_STATE_REJECTED";
+
+    public const string MessageGuardRejected =
+        "Lần gửi video này bị chặn trước khi gọi nhà cung cấp; không có yêu cầu nào được gửi đi.";
+
+    public const string MessageDuplicate =
+        "Yêu cầu gửi video này đã được ghi nhận trước đó; không gửi lại để tránh trùng lặp.";
+
+    public const string MessageIntentTransitionFailed =
+        "Không thể chuyển ý định gửi video sang trạng thái đang gửi; chưa có yêu cầu nào được gửi tới nhà cung cấp.";
+}
+
+/// <summary>
+/// Result of a pre-submit claim attempt. A rejected claim proves no provider HTTP
+/// request was made, so it must never be treated as an ambiguous submit outcome.
+/// </summary>
+public enum SceneVideoSubmitClaimOutcome
+{
+    /// <summary>The durable submit intent was persisted and the caller owns the submit.</summary>
+    Claimed,
+
+    /// <summary>A pre-existing durable intent or scene guard blocked the submit before any HTTP call.</summary>
+    Blocked,
+
+    /// <summary>The same logical request ID was already persisted by another owner; no HTTP call happened.</summary>
+    AlreadyClaimed
+}
+
+public sealed record SceneVideoSubmitClaim(SceneVideoSubmitClaimOutcome Outcome, Guid? OwnerToken)
+{
+    public static readonly SceneVideoSubmitClaim Blocked = new(SceneVideoSubmitClaimOutcome.Blocked, null);
+    public static readonly SceneVideoSubmitClaim AlreadyClaimed = new(SceneVideoSubmitClaimOutcome.AlreadyClaimed, null);
+}
+
 public sealed class SceneVideoSubmitCoordinator
 {
     private readonly TodoXConnectionFactory _factory;
@@ -17,7 +64,7 @@ public sealed class SceneVideoSubmitCoordinator
         _tenant = tenant;
     }
 
-    public async Task<Guid?> ClaimSubmitAsync(long projectId, long sceneId, string logicalRequestId, Guid jobId, CancellationToken ct = default)
+    public async Task<SceneVideoSubmitClaim> ClaimSubmitAsync(long projectId, long sceneId, string logicalRequestId, Guid jobId, CancellationToken ct = default)
     {
         if (projectId <= 0 || sceneId <= 0 || jobId == Guid.Empty || string.IsNullOrWhiteSpace(logicalRequestId))
             throw new ArgumentException("Invalid scene-video submit identity.");
@@ -61,7 +108,7 @@ public sealed class SceneVideoSubmitCoordinator
                          OR NULLIF(btrim(v.provider_video_id_base), '') IS NOT NULL))
                     OR v.status='pending_reconciliation'));
             """, new { tenant = _tenant.TenantId, sceneId, sceneText = sceneId.ToString() }, tx);
-        if (blocked) { tx.Commit(); return null; }
+        if (blocked) { tx.Commit(); return SceneVideoSubmitClaim.Blocked; }
         var token = Guid.NewGuid();
         var inserted = await conn.ExecuteAsync(
             """
@@ -71,7 +118,9 @@ public sealed class SceneVideoSubmitCoordinator
             ON CONFLICT (tenant_id, scene_id, logical_request_id) DO NOTHING;
             """, new { tenant = _tenant.TenantId, sceneId, logicalRequestId, jobId, token }, tx);
         tx.Commit();
-        return inserted == 1 ? token : null;
+        return inserted == 1
+            ? new SceneVideoSubmitClaim(SceneVideoSubmitClaimOutcome.Claimed, token)
+            : SceneVideoSubmitClaim.AlreadyClaimed;
     }
 
     public async Task<bool> BeginSubmitAsync(Guid token, CancellationToken ct = default)

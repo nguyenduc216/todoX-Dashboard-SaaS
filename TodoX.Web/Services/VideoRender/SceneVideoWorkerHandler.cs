@@ -778,9 +778,59 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId
                         }, ct);
-                    submitToken = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);
-                    if (submitToken is null || !await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))
-                        throw new RenderJobPendingReconciliationException(SceneVideoManualReview.Message);
+                    // A rejected claim (guard/duplicate intent) is decided entirely before any provider HTTP
+                    // request. It must not be reported as an ambiguous in-flight submit: no request was sent,
+                    // so no reconciliation is warranted and no manual review flag is set.
+                    var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);
+                    if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is not { } claimedToken)
+                    {
+                        var claimErrorCode = claim.Outcome == SceneVideoSubmitClaimOutcome.AlreadyClaimed
+                            ? SceneVideoSubmitGuard.ErrorCodeDuplicate
+                            : SceneVideoSubmitGuard.ErrorCodeGuardRejected;
+                        var claimMessage = claim.Outcome == SceneVideoSubmitClaimOutcome.AlreadyClaimed
+                            ? SceneVideoSubmitGuard.MessageDuplicate
+                            : SceneVideoSubmitGuard.MessageGuardRejected;
+                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_BLOCKED", "warning",
+                            "Scene-video submit was refused before any provider request was sent.",
+                            new
+                            {
+                                jobId = job.Id,
+                                input.ProjectId,
+                                input.SceneId,
+                                input.SceneIndex,
+                                sceneVideoVersionId = version.Id,
+                                providerCode = input.ProviderCode,
+                                modelCode = policy.Model,
+                                logicalRequestId = attemptLogicalRequestId,
+                                claimOutcome = claim.Outcome.ToString(),
+                                errorCode = claimErrorCode,
+                                providerRequestSent = false
+                            }, CancellationToken.None);
+                        await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
+                            claimErrorCode, claimMessage, CancellationToken.None, null, policy.Model);
+                        throw new RenderJobTerminalFailureException(claimMessage);
+                    }
+                    submitToken = claimedToken;
+                    if (!await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))
+                    {
+                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "error",
+                            "Scene-video submit intent could not transition to in-flight state.",
+                            new
+                            {
+                                jobId = job.Id,
+                                input.ProjectId,
+                                input.SceneId,
+                                input.SceneIndex,
+                                sceneVideoVersionId = version.Id,
+                                logicalRequestId = attemptLogicalRequestId,
+                                errorCode = SceneVideoSubmitGuard.ErrorCodeIntentTransitionFailed,
+                                providerRequestSent = false
+                            }, CancellationToken.None);
+                        await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
+                            SceneVideoSubmitGuard.ErrorCodeIntentTransitionFailed, SceneVideoSubmitGuard.MessageIntentTransitionFailed,
+                            CancellationToken.None, null, policy.Model);
+                        throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageIntentTransitionFailed);
+                    }
                     var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
                         input.ProviderId,
                         input.ProviderCapabilityId,
@@ -1874,16 +1924,45 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     providerConfigJson: input.ProviderConfigJson,
                     capabilityConfigJson: input.CapabilityConfigJson);
 
-                var submitToken = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, input.LogicalRequestId, job.Id, ct);
-                if (submitToken is null || !await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))
-                    throw new RenderJobPendingReconciliationException(SceneVideoManualReview.Message);
+                // Same contract as the 79AI path: a refused claim is decided before the provider call, so it is a
+                // definite (non-ambiguous) failure and must not set a manual-review flag.
+                var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, input.LogicalRequestId, job.Id, ct);
+                if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is not { } claimedToken)
+                {
+                    var claimErrorCode = claim.Outcome == SceneVideoSubmitClaimOutcome.AlreadyClaimed
+                        ? SceneVideoSubmitGuard.ErrorCodeDuplicate
+                        : SceneVideoSubmitGuard.ErrorCodeGuardRejected;
+                    var claimMessage = claim.Outcome == SceneVideoSubmitClaimOutcome.AlreadyClaimed
+                        ? SceneVideoSubmitGuard.MessageDuplicate
+                        : SceneVideoSubmitGuard.MessageGuardRejected;
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_BLOCKED", "warning",
+                        "Scene-video submit was refused before any provider request was sent.",
+                        new
+                        {
+                            jobId = job.Id,
+                            input.ProjectId,
+                            input.SceneId,
+                            input.SceneIndex,
+                            sceneVideoVersionId = version.Id,
+                            input.ProviderCode,
+                            modelCode = input.ModelName,
+                            logicalRequestId = input.LogicalRequestId,
+                            claimOutcome = claim.Outcome.ToString(),
+                            errorCode = claimErrorCode,
+                            providerRequestSent = false
+                        }, CancellationToken.None);
+                    throw new RenderJobTerminalFailureException(claimMessage);
+                }
+                var submitToken = claimedToken;
+                if (!await _submitCoordinator.BeginSubmitAsync(submitToken, ct))
+                    throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageIntentTransitionFailed);
                 var submit = await _tasks.SubmitAsync(payload, ct);
                 taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();
-                if (taskId is not null && !await _submitCoordinator.ConfirmSubmittedAsync(submitToken.Value, taskId, taskId, CancellationToken.None))
+                if (taskId is not null && !await _submitCoordinator.ConfirmSubmittedAsync(submitToken, taskId, taskId, CancellationToken.None))
                     throw new RenderJobPendingReconciliationException("Provider submit result requires manual reconciliation.");
                 if (string.IsNullOrWhiteSpace(taskId))
                 {
-                    await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
+                    await _submitCoordinator.MarkAmbiguousAsync(submitToken, CancellationToken.None);
                     throw new RenderJobPendingReconciliationException("Provider submit response is missing task_id; manual reconciliation required.");
                 }
 
