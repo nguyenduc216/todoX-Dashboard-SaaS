@@ -350,7 +350,7 @@ public sealed class SceneVideoSubmitCoordinator
                     THEN 3
                 ELSE 0
             END;
-            """, new { tenant = _tenant.TenantId, sceneId, sceneText = sceneId.ToString() }, tx);
+            """, new { tenant = _tenant.TenantId, sceneId, sceneText = sceneId.ToString(), jobId }, tx);
         if (blockReason != SceneVideoSubmitBlockReason.None)
         {
             tx.Commit();
