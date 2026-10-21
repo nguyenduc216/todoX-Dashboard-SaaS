@@ -225,6 +225,7 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoProjectFinaliza
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoRenderAction, TodoX.Web.Services.VideoRender.RVideoSceneVideoRenderAction>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneImageRenderAction, TodoX.Web.Services.VideoRender.RVideoSceneImageRenderAction>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoRecoveryService, TodoX.Web.Services.VideoRender.RVideoSceneVideoRecoveryService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideo79AiVideoService, TodoX.Web.Services.VideoRender.RVideo79AiVideoService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoProviderRoutingService, TodoX.Web.Services.VideoRender.VideoProviderRoutingService>();

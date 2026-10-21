@@ -7,6 +7,7 @@
 @inject IRVideoSceneVideoModelOptionsService ModelOptions
 @inject IRVideoSceneAddDefaultResolver AddDefaults
 @inject IRVideoSceneVideoRenderAction SceneVideoRender
+@inject IRVideoSceneImageRenderAction SceneImageRender
 @inject ISceneMediaVersioningService SceneVersions
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -110,6 +111,7 @@ else{<span>Chưa có</span>}
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleRerenderVideoAsync(s))" Disabled="@_busy">Tạo lại video</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleRerenderImageAsync(s))" Disabled="@_busy">Tạo lại ảnh</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,-1))" Disabled="@(s.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,1))" Disabled="@(s.SceneIndex>=JobView.Project.Scenes.Count || _busy)">Xuống</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleDeleteAsync(s))" Disabled="@_busy">Xóa</MudMenuItem>
@@ -143,6 +145,7 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))">Chỉnh</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleSaveAsync(ActiveScene!))" Disabled="@_busy">Lưu</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(()=>HandleRerenderVideoAsync(ActiveScene!))" Disabled="@_busy">Tạo lại video</MudButton>
+<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(()=>HandleRerenderImageAsync(ActiveScene!))" Disabled="@(_busy||_rerenderingImage.Contains(ActiveScene!.Id))">Tạo lại ảnh</MudButton>
 <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" /><MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" />
 </div>
 </div>}
@@ -157,6 +160,7 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
 [Parameter] public EventCallback OnReloadRequested { get; set; }
 long? SelectedSceneId; string? _showRef; bool _showDetail; bool _busy; VideoProjectSceneDto? _pendingDelete;
 private readonly SemaphoreSlim _gate = new(1,1);
+readonly HashSet<long> _rerenderingImage = new();
 IReadOnlyList<SceneVideoModelOption> _opts = Array.Empty<SceneVideoModelOption>();
 bool _optsReady;
 Task<IReadOnlyList<SceneVideoModelOption>>? _optsTask; // in-flight options fetch (started off the render path)
@@ -362,6 +366,29 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
  }
  catch(Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
  finally { _busy = false; _gate.Release(); }
+}
+async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
+{
+ if(JobView is null || AuthState.CurrentUser is null || !await _gate.WaitAsync(0)) return;
+ _busy = true; _rerenderingImage.Add(scene.Id);
+ try
+ {
+  var user = AuthState.CurrentUser;
+  var meta = ScenePromptMetadata.FromScene(scene);
+  if(string.IsNullOrWhiteSpace(meta.ImagePrompt)) { Snackbar.Add("Cần nhập prompt ảnh trước khi render.", Severity.Warning); return; }
+  var aspectRatio = new TodoXVideoPromptParser().Parse(JobView.Project.OriginalPrompt ?? string.Empty).Model.AspectRatio;
+  var request = new RVideoSceneImageRenderRequest(JobView.Project.Id, scene, meta, aspectRatio ?? string.Empty, JobView.CoreJob.ServiceId, JobView.CoreJob.JobId);
+  var estimate = await SceneImageRender.EstimateAsync(request);
+  if(!estimate.CanStart) { Snackbar.Add("Không đủ điểm hoặc không thể ước tính chi phí ảnh.", Severity.Warning); return; }
+  var confirm = await DialogService.ShowMessageBoxAsync("Render lại hình", $"Scene {scene.SceneIndex:00}: {estimate.ImageRate:0.##} điểm; hiện có {estimate.AvailablePoints:0.##} điểm.", yesText:"Xác nhận render lại", cancelText:"Hủy");
+  if(confirm != true) return;
+  var result = await SceneImageRender.EnqueueRerenderAsync(request, user);
+  if(!result.Success) { Snackbar.Add(result.ErrorMessage ?? "Không xác định được trạng thái hàng đợi; cần đối soát.", Severity.Error); return; }
+  Snackbar.Add(result.AlreadyActive ? "Scene đang có job ảnh." : "Đã gửi render lại ảnh.", result.AlreadyActive ? Severity.Info : Severity.Success);
+  if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+ }
+ catch(Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+ finally { _rerenderingImage.Remove(scene.Id); _busy = false; _gate.Release(); }
 }
 public void Dispose(){ _gate.Dispose(); }
 }
