@@ -4623,14 +4623,27 @@ else
                     && string.IsNullOrWhiteSpace(job.ProviderTaskId)
                     && string.IsNullOrWhiteSpace(job.ProviderVideoIdBase)
                     && !(_videoVersions.TryGetValue(scene.Id, out var versions) && versions.Any(v => v.RenderJobId == job.Id))))
-           && !string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
+           && !(string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
+                && !HasTerminalFailedVideoVersionWithoutActiveJob(scene))
            && (CanCreateSceneVideo(scene, draft) || CanRetrySceneVideo(scene)
+               || (HasTerminalFailedVideoVersionWithoutActiveJob(scene)
+                   && (!string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) || (_useReferenceImageForAllScenes && HasSharedReferenceImage))
+                   && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
+                   && HasProjectAspectRatio && HasProjectResolution
+                   && _defaultImageToVideoProvider is not null
+                   && IsSceneVideoPromptValid(scene, draft))
                || (HasCompletedVideoVersion(scene)
                    && (!string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) || (_useReferenceImageForAllScenes && HasSharedReferenceImage))
                    && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
                    && HasProjectAspectRatio && HasProjectResolution
                    && _defaultImageToVideoProvider is not null
                    && IsSceneVideoPromptValid(scene, draft)));
+
+    private bool HasTerminalFailedVideoVersionWithoutActiveJob(VideoProjectSceneDto scene)
+        => _videoVersions.TryGetValue(scene.Id, out var versions)
+           && versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault() is { Status: var status }
+           && string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+           && !HasActiveSceneVideoJob(scene.Id);
 
     private bool CanRetrySceneVideo(VideoProjectSceneDto scene)
 
