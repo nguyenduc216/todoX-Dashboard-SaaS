@@ -488,7 +488,13 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 version = null;
             }
 
-            version ??= await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
+            // Keep the exact operation at the DB boundary: PostgreSQL may report a position in
+            // a trigger/function rather than in the application command text.
+            if (version is null)
+            {
+                try
+                {
+                    version = await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
                     input.ProjectId,
                     input.SceneId,
                     sourceImageVersionId,
@@ -541,6 +547,15 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     RequestedModel: policy.Model,
                     ActualModel: policy.Model,
                     ProviderCapabilityId: input.ProviderCapabilityId), ct);
+                }
+                catch (Npgsql.PostgresException ex)
+                {
+                    _logger.LogError(ex,
+                        "RVIDEO_SQL_DIAGNOSTIC operation=CreateQueuedSceneVideoVersion sqlState={SqlState} position={Position} internalPosition={InternalPosition} jobId={JobId} sceneId={SceneId} versionId=not_committed; command template: INSERT video_render.scene_video_versions (... render_job_id ...) VALUES (... @renderJobId ...); internal query intentionally omitted",
+                        ex.SqlState, ex.Position, ex.InternalPosition, job.Id, input.SceneId);
+                    throw;
+                }
+            }
 
             if (!string.IsNullOrWhiteSpace(version.ProviderTaskId))
             {

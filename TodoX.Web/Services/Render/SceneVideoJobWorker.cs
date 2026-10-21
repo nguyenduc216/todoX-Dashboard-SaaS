@@ -106,6 +106,12 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 }
                 catch (Exception ex)
                 {
+                    if (ex is Npgsql.PostgresException pg)
+                    {
+                        _logger.LogError(pg,
+                            "RVIDEO_SQL_DIAGNOSTIC operation=DispatchClaim sqlState={SqlState} position={Position} internalPosition={InternalPosition} jobId={JobId} sceneId=see_job_snapshot versionId=see_job_logical_request; SQL command omitted to avoid logging snapshot/provider data",
+                            pg.SqlState, pg.Position, pg.InternalPosition, job.Id);
+                    }
                     await AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken);
                     var shouldRetry = job.AttemptCount < job.MaxAttempts;
                     if (shouldRetry)
