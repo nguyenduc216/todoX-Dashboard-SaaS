@@ -814,10 +814,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                                 sceneVideoVersionId = version.Id,
                                 logicalRequestId = attemptLogicalRequestId,
                                 historicalAttemptModified = false,
-                                providerRequestSent = true
+                                providerRequestSent = false
                             }, ct);
                     }
-                    if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is not { } claimedToken)
+                    if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is null)
                     {
                         // A refused claim is decided entirely before the provider call, so it is a definite
                         // terminal failure and must never be parked in ambiguous reconciliation.
@@ -862,6 +862,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageGuardRejected);
                         }
                     }
+                    if (claim.Outcome == SceneVideoSubmitClaimOutcome.Claimed && claim.OwnerToken is { } claimedToken)
+                        submitToken = claimedToken;
                     if (submitToken is { } activeToken)
                     {
                         if (!await _submitCoordinator.BeginSubmitAsync(activeToken, ct))
@@ -1984,7 +1986,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             sceneVideoVersionId = version.Id,
                             logicalRequestId = input.LogicalRequestId,
                             historicalAttemptModified = false,
-                            providerRequestSent = true
+                            providerRequestSent = false
                         }, ct);
                 }
                 if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is not { } claimedToken)
