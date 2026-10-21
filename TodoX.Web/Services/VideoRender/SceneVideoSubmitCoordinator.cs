@@ -47,14 +47,62 @@ public enum SceneVideoSubmitClaimOutcome
     AlreadyClaimed
 }
 
-public sealed record SceneVideoSubmitClaim(SceneVideoSubmitClaimOutcome Outcome, Guid? OwnerToken)
+/// <summary>
+/// Which guard clause refused a submit. Recorded so operators can tell a stale
+/// in-flight attempt apart from a scene-level manual-review hold without re-deriving SQL.
+/// </summary>
+public enum SceneVideoSubmitBlockReason
+{
+    /// <summary>No refusal; the claim succeeded.</summary>
+    None,
+
+    /// <summary>Another durable submit intent for this scene is not in a resolved terminal state.</summary>
+    ExistingIntentUnresolved,
+
+    /// <summary>A scene-video render job is still in flight or is held for manual review.</summary>
+    SceneJobInFlightOrManualReview,
+
+    /// <summary>A scene-video version is still in flight or is held for reconciliation.</summary>
+    SceneVersionInFlightOrReconciliation
+}
+
+public sealed record SceneVideoSubmitClaim(
+    SceneVideoSubmitClaimOutcome Outcome,
+    Guid? OwnerToken,
+    SceneVideoSubmitBlockReason BlockReason = SceneVideoSubmitBlockReason.None)
 {
     public static readonly SceneVideoSubmitClaim Blocked = new(SceneVideoSubmitClaimOutcome.Blocked, null);
     public static readonly SceneVideoSubmitClaim AlreadyClaimed = new(SceneVideoSubmitClaimOutcome.AlreadyClaimed, null);
+
+    public static SceneVideoSubmitClaim BlockedBecause(SceneVideoSubmitBlockReason reason)
+        => new(SceneVideoSubmitClaimOutcome.Blocked, null, reason);
 }
 
 public sealed class SceneVideoSubmitCoordinator
 {
+    /// <summary>
+    /// Snapshot of every state fact the pre-HTTP guard inspects for one scene. Being a plain
+    /// value type keeps the refusal decision executable in tests without a database, so the
+    /// classification that caused the scene-814 mislabel can be verified behaviourally.
+    /// </summary>
+    public sealed record SceneSubmitGuardFacts(
+        bool HasUnresolvedIntent,
+        bool HasInFlightOrManualReviewJob,
+        bool HasInFlightOrReconciliationVersion);
+
+    /// <summary>
+    /// Pure guard decision, evaluated in the same precedence order as the SQL guard so a refusal
+    /// stays attributable to exactly one cause.
+    /// </summary>
+    public static SceneVideoSubmitBlockReason ClassifyBlock(SceneSubmitGuardFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        if (facts.HasUnresolvedIntent) return SceneVideoSubmitBlockReason.ExistingIntentUnresolved;
+        if (facts.HasInFlightOrManualReviewJob) return SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview;
+        if (facts.HasInFlightOrReconciliationVersion) return SceneVideoSubmitBlockReason.SceneVersionInFlightOrReconciliation;
+        return SceneVideoSubmitBlockReason.None;
+    }
+
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
 
@@ -85,30 +133,42 @@ public sealed class SceneVideoSubmitCoordinator
             """, new { projectId, sceneId, jobId, tenant = _tenant.TenantId }, tx);
         if (!owned) throw new InvalidOperationException("Scene-video submit tenant or job ownership mismatch.");
 
-        var blocked = await conn.ExecuteScalarAsync<bool>(
+        // The reason is evaluated in the same precedence order as the previous combined EXISTS so that
+        // refusals stay behaviourally identical while still being attributable for operators.
+        var blockReason = (SceneVideoSubmitBlockReason)await conn.ExecuteScalarAsync<int>(
             """
-            SELECT EXISTS (SELECT 1 FROM render.scene_video_submit_intents i
-                JOIN render.render_jobs prior ON prior.id=i.render_job_id AND prior.tenant_id=i.tenant_id
-                WHERE i.tenant_id=@tenant AND i.scene_id=@sceneId
-                  AND NOT ((i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status='completed')
-                           OR (i.submit_state='CONFIRMED_NO_TASK' AND i.render_job_id=@jobId)))
-              OR EXISTS (SELECT 1 FROM render.render_jobs j
-                WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
-                  AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=@sceneText
-                  AND (j.status='pending_reconciliation'
-                    OR j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
-                    OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'
-                    OR (j.status NOT IN ('completed', 'failed') AND
-                        (NULLIF(btrim(j.provider_task_id), '') IS NOT NULL
-                         OR NULLIF(btrim(j.provider_video_id_base), '') IS NOT NULL))))
-              OR EXISTS (SELECT 1 FROM video_render.scene_video_versions v
-                WHERE v.tenant_id=@tenant AND v.scene_id=@sceneId
-                  AND ((v.status NOT IN ('completed', 'failed') AND
-                        (NULLIF(btrim(v.provider_task_id), '') IS NOT NULL
-                         OR NULLIF(btrim(v.provider_video_id_base), '') IS NOT NULL))
-                    OR v.status='pending_reconciliation'));
+            SELECT CASE
+                WHEN EXISTS (SELECT 1 FROM render.scene_video_submit_intents i
+                    JOIN render.render_jobs prior ON prior.id=i.render_job_id AND prior.tenant_id=i.tenant_id
+                    WHERE i.tenant_id=@tenant AND i.scene_id=@sceneId
+                      AND NOT ((i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status='completed')
+                               OR (i.submit_state='CONFIRMED_NO_TASK' AND i.render_job_id=@jobId)))
+                    THEN 1
+                WHEN EXISTS (SELECT 1 FROM render.render_jobs j
+                    WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
+                      AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=@sceneText
+                      AND (j.status='pending_reconciliation'
+                        OR j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
+                        OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'
+                        OR (j.status NOT IN ('completed', 'failed') AND
+                            (NULLIF(btrim(j.provider_task_id), '') IS NOT NULL
+                             OR NULLIF(btrim(j.provider_video_id_base), '') IS NOT NULL))))
+                    THEN 2
+                WHEN EXISTS (SELECT 1 FROM video_render.scene_video_versions v
+                    WHERE v.tenant_id=@tenant AND v.scene_id=@sceneId
+                      AND ((v.status NOT IN ('completed', 'failed') AND
+                            (NULLIF(btrim(v.provider_task_id), '') IS NOT NULL
+                             OR NULLIF(btrim(v.provider_video_id_base), '') IS NOT NULL))
+                        OR v.status='pending_reconciliation'))
+                    THEN 3
+                ELSE 0
+            END;
             """, new { tenant = _tenant.TenantId, sceneId, sceneText = sceneId.ToString() }, tx);
-        if (blocked) { tx.Commit(); return SceneVideoSubmitClaim.Blocked; }
+        if (blockReason != SceneVideoSubmitBlockReason.None)
+        {
+            tx.Commit();
+            return SceneVideoSubmitClaim.BlockedBecause(blockReason);
+        }
         var token = Guid.NewGuid();
         var inserted = await conn.ExecuteAsync(
             """
@@ -134,6 +194,38 @@ public sealed class SceneVideoSubmitCoordinator
 
     public Task<bool> ConfirmNoTaskAsync(Guid token, CancellationToken ct = default)
         => UpdateAsync(token, "CONFIRMED_NO_TASK", null, null, "SUBMIT_IN_FLIGHT", ct);
+
+    /// <summary>
+    /// Records that a refused attempt definitely never reached the provider.
+    /// Only a persisted intent that is still unsubmitted is closed; an intent that already
+    /// carries a provider task, or that is already ambiguous/confirmed, is left untouched so a
+    /// real in-flight submit is never downgraded or silently converted into a failure.
+    /// </summary>
+    public async Task<SceneVideoSubmitState?> TryRecordPreHttpFailureAsync(long sceneId, string logicalRequestId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(logicalRequestId)) return null;
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.scene_video_submit_intents
+               SET submit_state='CONFIRMED_NO_TASK', reconciled_at=COALESCE(reconciled_at, now()), updated_at=now()
+             WHERE tenant_id=@tenant AND scene_id=@sceneId AND logical_request_id=@logicalRequestId
+               AND submit_state='SUBMIT_INTENT_PERSISTED'
+               AND COALESCE(NULLIF(btrim(provider_task_id), ''), NULL) IS NULL;
+            """, new { tenant = _tenant.TenantId, sceneId, logicalRequestId });
+        return await GetSubmitStateAsync(sceneId, logicalRequestId, ct);
+    }
+
+    /// <summary>
+    /// Whether an intent that already exists for this logical request proves a provider submit
+    /// happened. Callers must re-link to the stored task instead of sending a duplicate request.
+    /// </summary>
+    public static bool HasProviderTask(SceneVideoSubmitState? state)
+        => !string.IsNullOrWhiteSpace(state?.ProviderTaskId)
+           || string.Equals(state?.SubmitState, "CONFIRMED_PROVIDER_TASK", StringComparison.Ordinal)
+           || string.Equals(state?.SubmitState, "SUBMIT_IN_FLIGHT", StringComparison.Ordinal)
+           || string.Equals(state?.SubmitState, "AMBIGUOUS_SUBMIT", StringComparison.Ordinal);
 
     public Task<bool> MarkAmbiguousAsync(Guid token, CancellationToken ct = default)
         => UpdateAsync(token, "AMBIGUOUS_SUBMIT", null, null, "SUBMIT_IN_FLIGHT", ct);

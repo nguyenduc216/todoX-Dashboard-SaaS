@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.Serialization;
 using System.Net;
 using System.Text.Json;
@@ -338,7 +338,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Theory]
-    [InlineData("provider_failure", "Lỗi Google không thể xử lý đơn này. #22f", "MODEL_PROVIDER_FAILURE")]
+    [InlineData("provider_failure", "Lá»—i Google khÃ´ng thá»ƒ xá»­ lÃ½ Ä‘Æ¡n nÃ y. #22f", "MODEL_PROVIDER_FAILURE")]
     [InlineData("http_503", "service unavailable", "TRANSIENT_PROVIDER_FAILURE")]
     [InlineData("unauthorized", "invalid access token", "AUTHENTICATION_FAILURE")]
     [InlineData("insufficient_balance", "insufficient balance", "BILLING_FAILURE")]
@@ -591,7 +591,7 @@ public sealed class RVideoVideoHotfixTests
     public void RVideoWrappedAi79SubmitRejectionIsEligibleForModelFallback()
     {
         var exception = new Ai79TaskSubmitException(
-            "Hiện gói dịch vụ Model VEO - Omni không khả dụng. Vui lòng chọn Model khác",
+            "Hiá»‡n gÃ³i dá»‹ch vá»¥ Model VEO - Omni khÃ´ng kháº£ dá»¥ng. Vui lÃ²ng chá»n Model khÃ¡c",
             """{"error":"model unavailable"}""",
             HttpStatusCode.ServiceUnavailable,
             "provider_failure",
@@ -622,7 +622,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Theory]
-    [InlineData("provider_unavailable", "Dịch vụ hiện không khả dụng, vui lòng thử lại sau.")]
+    [InlineData("provider_unavailable", "Dá»‹ch vá»¥ hiá»‡n khÃ´ng kháº£ dá»¥ng, vui lÃ²ng thá»­ láº¡i sau.")]
     [InlineData("provider_timeout", "The provider timed out while submitting the request.")]
     public void RVideoServiceUnavailableSubmitIsPendingReconciliationUnlessProviderExplicitlyRejected(
         string errorCode,
@@ -655,8 +655,8 @@ public sealed class RVideoVideoHotfixTests
     public void RVideoNotResourcesWithZeroTasksIsAKnownSafeFallbackFailure()
     {
         var exception = new Ai79TaskSubmitException(
-            "79AI video submit failed: Dịch vụ hiện không khả dụng, vui lòng thử lại sau.",
-            """{"countTasks":"0","error":"NOT_RESOURCES","message":"Dịch vụ hiện không khả dụng, vui lòng thử lại sau."}""",
+            "79AI video submit failed: Dá»‹ch vá»¥ hiá»‡n khÃ´ng kháº£ dá»¥ng, vui lÃ²ng thá»­ láº¡i sau.",
+            """{"countTasks":"0","error":"NOT_RESOURCES","message":"Dá»‹ch vá»¥ hiá»‡n khÃ´ng kháº£ dá»¥ng, vui lÃ²ng thá»­ láº¡i sau."}""",
             HttpStatusCode.OK,
             "provider_error",
             sanitizedRequestMetadataJson: """{"model":"veo_omni","mode":"flash"}""");
@@ -778,7 +778,7 @@ public sealed class RVideoVideoHotfixTests
     [InlineData("unauthorized", "invalid access token", HttpStatusCode.Unauthorized, "AUTHENTICATION_FAILURE", false)]
     [InlineData("insufficient_balance", "insufficient balance", HttpStatusCode.ServiceUnavailable, "BILLING_FAILURE", false)]
     [InlineData("bad_request", "invalid prompt", HttpStatusCode.BadRequest, "INVALID_INPUT", false)]
-    [InlineData("provider_failure", "Lỗi Google không thể xử lý đơn này, vui lòng kiểm tra lại Prompt. #22f", HttpStatusCode.ServiceUnavailable, "MODEL_PROVIDER_FAILURE", true)]
+    [InlineData("provider_failure", "Lá»—i Google khÃ´ng thá»ƒ xá»­ lÃ½ Ä‘Æ¡n nÃ y, vui lÃ²ng kiá»ƒm tra láº¡i Prompt. #22f", HttpStatusCode.ServiceUnavailable, "MODEL_PROVIDER_FAILURE", true)]
     public void RVideoSubmitFailureClassificationControlsTerminalVsFallback(
         string errorCode,
         string message,
@@ -946,23 +946,23 @@ public sealed class RVideoVideoHotfixTests
         Assert.Contains("Blocked,", coordinator);
         Assert.Contains("AlreadyClaimed", coordinator);
         Assert.Contains("public async Task<SceneVideoSubmitClaim> ClaimSubmitAsync", coordinator);
-        Assert.Contains("return SceneVideoSubmitClaim.Blocked;", coordinator);
-        Assert.Contains(": SceneVideoSubmitClaim.AlreadyClaimed;", coordinator);
+        Assert.Contains("public async Task<SceneVideoSubmitClaim> ClaimSubmitAsync", coordinator);
+        Assert.Contains("SceneVideoSubmitClaim.BlockedBecause(blockReason)", coordinator);
 
         // A refused claim proves no provider request was sent, so it must be a terminal failure
         // rather than a pending-reconciliation (manual review) outcome.
         Assert.Contains("SceneVideoSubmitGuard.ErrorCodeGuardRejected", worker);
         Assert.Contains("SceneVideoSubmitGuard.ErrorCodeDuplicate", worker);
         Assert.Contains("SceneVideoSubmitGuard.ErrorCodeIntentTransitionFailed", worker);
-        Assert.Contains("\"RVIDEO_VIDEO_SUBMIT_BLOCKED\"", worker);
+        Assert.Contains("\"RVIDEO_VIDEO_NOT_SUBMITTED\"", worker);
         Assert.Contains("providerRequestSent = false", worker);
-        Assert.Contains("throw new RenderJobTerminalFailureException(claimMessage);", worker);
+        Assert.Contains("throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageGuardRejected);", worker);
 
-        // The ambiguous-submit flag must only be reachable after the provider call.
-        var blockedIndex = worker.IndexOf("\"RVIDEO_VIDEO_SUBMIT_BLOCKED\"", StringComparison.Ordinal);
-        var ambiguousIndex = worker.IndexOf("MarkAmbiguousAsync(submitToken", StringComparison.Ordinal);
-        Assert.True(blockedIndex >= 0);
-        Assert.True(ambiguousIndex > blockedIndex,
+        // The ambiguous-submit flag must only be reachable after the provider submit call.
+        var guardRejectIndex = worker.IndexOf("SceneVideoSubmitGuard.MessageGuardRejected", StringComparison.Ordinal);
+        var ambiguousIndex = worker.IndexOf("MarkAmbiguousAsync(activeToken", StringComparison.Ordinal);
+        Assert.True(guardRejectIndex >= 0);
+        Assert.True(ambiguousIndex > guardRejectIndex,
             "MarkAmbiguousAsync must not run before the pre-HTTP guard classification.");
         Assert.DoesNotContain(
             "if (submitToken is null || !await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))\n                        throw new RenderJobPendingReconciliationException(SceneVideoManualReview.Message);",
@@ -974,22 +974,92 @@ public sealed class RVideoVideoHotfixTests
     {
         var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
 
-        var claimIndex = worker.IndexOf("var claim = await _submitCoordinator.ClaimSubmitAsync", StringComparison.Ordinal);
-        Assert.True(claimIndex >= 0, "Worker must consume the structured claim."); 
+        foreach (var claimCall in new[]
+                 {
+                     "var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);",
+                     "var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, input.LogicalRequestId, job.Id, ct);"
+                 })
+        {
+            var claimIndex = worker.IndexOf(claimCall, StringComparison.Ordinal);
+            Assert.True(claimIndex >= 0, $"Worker must consume the structured claim: {claimCall}");
 
-        var firstGuardBranchEnd = worker.IndexOf("var submit = await adapter.SubmitAsync", claimIndex, StringComparison.Ordinal);
-        Assert.True(firstGuardBranchEnd > claimIndex);
+            var firstGuardBranchEnd = worker.IndexOf("_submitCoordinator.BeginSubmitAsync", claimIndex, StringComparison.Ordinal);
+            Assert.True(firstGuardBranchEnd > claimIndex);
 
-        var guardBranch = worker[claimIndex..firstGuardBranchEnd];
-        Assert.Contains("throw new RenderJobTerminalFailureException", guardBranch);
-        Assert.DoesNotContain("throw new RenderJobPendingReconciliationException", guardBranch);
-        Assert.DoesNotContain("MarkAmbiguousAsync", guardBranch);
-        Assert.Contains("SceneVideoSubmitGuard.MessageGuardRejected", guardBranch);
+            var guardBranch = worker[claimIndex..firstGuardBranchEnd];
+            Assert.Contains("throw new RenderJobTerminalFailureException", guardBranch);
+            Assert.Contains("RecordPreHttpSubmitRefusalAsync", guardBranch);
+            Assert.DoesNotContain("throw new RenderJobPendingReconciliationException", guardBranch);
+            Assert.DoesNotContain("MarkAmbiguousAsync", guardBranch);
+            Assert.DoesNotContain("MarkPendingReconciliationAsync", guardBranch);
+        }
 
-        // Failure classification stored against the version must match the guard code.
-        Assert.Contains(
-            "claimErrorCode, claimMessage, CancellationToken.None, null, policy.Model);",
-            guardBranch);
+        // The pre-HTTP recorder must settle the version terminally and release the reservation,
+        // never park either one in ambiguous reconciliation.
+        var recorderIndex = worker.IndexOf("private async Task RecordPreHttpSubmitRefusalAsync", StringComparison.Ordinal);
+        Assert.True(recorderIndex >= 0);
+        var recorderEnd = worker.IndexOf("private async Task LogUsageAsync", recorderIndex, StringComparison.Ordinal);
+        Assert.True(recorderEnd > recorderIndex);
+        var recorder = worker[recorderIndex..recorderEnd];
+        Assert.Contains("FailSceneVideoVersionAsync", recorder);
+        Assert.Contains("Success = false", recorder);
+        Assert.DoesNotContain("MarkSceneVideoPendingReconciliationAsync", recorder);
+        Assert.DoesNotContain("MarkPendingReconciliationAsync", recorder);
+    }
+    [Fact]
+    public void SceneSubmitGuardClassificationIsExecutableAndAttributable()
+    {
+        // Executable behavioural test of the real guard decision used by ClaimSubmitAsync.
+        // Scene 814: V2 completed + selected, V3 failed, V4 refused before any provider HTTP.
+        var scene814 = new SceneVideoSubmitCoordinator.SceneSubmitGuardFacts(
+            HasUnresolvedIntent: false,
+            HasInFlightOrManualReviewJob: false,
+            HasInFlightOrReconciliationVersion: false);
+        Assert.Equal(SceneVideoSubmitBlockReason.None, SceneVideoSubmitCoordinator.ClassifyBlock(scene814));
+
+        // A completed V2 selected version and a failed V3 must not block a brand-new V5 attempt.
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.ExistingIntentUnresolved,
+            SceneVideoSubmitCoordinator.ClassifyBlock(scene814 with { HasUnresolvedIntent = true }));
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview,
+            SceneVideoSubmitCoordinator.ClassifyBlock(scene814 with { HasInFlightOrManualReviewJob = true }));
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.SceneVersionInFlightOrReconciliation,
+            SceneVideoSubmitCoordinator.ClassifyBlock(scene814 with { HasInFlightOrReconciliationVersion = true }));
+
+        // Precedence must be stable so an operator sees exactly one attributable cause.
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.ExistingIntentUnresolved,
+            SceneVideoSubmitCoordinator.ClassifyBlock(new SceneVideoSubmitCoordinator.SceneSubmitGuardFacts(
+                HasUnresolvedIntent: true,
+                HasInFlightOrManualReviewJob: true,
+                HasInFlightOrReconciliationVersion: true)));
+    }
+
+    [Fact]
+    public async Task ScenePreHttpRefusalNeverDowngradesAnIntentThatAlreadyHasAProviderTask()
+    {
+        // Behavioural proof that a definite pre-HTTP refusal cannot be turned into ambiguous
+        // reconciliation once the intent already proves a provider task exists.
+        var ambiguous = new SceneVideoSubmitClaim(
+            SceneVideoSubmitClaimOutcome.AlreadyClaimed, null, SceneVideoSubmitBlockReason.ExistingIntentUnresolved);
+        Assert.Null(ambiguous.OwnerToken);
+        Assert.Equal(SceneVideoSubmitBlockReason.ExistingIntentUnresolved, ambiguous.BlockReason);
+
+        var blocked = SceneVideoSubmitClaim.BlockedBecause(SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview);
+        Assert.Equal(SceneVideoSubmitClaimOutcome.Blocked, blocked.Outcome);
+        Assert.Equal(SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview, blocked.BlockReason);
+
+        // An intent that already carries a task must be treated as "re-link", never as "send again".
+        var withTask = new SceneVideoSubmitState("CONFIRMED_PROVIDER_TASK", Guid.NewGuid(), "task-abc", "base-abc");
+        Assert.True(SceneVideoSubmitCoordinator.HasProviderTask(withTask));
+        Assert.True(SceneVideoSubmitCoordinator.HasProviderTask(withTask with { SubmitState = "SUBMIT_IN_FLIGHT" }));
+        Assert.True(SceneVideoSubmitCoordinator.HasProviderTask(withTask with { SubmitState = "AMBIGUOUS_SUBMIT" }));
+        Assert.False(SceneVideoSubmitCoordinator.HasProviderTask(null));
+        Assert.False(SceneVideoSubmitCoordinator.HasProviderTask(new SceneVideoSubmitState(
+            "CONFIRMED_NO_TASK", Guid.NewGuid(), null, null)));
+        await Task.CompletedTask;
     }
 
     [Fact]
@@ -1744,7 +1814,7 @@ public sealed class RVideoVideoHotfixTests
             }
 
             Assert.Equal("MODEL_PROVIDER_FAILURE",
-                ClassifyProviderFailureForTest("provider_failure", "Lỗi Google không thể xử lý Prompt. #22f"));
+                ClassifyProviderFailureForTest("provider_failure", "Lá»—i Google khÃ´ng thá»ƒ xá»­ lÃ½ Prompt. #22f"));
             Assert.Equal(index < candidates.Length - 1, index + 1 < candidates.Length);
         }
 
