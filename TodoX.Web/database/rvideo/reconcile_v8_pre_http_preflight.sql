@@ -2,6 +2,10 @@
 -- Review all rows and production schema/constraints before approving reconciliation.
 -- No DDL, DML, locks or writes. Do not interpret empty provider IDs as proof of no HTTP;
 -- independently verify provider request logs and obtain operator confirmation.
+-- Production snapshot: V8 manual-review error is expected. The ownership orphan
+-- 4190c02c-5279-4534-8ec6-95fbcbbf05b9 must have no lease, version or intent.
+-- V3-V6 queued versions attached to failed jobs are historical only if their
+-- provider IDs, submit timestamps and events show no unresolved submission.
 SELECT j.id, j.tenant_id, j.job_type, j.status, j.error_code, j.input_json,
        j.provider_task_id, j.provider_video_id_base, j.lock_owner, j.lock_until,
        j.worker_key, j.completed_at
@@ -35,6 +39,23 @@ WHERE s.id=814 AND s.project_id=183 AND s.tenant_id=:'tenant_id'::uuid;
 SELECT e.event_type, e.created_at, e.data_json FROM render.render_job_events e
 WHERE e.tenant_id=:'tenant_id'::uuid AND e.job_id='d555306e-9c55-4552-9896-113a1334bfa2'
 ORDER BY e.created_at;
+
+SELECT j.id, j.status, j.error_code, j.lock_owner, j.lock_until,
+       v.id AS version_id, i.submit_state
+FROM render.render_jobs j
+LEFT JOIN video_render.scene_video_versions v ON v.tenant_id=j.tenant_id AND v.render_job_id=j.id
+LEFT JOIN render.scene_video_submit_intents i ON i.tenant_id=j.tenant_id AND i.render_job_id=j.id
+WHERE j.tenant_id=:'tenant_id'::uuid AND j.id='4190c02c-5279-4534-8ec6-95fbcbbf05b9';
+
+SELECT v.id, v.version_number, v.status AS version_status, v.submitted_at,
+       v.provider_task_id, v.provider_video_id_base, j.status AS job_status,
+       j.provider_task_id AS job_provider_task, j.provider_video_id_base AS job_provider_video,
+       e.event_type, e.data_json
+FROM video_render.scene_video_versions v
+LEFT JOIN render.render_jobs j ON j.id=v.render_job_id AND j.tenant_id=v.tenant_id
+LEFT JOIN render.render_job_events e ON e.job_id=j.id AND e.tenant_id=j.tenant_id
+WHERE v.tenant_id=:'tenant_id'::uuid AND v.scene_id=814 AND v.version_number BETWEEN 3 AND 6
+ORDER BY v.version_number, e.created_at;
 
 -- Check the actual production columns and constraints: source migrations are not a snapshot.
 SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns

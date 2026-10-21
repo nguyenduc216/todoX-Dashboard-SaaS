@@ -62,8 +62,7 @@ BEGIN
        OR NULLIF(btrim(j.provider_task_id),'') IS NOT NULL OR NULLIF(btrim(j.provider_video_id_base),'') IS NOT NULL
        OR (j.lock_until IS NOT NULL AND j.lock_until > now())
        OR (NULLIF(btrim(j.lock_owner),'') IS NOT NULL AND j.lock_until IS NULL)
-       OR j.error_code IS NOT DISTINCT FROM 'SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
-       OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'
+       OR j.error_code IS DISTINCT FROM 'SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
     THEN RAISE EXCEPTION 'V8 job preflight mismatch or live lease/provider identity'; END IF;
 
     SELECT * INTO STRICT v FROM video_render.scene_video_versions
@@ -107,16 +106,29 @@ BEGIN
            WHERE x.tenant_id=t AND x.id<>job_id AND x.job_type='render_scene_video'
              AND COALESCE(x.input_json->>'projectId',x.input_json->>'project_id')='183'
              AND COALESCE(x.input_json->>'sceneId',x.input_json->>'scene_id')='814'
-             AND (x.status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation')
-                  OR NULLIF(btrim(x.provider_task_id),'') IS NOT NULL
+              AND (x.status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation')
+                   AND NOT (x.id='4190c02c-5279-4534-8ec6-95fbcbbf05b9'
+                       AND x.status='pending_reconciliation'
+                       AND x.error_code='RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED'
+                       AND NULLIF(btrim(x.provider_task_id),'') IS NULL
+                       AND NULLIF(btrim(x.provider_video_id_base),'') IS NULL
+                       AND (x.lock_until IS NULL OR x.lock_until<=now())
+                       AND NOT EXISTS (SELECT 1 FROM video_render.scene_video_versions ov
+                           WHERE ov.tenant_id=t AND ov.render_job_id=x.id)
+                       AND NOT EXISTS (SELECT 1 FROM render.scene_video_submit_intents oi
+                           WHERE oi.tenant_id=t AND oi.render_job_id=x.id))
+                   OR (NULLIF(btrim(x.provider_task_id),'') IS NOT NULL
+                       OR NULLIF(btrim(x.provider_video_id_base),'') IS NOT NULL)
                      AND x.status NOT IN ('completed','failed','cancelled')))
        OR EXISTS (SELECT 1 FROM render.scene_video_submit_intents x
            WHERE x.tenant_id=t AND x.scene_id=814 AND x.render_job_id<>job_id
              AND x.submit_state IN ('SUBMIT_IN_FLIGHT','AMBIGUOUS_SUBMIT','MANUAL_REVIEW_REQUIRED'))
        OR EXISTS (SELECT 1 FROM video_render.scene_video_versions x
            WHERE x.tenant_id=t AND x.scene_id=814 AND x.id<>v_id
-             AND (x.status NOT IN ('completed','failed','cancelled')
-                  OR NULLIF(btrim(x.provider_task_id),'') IS NOT NULL AND x.status <> 'completed'))
+              AND (x.status='pending_reconciliation'
+                   OR (x.status NOT IN ('completed','failed','cancelled')
+                       AND (NULLIF(btrim(x.provider_task_id),'') IS NOT NULL
+                            OR NULLIF(btrim(x.provider_video_id_base),'') IS NOT NULL))))
     THEN RAISE EXCEPTION 'HTTP evidence or another unresolved operation exists'; END IF;
 
     -- Audit is independent of the historical intent/job/version and immutable to this script.
@@ -149,9 +161,18 @@ BEGIN
        OR EXISTS (SELECT 1 FROM render.render_jobs x WHERE x.tenant_id=t
            AND x.job_type='render_scene_video'
            AND COALESCE(x.input_json->>'sceneId',x.input_json->>'scene_id')='814'
-           AND x.status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation'))
+            AND x.status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation')
+            AND NOT (x.id='4190c02c-5279-4534-8ec6-95fbcbbf05b9'
+                AND x.status='pending_reconciliation' AND x.error_code='RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED'
+                AND NULLIF(btrim(x.provider_task_id),'') IS NULL AND NULLIF(btrim(x.provider_video_id_base),'') IS NULL
+                AND (x.lock_until IS NULL OR x.lock_until<=now())
+                AND NOT EXISTS (SELECT 1 FROM video_render.scene_video_versions ov WHERE ov.tenant_id=t AND ov.render_job_id=x.id)
+                AND NOT EXISTS (SELECT 1 FROM render.scene_video_submit_intents oi WHERE oi.tenant_id=t AND oi.render_job_id=x.id)))
        OR EXISTS (SELECT 1 FROM video_render.scene_video_versions x WHERE x.tenant_id=t
-           AND x.scene_id=814 AND x.status IN ('queued','submitted','processing','pending_reconciliation'))
+            AND x.scene_id=814 AND (x.status='pending_reconciliation'
+                OR (x.status NOT IN ('completed','failed','cancelled')
+                    AND (NULLIF(btrim(x.provider_task_id),'') IS NOT NULL
+                         OR NULLIF(btrim(x.provider_video_id_base),'') IS NOT NULL))))
     THEN RAISE EXCEPTION 'Postcheck: scene still blocked'; END IF;
 END;
 $reconcile$;

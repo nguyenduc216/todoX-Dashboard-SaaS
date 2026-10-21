@@ -1,6 +1,7 @@
 -- READ-ONLY postcheck. Run after successful COMMIT with the same tenant_id.
 -- Expected: V8 job/version failed, intent CONFIRMED_NO_TASK, exactly one audit row;
--- no rows in the two blocking queries; selected V2 remains completed and selected.
+-- ownership orphan may remain pending; V3-V6 may remain queued without provider
+-- evidence. Other unresolved rows in the blocking queries must be investigated.
 SELECT a.*, j.status AS job_status, j.provider_task_id AS job_provider_task,
        v.version_number, v.status AS version_status, v.is_selected,
        i.submit_state, i.provider_task_id AS intent_provider_task,
@@ -18,7 +19,13 @@ WHERE a.tenant_id=:'tenant_id'::uuid AND a.render_job_id='d555306e-9c55-4552-989
 SELECT j.id, j.status FROM render.render_jobs j WHERE j.tenant_id=:'tenant_id'::uuid
  AND j.job_type='render_scene_video'
  AND COALESCE(j.input_json->>'sceneId',j.input_json->>'scene_id')='814'
- AND j.status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation');
+ AND j.status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation')
+ AND NOT (j.id='4190c02c-5279-4534-8ec6-95fbcbbf05b9'
+   AND j.status='pending_reconciliation' AND j.error_code='RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED'
+   AND NULLIF(btrim(j.provider_task_id),'') IS NULL AND NULLIF(btrim(j.provider_video_id_base),'') IS NULL
+   AND (j.lock_until IS NULL OR j.lock_until<=now())
+   AND NOT EXISTS (SELECT 1 FROM video_render.scene_video_versions ov WHERE ov.tenant_id=j.tenant_id AND ov.render_job_id=j.id)
+   AND NOT EXISTS (SELECT 1 FROM render.scene_video_submit_intents oi WHERE oi.tenant_id=j.tenant_id AND oi.render_job_id=j.id));
 SELECT v.id, v.status FROM video_render.scene_video_versions v
 WHERE v.tenant_id=:'tenant_id'::uuid AND v.scene_id=814
  AND (v.status='pending_reconciliation' OR
