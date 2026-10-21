@@ -67,7 +67,15 @@ public enum SceneVideoSubmitBlockReason
     SceneJobInFlightOrManualReview,
 
     /// <summary>A scene-video version is still in flight or is held for reconciliation.</summary>
-    SceneVersionInFlightOrReconciliation
+    SceneVersionInFlightOrReconciliation,
+
+    /// <summary>
+    /// A settled historical attempt left a manual-review marker behind, and no live attempt exists.
+    /// This never refuses the submit: the marker belongs to a job that already ended, so it cannot
+    /// still be the provider's live task. It is reported so the new operation is started explicitly
+    /// instead of the marker being silently ignored.
+    /// </summary>
+    HistoricalManualReviewWithoutLiveAttempt
 }
 
 /// <summary>
@@ -125,6 +133,99 @@ public sealed record SceneVideoSubmitIntentFact(
         => string.IsNullOrWhiteSpace(submitState) ? string.Empty : submitState.Trim().ToUpperInvariant();
 }
 
+/// <summary>
+/// One scene-video render job fact Clause 2 of the pre-HTTP guard inspects, reduced to the only
+/// properties that decide whether the job still holds the scene. Keeping this a value type lets the
+/// refusal decision be proven in tests with the exact production scene-814 rows, without a database.
+/// </summary>
+public sealed record SceneVideoSubmitJobFact(
+    string Status,
+    string? ErrorCode,
+    bool HasManualReviewMarker,
+    bool HasProviderIdentity)
+{
+    /// <summary>The manual-review marker as written by the ambiguous-submit watchdog.</summary>
+    public const string ManualReviewErrorCode = "SCENE_VIDEO_MANUAL_REVIEW_REQUIRED";
+
+    private const string PendingReconciliation = "pending_reconciliation";
+
+    /// <summary>
+    /// Whether this job is still open, i.e. it may still be progressing or awaiting reconciliation.
+    /// A completed, failed or cancelled job has ended and can never become live again.
+    /// </summary>
+    public bool IsOpen
+        => Normalize(Status) is not ("completed" or "failed" or "cancelled");
+
+    /// <summary>Whether this job carries the manual-review marker in either recorded form.</summary>
+    public bool CarriesManualReviewMarker
+        => HasManualReviewMarker
+           || string.Equals(Normalize(ErrorCode), ManualReviewErrorCode.ToLowerInvariant(), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether this job must still refuse a submit for the scene (Clause 2).
+    /// <para>
+    /// A job that is awaiting reconciliation, or that is still open while holding a provider identity,
+    /// may have a live provider task and therefore always holds the scene.
+    /// </para>
+    /// <para>
+    /// The manual-review marker holds the scene only while its own job is still open, which is how every
+    /// other manual-review gate in the application reads it (enqueue guard, active-job lookup, marker
+    /// writer). A marker left on an already terminated job is history: it proves the earlier attempt
+    /// ended, not that a provider task is still running, so it must never lock the scene against a
+    /// brand-new user-initiated operation.
+    /// </para>
+    /// </summary>
+    public bool BlocksSceneSubmit
+        => Normalize(Status) == PendingReconciliation
+           || (IsOpen && (CarriesManualReviewMarker || HasProviderIdentity));
+
+    /// <summary>
+    /// Whether this job is a settled historical attempt that left a manual-review marker behind and can
+    /// no longer hold the scene. Reported so a new operation is started transparently, not silently.
+    /// </summary>
+    public bool IsSettledManualReviewHistory
+        => !BlocksSceneSubmit && CarriesManualReviewMarker;
+
+    private static string Normalize(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToLowerInvariant();
+}
+
+/// <summary>
+/// Executable form of the three-clause pre-HTTP guard. Every clause is a pure function of the durable
+/// facts, so the refusal that blocked scene 814 can be reproduced and proven in tests.
+/// </summary>
+public static class SceneSubmitGuard
+{
+    /// <summary>
+    /// Evaluates all three clauses in the same precedence order as <c>ClaimSubmitAsync</c> so a
+    /// refusal stays attributable to exactly one cause.
+    /// </summary>
+    public static SceneVideoSubmitBlockReason Evaluate(
+        IEnumerable<SceneVideoSubmitIntentFact>? intents,
+        IEnumerable<SceneVideoSubmitJobFact>? jobs,
+        IEnumerable<SceneVideoSubmitJobFact>? versions)
+    {
+        // Clause 1 takes precedence: a live or not-yet-settled submit intent is the strongest hold and
+        // must map to the same reported reason it does in SQL.
+        if (intents is not null && intents.Any(i => SceneVideoSubmitIntentFact.BlocksSceneSubmit(i)))
+            return SceneVideoSubmitBlockReason.ExistingIntentUnresolved;
+        if (jobs is not null && jobs.Any(j => j.BlocksSceneSubmit))
+            return SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview;
+        if (versions is not null && versions.Any(v => v.BlocksSceneSubmit))
+            return SceneVideoSubmitBlockReason.SceneVersionInFlightOrReconciliation;
+        if (jobs is not null && jobs.Any(j => j.IsSettledManualReviewHistory))
+            return SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt;
+        return SceneVideoSubmitBlockReason.None;
+    }
+
+    /// <summary>
+    /// Whether the outcome permits the submit to proceed to the provider adapter as a new operation.
+    /// </summary>
+    public static bool PermitsSubmit(SceneVideoSubmitBlockReason reason)
+        => reason is SceneVideoSubmitBlockReason.None
+           or SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt;
+}
+
 public sealed record SceneVideoSubmitClaim(
     SceneVideoSubmitClaimOutcome Outcome,
     Guid? OwnerToken,
@@ -135,6 +236,14 @@ public sealed record SceneVideoSubmitClaim(
 
     public static SceneVideoSubmitClaim BlockedBecause(SceneVideoSubmitBlockReason reason)
         => new(SceneVideoSubmitClaimOutcome.Blocked, null, reason);
+
+    /// <summary>
+    /// A claim that is permitted while a settled historical manual-review marker exists. The marker is
+    /// surfaced to the caller so the new operation is started explicitly and never silently.
+    /// </summary>
+    public static SceneVideoSubmitClaim ClaimedWithHistoricalManualReview(Guid ownerToken)
+        => new(SceneVideoSubmitClaimOutcome.Claimed, ownerToken,
+            SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt);
 }
 
 public sealed class SceneVideoSubmitCoordinator
@@ -147,7 +256,8 @@ public sealed class SceneVideoSubmitCoordinator
     public sealed record SceneSubmitGuardFacts(
         bool HasUnresolvedIntent,
         bool HasInFlightOrManualReviewJob,
-        bool HasInFlightOrReconciliationVersion);
+        bool HasInFlightOrReconciliationVersion,
+        bool HasSettledManualReviewHistory = false);
 
     /// <summary>
     /// Pure guard decision, evaluated in the same precedence order as the SQL guard so a refusal
@@ -159,6 +269,7 @@ public sealed class SceneVideoSubmitCoordinator
         if (facts.HasUnresolvedIntent) return SceneVideoSubmitBlockReason.ExistingIntentUnresolved;
         if (facts.HasInFlightOrManualReviewJob) return SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview;
         if (facts.HasInFlightOrReconciliationVersion) return SceneVideoSubmitBlockReason.SceneVersionInFlightOrReconciliation;
+        if (facts.HasSettledManualReviewHistory) return SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt;
         return SceneVideoSubmitBlockReason.None;
     }
 
@@ -216,9 +327,16 @@ public sealed class SceneVideoSubmitCoordinator
                 WHEN EXISTS (SELECT 1 FROM render.render_jobs j
                     WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
                       AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=@sceneText
+                      -- A manual-review marker only holds the scene while its own job is still open.
+                      -- Every other manual-review gate in the application reads the marker this way
+                      -- (the enqueue guard and the active-job lookup both require pending_reconciliation,
+                      -- and the watchdog only writes the marker onto a pending_reconciliation job).
+                      -- A marker left on an already terminated job is history, not a live provider task,
+                      -- so it must not lock the scene against a brand-new user-initiated operation.
                       AND (j.status='pending_reconciliation'
-                        OR j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
-                        OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'
+                        OR (j.status NOT IN ('completed', 'failed', 'cancelled')
+                            AND (j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
+                                 OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'))
                         OR (j.status NOT IN ('completed', 'failed') AND
                             (NULLIF(btrim(j.provider_task_id), '') IS NOT NULL
                              OR NULLIF(btrim(j.provider_video_id_base), '') IS NOT NULL))))
@@ -238,6 +356,19 @@ public sealed class SceneVideoSubmitCoordinator
             tx.Commit();
             return SceneVideoSubmitClaim.BlockedBecause(blockReason);
         }
+        // The three refusal clauses passed. A manual-review marker on an already settled job is history:
+        // it must not refuse this operation, but it is reported so the new submit is started explicitly
+        // rather than the marker being silently dropped.
+        var historicalManualReview = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM render.render_jobs j
+                WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
+                  AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=@sceneText
+                  AND j.status NOT IN ('pending_reconciliation', 'queued', 'preparing', 'rendering',
+                                       'post_processing', 'processing')
+                  AND (j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
+                       OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'));
+            """, new { tenant = _tenant.TenantId, sceneText = sceneId.ToString() }, tx);
         var token = Guid.NewGuid();
         var inserted = await conn.ExecuteAsync(
             """
@@ -247,9 +378,10 @@ public sealed class SceneVideoSubmitCoordinator
             ON CONFLICT (tenant_id, scene_id, logical_request_id) DO NOTHING;
             """, new { tenant = _tenant.TenantId, sceneId, logicalRequestId, jobId, token }, tx);
         tx.Commit();
-        return inserted == 1
-            ? new SceneVideoSubmitClaim(SceneVideoSubmitClaimOutcome.Claimed, token)
-            : SceneVideoSubmitClaim.AlreadyClaimed;
+        if (inserted != 1) return SceneVideoSubmitClaim.AlreadyClaimed;
+        return historicalManualReview
+            ? SceneVideoSubmitClaim.ClaimedWithHistoricalManualReview(token)
+            : new SceneVideoSubmitClaim(SceneVideoSubmitClaimOutcome.Claimed, token);
     }
 
     public async Task<bool> BeginSubmitAsync(Guid token, CancellationToken ct = default)

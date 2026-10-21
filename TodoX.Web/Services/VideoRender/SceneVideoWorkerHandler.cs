@@ -782,6 +782,26 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     // request. It must not be reported as an ambiguous in-flight submit: no request was sent,
                     // so no reconciliation is warranted and no manual review flag is set.
                     var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);
+                    if (claim.Outcome == SceneVideoSubmitClaimOutcome.Claimed
+                        && claim.BlockReason == SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt)
+                    {
+                        // A settled historical attempt left a manual-review marker, but no live attempt holds
+                        // the scene. The marker is reported here instead of being silently dropped; the new
+                        // operation proceeds and the historical rows are never modified.
+                        await _repo.AddProjectEventAsync(input.ProjectId, "RVIDEO_VIDEO_HISTORICAL_MANUAL_REVIEW_OVERRIDDEN", "info",
+                            "A historical manual-review marker exists on a settled attempt; the new user-initiated operation proceeds with its own provider request.",
+                            new
+                            {
+                                jobId = job.Id,
+                                input.ProjectId,
+                                input.SceneId,
+                                input.SceneIndex,
+                                sceneVideoVersionId = version.Id,
+                                logicalRequestId = attemptLogicalRequestId,
+                                historicalAttemptModified = false,
+                                providerRequestSent = true
+                            }, ct);
+                    }
                     if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is not { } claimedToken)
                     {
                         // A refused claim is decided entirely before the provider call, so it is a definite
@@ -1933,6 +1953,25 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 // Same contract as the 79AI path: a refused claim is decided before the provider call, so it is a
                 // definite terminal failure and must never be parked in ambiguous reconciliation.
                 var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, input.LogicalRequestId, job.Id, ct);
+                if (claim.Outcome == SceneVideoSubmitClaimOutcome.Claimed
+                    && claim.BlockReason == SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt)
+                {
+                    // Same transparency contract as the 79AI path: a marker left on a settled attempt never
+                    // refuses a new user-initiated operation, and the historical rows are never modified.
+                    await _repo.AddProjectEventAsync(input.ProjectId, "RVIDEO_VIDEO_HISTORICAL_MANUAL_REVIEW_OVERRIDDEN", "info",
+                        "A historical manual-review marker exists on a settled attempt; the new user-initiated operation proceeds with its own provider request.",
+                        new
+                        {
+                            jobId = job.Id,
+                            input.ProjectId,
+                            input.SceneId,
+                            input.SceneIndex,
+                            sceneVideoVersionId = version.Id,
+                            logicalRequestId = input.LogicalRequestId,
+                            historicalAttemptModified = false,
+                            providerRequestSent = true
+                        }, ct);
+                }
                 if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is not { } claimedToken)
                 {
                     if (claim.Outcome == SceneVideoSubmitClaimOutcome.AlreadyClaimed)

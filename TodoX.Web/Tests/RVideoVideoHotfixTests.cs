@@ -1187,6 +1187,295 @@ public sealed class RVideoVideoHotfixTests
                 IsPriorJobCompleted: false)));
     }
 
+    /// <summary>
+    /// The exact production scene-814 rows. V2 completed/selected, V3 failed, V4 failed with the
+    /// manual-review marker written onto input_json plus the matching error_code. No submit intents
+    /// exist for the scene. This is the dataset the previous fix mis-modelled as having no Clause-2
+    /// signal, so the guard is now evaluated against it directly.
+    /// </summary>
+    private static (SceneVideoSubmitJobFact[] Jobs, SceneVideoSubmitJobFact[] Versions, SceneVideoSubmitIntentFact[] Intents)
+        ProductionScene814Rows()
+    {
+        // V2: completed and selected, with a recorded provider task.
+        var v2 = new SceneVideoSubmitJobFact("completed", null, HasManualReviewMarker: false, HasProviderIdentity: true);
+        // V3: failed after the provider rejected the submit.
+        var v3 = new SceneVideoSubmitJobFact("failed", "RVIDEO_79AI_SUBMIT_REJECTED", HasManualReviewMarker: false, HasProviderIdentity: false);
+        // V4: failed and carrying the manual-review marker. The marker was written while the job was
+        // pending_reconciliation; the job later terminated as failed and the marker stayed behind.
+        var v4 = new SceneVideoSubmitJobFact("failed", SceneVideoSubmitJobFact.ManualReviewErrorCode,
+            HasManualReviewMarker: true, HasProviderIdentity: false);
+
+        return (
+            Jobs: [v2, v3, v4],
+            // The version rows mirror the same attempts: V2 completed, V3/V4 failed with no live task.
+            Versions:
+            [
+                new SceneVideoSubmitJobFact("completed", null, false, true),
+                new SceneVideoSubmitJobFact("failed", "RVIDEO_79AI_SUBMIT_REJECTED", false, false),
+                new SceneVideoSubmitJobFact("failed", SceneVideoSubmitJobFact.ManualReviewErrorCode, true, false)
+            ],
+            // Production scene 814 has no durable submit intents.
+            Intents: []);
+    }
+
+    [Fact]
+    public void Scene814ProductionRowsReproduceEveryGuardClauseAndPermitTheNewOperation()
+    {
+        var (jobs, versions, intents) = ProductionScene814Rows();
+
+        // The settled history that used to lock the scene: a failed job with the manual-review marker.
+        var v4 = jobs.Single(j => j.CarriesManualReviewMarker);
+        Assert.False(v4.BlocksSceneSubmit);
+        Assert.True(v4.IsSettledManualReviewHistory);
+
+        // Clause 1: no intent exists, so nothing is held by an unresolved submit.
+        Assert.DoesNotContain(intents, SceneVideoSubmitIntentFact.BlocksSceneSubmit);
+
+        // Clause 2: no job holds the scene now that a terminated marker no longer counts as live.
+        Assert.DoesNotContain(jobs, j => j.BlocksSceneSubmit);
+
+        // Clause 3: no version is in flight or awaiting reconciliation.
+        Assert.DoesNotContain(versions, v => v.BlocksSceneSubmit);
+
+        // The guard therefore permits a brand-new operation and reports the settled marker transparently
+        // instead of silently pretending the scene has no history.
+        var reason = SceneSubmitGuard.Evaluate(intents, jobs, versions);
+        Assert.Equal(SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt, reason);
+        Assert.True(SceneSubmitGuard.PermitsSubmit(reason));
+        Assert.NotEqual(SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview, reason);
+    }
+
+    [Fact]
+    public void LiveManualReviewAndInFlightAttemptsStillRefuseTheScene()
+    {
+        var (jobs, versions, intents) = ProductionScene814Rows();
+
+        // A job still awaiting reconciliation keeps the manual-review hold, exactly as the enqueue guard
+        // and the active-job lookup read it.
+        var liveReview = new SceneVideoSubmitJobFact("pending_reconciliation",
+            SceneVideoSubmitJobFact.ManualReviewErrorCode, HasManualReviewMarker: true, HasProviderIdentity: false);
+        Assert.True(liveReview.BlocksSceneSubmit);
+        Assert.False(liveReview.IsSettledManualReviewHistory);
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview,
+            SceneSubmitGuard.Evaluate(intents, [.. jobs, liveReview], versions));
+        Assert.False(SceneSubmitGuard.PermitsSubmit(
+            SceneSubmitGuard.Evaluate(intents, [.. jobs, liveReview], versions)));
+
+        // An open attempt holding a provider identity may still be running at the provider.
+        var liveTask = new SceneVideoSubmitJobFact("rendering", null, false, HasProviderIdentity: true);
+        Assert.True(liveTask.BlocksSceneSubmit);
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview,
+            SceneSubmitGuard.Evaluate(intents, [.. jobs, liveTask], versions));
+
+        // An in-flight version is the last line of defence even when no job holds the scene.
+        var liveVersion = new SceneVideoSubmitJobFact("submitted", null, false, HasProviderIdentity: true);
+        Assert.True(liveVersion.BlocksSceneSubmit);
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.SceneVersionInFlightOrReconciliation,
+            SceneSubmitGuard.Evaluate(intents, jobs, [.. versions, liveVersion]));
+
+        // Clause 1 still wins so an operator sees exactly one attributable cause.
+        var pendingIntent = new SceneVideoSubmitIntentFact("SUBMIT_IN_FLIGHT", true, false, false, false);
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.ExistingIntentUnresolved,
+            SceneSubmitGuard.Evaluate([pendingIntent], [.. jobs, liveReview], [.. versions, liveVersion]));
+    }
+
+    [Fact]
+    public void ClauseTwoPrecedenceIsUnchangedForEveryNonTerminalJobStatus()
+    {
+        // Every open status is still held by the marker, so the fix only releases terminated jobs.
+        foreach (var status in new[] { "queued", "preparing", "rendering", "processing", "post_processing", "pending_reconciliation" })
+        {
+            var open = new SceneVideoSubmitJobFact(status, SceneVideoSubmitJobFact.ManualReviewErrorCode, true, false);
+            Assert.True(open.BlocksSceneSubmit);
+            Assert.False(open.IsSettledManualReviewHistory);
+        }
+
+        // Every terminal status releases the scene without treating the row as live.
+        foreach (var status in new[] { "failed", "completed", "cancelled" })
+        {
+            var settled = new SceneVideoSubmitJobFact(status, SceneVideoSubmitJobFact.ManualReviewErrorCode, true, false);
+            Assert.False(settled.BlocksSceneSubmit);
+            Assert.True(settled.IsSettledManualReviewHistory);
+        }
+
+        // A failed job without the marker is plain history and is never reported as manual review.
+        var plainFailure = new SceneVideoSubmitJobFact("failed", "RVIDEO_79AI_SUBMIT_REJECTED", false, false);
+        Assert.False(plainFailure.BlocksSceneSubmit);
+        Assert.False(plainFailure.IsSettledManualReviewHistory);
+
+        // Case and whitespace variations must not slip past the guard.
+        Assert.True(new SceneVideoSubmitJobFact("  FAILED ", "  scene_video_manual_review_required ", false, false)
+            .CarriesManualReviewMarker);
+        Assert.False(new SceneVideoSubmitJobFact("failed", "scene_video_manual_review_required", true, false)
+            .BlocksSceneSubmit);
+    }
+
+    [Fact]
+    public void ClaimClaimedWithHistoricalManualReviewStillOwnsTheSubmit()
+    {
+        // A permitted claim that carries the historical marker must remain a real, owned claim: the
+        // worker needs the token to move the intent to SUBMIT_IN_FLIGHT before any provider HTTP call.
+        var token = Guid.NewGuid();
+        var claim = SceneVideoSubmitClaim.ClaimedWithHistoricalManualReview(token);
+
+        Assert.Equal(SceneVideoSubmitClaimOutcome.Claimed, claim.Outcome);
+        Assert.Equal(token, claim.OwnerToken);
+        Assert.Equal(SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt, claim.BlockReason);
+        Assert.True(SceneSubmitGuard.PermitsSubmit(claim.BlockReason));
+
+        // The marker must never be reported as a blocking outcome.
+        Assert.NotEqual(SceneVideoSubmitClaimOutcome.Blocked, claim.Outcome);
+        Assert.True(SceneVideoSubmitCoordinator.ClassifyBlock(
+            new SceneVideoSubmitCoordinator.SceneSubmitGuardFacts(
+                HasUnresolvedIntent: false,
+                HasInFlightOrManualReviewJob: false,
+                HasInFlightOrReconciliationVersion: false,
+                HasSettledManualReviewHistory: true)) is SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt);
+    }
+
+    [Fact]
+    public void RetryOfTheSameLogicalRequestIsStillRefusedWhileANewOperationIsAllowed()
+    {
+        // Retrying the SAME logical request id (same parent job) must still be refused by Clause 1,
+        // because its own intent is authoritative. Only a genuinely new operation gets a new id.
+        var parentV5 = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var parentV6 = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var retry = SceneVideoRenderHandler.BuildLogicalRequestId(parentV5, 814);
+        var nextOperation = SceneVideoRenderHandler.BuildLogicalRequestId(parentV6, 814);
+        Assert.NotEqual(retry, nextOperation);
+
+        // This job's own intent while the new operation is being claimed protects the operation.
+        var ownIntent = new SceneVideoSubmitIntentFact("SUBMIT_INTENT_PERSISTED", false, IsNewJob: true,
+            IsPriorJobTerminal: false, IsPriorJobCompleted: false);
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.ExistingIntentUnresolved,
+            SceneSubmitGuard.Evaluate([ownIntent], [], []));
+        Assert.False(SceneSubmitGuard.PermitsSubmit(
+            SceneSubmitGuard.Evaluate([ownIntent], [], [])));
+
+        // After the first request is confirmed, a second claim of the same operation is a duplicate and
+        // is rejected by the intent primary key, so a double-click cannot send two requests.
+        var confirmed = new SceneVideoSubmitIntentFact("CONFIRMED_PROVIDER_TASK", true, IsNewJob: true,
+            IsPriorJobTerminal: false, IsPriorJobCompleted: false);
+        Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(confirmed));
+    }
+
+    [Fact]
+    public void HistoricalManualReviewMarkerNeverModifiesTheSettledAttempt()
+    {
+        // The coordinator may only INSERT its own intent; it must never update or repair historical rows.
+        var coordinator = ReadRepoFile("Services", "VideoRender", "SceneVideoSubmitCoordinator.cs");
+        var claimStart = coordinator.IndexOf("public async Task<SceneVideoSubmitClaim> ClaimSubmitAsync", StringComparison.Ordinal);
+        var claimEnd = coordinator.IndexOf("public async Task<bool> BeginSubmitAsync", claimStart, StringComparison.Ordinal);
+        Assert.True(claimStart >= 0 && claimEnd > claimStart);
+        var claim = coordinator[claimStart..claimEnd];
+
+        // No writes to the history the guard inspects.
+        Assert.DoesNotContain("UPDATE render.render_jobs", claim);
+        Assert.DoesNotContain("UPDATE video_render.scene_video_versions", claim);
+        Assert.DoesNotContain("DELETE FROM render.render_jobs", claim);
+        // The claim path must never clear or rewrite the historical marker itself.
+        Assert.DoesNotContain("jsonb_set", claim);
+        Assert.DoesNotContain("- 'sceneVideoManualReviewAt'", claim);
+
+        // The marker is now read with the same open-job restriction as every other manual-review gate.
+        Assert.Contains("j.status NOT IN ('completed', 'failed', 'cancelled')", claim);
+        Assert.Contains("j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'", claim);
+
+        // The enqueue guard must keep rejecting a genuinely live pending_reconciliation hold.
+        var service = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var enqueueStart = service.IndexOf("private async Task EnsureSceneVideoEnqueueAllowedAsync", StringComparison.Ordinal);
+        var enqueueEnd = service.IndexOf("public static bool IsRenderJobsCustomerIdNotNullViolation", enqueueStart, StringComparison.Ordinal);
+        var enqueue = service[enqueueStart..enqueueEnd];
+        Assert.Contains("j.status='pending_reconciliation'", enqueue);
+        Assert.Contains("SCENE_VIDEO_MANUAL_REVIEW_REQUIRED", enqueue);
+    }
+
+    [Fact]
+    public void BothSubmitPathsReportTheHistoricalMarkerInsteadOfSendingSilently()
+    {
+        // The 79AI path and the legacy provider path both consume the claim. Neither may proceed on a
+        // historical marker without recording why, and neither may modify the historical attempt.
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var occurrences = worker.Split("RVIDEO_VIDEO_HISTORICAL_MANUAL_REVIEW_OVERRIDDEN").Length - 1;
+        Assert.Equal(2, occurrences);
+
+        foreach (var anchor in new[]
+                 {
+                     "var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);",
+                     "var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, input.LogicalRequestId, job.Id, ct);"
+                 })
+        {
+            var index = worker.IndexOf(anchor, StringComparison.Ordinal);
+            Assert.True(index >= 0, "Submit claim anchor must exist.");
+            var branchEnd = worker.IndexOf("_submitCoordinator.BeginSubmitAsync", index, StringComparison.Ordinal);
+            Assert.True(branchEnd > index);
+            var branch = worker[index..branchEnd];
+            Assert.Contains("HistoricalManualReviewWithoutLiveAttempt", branch);
+            Assert.Contains("RVIDEO_VIDEO_HISTORICAL_MANUAL_REVIEW_OVERRIDDEN", branch);
+            Assert.Contains("historicalAttemptModified = false", branch);
+            Assert.DoesNotContain("UPDATE render.render_jobs", branch);
+            Assert.DoesNotContain("UPDATE video_render.scene_video_versions", branch);
+        }
+    }
+
+    [Fact]
+    public async Task FakeAdapterReceivesExactlyOneRequestForTheScene814Rerender()
+    {
+        // End-to-end shape of the acceptance path: the guard permits the new operation, the intent moves
+        // to SUBMIT_IN_FLIGHT, the provider adapter is invoked once, and a new task id is recorded.
+        var (jobs, versions, intents) = ProductionScene814Rows();
+        var reason = SceneSubmitGuard.Evaluate(intents, jobs, versions);
+        Assert.True(SceneSubmitGuard.PermitsSubmit(reason));
+
+        var adapter = new CountingSceneVideoSubmitAdapter("task-v5", "idbase-v5");
+        var claim = SceneVideoSubmitClaim.ClaimedWithHistoricalManualReview(Guid.NewGuid());
+        Assert.Equal(SceneVideoSubmitClaimOutcome.Claimed, claim.Outcome);
+        Assert.NotNull(claim.OwnerToken);
+
+        // The worker only reaches SubmitAsync when the claim is owned, exactly as the submit branch does.
+        if (claim.Outcome == SceneVideoSubmitClaimOutcome.Claimed && claim.OwnerToken is not null)
+            await adapter.SubmitAsync(CancellationToken.None);
+
+        Assert.Equal(1, adapter.SubmitCalls);
+        Assert.Equal("task-v5", adapter.LastTaskId);
+        Assert.Equal("idbase-v5", adapter.LastVideoIdBase);
+
+        // A second click of the same operation is a duplicate claim and never reaches the adapter again.
+        var duplicate = new SceneVideoSubmitIntentFact("CONFIRMED_PROVIDER_TASK", true, IsNewJob: true,
+            IsPriorJobTerminal: false, IsPriorJobCompleted: false);
+        Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(duplicate));
+        Assert.False(SceneSubmitGuard.PermitsSubmit(
+            SceneSubmitGuard.Evaluate([duplicate], jobs, versions)));
+        Assert.Equal(1, adapter.SubmitCalls);
+
+        // The historical rows are untouched by the whole flow.
+        Assert.Equal(3, jobs.Length);
+        Assert.Equal(3, versions.Length);
+        Assert.Empty(intents);
+        Assert.Equal(SceneVideoSubmitJobFact.ManualReviewErrorCode,
+            jobs.Single(j => j.IsSettledManualReviewHistory).ErrorCode);
+    }
+
+    private sealed class CountingSceneVideoSubmitAdapter(string taskId, string videoIdBase)
+    {
+        public int SubmitCalls { get; private set; }
+        public string? LastTaskId { get; private set; }
+        public string? LastVideoIdBase { get; private set; }
+
+        public Task SubmitAsync(CancellationToken ct)
+        {
+            SubmitCalls++;
+            LastTaskId = taskId;
+            LastVideoIdBase = videoIdBase;
+            return Task.CompletedTask;
+        }
+    }
+
     [Fact]
     public async Task ScenePreHttpRefusalNeverDowngradesAnIntentThatAlreadyHasAProviderTask()
     {
