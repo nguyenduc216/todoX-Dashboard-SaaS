@@ -56,7 +56,11 @@ public enum SceneVideoSubmitBlockReason
     /// <summary>No refusal; the claim succeeded.</summary>
     None,
 
-    /// <summary>Another durable submit intent for this scene is not in a resolved terminal state.</summary>
+    /// <summary>
+    /// A durable submit intent that could still be the provider's live task for this scene exists for
+    /// another job, or this job's own intent is not yet resolved. Historical attempts that already ended
+    /// without a provider task never reach this state.
+    /// </summary>
     ExistingIntentUnresolved,
 
     /// <summary>A scene-video render job is still in flight or is held for manual review.</summary>
@@ -64,6 +68,61 @@ public enum SceneVideoSubmitBlockReason
 
     /// <summary>A scene-video version is still in flight or is held for reconciliation.</summary>
     SceneVersionInFlightOrReconciliation
+}
+
+/// <summary>
+/// One durable submit-intent fact the pre-HTTP guard inspects for a scene, reduced to the only
+/// properties that decide whether the intent still represents a live submit for that scene.
+/// Keeping this a value type lets the refusal decision be proven in tests without a database.
+/// </summary>
+public sealed record SceneVideoSubmitIntentFact(
+    string SubmitState,
+    bool HasProviderTask,
+    bool IsNewJob,
+    bool IsPriorJobTerminal,
+    bool IsPriorJobCompleted)
+{
+    /// <summary>
+    /// Whether an intent row must still refuse an unrelated new submit for the same scene.
+    /// <para>
+    /// An intent that belongs to the incoming job always protects that operation, so a double-click,
+    /// an automatic retry and an in-flight or ambiguous submit can never be silently resent.
+    /// </para>
+    /// <para>
+    /// An intent left behind by a different (historical) attempt blocks only while it can still be the
+    /// provider's live task for the scene: while the provider needs reconciling, or while it has not
+    /// reached the provider yet AND its own job has not terminated. Once such an attempt is definitely
+    /// settled (a recorded pre-HTTP refusal, or a recorded provider task whose job already ended) it
+    /// must not lock the scene forever and prevent the user from starting a new render operation.
+    /// </para>
+    /// </summary>
+    public static bool BlocksSceneSubmit(SceneVideoSubmitIntentFact intent)
+    {
+        ArgumentNullException.ThrowIfNull(intent);
+        if (intent.IsNewJob)
+        {
+            // This job's own intent is always authoritative, whatever state it is in.
+            return true;
+        }
+
+        return Normalize(intent.SubmitState) switch
+        {
+            // A submit may be in flight or its outcome unknown; the provider task must never be duplicated.
+            "SUBMIT_IN_FLIGHT" or "AMBIGUOUS_SUBMIT" or "MANUAL_REVIEW_REQUIRED" => true,
+            // An intent was persisted but never sent. It blocks only while its own job is still live.
+            "SUBMIT_INTENT_PERSISTED" => !intent.IsPriorJobTerminal,
+            // A recorded provider task only settles the attempt once its job actually completed and the
+            // result was persisted. A task whose job failed may still be live at the provider, so it keeps
+            // blocking until an operator reconciles it.
+            "CONFIRMED_PROVIDER_TASK" => !intent.IsPriorJobCompleted,
+            // A recorded pre-HTTP refusal proves no request left the server and the attempt is settled.
+            "CONFIRMED_NO_TASK" => false,
+            _ => true
+        };
+    }
+
+    private static string Normalize(string? submitState)
+        => string.IsNullOrWhiteSpace(submitState) ? string.Empty : submitState.Trim().ToUpperInvariant();
 }
 
 public sealed record SceneVideoSubmitClaim(
@@ -141,8 +200,18 @@ public sealed class SceneVideoSubmitCoordinator
                 WHEN EXISTS (SELECT 1 FROM render.scene_video_submit_intents i
                     JOIN render.render_jobs prior ON prior.id=i.render_job_id AND prior.tenant_id=i.tenant_id
                     WHERE i.tenant_id=@tenant AND i.scene_id=@sceneId
-                      AND NOT ((i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status='completed')
-                               OR (i.submit_state='CONFIRMED_NO_TASK' AND i.render_job_id=@jobId)))
+                      AND (
+                            -- This job's own intent is always authoritative: it protects the double-click,
+                            -- the automatic retry and any in-flight/ambiguous submit from being resent.
+                            i.render_job_id=@jobId
+                            -- Intent that reached the provider but has no recorded task yet: the provider task
+                            -- may be live, so a new operation must not silently duplicate it.
+                            OR i.submit_state IN ('SUBMIT_IN_FLIGHT', 'AMBIGUOUS_SUBMIT', 'MANUAL_REVIEW_REQUIRED')
+                            -- Intent that never reached the provider: it blocks only while its own job is live.
+                            OR (i.submit_state='SUBMIT_INTENT_PERSISTED' AND prior.status NOT IN ('completed', 'failed'))
+                            -- A recorded provider task settles the attempt only once its job completed.
+                            OR (i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status <> 'completed')
+                          ))
                     THEN 1
                 WHEN EXISTS (SELECT 1 FROM render.render_jobs j
                     WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'

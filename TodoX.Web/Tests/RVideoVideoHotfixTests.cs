@@ -923,8 +923,14 @@ public sealed class RVideoVideoHotfixTests
     public void SceneVideoSubmitIntentAllowsCompletedTaskAndExplicitlyRejectedFallbackOnly()
     {
         var coordinator = ReadRepoFile("Services", "VideoRender", "SceneVideoSubmitCoordinator.cs");
-        Assert.Contains("i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status='completed'", coordinator);
-        Assert.Contains("i.submit_state='CONFIRMED_NO_TASK' AND i.render_job_id=@jobId", coordinator);
+        // The intent guard is operation-scoped: this job's own intent always protects the operation, while
+        // a historical attempt only blocks the scene while it can still be the provider's live task.
+        Assert.Contains("i.render_job_id=@jobId", coordinator);
+        Assert.Contains("i.submit_state IN ('SUBMIT_IN_FLIGHT', 'AMBIGUOUS_SUBMIT', 'MANUAL_REVIEW_REQUIRED')", coordinator);
+        Assert.Contains("i.submit_state='SUBMIT_INTENT_PERSISTED' AND prior.status NOT IN ('completed', 'failed')", coordinator);
+        Assert.Contains("i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status <> 'completed'", coordinator);
+        // A recorded pre-HTTP refusal must not lock the scene forever.
+        Assert.DoesNotContain("i.submit_state='CONFIRMED_NO_TASK' AND i.render_job_id=@jobId", coordinator);
         Assert.Contains("SUBMIT_IN_FLIGHT", coordinator);
         Assert.Contains("AMBIGUOUS_SUBMIT", coordinator);
         var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
@@ -1035,6 +1041,150 @@ public sealed class RVideoVideoHotfixTests
                 HasUnresolvedIntent: true,
                 HasInFlightOrManualReviewJob: true,
                 HasInFlightOrReconciliationVersion: true)));
+    }
+
+    [Fact]
+    public void UserInitiatedRerenderIsNotBlockedByHistoricalTerminalAttempts()
+    {
+        // Scene 814 acceptance: V2 completed/selected, V3 failed, V4 refused before any provider HTTP.
+        // The user's brand-new V5 operation must not be locked out by that history.
+
+        // V3: its job failed, its intent was persisted but the request never left the server.
+        Assert.False(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "SUBMIT_INTENT_PERSISTED",
+                HasProviderTask: false,
+                IsNewJob: false,
+                IsPriorJobTerminal: true,
+                IsPriorJobCompleted: false)));
+
+        // V4: the pre-HTTP refusal was recorded, so the attempt is definitely settled.
+        Assert.False(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "CONFIRMED_NO_TASK",
+                HasProviderTask: false,
+                IsNewJob: false,
+                IsPriorJobTerminal: true,
+                IsPriorJobCompleted: false)));
+
+        // V2: the prior provider task's job completed and the result was persisted.
+        Assert.False(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "CONFIRMED_PROVIDER_TASK",
+                HasProviderTask: true,
+                IsNewJob: false,
+                IsPriorJobTerminal: true,
+                IsPriorJobCompleted: true)));
+
+        // With that history no clause blocks, so the guard permits the new operation.
+        Assert.Equal(
+            SceneVideoSubmitBlockReason.None,
+            SceneVideoSubmitCoordinator.ClassifyBlock(new SceneVideoSubmitCoordinator.SceneSubmitGuardFacts(
+                HasUnresolvedIntent: false,
+                HasInFlightOrManualReviewJob: false,
+                HasInFlightOrReconciliationVersion: false)));
+    }
+
+    [Fact]
+    public void SceneSubmitIntentGuardStillProtectsInFlightAmbiguousAndUnfinishedAttempts()
+    {
+        // Automatic retry / in-flight protection: an unknown-outcome submit may still be the provider's
+        // live task, so a new operation must never silently duplicate it.
+        foreach (var state in new[] { "SUBMIT_IN_FLIGHT", "AMBIGUOUS_SUBMIT", "MANUAL_REVIEW_REQUIRED" })
+        {
+            Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+                new SceneVideoSubmitIntentFact(
+                    SubmitState: state,
+                    HasProviderTask: true,
+                    IsNewJob: false,
+                    IsPriorJobTerminal: true,
+                    IsPriorJobCompleted: true)),
+                $"{state} must keep blocking the scene until it is reconciled.");
+        }
+
+        // A persisted-but-unsent intent still blocks while its own job is live.
+        Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "SUBMIT_INTENT_PERSISTED",
+                HasProviderTask: false,
+                IsNewJob: false,
+                IsPriorJobTerminal: false,
+                IsPriorJobCompleted: false)));
+
+        // A recorded provider task whose job has not completed may still be live at the provider.
+        Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "CONFIRMED_PROVIDER_TASK",
+                HasProviderTask: true,
+                IsNewJob: false,
+                IsPriorJobTerminal: true,
+                IsPriorJobCompleted: false)));
+
+        // Unknown states stay conservative: refuse rather than risk a duplicate provider request.
+        Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "SOMETHING_NEW",
+                HasProviderTask: true,
+                IsNewJob: false,
+                IsPriorJobTerminal: true,
+                IsPriorJobCompleted: true)));
+    }
+
+    [Fact]
+    public void ThisJobsOwnIntentAlwaysProtectsItsOperationRegardlessOfState()
+    {
+        // Double-click and same-operation resend protection: whenever the intent belongs to the incoming
+        // job, every state must refuse a second submit for that same operation.
+        foreach (var state in new[]
+                 {
+                     "SUBMIT_INTENT_PERSISTED", "SUBMIT_IN_FLIGHT", "CONFIRMED_PROVIDER_TASK",
+                     "CONFIRMED_NO_TASK", "AMBIGUOUS_SUBMIT", "MANUAL_REVIEW_REQUIRED"
+                 })
+        {
+            foreach (var priorCompleted in new[] { true, false })
+            {
+                Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+                    new SceneVideoSubmitIntentFact(
+                        SubmitState: state,
+                        HasProviderTask: false,
+                        IsNewJob: true,
+                        IsPriorJobTerminal: true,
+                        IsPriorJobCompleted: priorCompleted)),
+                    $"The incoming job's own intent ({state}) must always refuse a duplicate submit.");
+            }
+        }
+    }
+
+    [Fact]
+    public void SequelAttemptGetsANewLogicalRequestIdPerOperationAndScenarioIsCaseInsensitive()
+    {
+        // A distinct operation (new parent job) derives a distinct logical request ID, so a second
+        // rerender after V5 becomes V6 rather than reusing V5's request.
+        var parentV5 = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var parentV6 = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+        var requestV5 = SceneVideoRenderHandler.BuildLogicalRequestId(parentV5, 814);
+        var requestV6 = SceneVideoRenderHandler.BuildLogicalRequestId(parentV6, 814);
+
+        Assert.NotEqual(requestV5, requestV6);
+        Assert.Equal("render_job_scene_video-job-11111111111111111111111111111111-scene-814", requestV5);
+        Assert.Equal("render_job_scene_video-job-22222222222222222222222222222222-scene-814", requestV6);
+
+        // State matching must be case-insensitive so a differently cased row cannot slip past the guard.
+        Assert.True(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "submit_in_flight",
+                HasProviderTask: true,
+                IsNewJob: false,
+                IsPriorJobTerminal: true,
+                IsPriorJobCompleted: true)));
+        Assert.False(SceneVideoSubmitIntentFact.BlocksSceneSubmit(
+            new SceneVideoSubmitIntentFact(
+                SubmitState: "confirmed_no_task",
+                HasProviderTask: false,
+                IsNewJob: false,
+                IsPriorJobTerminal: true,
+                IsPriorJobCompleted: false)));
     }
 
     [Fact]
