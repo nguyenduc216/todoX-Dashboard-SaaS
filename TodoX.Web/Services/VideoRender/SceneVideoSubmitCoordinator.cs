@@ -334,6 +334,15 @@ public sealed class SceneVideoSubmitCoordinator
                       -- A marker left on an already terminated job is history, not a live provider task,
                       -- so it must not lock the scene against a brand-new user-initiated operation.
                       AND (j.status='pending_reconciliation'
+                        AND NOT (j.id <> @jobId
+                          AND j.error_code='RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED'
+                          AND NULLIF(btrim(j.provider_task_id), '') IS NULL
+                          AND NULLIF(btrim(j.provider_video_id_base), '') IS NULL
+                          AND (j.lock_until IS NULL OR j.lock_until <= now())
+                          AND NOT EXISTS (SELECT 1 FROM video_render.scene_video_versions owned_version
+                              WHERE owned_version.tenant_id=j.tenant_id AND owned_version.render_job_id=j.id)
+                          AND NOT EXISTS (SELECT 1 FROM render.scene_video_submit_intents owned_intent
+                              WHERE owned_intent.tenant_id=j.tenant_id AND owned_intent.render_job_id=j.id))
                         OR (j.status NOT IN ('completed', 'failed', 'cancelled')
                             AND (j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
                                  OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'))

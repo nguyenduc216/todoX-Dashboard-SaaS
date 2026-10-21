@@ -4082,6 +4082,13 @@ public sealed partial class SceneVideoWorkerHandler
                 logicalRequestId,
                 errorCode,
                 blockReason = blockReason.ToString(),
+                blockerCategory = blockReason switch
+                {
+                    SceneVideoSubmitBlockReason.ExistingIntentUnresolved => "intent",
+                    SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview => "job",
+                    SceneVideoSubmitBlockReason.SceneVersionInFlightOrReconciliation => "video version",
+                    _ => "none"
+                },
                 intentAlreadyHadProviderTask,
                 providerRequestSent = false
             }, ct);
