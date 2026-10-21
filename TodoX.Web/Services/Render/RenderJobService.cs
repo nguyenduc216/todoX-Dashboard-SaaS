@@ -437,7 +437,12 @@ public sealed class RenderJobService : IRenderJobService
                     OR COALESCE(input_json->>'logicalRequestId', input_json->>'logical_request_id') = @logicalRequestId)
                AND (@jobType <> 'render_scene_video' OR NOT (
                     error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
-                    OR COALESCE(input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'))
+                    OR COALESCE(input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt'
+                    OR (status='pending_reconciliation' AND error_code='RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED'
+                        AND NULLIF(provider_task_id, '') IS NULL
+                        AND NULLIF(provider_video_id_base, '') IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM video_render.scene_video_versions v WHERE v.render_job_id=render.render_jobs.id)
+                        AND NOT EXISTS (SELECT 1 FROM render.scene_video_submit_intents i WHERE i.render_job_id=render.render_jobs.id))))
              ORDER BY queued_at DESC, created_at DESC
              LIMIT 1;
             """,

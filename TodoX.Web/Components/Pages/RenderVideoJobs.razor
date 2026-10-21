@@ -4615,7 +4615,14 @@ else
            && IsSceneVideoPromptValid(scene, draft);
 
     private bool CanRerenderSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
-        => !HasActiveSceneVideoJob(scene.Id)
+        => !_jobs.Any(job => string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo, StringComparison.OrdinalIgnoreCase)
+               && TryExtractSceneId(job.InputJson, out var jobSceneId) && jobSceneId == scene.Id
+               && IsActiveRenderJobStatus(job.Status)
+               && !(string.Equals(job.Status, RenderJobStatuses.PendingReconciliation, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(job.ErrorCode, "RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED", StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(job.ProviderTaskId)
+                    && string.IsNullOrWhiteSpace(job.ProviderVideoIdBase)
+                    && !(_videoVersions.TryGetValue(scene.Id, out var versions) && versions.Any(v => v.RenderJobId == job.Id))))
            && !string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
            && (CanCreateSceneVideo(scene, draft) || CanRetrySceneVideo(scene)
                || (HasCompletedVideoVersion(scene)
