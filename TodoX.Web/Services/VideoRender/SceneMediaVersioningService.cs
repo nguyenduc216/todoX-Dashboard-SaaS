@@ -341,8 +341,18 @@ public sealed class SceneRenderErrorDetailDto
     public string? ProviderVideoUrl { get; set; }
 }
 
+// FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261022-SCENE05-P0-001.
+// Read-only scene controls: selected playback and latest operation are independent identities.
+public sealed record SceneVideoUiState(
+    SceneVideoVersionDto? SelectedVersion,
+    RenderJobDto? LatestJob,
+    SceneVideoVersionDto? LatestJobVersion,
+    SceneVideoSubmitBlockReason SubmitBlockReason,
+    bool HasActiveJob);
+
 public interface ISceneMediaVersioningService
 {
+    Task<SceneVideoUiState> GetSceneVideoUiStateAsync(long sceneId, CurrentUserSession user, CancellationToken ct = default);
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
     Task<SceneImageVersionDto> CreateQueuedImageVersionAsync(SceneImageVersionCreateRequest request, CancellationToken ct = default);
     /// <summary>
@@ -369,8 +379,10 @@ public interface ISceneMediaVersioningService
     Task SelectImageVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectImageVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
     Task<SceneVideoVersionDto> CreateQueuedSceneVideoVersionAsync(SceneVideoVersionCreateRequest request, CancellationToken ct = default);
+    Task RecoverTerminalSuccessSceneVideoVersionAsync(Guid versionId, Guid jobId, long projectId, long sceneId, string logicalRequestId, string providerVideoIdBase, VideoProviderPollResult evidence, SceneVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task CompleteSceneVideoVersionAsync(Guid versionId, SceneVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task FailSceneVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task<IReadOnlyList<SceneVideoVersionDto>> ListJobSceneVideoVersionsAsync(Guid jobId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<SceneVideoVersionDto?> GetSceneVideoVersionByLogicalRequestIdAsync(string logicalRequestId, CancellationToken ct = default);
     Task<SceneVideoVersionDto?> GetRecoverableSceneVideoVersionAsync(long sceneId, string logicalRequestId, CancellationToken ct = default);
@@ -1131,6 +1143,20 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             return existing;
         }
 
+        // Atomic with version allocation under the scene lock: a failed owner with a task is still an owner.
+        var protectedJob = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM render.render_jobs WHERE id=@jobId AND tenant_id=@tenant
+                AND (NULLIF(btrim(provider_task_id),'') IS NOT NULL OR NULLIF(btrim(provider_video_id_base),'') IS NOT NULL))
+                OR EXISTS (SELECT 1 FROM video_render.scene_video_versions WHERE render_job_id=@jobId AND tenant_id=@tenant
+                AND (NULLIF(btrim(provider_task_id),'') IS NOT NULL OR NULLIF(btrim(provider_video_id_base),'') IS NOT NULL))
+                OR EXISTS (SELECT 1 FROM render.scene_video_submit_intents WHERE render_job_id=@jobId AND tenant_id=@tenant
+                AND (submit_state IN ('SUBMIT_INTENT_PERSISTED','CONFIRMED_PROVIDER_TASK','SUBMIT_IN_FLIGHT','AMBIGUOUS_SUBMIT','MANUAL_REVIEW_REQUIRED')
+                     OR NULLIF(btrim(provider_task_id),'') IS NOT NULL OR NULLIF(btrim(provider_video_id_base),'') IS NOT NULL));
+            """, new { jobId = request.RenderJobId, tenant = _tenant.TenantId }, tx);
+        if (protectedJob)
+            throw new RenderJobPendingReconciliationException("An existing task or unresolved submit protects this job from allocating another scene-video version.");
+
         var versionNumber = await conn.ExecuteScalarAsync<int>(
             "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_video_versions WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
             new { request.SceneId, request.ProjectId, tenant = _tenant.TenantId }, tx);
@@ -1190,6 +1216,92 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             ModelName = request.ActualModel ?? request.RequestedModel,
             ProviderCapabilityId = request.ProviderCapabilityId
         };
+    }
+
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261022-SCENE05-P0-001.
+    // Recovery is deliberately separate: a provider-confirmed owner may finish without changing scene selection.
+    public async Task RecoverTerminalSuccessSceneVideoVersionAsync(
+        Guid versionId, Guid jobId, long projectId, long sceneId, string logicalRequestId,
+        string providerVideoIdBase, VideoProviderPollResult evidence,
+        SceneVideoVersionCompleteRequest request, CancellationToken ct = default)
+    {
+        if (evidence.Status != VideoProviderTaskStatus.Success
+            || string.IsNullOrWhiteSpace(evidence.ProviderTaskId)
+            || string.IsNullOrWhiteSpace(providerVideoIdBase)
+            || string.IsNullOrWhiteSpace(logicalRequestId)
+            || string.IsNullOrWhiteSpace(evidence.SanitizedResponseJson)
+            || !Uri.TryCreate(evidence.OutputUrl, UriKind.Absolute, out var output)
+            || output.Scheme is not ("http" or "https")
+            || string.IsNullOrWhiteSpace(request.ProviderTaskId)
+            || evidence.ProviderTaskId != providerVideoIdBase
+            || request.BillingLogicalRequestId != logicalRequestId
+            || request.ResultMediaId is null || request.ResultMediaId == Guid.Empty
+            || string.IsNullOrWhiteSpace(request.VideoUrl) || string.IsNullOrWhiteSpace(request.VideoPath))
+            throw new InvalidOperationException("RVIDEO_RECOVERY_TERMINAL_EVIDENCE_REQUIRED");
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        // Same scene advisory/row lock order as normal completion and failure transitions.
+        var version = await LockVideoVersionAsync(conn, tx, versionId, ct);
+        if (version.RenderJobId != jobId || version.ProjectId != projectId || version.SceneId != sceneId
+            || version.LogicalRequestId != logicalRequestId
+            || version.ProviderTaskId != request.ProviderTaskId || version.ProviderVideoIdBase != providerVideoIdBase)
+            throw new InvalidOperationException("RVIDEO_RECOVERY_OWNER_IDENTITY_REQUIRED");
+
+        var confirmed = await conn.QuerySingleOrDefaultAsync<Guid?>(
+            """
+            SELECT i.owner_token
+              FROM render.scene_video_submit_intents i
+              JOIN render.render_jobs j ON j.id=i.render_job_id AND j.tenant_id=i.tenant_id
+             WHERE i.tenant_id=@tenant AND i.scene_id=@sceneId AND i.render_job_id=@jobId
+               AND i.logical_request_id=@logicalRequestId AND i.submit_state='CONFIRMED_PROVIDER_TASK'
+               AND i.provider_task_id=@taskId AND i.provider_video_id_base=@providerVideoIdBase
+               AND j.job_type='render_scene_video'
+               AND j.input_json->>'projectId'=@projectText AND j.input_json->>'sceneId'=@sceneText
+             FOR UPDATE OF i;
+            """, new { tenant = _tenant.TenantId, sceneId, jobId, logicalRequestId,
+                taskId = request.ProviderTaskId, providerVideoIdBase,
+                projectText = projectId.ToString(), sceneText = sceneId.ToString() }, tx);
+        if (confirmed is null)
+            throw new InvalidOperationException("RVIDEO_RECOVERY_CONFIRMED_INTENT_REQUIRED");
+
+        var mediaExists = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM media.media_files
+              WHERE id=@mediaId AND tenant_id=@tenant AND object_key=@storageKey AND is_active=true
+                AND COALESCE(public_url, file_url)=@videoUrl AND file_size_bytes > 0);
+            """, new { mediaId = request.ResultMediaId, tenant = _tenant.TenantId,
+                storageKey = version.StorageKey, request.VideoUrl }, tx);
+        if (!mediaExists)
+            throw new InvalidOperationException("RVIDEO_RECOVERY_PERSISTED_MEDIA_REQUIRED");
+        if (version.Status == "completed")
+        {
+            if (version.ResultMediaId != request.ResultMediaId || version.PublicUrl != request.VideoUrl)
+                throw new InvalidOperationException("RVIDEO_RECOVERY_COMPLETION_CONFLICT");
+            tx.Commit();
+            return;
+        }
+        if (!string.Equals(version.Status, "failed", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("RVIDEO_RECOVERY_FAILED_OWNER_REQUIRED");
+
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_video_versions
+               SET status='completed', result_media_id=@mediaId, public_url=@videoUrl,
+                   source_file_path=@videoPath, poster_url=@posterUrl, duration_seconds=@durationSeconds,
+                   mime_type=@mimeType, billing_logical_request_id=@logicalRequestId,
+                   charged_points=@chargedPoints, error_code=NULL, error_message=NULL,
+                   completed_at=now(), updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant AND status=@previousStatus
+               AND render_job_id=@jobId AND provider_task_id=@taskId AND provider_video_id_base=@providerVideoIdBase;
+            """, new { versionId, tenant = _tenant.TenantId, previousStatus = version.Status, jobId,
+                taskId = request.ProviderTaskId, providerVideoIdBase, logicalRequestId,
+                mediaId = request.ResultMediaId, request.VideoUrl, request.VideoPath, request.PosterUrl,
+                request.DurationSeconds, request.MimeType, request.ChargedPoints }, tx);
+        if (changed != 1) throw new InvalidOperationException("RVIDEO_RECOVERY_CONCURRENT_CHANGE");
+        // Do not update is_selected, selected_video_version_id or the scene's selected media URLs.
+        tx.Commit();
     }
 
     public async Task CompleteSceneVideoVersionAsync(Guid versionId, SceneVideoVersionCompleteRequest request, CancellationToken ct = default)
@@ -1308,6 +1420,50 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              WHERE id=@versionId AND tenant_id=@tenant;
             """, new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage }, tx);
         tx.Commit();
+    }
+
+    public async Task<SceneVideoUiState> GetSceneVideoUiStateAsync(long sceneId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        using var conn = await _factory.OpenAsync(ct);
+        // One read snapshot prevents polling from mixing a previous job status with a new blocker/selection.
+        using var tx = conn.BeginTransaction(System.Data.IsolationLevel.RepeatableRead);
+        var args = new { tenant = _tenant.TenantId, sceneId, sceneText = sceneId.ToString(), jobId = Guid.Empty };
+        var selected = await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(SelectSceneVideoVersionSql +
+            " WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true ORDER BY version_number DESC LIMIT 1;", args, tx);
+        var latestJob = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
+            """
+            SELECT id AS Id, job_type AS JobType, status AS Status, input_json::text AS InputJson,
+                   provider_task_id AS ProviderTaskId, provider_video_id_base AS ProviderVideoIdBase,
+                   error_code AS ErrorCode, error_message AS ErrorMessage, created_at AS CreatedAt, queued_at AS QueuedAt
+              FROM render.render_jobs
+             WHERE tenant_id=@tenant AND job_type='render_scene_video'
+               AND COALESCE(input_json->>'sceneId', input_json->>'scene_id')=@sceneText
+             ORDER BY created_at DESC, queued_at DESC, id DESC LIMIT 1;
+            """, args, tx);
+        var owner = latestJob is null ? null : await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(
+            SelectSceneVideoVersionSql + " WHERE tenant_id=@tenant AND scene_id=@sceneId AND render_job_id=@jobId ORDER BY version_number DESC LIMIT 1;",
+            new { tenant = _tenant.TenantId, sceneId, jobId = latestJob.Id }, tx);
+        var blocker = (SceneVideoSubmitBlockReason)await conn.ExecuteScalarAsync<int>(
+            SceneVideoSubmitCoordinator.SceneSubmitBlockReasonSql, args, tx);
+        var active = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM render.render_jobs WHERE tenant_id=@tenant AND job_type='render_scene_video'
+                AND COALESCE(input_json->>'sceneId', input_json->>'scene_id')=@sceneText
+                AND status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation'));
+            """, args, tx);
+        tx.Commit();
+        return new SceneVideoUiState(selected, latestJob, owner, blocker, active);
+    }
+
+    public async Task<IReadOnlyList<SceneVideoVersionDto>> ListJobSceneVideoVersionsAsync(Guid jobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<SceneVideoVersionDto>(SelectSceneVideoVersionSql +
+            " WHERE render_job_id=@jobId AND tenant_id=@tenant ORDER BY version_number DESC;",
+            new { jobId, tenant = _tenant.TenantId });
+        return rows.ToList();
     }
 
     public async Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default)
@@ -1440,7 +1596,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_video_versions
-               SET status='pending_reconciliation',
+               SET status=CASE WHEN lower(status) IN ('failed','completed') THEN status ELSE 'pending_reconciliation' END,
                    error_code=@errorCode,
                    error_message=@errorMessage,
                    provider_video_id_base=COALESCE(provider_video_id_base, @providerVideoIdBase),

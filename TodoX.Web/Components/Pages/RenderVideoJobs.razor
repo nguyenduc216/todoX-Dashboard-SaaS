@@ -1059,11 +1059,18 @@ else
 
                                                                   FailedText="Lỗi render video"
 
-                                                                  RetryDisabled="@_sceneVideoRetrying.Contains(scene.Id)"
+                                                                  RetryDisabled="@(_sceneVideoRetrying.Contains(scene.Id) || !CanRerenderSceneVideo(scene, draft))"
 
                                                                   OnRetry="@(() => RenderSceneVideoAsync(scene))"
 
                                                                   OnClick="@(() => OpenSceneVideoPreview(scene))" />
+
+                                                <MudText Typo="Typo.caption">Video đang sử dụng: @ResolveSelectedSceneVideoLabel(scene)</MudText>
+                                                <MudText Typo="Typo.caption">Render gần nhất: @ResolveVideoSceneLabel(scene)</MudText>
+                                                @if (!string.IsNullOrWhiteSpace(SceneVideoRerenderDisabledReason(scene, draft)))
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Warning">@SceneVideoRerenderDisabledReason(scene, draft)</MudText>
+                                                }
 
                                                 <div class="scene-media-actions">
 
@@ -1674,6 +1681,7 @@ else
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneImageVersionDto>> _imageVersions = new();
 
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>> _videoVersions = new();
+    private readonly Dictionary<long, TodoX.Web.Services.VideoRender.SceneVideoUiState> _sceneVideoUiStates = new();
 
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneAudioVersionDto>> _audioVersions = new();
 
@@ -4173,22 +4181,19 @@ else
                                     && IsOfficialVideoVersion(scene, x)));
 
     private TodoX.Web.Services.VideoRender.SceneVideoVersionDto? ResolveVideoVersion(VideoProjectSceneDto scene)
+        => _sceneVideoUiStates.TryGetValue(scene.Id, out var state)
+            ? state.SelectedVersion
+            : _videoVersions.TryGetValue(scene.Id, out var versions) ? versions.FirstOrDefault(x => x.IsSelected) : null;
 
+    private string ResolveSelectedSceneVideoLabel(VideoProjectSceneDto scene)
     {
-
-        if (!_videoVersions.TryGetValue(scene.Id, out var versions) || versions.Count == 0)
-
-        {
-
-            return null;
-
-        }
-
-        return versions.FirstOrDefault(x => x.IsSelected)
-
-            ?? versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
-
+        var selected = ResolveVideoVersion(scene);
+        if (selected is null) return "Chưa chọn video";
+        return $"V{selected.VersionNumber} — {(selected.Status.Equals("completed", StringComparison.OrdinalIgnoreCase) ? "Hoàn tất" : "Chưa hoàn tất")}";
     }
+
+    private TodoX.Web.Services.VideoRender.SceneVideoVersionDto? ResolveLatestSceneVideoAttempt(VideoProjectSceneDto scene)
+        => _sceneVideoUiStates.TryGetValue(scene.Id, out var state) ? state.LatestJobVersion : null;
 
     private bool HasActiveSceneVideoJob(long sceneId, string? logicalRequestId = null)
 
@@ -4249,110 +4254,40 @@ else
     }
 
     private string ResolveVideoSceneStatus(VideoProjectSceneDto scene)
-
     {
-
-        var videoState = ResolveVideoMediaState(scene);
-
-        if (RequiresExternalVoice(scene))
-
+        if (!_sceneVideoUiStates.TryGetValue(scene.Id, out var state)) return "state_unavailable";
+        // Operation status comes from the newest job by creation time, never from the selected asset.
+        return state.LatestJob?.Status.Trim().ToLowerInvariant() switch
         {
-
-            var selectedVideo = ResolveVideoVersion(scene);
-
-            if (selectedVideo is null
-
-                || !string.Equals(selectedVideo.Status, "completed", StringComparison.OrdinalIgnoreCase))
-
-            {
-
-                return videoState switch
-
-                {
-
-                    MediaRenderState.Queued => VideoSceneStatuses.VideoQueued,
-
-                    MediaRenderState.Rendering or MediaRenderState.Downloading => VideoSceneStatuses.VideoRendering,
-
-                    MediaRenderState.Failed => VideoSceneStatuses.Failed,
-
-                    _ => scene.Status
-
-                };
-
-            }
-
-            var selectedAudio = ResolveVoiceVersion(scene);
-
-            if (selectedAudio is null)
-
-            {
-
-                return "voice_rendering";
-
-            }
-
-            if (string.Equals(selectedAudio.Status, "failed", StringComparison.OrdinalIgnoreCase))
-
-            {
-
-                return "voice_failed";
-
-            }
-
-            return IsOfficialVideoVersion(scene, selectedVideo)
-
-                ? VideoSceneStatuses.VideoReady
-
-                : string.Equals(selectedAudio.Status, "completed", StringComparison.OrdinalIgnoreCase)
-
-                    ? "voice_mux_pending"
-
-                    : "voice_rendering";
-
-        }
-
-        return videoState switch
-
-        {
-
-            MediaRenderState.Queued => VideoSceneStatuses.VideoQueued,
-
-            MediaRenderState.Rendering or MediaRenderState.Downloading => VideoSceneStatuses.VideoRendering,
-
-            MediaRenderState.Ready => VideoSceneStatuses.VideoReady,
-
-            MediaRenderState.Failed => VideoSceneStatuses.Failed,
-
-            _ => scene.Status
-
+            "queued" or "draft" => VideoSceneStatuses.VideoQueued,
+            "preparing" or "rendering" or "processing" or "post_processing" => VideoSceneStatuses.VideoRendering,
+            "pending_reconciliation" => "pending_reconciliation",
+            "completed" => VideoSceneStatuses.VideoReady,
+            "failed" or "cancelled" => VideoSceneStatuses.Failed,
+            null => "not_rendered",
+            _ => "pending_reconciliation"
         };
-
     }
 
     private string ResolveVideoSceneLabel(VideoProjectSceneDto scene)
-
-        => ResolveVideoSceneStatus(scene) switch
-
+    {
+        if (_sceneVideoUiStates.TryGetValue(scene.Id, out var state)
+            && state.LatestJob is { } job && IsActiveRenderJobStatus(job.Status)
+            && job.Status != RenderJobStatuses.PendingReconciliation
+            && state.LatestJobVersion?.Status.Equals("failed", StringComparison.OrdinalIgnoreCase) == true
+            && (!string.IsNullOrWhiteSpace(job.ProviderTaskId) || !string.IsNullOrWhiteSpace(job.ProviderVideoIdBase)))
+            return "Đang xác minh kết quả";
+        return ResolveVideoSceneStatus(scene) switch
         {
-
             VideoSceneStatuses.VideoQueued => "Đang chờ",
-
-            VideoSceneStatuses.VideoRendering => "Đang tạo video",
-
+            VideoSceneStatuses.VideoRendering => "Đang xử lý",
             VideoSceneStatuses.VideoReady => "Hoàn tất",
-
-            "voice_rendering" => "Đang tạo giọng",
-
-            "voice_mux_pending" => "Đang ghép giọng",
-
-            "voice_failed" => "Giọng lỗi",
-
-            VideoSceneStatuses.Failed => "Lỗi render",
-
-            _ => "Chua render video"
-
+            VideoSceneStatuses.Failed => "Thất bại",
+            "pending_reconciliation" => "Cần đối soát",
+            "state_unavailable" => "Chưa tải được trạng thái render",
+            _ => "Chưa có lượt render"
         };
+    }
 
     private string? ResolveDraftVideoPath(VideoProjectSceneDto scene, SceneEditorState draft)
 
@@ -4595,79 +4530,44 @@ else
         };
 
     private bool CanCreateSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
-
-        => (!string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) || (_useReferenceImageForAllScenes && HasSharedReferenceImage))
-
-           && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
-
-           && HasProjectAspectRatio
-
-           && HasProjectResolution
-
-           && _defaultImageToVideoProvider is not null
-
-           && !HasCompletedVideoVersion(scene)
-
-           && !string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
-
-           && !HasActiveSceneVideoJob(scene.Id)
-
-           && IsSceneVideoPromptValid(scene, draft);
+        => !HasCompletedVideoVersion(scene) && CanRerenderSceneVideo(scene, draft);
 
     private bool CanRerenderSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
-        => !HasActiveSceneVideoJob(scene.Id)
-           && !string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
-           && (CanCreateSceneVideo(scene, draft) || CanRetrySceneVideo(scene)
-               || (HasCompletedVideoVersion(scene)
-                   && (!string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) || (_useReferenceImageForAllScenes && HasSharedReferenceImage))
-                   && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
-                   && HasProjectAspectRatio && HasProjectResolution
-                   && _defaultImageToVideoProvider is not null
-                   && IsSceneVideoPromptValid(scene, draft)));
+        => string.IsNullOrWhiteSpace(SceneVideoDisabledReason(scene, draft));
 
     private bool CanRetrySceneVideo(VideoProjectSceneDto scene)
-
     {
-
-        var version = ResolveVideoVersion(scene);
-
-        return version is not null
-
-               && string.IsNullOrWhiteSpace(version.ProviderTaskId)
-
-               && string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase)
-
-               && !HasActiveSceneVideoJob(scene.Id, version.LogicalRequestId);
-
+        var version = ResolveLatestSceneVideoAttempt(scene);
+        return version is not null && string.IsNullOrWhiteSpace(version.ProviderTaskId)
+            && string.IsNullOrWhiteSpace(version.ProviderVideoIdBase)
+            && ResolveVideoSceneStatus(scene) == VideoSceneStatuses.Failed
+            && CanRerenderSceneVideo(scene, GetSceneDraft(scene));
     }
 
+    private string SceneVideoRerenderDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
+        => _sceneVideoRetrying.Contains(scene.Id) ? "Đang gửi yêu cầu render" : SceneVideoDisabledReason(scene, draft);
+
     private string SceneVideoDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
-
-        => string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) && !(_useReferenceImageForAllScenes && HasSharedReferenceImage)
-
-            ? "Cần chọn/render ảnh trước"
-
-            : string.IsNullOrWhiteSpace(draft.MotionPrompt)
-
-                ? "Cần nhập prompt video"
-
-            : !HasProjectAspectRatio
-
-                ? "Cần chọn tỉ lệ video"
-
-            : !HasProjectResolution
-
-                ? "Cần chọn độ phân giải video"
-
-            : _defaultImageToVideoProvider is null
-
-                ? "Chưa cấu hình tạo video"
-
-            : !IsSceneVideoPromptValid(scene, draft)
-
-                ? ResolveVideoPromptState(scene, draft).Text
-
-            : string.Empty;
+    {
+        if (!_sceneVideoUiStates.TryGetValue(scene.Id, out var state))
+            return "Chưa tải được trạng thái backend; cần tải lại trước khi render";
+        if (state.LatestJob?.Status == RenderJobStatuses.PendingReconciliation)
+            return "Cần đối soát kết quả provider";
+        if (state.HasActiveJob && state.LatestJob is { } activeJob && IsActiveRenderJobStatus(activeJob.Status))
+            return state.LatestJob is { } job && (!string.IsNullOrWhiteSpace(job.ProviderTaskId)
+                || !string.IsNullOrWhiteSpace(job.ProviderVideoIdBase))
+                ? "Đang theo dõi task 79AI" : "Đang chờ hoặc xử lý render video";
+        if (state.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)
+            return "Cần đối soát kết quả provider";
+        if (state.HasActiveJob) return "Đang chờ hoặc xử lý render video";
+        if (string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) && !(_useReferenceImageForAllScenes && HasSharedReferenceImage))
+            return "Thiếu ảnh đầu vào";
+        if (string.IsNullOrWhiteSpace(draft.MotionPrompt)) return "Thiếu motion prompt";
+        if (_defaultImageToVideoProvider is null) return "Thiếu cấu hình provider";
+        if (!HasProjectAspectRatio) return "Cần chọn tỉ lệ video";
+        if (!HasProjectResolution) return "Cần chọn độ phân giải video";
+        return !IsSceneVideoPromptValid(scene, draft) ? ResolveVideoPromptState(scene, draft).Text : string.Empty;
+    }
 
     private bool CanEnqueueSceneVideos()
 
@@ -6360,6 +6260,8 @@ else
 
                 .ToList();
 
+            await LoadSceneVideoUiStatesAsync();
+
             // Recover batch-active state after a refresh/navigation: the server job keeps running even
 
             // if this circuit was recreated, so re-derive the shimmer state from the live job list.
@@ -6382,6 +6284,7 @@ else
 
         {
 
+            _sceneVideoUiStates.Clear();
             Logger.LogError(ex, "VIDEO_RENDER_LOAD_JOBS_FAILED logCode={LogCode}", logCode);
 
             await AddDebugAsync("jobs_failed", "Tải job thất bại", "FAILED", ex.Message, ex.ToString());
@@ -6466,7 +6369,11 @@ else
 
                 var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging
 
-                                  || _project.Scenes.Any(IsVideoSceneActive);
+                                  || _project.Scenes.Any(IsVideoSceneActive)
+                                  || _jobs.Any(job => job.JobType == TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo
+                                      && IsActiveRenderJobStatus(job.Status))
+                                  || _sceneVideoUiStates.Values.Any(state => state.HasActiveJob
+                                      || state.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None);
 
                 if (scenesPending || videoActive)
 
@@ -9239,15 +9146,11 @@ else
 
         var selectedVideo = ResolveVideoVersion(scene);
 
-        var selectedCompleted = versions.FirstOrDefault(x =>
-
-            x.IsSelected
-
-            && string.Equals(x.Status, "completed", StringComparison.OrdinalIgnoreCase)
-
-            && HasUsableVideoMedia(x)
-
-            && IsOfficialVideoVersion(scene, x));
+        var selectedCompleted = selectedVideo is not null
+            && selectedVideo.IsSelected
+            && selectedVideo.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+            && HasUsableVideoMedia(selectedVideo)
+            && IsOfficialVideoVersion(scene, selectedVideo) ? selectedVideo : null;
 
         if (selectedCompleted is not null)
 
@@ -9449,6 +9352,26 @@ else
 
         await Task.WhenAll(loads);
 
+    }
+
+    private async Task LoadSceneVideoUiStatesAsync()
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+        foreach (var scene in _project.Scenes)
+        {
+            _sceneVideoUiStates.Remove(scene.Id);
+            try
+            {
+                var state = await SceneVersions.GetSceneVideoUiStateAsync(scene.Id, AuthState.CurrentUser);
+                if (state.SelectedVersion is { } selected && _videoVersions.TryGetValue(scene.Id, out var versions))
+                    _videoVersions[scene.Id] = versions.Where(v => v.Id != selected.Id).Append(selected).ToArray();
+                _sceneVideoUiStates[scene.Id] = state;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "RVIDEO_LOAD_VIDEO_UI_STATE_FAILED sceneId={SceneId}", scene.Id);
+            }
+        }
     }
 
     private async Task LoadSceneImageVersionsForStateAsync(IEnumerable<VideoProjectSceneDto> scenes)
@@ -9893,7 +9816,7 @@ else
 
         }
 
-        var version = ResolveVideoVersion(scene);
+        var version = ResolveLatestSceneVideoAttempt(scene);
 
         if (version is null
 
@@ -10181,6 +10104,12 @@ else
 
             return;
 
+        }
+
+        if (!CanRerenderSceneVideo(scene, GetSceneDraft(scene)))
+        {
+            Snackbar.Add(SceneVideoDisabledReason(scene, GetSceneDraft(scene)), Severity.Info);
+            return;
         }
 
         if (!await ConfirmVideoSceneAsync(scene, billingIntent))

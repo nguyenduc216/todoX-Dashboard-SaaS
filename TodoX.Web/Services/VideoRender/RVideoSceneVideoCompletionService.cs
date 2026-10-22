@@ -32,7 +32,9 @@ public sealed record RVideoSceneVideoCompletionRequest(
     PointBillingIntent BillingIntent,
     Guid? BillingOperationId,
     bool IsRecovery,
-    decimal? BillableDurationSeconds = null);
+    decimal? BillableDurationSeconds = null,
+    VideoProviderPollResult? TerminalSuccessEvidence = null,
+    string? RecoveryProviderVideoIdBase = null);
 
 public interface IRVideoSceneVideoCompletionService
 {
@@ -170,9 +172,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
                 "rvideo", "second", request.SceneVideoVersionId, "rvideo_system_retry", "success");
         }
 
-        await _versions.CompleteSceneVideoVersionAsync(
-            request.SceneVideoVersionId,
-            new SceneVideoVersionCompleteRequest(
+        var completion = new SceneVideoVersionCompleteRequest(
                 saved.PublicUrl ?? saved.FileUrl,
                 ResolvePhysicalPath(saved.ObjectKey),
                 PosterUrl: request.PosterUrl,
@@ -189,8 +189,26 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
                 RefundedPoints: 0,
                 CostSource: request.CostSource ?? "configured_tariff",
                 AspectRatio: request.AspectRatio,
-                ResultMediaId: saved.Id),
-            ct);
+                ResultMediaId: saved.Id);
+        if (request.TerminalSuccessEvidence is { } evidence)
+        {
+            if (request.RenderJobId is not Guid ownerJobId || string.IsNullOrWhiteSpace(request.RecoveryProviderVideoIdBase))
+                throw new InvalidOperationException("RVIDEO_RECOVERY_OWNER_IDENTITY_REQUIRED");
+            await _versions.RecoverTerminalSuccessSceneVideoVersionAsync(
+                request.SceneVideoVersionId, ownerJobId, request.ProjectId, request.SceneId,
+                request.LogicalRequestId, request.RecoveryProviderVideoIdBase, evidence, completion, ct);
+            // Recovery preserves the selected scene output; downstream scene mutation must not select this owner.
+            await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+            {
+                LogicalRequestId = request.LogicalRequestId, Success = true, ActualModel = request.ModelName,
+                ProviderTaskId = request.ProviderTaskId, ProviderUsageJson = request.ProviderUsageJson,
+                TariffSnapshotJson = request.TariffSnapshotJson
+            }, ct);
+            await _jobs.MarkRecoveredCompletedAsync(ownerJobId, request.ProjectId, request.SceneId,
+                request.SceneVideoVersionId, request.LogicalRequestId, ct);
+            return saved;
+        }
+        await _versions.CompleteSceneVideoVersionAsync(request.SceneVideoVersionId, completion, ct);
 
         await _projects.AddProjectEventAsync(
             request.ProjectId,

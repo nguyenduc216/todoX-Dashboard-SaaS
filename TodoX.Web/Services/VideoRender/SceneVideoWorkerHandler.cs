@@ -233,8 +233,30 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
+        try
+        {
+            await HandleCoreAsync(job, ct);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException
+            and not RenderJobPendingReconciliationException and not RenderJobDeferredException
+            and not RenderJobTerminalFailureException)
+        {
+            // Parser/catalog/storage errors cannot turn an accepted task into an application retry/fallback.
+            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
+            throw;
+        }
+    }
+
+    private async Task HandleCoreAsync(RenderJobDto job, CancellationToken ct)
+    {
         if (job.AttemptCount > job.MaxAttempts)
         {
+            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
             _logger.LogError(
                 "RVIDEO_ATTEMPT_BUDGET_EXCEEDED jobId={JobId} jobType={JobType} attemptCount={AttemptCount} maxAttempts={MaxAttempts}",
                 job.Id,
@@ -314,6 +336,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     capabilityCode = input.CapabilityCode,
                     errorCode = "rvideo_video_payer_context_mismatch"
                 }, ct);
+            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
             await FailAsync(project.Id, scene, Guid.Empty, "rvideo_video_payer_context_mismatch", ex.Message, ct);
             await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PAYER_CONTEXT_INVALID", "error",
                 "Scene-video worker rejected an invalid trusted payer context before billing.",
@@ -333,6 +356,41 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         VideoProjectSceneDto scene,
         CancellationToken ct)
     {
+        // Read all job-owned versions/intents, not the scene's latest page or just the worker snapshot.
+        job = await _jobs.GetAsync(job.Id, ct)
+            ?? throw new RenderJobPendingReconciliationException("Render job identity is missing.");
+        var attemptVersions = await _versions.ListJobSceneVideoVersionsAsync(job.Id, ct);
+        var intents = await _submitCoordinator.ListJobSubmitIntentsAsync(job.Id, ct);
+        var taskIntents = intents.Where(i => i.SubmitState == "CONFIRMED_PROVIDER_TASK"
+            || !string.IsNullOrWhiteSpace(i.ProviderTaskId) || !string.IsNullOrWhiteSpace(i.ProviderVideoIdBase)).ToArray();
+        var taskVersions = attemptVersions.Where(v => !string.IsNullOrWhiteSpace(v.ProviderTaskId)
+            || !string.IsNullOrWhiteSpace(v.ProviderVideoIdBase)).ToArray();
+        var confirmedTask = job.ProviderTaskId?.Trim();
+        var hasProviderIdentity = taskIntents.Length > 0 || taskVersions.Length > 0
+            || !string.IsNullOrWhiteSpace(confirmedTask) || !string.IsNullOrWhiteSpace(job.ProviderVideoIdBase);
+        var owners = Array.Empty<SceneVideoVersionDto>();
+        if (intents.Any(i => i.SubmitState is "SUBMIT_IN_FLIGHT" or "AMBIGUOUS_SUBMIT" or "MANUAL_REVIEW_REQUIRED"))
+            throw new RenderJobPendingReconciliationException("Unresolved provider submission must be reconciled before selecting another attempt.");
+        if (hasProviderIdentity)
+        {
+            if (taskIntents.Length != 1 || taskVersions.Length != 1
+                || string.IsNullOrWhiteSpace(confirmedTask) || string.IsNullOrWhiteSpace(job.ProviderVideoIdBase))
+                throw new RenderJobPendingReconciliationException("Provider task ownership is missing or ambiguous; no new attempt is allowed.");
+            var owner = taskVersions[0];
+            var intent = taskIntents[0];
+            if (owner.ProjectId != input.ProjectId || owner.SceneId != input.SceneId
+                || !IsMatchingLogicalRequestId(owner.LogicalRequestId, input.LogicalRequestId)
+                || intent.SceneId != input.SceneId || intent.LogicalRequestId != owner.LogicalRequestId
+                || intent.SubmitState != "CONFIRMED_PROVIDER_TASK"
+                || owner.ProviderTaskId != confirmedTask || intent.ProviderTaskId != confirmedTask
+                || owner.ProviderVideoIdBase != job.ProviderVideoIdBase || intent.ProviderVideoIdBase != job.ProviderVideoIdBase)
+                throw new RenderJobPendingReconciliationException("Job, owner version and confirmed intent identities conflict; submit is prohibited.");
+            owners = [owner];
+        }
+        if (owners.Length == 0 && attemptVersions.Any(v => v.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+            && IsMatchingLogicalRequestId(v.LogicalRequestId, input.LogicalRequestId)))
+            return;
+
         var requestedSourceImageVersionId = input.SourceImageVersionId ?? input.SelectedSourceImageVersionId;
         var sourceVersion = await ResolveSourceImageVersionAsync(
             scene.Id,
@@ -351,6 +409,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             var message = hasExplicitSourceImageVersion
                 ? "Explicit completed source image version is required before rendering scene video."
                 : "Scene source image is required before rendering scene video.";
+            if (hasProviderIdentity)
+                throw new RenderJobPendingReconciliationException("Confirmed task source snapshot is unavailable; reconcile without creating another attempt.");
             await FailAsync(project.Id, scene, Guid.Empty, errorCode, message, ct);
             throw new RenderJobTerminalFailureException(errorCode);
         }
@@ -363,7 +423,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             input.SceneIndex);
         input.VideoPrompt = validation.TrimmedPrompt;
         input.MaxPromptCharacters = validation.MaxCharacterCount;
-        if (!validation.IsValid)
+        if (!validation.IsValid && !hasProviderIdentity)
         {
             await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROMPT_VALIDATION_FAILED", "warning",
                 validation.Message ?? $"Scene {input.SceneIndex:00}: prompt video không hợp lệ.",
@@ -379,13 +439,6 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 }, ct);
             await FailAsync(project.Id, scene, Guid.Empty, validation.ErrorCode, validation.Message ?? "Scene video prompt invalid.", ct);
             throw new RenderJobTerminalFailureException(validation.Message ?? "Scene video prompt invalid.");
-        }
-
-        var attemptVersions = await _versions.ListSceneVideoVersionsAsync(scene.Id, 0, 100, ct);
-        if (attemptVersions.Any(v => v.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
-            && IsMatchingLogicalRequestId(v.LogicalRequestId, input.LogicalRequestId)))
-        {
-            return;
         }
 
         var catalogModels = (await _models.GetModelsAsync(
@@ -464,22 +517,35 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     candidates = candidateResolution.Diagnostics
                 }, ct);
         }
-        var attemptIndex = ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions, candidates);
+        var attemptIndex = owners.Length == 1
+            ? ParseAttemptIndex(owners[0].LogicalRequestId, input.LogicalRequestId)
+            : ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions, candidates);
+        if (owners.Length == 1 && (attemptIndex < 0 || attemptIndex >= candidates.Count))
+            throw new RenderJobPendingReconciliationException("Confirmed provider task owner has no matching fallback candidate.");
         string? fallbackReason = null;
         while (attemptIndex < candidates.Count)
         {
             var candidate = candidates[attemptIndex];
             var policy = candidate.Policy;
             var attemptLogicalRequestId = BuildAttemptLogicalRequestId(input.LogicalRequestId, attemptIndex);
-            var version = input.ReuseExistingSceneVideoVersion
+            var version = owners.Length == 1
+                ? owners[0]
+                : input.ReuseExistingSceneVideoVersion
                 ? await _versions.GetSceneVideoVersionByLogicalRequestIdAsync(attemptLogicalRequestId, ct)
                 : await _versions.GetRecoverableSceneVideoVersionAsync(scene.Id, attemptLogicalRequestId, ct);
+            if (owners.Length == 1 && (!string.Equals(version!.LogicalRequestId, attemptLogicalRequestId, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(version.ProviderTaskId, confirmedTask, StringComparison.OrdinalIgnoreCase)))
+                throw new RenderJobPendingReconciliationException("Confirmed provider task owner intent does not match the candidate.");
             if (input.ExistingSceneVideoVersionId is Guid expectedVersionId && version?.Id != expectedVersionId)
             {
+                if (owners.Length == 1)
+                    throw new RenderJobPendingReconciliationException("Confirmed task owner differs from the expected version; manual reconciliation required.");
                 version = null;
             }
             if (version is not null && !IsCompatibleVersion(version, input, policy, candidate.ProviderDurationSeconds, candidate.ProviderResolution))
             {
+                if (owners.Length == 1)
+                    throw new RenderJobPendingReconciliationException("Confirmed provider task owner has a conflicting provider/model contract.");
                 await _versions.FailSceneVideoVersionAsync(
                     version.Id,
                     "RVIDEO_VIDEO_INVALID_FALLBACK_VERSION",
@@ -488,7 +554,16 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 version = null;
             }
 
-            version ??= await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
+            // Keep the exact operation at the DB boundary: PostgreSQL may report a position in
+            // a trigger/function rather than in the application command text.
+            if (version is null)
+            {
+                if (owners.Length == 1)
+                    throw new RenderJobPendingReconciliationException("Confirmed provider task owner could not be recovered.");
+                try
+                {
+                    await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
+                    version = await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
                     input.ProjectId,
                     input.SceneId,
                     sourceImageVersionId,
@@ -541,6 +616,19 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     RequestedModel: policy.Model,
                     ActualModel: policy.Model,
                     ProviderCapabilityId: input.ProviderCapabilityId), ct);
+                }
+                catch (Npgsql.PostgresException ex)
+                {
+                    _logger.LogError(ex,
+                        "RVIDEO_SQL_DIAGNOSTIC operation=CreateQueuedSceneVideoVersion sqlState={SqlState} position={Position} internalPosition={InternalPosition} jobId={JobId} sceneId={SceneId} versionId=not_committed; command template: INSERT video_render.scene_video_versions (... render_job_id ...) VALUES (... @renderJobId ...); internal query intentionally omitted",
+                        ex.SqlState, ex.Position, ex.InternalPosition, job.Id, input.SceneId);
+                    throw;
+                }
+            }
+
+            if (version.RenderJobId != job.Id || version.ProjectId != input.ProjectId || version.SceneId != input.SceneId
+                || version.LogicalRequestId != attemptLogicalRequestId)
+                throw new RenderJobPendingReconciliationException("Selected version does not belong to this job/scene/logical request; submit is prohibited.");
 
             if (!string.IsNullOrWhiteSpace(version.ProviderTaskId))
             {
@@ -581,6 +669,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 ? null
                 : version.ProviderVideoIdBase.Trim();
             string? taskId = providerVideoIdBase;
+            if (owners.Length == 1 && (string.IsNullOrWhiteSpace(taskId)
+                || !string.Equals(providerTaskId, confirmedTask, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(providerVideoIdBase, job.ProviderVideoIdBase, StringComparison.OrdinalIgnoreCase)))
+                throw new RenderJobPendingReconciliationException("Confirmed provider task lost its owner identity before polling; submit is prohibited.");
             if (IsUnknownSubmission(version, providerTaskId, providerVideoIdBase))
             {
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RECONCILIATION_STARTED", "warning",
@@ -703,6 +795,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         availablePoints = reservation.AvailablePoints,
                         errorCode = reservation.Status
                     }, ct);
+                if (hasProviderIdentity)
+                    throw new RenderJobPendingReconciliationException("Billing state requires reconciliation while the confirmed provider task is retained.");
                 await FailAsync(project.Id, scene, version.Id, reservation.Status, reservation.ErrorMessage ?? "Unable to reserve billing.", ct);
                 throw new RenderJobTerminalFailureException(reservation.ErrorMessage ?? "Unable to reserve billing.");
             }
@@ -778,37 +872,108 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId
                         }, ct);
-                    submitToken = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);
-                    if (submitToken is null || !await _submitCoordinator.BeginSubmitAsync(submitToken.Value, ct))
-                        throw new RenderJobPendingReconciliationException(SceneVideoManualReview.Message);
-                    var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
-                        input.ProviderId,
-                        input.ProviderCapabilityId,
-                        input.ProviderCode,
-                        input.CapabilityCode,
-                        policy.Model,
-                        policy.Mode,
-                        providerPrompt,
-                        input.AspectRatio,
-                         candidate.ProviderResolution,
-                        candidate.ProviderDurationSeconds,
-                        sourceImageAsset,
-                        referenceImages,
-                        (diagnostic, token) => AddHttpSubmitDiagnosticAsync(project.Id, job, input, version.Id, diagnostic, token)), ct);
-                    providerTaskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
-                    providerVideoIdBase = RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
-                        ? (string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase) ? null : submit.ProviderVideoIdBase.Trim())
-                        : providerTaskId;
-                    if (string.IsNullOrWhiteSpace(providerTaskId) || string.IsNullOrWhiteSpace(providerVideoIdBase))
+                    // A rejected claim (guard/duplicate intent) is decided entirely before any provider HTTP
+                    // request. It must not be reported as an ambiguous in-flight submit: no request was sent,
+                    // so no reconciliation is warranted and no manual review flag is set.
+                    await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
+                    var claim = await _submitCoordinator.ClaimSubmitAsync(input.ProjectId, input.SceneId, attemptLogicalRequestId, job.Id, ct);
+                    if (claim.Outcome == SceneVideoSubmitClaimOutcome.Claimed
+                        && claim.BlockReason == SceneVideoSubmitBlockReason.HistoricalManualReviewWithoutLiveAttempt)
                     {
-                        await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
-                        throw new RenderJobPendingReconciliationException("Provider submit result requires manual reconciliation.");
+                        // A settled historical attempt left a manual-review marker, but no live attempt holds
+                        // the scene. The marker is reported here instead of being silently dropped; the new
+                        // operation proceeds and the historical rows are never modified.
+                        await _repo.AddProjectEventAsync(input.ProjectId, "RVIDEO_VIDEO_HISTORICAL_MANUAL_REVIEW_OVERRIDDEN", "info",
+                            "A historical manual-review marker exists on a settled attempt; the new user-initiated operation proceeds with its own provider request.",
+                            new
+                            {
+                                jobId = job.Id,
+                                input.ProjectId,
+                                input.SceneId,
+                                input.SceneIndex,
+                                sceneVideoVersionId = version.Id,
+                                logicalRequestId = attemptLogicalRequestId,
+                                historicalAttemptModified = false,
+                                providerRequestSent = false
+                            }, ct);
                     }
-                    if (!await _submitCoordinator.ConfirmSubmittedAsync(submitToken.Value, providerTaskId, providerVideoIdBase, CancellationToken.None))
-                        throw new RenderJobPendingReconciliationException("Provider submit intent could not be confirmed.");
-                    taskId = providerVideoIdBase;
-                    await _jobs.SetProviderIdentifiersAsync(job.Id, providerTaskId, providerVideoIdBase, ct);
-
+                    if (claim.Outcome != SceneVideoSubmitClaimOutcome.Claimed || claim.OwnerToken is null)
+                    {
+                        // A refused claim is decided entirely before the provider call, so it is a definite
+                        // terminal failure and must never be parked in ambiguous reconciliation.
+                        if (claim.Outcome == SceneVideoSubmitClaimOutcome.AlreadyClaimed)
+                        {
+                            // The intent already exists. If it proves a submit happened, re-link to the stored
+                            // task instead of failing or resending; otherwise this attempt is a real duplicate.
+                            var existingState = await _submitCoordinator.GetSubmitStateAsync(input.SceneId, attemptLogicalRequestId, ct);
+                            if (existingState is not null && (!string.IsNullOrWhiteSpace(existingState.ProviderTaskId)
+                                || !string.IsNullOrWhiteSpace(existingState.ProviderVideoIdBase)
+                                || existingState.SubmitState is "CONFIRMED_PROVIDER_TASK" or "SUBMIT_IN_FLIGHT" or "AMBIGUOUS_SUBMIT" or "MANUAL_REVIEW_REQUIRED"))
+                            {
+                                throw new RenderJobPendingReconciliationException("Existing submit intent must be resolved through its unique owner before polling or submitting.");
+                            }
+                            else
+                            {
+                                await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, submitToken, ct);
+                                await RecordPreHttpSubmitRefusalAsync(input, job, scene, version.Id, attemptLogicalRequestId,
+                                    SceneVideoSubmitGuard.ErrorCodeDuplicate, SceneVideoSubmitGuard.MessageDuplicate,
+                                    claim.BlockReason, intentAlreadyHadProviderTask: false, ct);
+                                throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageDuplicate);
+                            }
+                        }
+                        else
+                        {
+                            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, submitToken, ct);
+                            await RecordPreHttpSubmitRefusalAsync(input, job, scene, version.Id, attemptLogicalRequestId,
+                                SceneVideoSubmitGuard.ErrorCodeGuardRejected, SceneVideoSubmitGuard.MessageGuardRejected,
+                                claim.BlockReason, intentAlreadyHadProviderTask: false, ct);
+                            throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageGuardRejected);
+                        }
+                    }
+                    if (claim.Outcome == SceneVideoSubmitClaimOutcome.Claimed && claim.OwnerToken is { } claimedToken)
+                        submitToken = claimedToken;
+                    if (submitToken is { } activeToken)
+                    {
+                        await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, activeToken, ct);
+                        if (!await _submitCoordinator.BeginSubmitAsync(activeToken, ct))
+                        {
+                            // State conflict only: no request was sent, and the existing intent protection is preserved.
+                            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, submitToken, ct);
+                            await RecordPreHttpSubmitRefusalAsync(input, job, scene, version.Id, attemptLogicalRequestId,
+                                SceneVideoSubmitGuard.ErrorCodeIntentTransitionFailed, SceneVideoSubmitGuard.MessageIntentTransitionFailed,
+                                SceneVideoSubmitBlockReason.ExistingIntentUnresolved, intentAlreadyHadProviderTask: false, ct);
+                            throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageIntentTransitionFailed);
+                        }
+                        await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, activeToken, ct);
+                        var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
+                            input.ProviderId,
+                            input.ProviderCapabilityId,
+                            input.ProviderCode,
+                            input.CapabilityCode,
+                            policy.Model,
+                            policy.Mode,
+                            providerPrompt,
+                            input.AspectRatio,
+                            candidate.ProviderResolution,
+                            candidate.ProviderDurationSeconds,
+                            sourceImageAsset,
+                            referenceImages,
+                            (diagnostic, token) => AddHttpSubmitDiagnosticAsync(project.Id, job, input, version.Id, diagnostic, token)), ct);
+                        providerTaskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
+                        providerVideoIdBase = RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
+                            ? (string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase) ? null : submit.ProviderVideoIdBase.Trim())
+                            : providerTaskId;
+                        if (string.IsNullOrWhiteSpace(providerTaskId) || string.IsNullOrWhiteSpace(providerVideoIdBase))
+                        {
+                            await _submitCoordinator.MarkAmbiguousAsync(activeToken, CancellationToken.None);
+                            throw new RenderJobPendingReconciliationException("Provider submit result requires manual reconciliation.");
+                        }
+                        if (!await _submitCoordinator.ConfirmSubmittedAsync(activeToken, providerTaskId, providerVideoIdBase, CancellationToken.None))
+                            throw new RenderJobPendingReconciliationException("Provider submit intent could not be confirmed.");
+                        hasProviderIdentity = true;
+                        taskId = providerVideoIdBase;
+                        await _jobs.SetProviderIdentifiersAsync(job.Id, providerTaskId, providerVideoIdBase, ct);
+                    }
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_SUCCESS", "info",
                         "Scene-video source image handoff completed.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id, imageInputMode = imageInputMode.ToString() }, ct);
@@ -867,7 +1032,9 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     || submitException is Ai79TaskSubmitException)
                 {
                     var structuredException = ExtractAi79SubmitException(submitException);
-                    var canFallback = structuredException is not null
+                    if (hasProviderIdentity)
+                        throw new RenderJobPendingReconciliationException("An accepted provider task must be reconciled; submit fallback is prohibited.", submitException);
+                    var canFallback = submitToken is not null && structuredException is not null
                         && IsDefinitivelyRejectedSubmit(structuredException);
                     if (canFallback)
                     {
@@ -1002,6 +1169,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                                 ai79Exception.ErrorCode,
                                 CancellationToken.None);
                         }
+                        await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
                         fallbackReason = failureClassification;
                         attemptIndex = nextCandidateIndex;
                         continue;
@@ -1129,12 +1297,16 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         providerVideoIdBase,
                         idBase = providerVideoIdBase
                     }, ct);
+                await VerifyConfirmedPollOwnerAsync(job.Id, input.ProjectId, input.SceneId, version.Id,
+                    attemptLogicalRequestId, providerTaskId, providerVideoIdBase, ct);
                 var status = await adapter.PollAsync(new VideoProviderPollRequest(
                     input.ProviderId,
                     input.ProviderCapabilityId,
                     input.ProviderCode,
                     input.CapabilityCode,
                     taskId!), ct);
+                if (status.ProviderTaskId != providerVideoIdBase)
+                    throw new RenderJobPendingReconciliationException("Provider poll response identity conflicts with the confirmed owner.");
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_RESPONSE", "info",
                     "Scene-video provider poll response received.",
                 new
@@ -1231,95 +1403,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         }, "warning", ct);
                     if (resourceUnavailableState.ShouldTerminalize)
                     {
-                        var failure = status.ErrorMessage ?? "79AI repeatedly reported NOT_RESOURCES for the existing video task without progress evidence.";
-                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_TERMINAL", "warning",
-                            "Scene-video provider task repeatedly reported NOT_RESOURCES without progress; terminalizing the current model candidate.",
-                            new
-                            {
-                                projectId = input.ProjectId,
-                                sceneId = input.SceneId,
-                                input.SceneIndex,
-                                renderJobId = job.Id,
-                                sceneVideoVersionId = version.Id,
-                                providerTaskId,
-                                providerVideoIdBase,
-                                idBase = providerVideoIdBase,
-                                provider = input.ProviderCode,
-                                model = policy.Model,
-                                mode = policy.Mode,
-                                providerDurationSeconds = candidate.ProviderDurationSeconds,
-                                resourceUnavailableState.ResourceUnavailableCount,
-                                resourceUnavailableState.FirstSeenAt,
-                                resourceUnavailableState.ElapsedSeconds,
-                                resourceUnavailableState.Percent,
-                                resourceUnavailableState.HasProgressEvidence,
-                                failureClassification = PollResourceUnavailableNoProgressFailureClassification
-                            }, ct);
-                        if (reservation.BillingRecordId is not null)
-                        {
-                            await _billing.CompleteAsync(new AiImageBillingCompleteRequest
-                            {
-                                LogicalRequestId = attemptLogicalRequestId,
-                                Success = false,
-                                ActualModel = policy.Model,
-                                ProviderTaskId = providerTaskId ?? taskId,
-                                ProviderUsageJson = status.SanitizedResponseJson,
-                                TariffSnapshotJson = tariffSnapshot,
-                                ErrorMessage = failure
-                            }, ct);
-                        }
-                        await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, providerTaskId ?? taskId, ct, policy.Model, candidate.ProviderDurationSeconds);
-                        await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_resources_unavailable", failure, ct);
-                        await AddFallbackFailedEventAsync(
-                            project,
-                            scene,
-                            job,
-                            input,
-                            policy,
-                            providerTaskId ?? taskId,
-                            PollResourceUnavailableNoProgressFailureClassification,
-                            status.ErrorCode,
-                            status.SanitizedResponseJson,
-                            failure,
-                            ct);
-                        var nextResourceCandidate = ResolveNextCandidateAfterFailure(
-                            candidate,
-                            PollResourceUnavailableNoProgressFailureClassification,
-                            attemptIndex,
-                            candidates,
-                            catalogModels);
-                        if (nextResourceCandidate is not null)
-                        {
-                            await AddFallbackStartedEventAsync(
-                                project,
-                                scene,
-                                job,
-                                input,
-                                policy,
-                                nextResourceCandidate.Policy,
-                                providerTaskId ?? taskId,
-                                PollResourceUnavailableNoProgressFailureClassification,
-                                status.ErrorCode,
-                                ct);
-                            fallbackReason = PollResourceUnavailableNoProgressFailureClassification;
-                            attemptIndex = candidates.IndexOf(nextResourceCandidate);
-                            continue;
-                        }
-
-                        await AddFallbackExhaustedEventAsync(
-                            project,
-                            scene,
-                            job,
-                            input,
-                            policy,
-                            providerTaskId ?? taskId,
-                            PollResourceUnavailableNoProgressFailureClassification,
-                            status.ErrorCode,
-                            status.SanitizedResponseJson,
-                            failure,
-                            ct);
-                        await FailAsync(project.Id, scene, version.Id, status.ErrorCode ?? "provider_resources_unavailable", failure, ct);
-                        throw new RenderJobTerminalFailureException(failure);
+                        await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
+                            "provider_resources_unavailable", "Resource-unavailable threshold is not a provider-confirmed terminal outcome.", ct,
+                            providerTaskId, policy.Model, providerVideoIdBase);
+                        throw new RenderJobPendingReconciliationException("Known task returned NOT_RESOURCES; operator reconciliation is required without fallback.");
                     }
 
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_RETRY", "warning",
@@ -1365,46 +1452,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         DateTimeOffset.UtcNow);
                     if (timeoutDecision.IsTimedOut)
                     {
-                        var providerElapsed = timeoutDecision.Elapsed;
-                        var timeoutMessage = $"Video provider task remained {status.Status} for {providerElapsed.TotalMinutes:F1} minutes, exceeding the configured {providerTimeout.TotalMinutes:F0}-minute hard timeout.";
-                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RENDER_TIMEOUT", "warning",
-                            "Scene-video provider task exceeded the hard render timeout and was marked failed locally.",
-                            new
-                            {
-                                projectId = input.ProjectId,
-                                sceneId = input.SceneId,
-                                input.SceneIndex,
-                                renderJobId = job.Id,
-                                sceneVideoVersionId = version.Id,
-                                providerCode = input.ProviderCode,
-                                modelCode = policy.Model,
-                                logicalRequestId = attemptLogicalRequestId,
-                                providerTaskId,
-                                providerVideoIdBase,
-                                idBase = providerVideoIdBase,
-                                providerStatus = status.Status.ToString(),
-                                providerElapsedSeconds = (int)providerElapsed.TotalSeconds,
-                                providerRenderHardTimeoutMinutes = (int)providerTimeout.TotalMinutes,
-                                providerErrorCode = status.ErrorCode,
-                                providerErrorMessage = status.ErrorMessage,
-                                providerRawResponse = SanitizeDiagnosticJson(status.SanitizedResponseJson)
-                            }, ct);
-                        if (reservation.BillingRecordId is not null)
-                        {
-                            await _billing.CompleteAsync(new AiImageBillingCompleteRequest
-                            {
-                                LogicalRequestId = attemptLogicalRequestId,
-                                Success = false,
-                                ActualModel = status.ActualModel ?? policy.Model,
-                                ProviderTaskId = providerTaskId ?? taskId,
-                                ProviderUsageJson = status.SanitizedResponseJson,
-                                TariffSnapshotJson = tariffSnapshot,
-                                ErrorMessage = timeoutMessage
-                            }, ct);
-                        }
-                        await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, timeoutMessage, providerTaskId ?? taskId, ct, status.ActualModel ?? policy.Model, candidate.ProviderDurationSeconds);
-                        await FailAsync(project.Id, scene, version.Id, "RVIDEO_PROVIDER_RENDER_TIMEOUT", timeoutMessage, ct);
-                        throw new RenderJobTerminalFailureException(timeoutMessage);
+                        await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
+                            "provider_poll_timeout", "Local timeout is not a provider-confirmed terminal outcome.", ct,
+                            providerTaskId, policy.Model, providerVideoIdBase);
+                        throw new RenderJobPendingReconciliationException("Known provider task exceeded local polling timeout; operator reconciliation required.");
                     }
 
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_PROCESSING", "info",
@@ -1428,6 +1479,13 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
                 if (status.Status != VideoProviderTaskStatus.Success)
                 {
+                    if (status.Status != VideoProviderTaskStatus.Failed)
+                    {
+                        await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
+                            "provider_status_unrecognized", "Provider response did not establish a terminal failure.", ct,
+                            providerTaskId, policy.Model, providerVideoIdBase);
+                        throw new RenderJobPendingReconciliationException("Provider response did not establish a terminal outcome; fallback is prohibited.");
+                    }
                     var failure = status.ErrorMessage ?? $"Video provider task failed with status {status.Status}.";
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FAILED", "error",
                         "Scene-video provider reported a terminal failure.",
@@ -1461,67 +1519,19 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     }
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, providerTaskId ?? taskId, ct, policy.Model, candidate.ProviderDurationSeconds);
                     await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
-                    var failureClassification = ClassifyProviderFailure(status.ErrorCode, failure, null);
-                    await AddFallbackFailedEventAsync(
-                        project,
-                        scene,
-                        job,
-                        input,
-                        policy,
-                        providerTaskId ?? taskId,
-                        failureClassification,
-                        status.ErrorCode,
-                        status.SanitizedResponseJson,
-                        failure,
-                        ct);
-                    var nextStatusCandidate = ResolveNextCandidateAfterFailure(
-                        candidate,
-                        failureClassification,
-                        attemptIndex,
-                        candidates,
-                        catalogModels);
-                    if (nextStatusCandidate is not null)
-                    {
-                        if (!ShouldFallback(failureClassification))
-                        {
-                            await FailAsync(project.Id, scene, version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
-                            throw new RenderJobTerminalFailureException(failure);
-                        }
-
-                        await AddFallbackStartedEventAsync(
-                            project,
-                            scene,
-                            job,
-                            input,
-                            policy,
-                            nextStatusCandidate.Policy,
-                            providerTaskId ?? taskId,
-                            failureClassification,
-                            status.ErrorCode,
-                            ct);
-                        fallbackReason = failureClassification;
-                        attemptIndex = candidates.IndexOf(nextStatusCandidate);
-                        continue;
-                    }
-
-                    await AddFallbackExhaustedEventAsync(
-                        project,
-                        scene,
-                        job,
-                        input,
-                        policy,
-                        providerTaskId ?? taskId,
-                        failureClassification,
-                        status.ErrorCode,
-                        status.SanitizedResponseJson,
-                        failure,
-                        ct);
-                    await FailAsync(project.Id, scene, version.Id, "provider_failure", failure, ct);
+                    await FailAsync(project.Id, scene, version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
                     throw new RenderJobTerminalFailureException(failure);
                 }
 
                 try
                 {
+                    // Poll identity is the video id base; the submit task id remains a separate owner identity.
+                    if (version.Status.Equals("failed", StringComparison.OrdinalIgnoreCase)
+                        && (string.IsNullOrWhiteSpace(providerTaskId) || string.IsNullOrWhiteSpace(providerVideoIdBase)
+                            || status.ProviderTaskId != providerVideoIdBase
+                            || version.ProviderTaskId != providerTaskId || version.ProviderVideoIdBase != providerVideoIdBase))
+                        throw new VideoReconciliationException("RVIDEO_RECOVERY_OWNER_IDENTITY_REQUIRED",
+                            "Terminal success cannot be bound to the confirmed failed owner.");
                     var outputUrl = status.OutputUrl;
                     if (string.IsNullOrWhiteSpace(outputUrl)
                         || !Uri.TryCreate(outputUrl, UriKind.Absolute, out var outputUri)
@@ -1573,7 +1583,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         input.BillingIntent,
                         input.BillingOperationId,
                         IsRecovery: !string.IsNullOrWhiteSpace(existingTaskId),
-                        BillableDurationSeconds: candidate.ProviderDurationSeconds), ct);
+                        BillableDurationSeconds: candidate.ProviderDurationSeconds,
+                        TerminalSuccessEvidence: version.Status.Equals("failed", StringComparison.OrdinalIgnoreCase)
+                            || (version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase) && !version.IsSelected) ? status : null,
+                        RecoveryProviderVideoIdBase: providerVideoIdBase), ct);
                     var actualVideoPoints = RVideoSceneVideoCompletionService.CalculateActualVideoPoints(
                         candidate.ProviderDurationSeconds,
                         input.CustomerPointRate);
@@ -1642,6 +1655,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     return;
                 }
             }
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+            {
+                throw new RenderJobPendingReconciliationException("Provider poll timed out locally; retain the confirmed task for reconciliation.", ex);
+            }
             catch (VideoProviderTransientException ex)
             {
                 await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "SCENE_VIDEO_POLL_TRANSIENT", ex.Message, CancellationToken.None, providerTaskId, policy.Model, providerVideoIdBase);
@@ -1655,8 +1672,15 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         "Provider task identity is missing; manual reconciliation required before retry.", ex);
                 return;
             }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                and not RenderJobPendingReconciliationException and not RenderJobDeferredException
+                and not RenderJobTerminalFailureException)
+            {
+                throw new RenderJobPendingReconciliationException("Provider polling could not establish an outcome; retain the same task for reconciliation.", ex);
+            }
         }
 
+        await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
         const string exhaustedCode = "RVIDEO_VIDEO_FALLBACK_EXHAUSTED";
         await _repo.AddProjectEventAsync(project.Id, exhaustedCode, "error",
             "No valid scene-video fallback candidate remains.",
@@ -1674,6 +1698,29 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         await FailAsync(project.Id, scene, Guid.Empty, exhaustedCode,
             "No valid 79AI video fallback candidate remains.", ct);
         throw new RenderJobTerminalFailureException(exhaustedCode);
+    }
+
+    private async Task VerifyConfirmedPollOwnerAsync(Guid jobId, long projectId, long sceneId, Guid versionId,
+        string logicalRequestId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct)
+    {
+        var current = await _jobs.GetAsync(jobId, ct);
+        var versions = await _versions.ListJobSceneVideoVersionsAsync(jobId, ct);
+        var intents = await _submitCoordinator.ListJobSubmitIntentsAsync(jobId, ct);
+        var owners = versions.Where(v => !string.IsNullOrWhiteSpace(v.ProviderTaskId)
+            || !string.IsNullOrWhiteSpace(v.ProviderVideoIdBase)).ToArray();
+        var confirmed = intents.Where(i => i.SubmitState == "CONFIRMED_PROVIDER_TASK"
+            || !string.IsNullOrWhiteSpace(i.ProviderTaskId) || !string.IsNullOrWhiteSpace(i.ProviderVideoIdBase)).ToArray();
+        if (current is null || string.IsNullOrWhiteSpace(providerTaskId) || string.IsNullOrWhiteSpace(providerVideoIdBase)
+            || current.ProviderTaskId != providerTaskId || current.ProviderVideoIdBase != providerVideoIdBase
+            || owners.Length != 1 || confirmed.Length != 1
+            || owners[0].Id != versionId || owners[0].ProjectId != projectId || owners[0].SceneId != sceneId
+            || owners[0].LogicalRequestId != logicalRequestId || owners[0].ProviderTaskId != providerTaskId
+            || owners[0].ProviderVideoIdBase != providerVideoIdBase
+            || confirmed[0].SceneId != sceneId || confirmed[0].LogicalRequestId != logicalRequestId
+            || confirmed[0].SubmitState != "CONFIRMED_PROVIDER_TASK" || confirmed[0].ProviderTaskId != providerTaskId
+            || confirmed[0].ProviderVideoIdBase != providerVideoIdBase
+            || intents.Any(i => i.SubmitState is "SUBMIT_IN_FLIGHT" or "AMBIGUOUS_SUBMIT" or "MANUAL_REVIEW_REQUIRED"))
+            throw new RenderJobPendingReconciliationException("Polling requires one matching job/version/confirmed-intent identity; no new submit is allowed.");
     }
 
     private async Task HandleReconciliationFailureAsync(
@@ -1712,13 +1759,15 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         if (currentAttempt < retryLimit)
         {
             await MarkPendingReconciliationAsync(input, versionId, logicalRequestId, tariffSnapshot, errorCode, errorMessage, ct, providerTaskId, providerVideoIdBase: providerVideoIdBase);
-            await _jobs.ScheduleProviderPollAsync(
+            var scheduled = await _jobs.ScheduleProviderPollAsync(
                 job.Id,
                 TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                 "SCENE_VIDEO_RECONCILIATION_RETRY",
                 errorMessage,
                 ct,
                 enforceReconciliationLimit: true);
+            if (!scheduled)
+                throw new RenderJobPendingReconciliationException("Provider output retry could not be scheduled; retain owner identifiers for reconciliation.");
             throw new RenderJobDeferredException(errorMessage);
         }
 
@@ -2143,6 +2192,17 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         IReadOnlyList<SceneVideoVersionDto> versions,
         IReadOnlyList<ResolvedFallbackCandidate> candidates)
     {
+        var providerOwners = versions.Where(v => IsMatchingLogicalRequestId(v.LogicalRequestId, logicalRequestId)
+            && (!string.IsNullOrWhiteSpace(v.ProviderTaskId) || !string.IsNullOrWhiteSpace(v.ProviderVideoIdBase))).ToArray();
+        if (providerOwners.Length > 1)
+            throw new RenderJobPendingReconciliationException("Multiple task-owning attempts require reconciliation; selecting a fallback is prohibited.");
+        if (providerOwners.Length == 1)
+        {
+            var ownerIndex = ParseAttemptIndex(providerOwners[0].LogicalRequestId, logicalRequestId);
+            if (ownerIndex < 0 || ownerIndex >= candidates.Count)
+                throw new RenderJobPendingReconciliationException("Task owner cannot be mapped to its persisted attempt.");
+            return ownerIndex;
+        }
         SceneVideoVersionDto? activeVersion = null;
         var maxAttempt = -1;
         var maxMappedAttempt = -1;
@@ -3803,7 +3863,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         if (!scheduled)
         {
             var current = await _jobs.GetAsync(job.Id, ct);
-            if (current?.Status is RenderJobStatuses.Completed or RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
+            if (current?.Status is RenderJobStatuses.Completed or RenderJobStatuses.Cancelled)
             {
                 return;
             }
@@ -3886,6 +3946,65 @@ public sealed partial class SceneVideoWorkerHandler
         }
 
         public string ErrorCode { get; }
+    }
+
+    /// <summary>
+    /// Records a scene-video submit that was refused by the pre-HTTP guard. No provider request
+    /// left the process, so this is a definite terminal failure: the version and job are marked
+    /// failed (never pending_reconciliation), the scene is synchronised, and the billing
+    /// reservation is released instead of being parked in ambiguous reconciliation. V2 selected
+    /// completed output is never touched because only this attempt's version row is updated.
+    /// </summary>
+    private async Task RecordPreHttpSubmitRefusalAsync(
+        SceneVideoRenderWorkItemInput input,
+        RenderJobDto job,
+        VideoProjectSceneDto scene,
+        Guid versionId,
+        string logicalRequestId,
+        string errorCode,
+        string errorMessage,
+        SceneVideoSubmitBlockReason blockReason,
+        bool intentAlreadyHadProviderTask,
+        CancellationToken ct)
+    {
+        await _repo.AddProjectEventAsync(input.ProjectId, "RVIDEO_VIDEO_NOT_SUBMITTED", "warning",
+            "Scene-video submit was refused before any provider request; recording a terminal failure.",
+            new
+            {
+                jobId = job.Id,
+                input.ProjectId,
+                input.SceneId,
+                input.SceneIndex,
+                sceneVideoVersionId = versionId,
+                logicalRequestId,
+                errorCode,
+                blockReason = blockReason.ToString(),
+                blockerCategory = blockReason switch
+                {
+                    SceneVideoSubmitBlockReason.ExistingIntentUnresolved => "intent",
+                    SceneVideoSubmitBlockReason.SceneJobInFlightOrManualReview => "job",
+                    SceneVideoSubmitBlockReason.SceneVersionInFlightOrReconciliation => "video version",
+                    _ => "none"
+                },
+                intentAlreadyHadProviderTask,
+                providerRequestSent = false
+            }, ct);
+
+        if (versionId != Guid.Empty)
+        {
+            await _versions.FailSceneVideoVersionAsync(versionId, errorCode, errorMessage, ct);
+        }
+
+        // Settle the reservation as a definite failure instead of parking it in reconciliation:
+        // no provider request was sent, so the reserved points must return to the wallet.
+        await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+        {
+            LogicalRequestId = logicalRequestId,
+            Success = false,
+            ErrorMessage = errorMessage
+        }, ct);
+
+        await FailAsync(input.ProjectId, scene, versionId, errorCode, errorMessage, ct);
     }
 
     private async Task LogUsageAsync(
