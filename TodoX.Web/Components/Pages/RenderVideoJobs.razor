@@ -1065,8 +1065,6 @@ else
 
                                                                   OnClick="@(() => OpenSceneVideoPreview(scene))" />
 
-                                                <MudText Typo="Typo.caption">Video đang sử dụng: @ResolveSelectedSceneVideoLabel(scene)</MudText>
-                                                <MudText Typo="Typo.caption">Render gần nhất: @ResolveVideoSceneLabel(scene)</MudText>
                                                 @if (!string.IsNullOrWhiteSpace(SceneVideoRerenderDisabledReason(scene, draft)))
                                                 {
                                                     <MudText Typo="Typo.caption" Color="Color.Warning">@SceneVideoRerenderDisabledReason(scene, draft)</MudText>
