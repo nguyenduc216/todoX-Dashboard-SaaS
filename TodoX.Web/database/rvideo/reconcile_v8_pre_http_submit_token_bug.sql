@@ -9,6 +9,9 @@
 -- Execute with psql -v ON_ERROR_STOP=1 and ALL variables above; run the separate
 -- read-only preflight first. Never run this file as a preflight.
 -- This transaction does not alter the selected/completed V2 or any scene media pointer.
+-- Pre-3b9ca718 V8 could set submitted_at without invoking adapter.SubmitAsync.
+-- Only the exact operator-verified V8 timestamp below is permitted; it is not
+-- evidence of HTTP by itself. Any provider/HTTP evidence still aborts this transaction.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE IF NOT EXISTS render.scene_video_operator_reconciliations (
@@ -70,9 +73,11 @@ BEGIN
           AND logical_request_id=logical_id FOR UPDATE;
     v_id := v.id;
     IF v.id IS DISTINCT FROM (SELECT version_id FROM pre_http_operator_input)
+       OR v.id IS DISTINCT FROM '7c744095-f0fa-46b6-adf9-2759cc6b39da'::uuid
        OR v.status IS DISTINCT FROM 'pending_reconciliation'
        OR v.error_code IS DISTINCT FROM (SELECT version_error_code FROM pre_http_operator_input)
        OR NULLIF(btrim(v.provider_task_id),'') IS NOT NULL OR NULLIF(btrim(v.provider_video_id_base),'') IS NOT NULL
+       OR v.submitted_at IS DISTINCT FROM '2026-10-22 00:50:42.110+07'::timestamptz
        OR v.is_selected IS TRUE
     THEN RAISE EXCEPTION 'V8 version preflight mismatch or selected/provider identity'; END IF;
 
@@ -94,7 +99,7 @@ BEGIN
              AND (x.scene_id<>814 OR x.logical_request_id<>logical_id))
        OR EXISTS (SELECT 1 FROM video_render.scene_video_versions x WHERE x.id=v_id
            AND (x.provider_task_id IS NOT NULL OR x.provider_video_id_base IS NOT NULL
-                OR x.submitted_at IS NOT NULL OR x.completed_at IS NOT NULL
+                 OR x.completed_at IS NOT NULL
                 OR x.result_media_id IS NOT NULL OR x.public_url IS NOT NULL))
        OR EXISTS (SELECT 1 FROM render.scene_video_submit_intents x
            WHERE x.tenant_id=t AND x.render_job_id=job_id

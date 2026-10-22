@@ -6,6 +6,10 @@
 -- 4190c02c-5279-4534-8ec6-95fbcbbf05b9 must have no lease, version or intent.
 -- V3-V6 queued versions attached to failed jobs are historical only if their
 -- provider IDs, submit timestamps and events show no unresolved submission.
+-- V8 ONLY: expected submitted_at = 2026-10-22 00:50:42.110+07.
+-- Before 3b9ca718, MarkSceneVideoVersionSubmittedAsync ran even when the
+-- null submitToken skipped BeginSubmitAsync/adapter.SubmitAsync. Independently
+-- confirm no HTTP; reject any differing timestamp or provider/submit evidence.
 SELECT j.id, j.tenant_id, j.job_type, j.status, j.error_code, j.input_json,
        j.provider_task_id, j.provider_video_id_base, j.lock_owner, j.lock_until,
        j.worker_key, j.completed_at

@@ -2,8 +2,11 @@
 -- Expected: V8 job/version failed, intent CONFIRMED_NO_TASK, exactly one audit row;
 -- ownership orphan may remain pending; V3-V6 may remain queued without provider
 -- evidence. Other unresolved rows in the blocking queries must be investigated.
+-- V8 submitted_at remains the pre-HTTP timestamp; reconciliation does not clear it.
 SELECT a.*, j.status AS job_status, j.provider_task_id AS job_provider_task,
-       v.version_number, v.status AS version_status, v.is_selected,
+       v.version_number, v.status AS version_status, v.submitted_at,
+       v.provider_task_id AS version_provider_task, v.provider_video_id_base AS version_provider_video,
+       v.is_selected,
        i.submit_state, i.provider_task_id AS intent_provider_task,
        s.selected_video_version_id
 FROM render.scene_video_operator_reconciliations a
