@@ -88,7 +88,9 @@ public sealed record SceneVideoSubmitIntentFact(
     bool HasProviderTask,
     bool IsNewJob,
     bool IsPriorJobTerminal,
-    bool IsPriorJobCompleted)
+    bool IsPriorJobCompleted,
+    bool IsPriorJobFailed = false,
+    bool HasAuditedTerminalProviderFailure = false)
 {
     /// <summary>
     /// Whether an intent row must still refuse an unrelated new submit for the same scene.
@@ -122,7 +124,8 @@ public sealed record SceneVideoSubmitIntentFact(
             // A recorded provider task only settles the attempt once its job actually completed and the
             // result was persisted. A task whose job failed may still be live at the provider, so it keeps
             // blocking until an operator reconciles it.
-            "CONFIRMED_PROVIDER_TASK" => !intent.IsPriorJobCompleted,
+            "CONFIRMED_PROVIDER_TASK" => !(intent.IsPriorJobCompleted
+                || (intent.IsPriorJobFailed && intent.HasAuditedTerminalProviderFailure)),
             // A recorded pre-HTTP refusal proves no request left the server and the attempt is settled.
             "CONFIRMED_NO_TASK" => false,
             _ => true
@@ -403,7 +406,46 @@ public sealed class SceneVideoSubmitCoordinator
                             -- Intent that never reached the provider: it blocks only while its own job is live.
                             OR (i.submit_state='SUBMIT_INTENT_PERSISTED' AND prior.status NOT IN ('completed', 'failed'))
                             -- A recorded provider task settles the attempt only once its job completed.
-                            OR (i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status <> 'completed')
+                            -- Operator reconciliation closes an actually failed task without claiming no task existed.
+                            -- FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261022-SCENE05-RELEASE-002.
+                            OR (i.submit_state='CONFIRMED_PROVIDER_TASK' AND prior.status <> 'completed'
+                                AND NOT (prior.status='failed' AND i.reconciled_at IS NOT NULL
+                                    AND NULLIF(btrim(i.provider_task_id), '') IS NOT NULL
+                                    AND NULLIF(btrim(i.provider_video_id_base), '') IS NOT NULL
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'resolution', '')='TERMINAL_FAILED'
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'jobId', '')=prior.id::text
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'providerTaskId', '')=i.provider_task_id
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'providerVideoIdBase', '')=i.provider_video_id_base
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'intentOwnerToken', '')=i.owner_token::text
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'operatorApproved', '')='true'
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'oldWorkerFenced', '')='true'
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'sceneId', '')=i.scene_id::text
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'logicalRequestId', '')=i.logical_request_id
+                                    AND prior.provider_task_id IS NOT DISTINCT FROM i.provider_task_id
+                                    AND prior.provider_video_id_base IS NOT DISTINCT FROM i.provider_video_id_base
+                                    AND NULLIF(btrim(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'approvalReference'), '') IS NOT NULL
+                                    AND NULLIF(btrim(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'observedAt'), '') IS NOT NULL
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'evidenceKind', '')='provider_terminal_failure'
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->'evidence'->>'providerTaskId', '')=i.provider_task_id
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->'evidence'->>'providerVideoIdBase', '')=i.provider_video_id_base
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->'evidence'->>'normalizedStatus', '')='FAILED'
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->'evidence'->>'terminal', '')='true'
+                                    AND COALESCE(jsonb_typeof(prior.input_json->'sceneVideoTerminalFailureReconciliation'->'evidence'->'rawResponse'), '')='object'
+                                    AND COALESCE(prior.input_json->'sceneVideoTerminalFailureReconciliation'->'evidence'->'rawResponse','{}'::jsonb)<>'{}'::jsonb
+                                    AND NULLIF(btrim(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'operator'), '') IS NOT NULL
+                                    AND NULLIF(btrim(prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'evidenceReference'), '') IS NOT NULL
+                                    AND EXISTS (SELECT 1 FROM video_render.scene_video_versions owner
+                                        WHERE owner.tenant_id=prior.tenant_id AND owner.render_job_id=prior.id
+                                          AND owner.id::text=prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'ownerVersionId'
+                                          AND owner.scene_id=i.scene_id AND owner.logical_request_id=i.logical_request_id
+                                          AND owner.project_id::text=prior.input_json->'sceneVideoTerminalFailureReconciliation'->>'projectId'
+                                          AND owner.project_id::text=COALESCE(prior.input_json->>'projectId',prior.input_json->>'project_id')
+                                          AND owner.provider_task_id=i.provider_task_id AND owner.provider_video_id_base=i.provider_video_id_base
+                                          AND owner.status='failed' AND NOT owner.is_selected)
+                                    AND EXISTS (SELECT 1 FROM render.render_job_events audit
+                                        WHERE audit.job_id=prior.id AND audit.tenant_id=prior.tenant_id
+                                          AND audit.event_type='SCENE05_OPERATOR_TERMINAL_FAILURE_RECONCILED'
+                                          AND audit.data_json->'reconciliation'=prior.input_json->'sceneVideoTerminalFailureReconciliation')))
                           ))
                     THEN 1
                 WHEN EXISTS (SELECT 1 FROM render.render_jobs j

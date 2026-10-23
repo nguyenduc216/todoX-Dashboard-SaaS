@@ -438,7 +438,7 @@ private async Task UploadReferenceAsync(InputFileChangeEventArgs args){
       await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
       if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
       Snackbar.Add("Đã tải ảnh tham chiếu.",Severity.Success);
-    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_UPLOAD_REFERENCE_FAILED"); Snackbar.Add(ex.Message,Severity.Error); }
+    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_UPLOAD_REFERENCE_FAILED"); Snackbar.Add("Không thể thực hiện yêu cầu. Vui lòng thử lại sau.",Severity.Error); }
     finally{ _uploading=false; StateHasChanged(); }
   }
   private async Task OpenCharacterPickerAsync(){
@@ -464,7 +464,7 @@ private async Task UploadReferenceAsync(InputFileChangeEventArgs args){
       await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
       if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
       Snackbar.Add("Đã chọn Character tham chiếu.",Severity.Success);
-    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_CHARACTER_APPLY_FAILED"); Snackbar.Add(ex.Message,Severity.Error); }
+    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_CHARACTER_APPLY_FAILED"); Snackbar.Add("Không thể thực hiện yêu cầu. Vui lòng thử lại sau.",Severity.Error); }
   }
 // Builds the canonical settings request for a reference change, carrying all untouched settings forward.
   private RVideoJobSettingsRequest BuildReferenceSettings(string characterMode, long? selectedCharacterId, object? characterSnapshot){
@@ -514,7 +514,7 @@ private async Task UploadReferenceAsync(InputFileChangeEventArgs args){
       await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
       if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
       Snackbar.Add("Đã gỡ tham chiếu.",Severity.Success);
-    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_REMOVE_REFERENCE_FAILED"); Snackbar.Add(ex.Message,Severity.Error); }
+    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_REMOVE_REFERENCE_FAILED"); Snackbar.Add("Không thể thực hiện yêu cầu. Vui lòng thử lại sau.",Severity.Error); }
     finally{ _uploading=false; StateHasChanged(); }
   }
   private sealed record RefItem(string Url,string Label,string KindLabel,string Source);

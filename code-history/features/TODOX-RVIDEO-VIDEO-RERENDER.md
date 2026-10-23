@@ -15,3 +15,4 @@ Verified baseline: code-history/20261019_VIDEO-RERENDER-RELEASE.md and the curre
 ## Changes
 
 1. 2026-10-22 — TODOX-20261022-SCENE05-P0-001: Tasks 1/2/3, selective main integration and operator package. See ../20261022_TODOX-20261022-SCENE05-P0-001.md. Main SHA and package evidence are reported after verification.
+2. 2026-10-22 — TODOX-20261022-SCENE05-RELEASE-002: scoped operator reconciliation SQL and audited terminal-failure submit-guard release. See ../20261022_TODOX-20261022-SCENE05-RELEASE-002.md. No production action; terminal evidence and operator approval are still required.

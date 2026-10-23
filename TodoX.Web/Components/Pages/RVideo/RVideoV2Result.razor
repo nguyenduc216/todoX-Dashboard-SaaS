@@ -29,7 +29,7 @@ else{
 <section class="rv2-result-info">
 <MudText Typo="Typo.subtitle2">Thông tin video</MudText>
 <MudText Typo="Typo.caption">Tiêu đề: @(JobView.Project.Title??"—")</MudText>
-<MudText Typo="Typo.caption">Trạng thái: @JobView.Project.Status</MudText>
+<MudText Typo="Typo.caption">Trạng thái: @RVideoUserText.Status(JobView.Project.Status)</MudText>
 <MudText Typo="Typo.caption">Scene: @JobView.Project.Scenes.Count</MudText>
 <MudText Typo="Typo.caption">Tổng giây: @JobView.Project.TotalSeconds</MudText>
 <MudText Typo="Typo.caption">Job: @(JobView.CoreJob.JobId.ToString())</MudText>

@@ -1,3 +1,4 @@
+@using TodoX.Web.Components.Pages.RVideo
 @page "/render-job"
 
 @implements IAsyncDisposable
@@ -749,50 +750,6 @@ else
 
                                             <MudDivider Class="my-3" />
 
-                                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-
-                                                <MudText Typo="Typo.subtitle2">Log kỹ thuật phân tách scene</MudText>
-
-                                                <MudStack Row="true" Spacing="1">
-
-                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearDebugLogAsync" aria-label="Xóa log kỹ thuật" />
-
-                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ContentCopy" OnClick="CopyDebugLogAsync" aria-label="Sao chép log kỹ thuật" />
-
-                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Download" OnClick="DownloadDebugLogAsync" aria-label="Tải log kỹ thuật" />
-
-                                                </MudStack>
-
-                                            </MudStack>
-
-                                            <div id="render-job-debug-log" style="max-height:260px;overflow:auto;display:flex;flex-direction:column-reverse;gap:8px;">
-
-                                                @if (_debugEntries.Count == 0)
-
-                                                {
-
-                                                    <MudText Typo="Typo.body2" Color="Color.Secondary">Chưa có log.</MudText>
-
-                                                }
-                                                else
-                                                {
-
-                                                    @foreach (var entry in _debugEntries.OrderByDescending(x => x.StepNumber).ThenByDescending(x => x.Timestamp))
-
-                                                    {
-
-                                                        <MudPaper Class="pa-2" Outlined="true">
-
-                                                            <MudText Typo="Typo.caption">@entry.Status · @entry.StepCode · @entry.Message</MudText>
-
-                                                        </MudPaper>
-
-                                                    }
-
-                                                }
-
-                                            </div>
-
                                         </MudExpansionPanel>
 
                                     </MudExpansionPanels>
@@ -1057,18 +1014,13 @@ else
 
                                                                   EmptyText="Chua render video"
 
-                                                                  FailedText="Lỗi render video"
+                                                                  FailedText="Tạo video thất bại"
 
                                                                   RetryDisabled="@(_sceneVideoRetrying.Contains(scene.Id) || !CanRerenderSceneVideo(scene, draft))"
 
                                                                   OnRetry="@(() => RenderSceneVideoAsync(scene))"
 
                                                                   OnClick="@(() => OpenSceneVideoPreview(scene))" />
-
-                                                @if (!string.IsNullOrWhiteSpace(SceneVideoRerenderDisabledReason(scene, draft)))
-                                                {
-                                                    <MudText Typo="Typo.caption" Color="Color.Warning">@SceneVideoRerenderDisabledReason(scene, draft)</MudText>
-                                                }
 
                                                 <div class="scene-media-actions">
 
@@ -1198,7 +1150,7 @@ else
 
                                                 {
 
-                                                    <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
+                                                    <MudText Typo="Typo.caption" Color="Color.Error">@RVideoUserText.Error(sceneErr, "Tạo ảnh thất bại")</MudText>
 
                                                 }
 
@@ -1418,7 +1370,7 @@ else
 
                     <MudExpansionPanels Class="mt-4" Elevation="0">
 
-                        <MudExpansionPanel Text="Chi tiết kỹ thuật">
+                        <MudExpansionPanel Text="Lịch sử video">
 
                             <MudStack Spacing="2">
 
@@ -1439,46 +1391,6 @@ else
                                     @RenderFinalHistoryPanel()
 
                                 }
-
-                                <MudPaper Class="pa-3" Outlined="true">
-
-                                    <MudText Typo="Typo.subtitle2">Project events</MudText>
-
-                                    @foreach (var log in _project.Events.Take(20))
-
-                                    {
-
-                                        <MudText Typo="Typo.caption">@log.EventType · @log.Message</MudText>
-
-                                    }
-
-                                </MudPaper>
-
-                                <MudPaper Class="pa-3" Outlined="true">
-
-                                    <MudText Typo="Typo.subtitle2">Render jobs</MudText>
-
-                                    @if (_jobs.Count == 0)
-
-                                    {
-
-                                        <MudText Typo="Typo.caption">Chưa có job nào cho project này.</MudText>
-
-                                    }
-                                    else
-                                    {
-
-                                        @foreach (var job in _jobs)
-
-                                        {
-
-                                            <MudText Typo="Typo.caption">@job.JobType · @job.Status · @job.ProviderCode / @job.ModelCode</MudText>
-
-                                        }
-
-                                    }
-
-                                </MudPaper>
 
                             </MudStack>
 
@@ -1887,21 +1799,7 @@ else
 
                || string.Equals(_project.Status, VideoProjectStatuses.Failed, StringComparison.OrdinalIgnoreCase));
 
-    private string FinalMergeErrorText
-
-        => _finalVersions.FirstOrDefault(IsFailedFinalVideoVersion)?.ErrorMessage
-
-           ?? _jobs.FirstOrDefault(job =>
-
-               string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.MergeProjectVideo, StringComparison.OrdinalIgnoreCase)
-
-               && string.Equals(job.LogCode, _project is null ? string.Empty : TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id), StringComparison.OrdinalIgnoreCase)
-
-               && job.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)?.ErrorMessage
-
-           ?? _project?.ErrorMessage
-
-           ?? "Ghép video thất bại. Vui lòng kiểm tra log và thử lại nếu lifecycle cho phép.";
+    private string FinalMergeErrorText => "Tạo video thất bại";
 
     private bool HasActionableMissingSceneImages
 
@@ -2971,7 +2869,7 @@ else
 
             Logger.LogError(ex, "VIDEO_RENDER_CREATE_SCENES_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
             await AddDebugAsync("rvideo_scene_split_failed", "Tạo / phân tách scene thất bại", "FAILED", ex.Message, ex.ToString());
 
@@ -4274,16 +4172,16 @@ else
             && job.Status != RenderJobStatuses.PendingReconciliation
             && state.LatestJobVersion?.Status.Equals("failed", StringComparison.OrdinalIgnoreCase) == true
             && (!string.IsNullOrWhiteSpace(job.ProviderTaskId) || !string.IsNullOrWhiteSpace(job.ProviderVideoIdBase)))
-            return "Đang xác minh kết quả";
+            return "Đang tạo video";
         return ResolveVideoSceneStatus(scene) switch
         {
-            VideoSceneStatuses.VideoQueued => "Đang chờ",
-            VideoSceneStatuses.VideoRendering => "Đang xử lý",
+            VideoSceneStatuses.VideoQueued => "Đang tạo video",
+            VideoSceneStatuses.VideoRendering => "Đang tạo video",
             VideoSceneStatuses.VideoReady => "Hoàn tất",
-            VideoSceneStatuses.Failed => "Thất bại",
-            "pending_reconciliation" => "Cần đối soát",
-            "state_unavailable" => "Chưa tải được trạng thái render",
-            _ => "Chưa có lượt render"
+            VideoSceneStatuses.Failed => "Tạo video thất bại",
+            "pending_reconciliation" => "Chưa thể thử lại",
+            "state_unavailable" => "Chưa thể thử lại",
+            _ => "Chưa thể thử lại"
         };
     }
 
@@ -4449,52 +4347,11 @@ else
 
             : Task.CompletedTask;
 
-    private async Task OpenSceneErrorDetailAsync(VideoProjectSceneDto scene, string taskType)
-
+    private Task OpenSceneErrorDetailAsync(VideoProjectSceneDto scene, string taskType)
     {
-
-        if (AuthState.CurrentUser is null)
-
-        {
-
-            Snackbar.Add("Vui lòng đăng nhập để xem log lỗi.", Severity.Warning);
-
-            return;
-
-        }
-
-        SceneRenderErrorDetailDto detail;
-
-        try
-
-        {
-
-            detail = await SceneVersions.GetSceneRenderErrorDetailAsync(scene.Id, taskType, AuthState.CurrentUser)
-
-                ?? BuildFallbackSceneErrorDetail(scene, taskType, "Không tìm thấy nội dung lỗi chi tiết");
-
-        }
-
-        catch (Exception ex)
-
-        {
-
-            detail = BuildFallbackSceneErrorDetail(scene, taskType, $"Không thể tải log lỗi: {ex.Message}");
-
-        }
-
-        var parameters = new DialogParameters<SceneRenderErrorDetailDialog>
-
-        {
-
-            { x => x.Detail, detail }
-
-        };
-
-        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large, CloseOnEscapeKey = true };
-
-        await DialogService.ShowAsync<SceneRenderErrorDetailDialog>($"Chi tiết lỗi Scene {scene.SceneIndex:00}", parameters, options);
-
+        Snackbar.Add(string.Equals(taskType, "video", StringComparison.OrdinalIgnoreCase)
+            ? "Tạo video thất bại" : "Tạo ảnh thất bại", Severity.Error);
+        return Task.CompletedTask;
     }
 
     private SceneRenderErrorDetailDto BuildFallbackSceneErrorDetail(VideoProjectSceneDto scene, string taskType, string message)
@@ -4543,25 +4400,23 @@ else
     }
 
     private string SceneVideoRerenderDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
-        => _sceneVideoRetrying.Contains(scene.Id) ? "Đang gửi yêu cầu render" : SceneVideoDisabledReason(scene, draft);
+        => _sceneVideoRetrying.Contains(scene.Id) ? "Đang tạo video" : SceneVideoDisabledReason(scene, draft);
 
     private string SceneVideoDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
     {
         if (!_sceneVideoUiStates.TryGetValue(scene.Id, out var state))
-            return "Chưa tải được trạng thái backend; cần tải lại trước khi render";
+            return "Chưa thể thử lại";
         if (state.LatestJob?.Status == RenderJobStatuses.PendingReconciliation)
-            return "Cần đối soát kết quả provider";
+            return "Chưa thể thử lại";
         if (state.HasActiveJob && state.LatestJob is { } activeJob && IsActiveRenderJobStatus(activeJob.Status))
-            return state.LatestJob is { } job && (!string.IsNullOrWhiteSpace(job.ProviderTaskId)
-                || !string.IsNullOrWhiteSpace(job.ProviderVideoIdBase))
-                ? "Đang theo dõi task 79AI" : "Đang chờ hoặc xử lý render video";
+            return "Đang tạo video";
         if (state.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)
-            return "Cần đối soát kết quả provider";
-        if (state.HasActiveJob) return "Đang chờ hoặc xử lý render video";
+            return "Chưa thể thử lại";
+        if (state.HasActiveJob) return "Đang tạo video";
         if (string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) && !(_useReferenceImageForAllScenes && HasSharedReferenceImage))
             return "Thiếu ảnh đầu vào";
         if (string.IsNullOrWhiteSpace(draft.MotionPrompt)) return "Thiếu motion prompt";
-        if (_defaultImageToVideoProvider is null) return "Thiếu cấu hình provider";
+        if (_defaultImageToVideoProvider is null) return "Chưa thể thử lại";
         if (!HasProjectAspectRatio) return "Cần chọn tỉ lệ video";
         if (!HasProjectResolution) return "Cần chọn độ phân giải video";
         return !IsSceneVideoPromptValid(scene, draft) ? ResolveVideoPromptState(scene, draft).Text : string.Empty;
@@ -5928,7 +5783,7 @@ else
 
             Logger.LogWarning(ex, "RVVIDEO_UPLOAD_MUSIC_FAILED");
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
         }
 
@@ -6028,7 +5883,7 @@ else
 
             Logger.LogWarning(ex, "RVVIDEO_UPLOAD_CHARACTER_FAILED");
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
         }
 
@@ -6449,7 +6304,7 @@ else
 
             {
 
-                Snackbar.Add(pre.ErrorMessage ?? "Scene draft validation failed.", Severity.Error);
+                Snackbar.Add("Scene draft validation failed.", Severity.Error);
 
                 return false;
 
@@ -6499,7 +6354,7 @@ else
 
             {
 
-                Snackbar.Add(result.ErrorMessage ?? "Không thể lưu scene.", Severity.Error);
+                Snackbar.Add("Không thể lưu scene.", Severity.Error);
 
                 return false;
 
@@ -6621,7 +6476,7 @@ else
 
             Logger.LogError(ex, "VIDEO_RENDER_SAVE_JOB_FAILED projectId={ProjectId}", _projectId);
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
             await AddDebugAsync("job_save_failed", "Lưu job thất bại", "FAILED", ex.Message, ex.ToString());
 
@@ -6655,7 +6510,7 @@ else
 
             Logger.LogError(ex, "RVIDEO_DRAFT_SAVE_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
 
-            Snackbar.Add($"Không thể lưu draft RVIDEO: {ex.Message}", Severity.Error);
+            Snackbar.Add("Không thể lưu thay đổi. Vui lòng thử lại sau.", Severity.Error);
 
             await AddDebugAsync("rvideo_draft_save_failed", "Lưu draft thất bại", "FAILED", ex.Message, ex.ToString());
 
@@ -7530,7 +7385,7 @@ else
 
             Logger.LogError(ex, "VIDEO_RENDER_SCENE_IMAGE_BATCH_ENQUEUE_FAILED projectId={ProjectId}", _project.Id);
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
             await InvokeAsync(StateHasChanged);
 
@@ -7862,7 +7717,7 @@ else
 
                 new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = ex.Message });
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
         }
 
@@ -8022,15 +7877,15 @@ else
 
             Key = version.Id.ToString("N"), VersionLabel = $"v{version.VersionNumber}", Title = $"Ảnh scene {scene.SceneIndex}",
 
-            Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
+            Status = RVideoUserText.Status(version.Status), StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
 
             IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), MediaUrl = version.PublicUrl,
 
-            Metadata = $"{version.ProviderCode ?? "provider"} / {version.ModelName ?? "model"}",
+            Metadata = version.ModelName ?? "",
 
             Prompt = version.CompiledImagePromptSnapshot ?? version.ImagePromptSnapshot,
 
-            Error = LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, version.ErrorMessage) ? null : version.ErrorMessage
+            Error = LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, version.ErrorMessage) ? null : RVideoUserText.Error(version.ErrorMessage)
 
         }).ToList();
 
@@ -8102,15 +7957,15 @@ else
 
             Key = version.Id.ToString("N"), VersionLabel = $"v{version.VersionNumber}", Title = $"Video scene {scene.SceneIndex}",
 
-            Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
+            Status = RVideoUserText.Status(version.Status), StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
 
             IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), IsVideo = true,
 
-            MediaUrl = version.PublicUrl, Metadata = $"{version.ProviderCode ?? "provider"} / {version.ModelName ?? "model"} · {version.DurationSeconds?.ToString("0.##") ?? "?"} giây",
+            MediaUrl = version.PublicUrl, Metadata = $"{version.ModelName ?? ""} · {version.DurationSeconds?.ToString("0.##") ?? "?"} giây",
 
             Prompt = version.VideoPromptSnapshot,
 
-            Error = LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, version.ErrorMessage) ? null : version.ErrorMessage
+            Error = LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, version.ErrorMessage) ? null : RVideoUserText.Error(version.ErrorMessage)
 
         }).ToList();
 
@@ -8416,11 +8271,11 @@ else
 
             Key = version.Id.ToString("N"), VersionLabel = $"v{version.VersionNumber}", Title = "Video hoàn chỉnh",
 
-            Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
+            Status = RVideoUserText.Status(version.Status), StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
 
             IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), IsVideo = true,
 
-            MediaUrl = version.PublicUrl, Metadata = $"{version.DurationSeconds?.ToString("0.##") ?? "?"} giây", Error = version.ErrorMessage
+            MediaUrl = version.PublicUrl, Metadata = $"{version.DurationSeconds?.ToString("0.##") ?? "?"} giây", Error = RVideoUserText.Error(version.ErrorMessage)
 
         }).ToList();
 
@@ -8532,7 +8387,7 @@ else
 
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
 
-                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @version.Status</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @RVideoUserText.Status(version.Status)</MudChip>
 
                                 @if (version.IsSelected)
 
@@ -8554,13 +8409,13 @@ else
 
                             }
 
-                            <MudText Typo="Typo.caption">Provider: @version.ProviderCode | Model: @version.ModelName | Task: @version.ProviderTaskId</MudText>
+                            <MudText Typo="Typo.caption">Model: @version.ModelName</MudText>
 
                             <MudText Typo="Typo.caption">USD dự kiến: @FormatMoney(version.EstimatedUsd) | USD thực tế: @FormatMoney(version.ActualUsd)</MudText>
 
                             <MudText Typo="Typo.caption">Prompt gốc: @ShortText(version.ImagePromptSnapshot)</MudText>
 
-                            <MudText Typo="Typo.caption">Prompt gửi provider: @ShortText(version.CompiledImagePromptSnapshot)</MudText>
+                            <MudText Typo="Typo.caption">Prompt đã sử dụng: @ShortText(version.CompiledImagePromptSnapshot)</MudText>
 
                             <MudText Typo="Typo.caption">Prompt video: @ShortText(version.VideoPromptSnapshot)</MudText>
 
@@ -8568,7 +8423,7 @@ else
 
                             {
 
-                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Error">@RVideoUserText.Error(version.ErrorMessage)</MudText>
 
                             }
 
@@ -8632,7 +8487,7 @@ else
 
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
 
-                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @version.Status</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @RVideoUserText.Status(version.Status)</MudChip>
 
                                 @if (version.IsSelected)
 
@@ -8656,7 +8511,7 @@ else
 
                             <MudText Typo="Typo.caption">Source image version: @version.SourceImageVersionId</MudText>
 
-                            <MudText Typo="Typo.caption">Provider: @version.ProviderCode | Model: @version.ModelName | Task: @version.ProviderTaskId</MudText>
+                            <MudText Typo="Typo.caption">Model: @version.ModelName</MudText>
 
                             <MudText Typo="Typo.caption">Thời lượng: @version.DurationSeconds giây</MudText>
 
@@ -8668,7 +8523,7 @@ else
 
                             {
 
-                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Error">@RVideoUserText.Error(version.ErrorMessage)</MudText>
 
                             }
 
@@ -8724,7 +8579,7 @@ else
 
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
 
-                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @version.Status</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @RVideoUserText.Status(version.Status)</MudChip>
 
                                 @if (version.IsSelected)
 
@@ -8760,7 +8615,7 @@ else
 
                             {
 
-                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Error">@RVideoUserText.Error(version.ErrorMessage)</MudText>
 
                             }
 
@@ -9448,7 +9303,7 @@ else
 
         var res = await SceneCollection.MoveSceneAsync(_project.Id, scene.Id, -1, AuthState.CurrentUser);
 
-        if (!res.Success) { Snackbar.Add(res.ErrorMessage ?? "Không thể di chuyển scene.", Severity.Error); return; }
+        if (!res.Success) { Snackbar.Add("Không thể di chuyển scene.", Severity.Error); return; }
 
         await ReloadAsync();
 
@@ -9462,7 +9317,7 @@ else
 
         var res = await SceneCollection.MoveSceneAsync(_project.Id, scene.Id, 1, AuthState.CurrentUser);
 
-        if (!res.Success) { Snackbar.Add(res.ErrorMessage ?? "Không thể di chuyển scene.", Severity.Error); return; }
+        if (!res.Success) { Snackbar.Add("Không thể di chuyển scene.", Severity.Error); return; }
 
         await ReloadAsync();
 
@@ -9476,7 +9331,7 @@ else
 
         var res = await SceneCollection.DeleteSceneAsync(_project.Id, scene.Id, AuthState.CurrentUser);
 
-        if (!res.Success) { Snackbar.Add(res.ErrorMessage ?? "Không thể xóa scene.", Severity.Error); return; }
+        if (!res.Success) { Snackbar.Add("Không thể xóa scene.", Severity.Error); return; }
 
         await ReloadAsync();
 
@@ -9502,7 +9357,7 @@ else
 
         var res = await SceneCollection.AddSceneAsync(_project.Id, req, AuthState.CurrentUser);
 
-        if (!res.Success) { Snackbar.Add(res.ErrorMessage ?? "Không thể thêm scene.", Severity.Error); return; }
+        if (!res.Success) { Snackbar.Add("Không thể thêm scene.", Severity.Error); return; }
 
         Snackbar.Add("Đã thêm scene thủ công.", Severity.Success);
 
@@ -9606,7 +9461,7 @@ else
 
             new { projectId = _project.Id, sceneIds, error = ex.Message });
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
             return;
 
@@ -10060,7 +9915,7 @@ else
 
                 new { job.Id, sceneId = scene.Id, scene.SceneIndex, provider = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode, model = jobModelCode, selectedOverride.Option?.Mode, selectedOverride.DurationSeconds, billingIntent = billingIntent.ToString() });
 
-            Snackbar.Add(eventMessage, Severity.Success);
+            Snackbar.Add("Đang tạo video", Severity.Success);
 
             await StartPolling();
 
@@ -10072,7 +9927,7 @@ else
 
             Logger.LogError(ex, "VIDEO_RENDER_SCENE_VIDEO_ENQUEUE_FAILED projectId={ProjectId} sceneId={SceneId}", _project.Id, scene.Id);
 
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Chưa thể thử lại", Severity.Error);
 
             await LogProjectEvent("SCENE_VIDEO_ENQUEUE_FAILED", "error", $"Enqueue render video scene {scene.SceneIndex} lỗi.",
 
@@ -10258,11 +10113,11 @@ else
 
         VideoSceneStatuses.ImageReady => "Đã sẵn ảnh",
 
-        VideoSceneStatuses.VideoQueued => "Đang chờ",
+        VideoSceneStatuses.VideoQueued => "Đang tạo video",
 
         VideoSceneStatuses.VideoRendering => "Đang tạo video",
 
-        "pending_reconciliation" => "Đang đồng bộ lại",
+        "pending_reconciliation" => "Chưa thể thử lại",
 
         VideoSceneStatuses.VideoReady => "Hoàn tất",
 
