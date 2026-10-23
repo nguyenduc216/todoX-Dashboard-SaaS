@@ -628,7 +628,15 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
             if (version.RenderJobId != job.Id || version.ProjectId != input.ProjectId || version.SceneId != input.SceneId
                 || version.LogicalRequestId != attemptLogicalRequestId)
+            {
+                _logger.LogError(
+                    "RVIDEO_VIDEO_VERSION_IDENTITY_MISMATCH versionId={VersionId} attemptIndex={AttemptIndex} jobMismatch={JobMismatch} projectMismatch={ProjectMismatch} sceneMismatch={SceneMismatch} logicalRequestMismatch={LogicalRequestMismatch} expectedJobId={ExpectedJobId} actualJobId={ActualJobId} expectedProjectId={ExpectedProjectId} actualProjectId={ActualProjectId} expectedSceneId={ExpectedSceneId} actualSceneId={ActualSceneId} expectedLogicalRequestId={ExpectedLogicalRequestId} actualLogicalRequestId={ActualLogicalRequestId} inputLogicalRequestId={InputLogicalRequestId}",
+                    version.Id, attemptIndex, version.RenderJobId != job.Id, version.ProjectId != input.ProjectId,
+                    version.SceneId != input.SceneId, version.LogicalRequestId != attemptLogicalRequestId,
+                    job.Id, version.RenderJobId, input.ProjectId, version.ProjectId, input.SceneId, version.SceneId,
+                    attemptLogicalRequestId, version.LogicalRequestId, input.LogicalRequestId);
                 throw new RenderJobPendingReconciliationException("Selected version does not belong to this job/scene/logical request; submit is prohibited.");
+            }
 
             if (!string.IsNullOrWhiteSpace(version.ProviderTaskId))
             {

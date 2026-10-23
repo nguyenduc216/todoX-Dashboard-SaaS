@@ -1139,6 +1139,11 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                     """,
                     new { existing.Id, request.RenderJobId, tenant = _tenant.TenantId }, tx);
             }
+            // Return the persisted owner after COALESCE, including an owner attached here.
+            // Never replace another job's owner in memory; the worker identity guard must reject it.
+            existing = await conn.QuerySingleAsync<SceneVideoVersionDto>(
+                SelectSceneVideoVersionSql + " WHERE id=@id AND tenant_id=@tenant;",
+                new { existing.Id, tenant = _tenant.TenantId }, tx);
             tx.Commit();
             return existing;
         }
@@ -1210,6 +1215,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             SourceImageVersionId = request.SourceImageVersionId,
             VersionNumber = versionNumber,
             LogicalRequestId = request.LogicalRequestId,
+            RenderJobId = request.RenderJobId,
             Status = "queued",
             StorageKey = storageKey,
             ProviderCode = request.ProviderCode,
