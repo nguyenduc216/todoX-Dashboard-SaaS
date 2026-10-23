@@ -10,12 +10,14 @@ DO $project188$
 DECLARE
     v_approved boolean := false;
     v_schema_reviewed boolean := false;
-    v_expected_database text := NULL;
-    v_expected_schema_signature text := NULL;
+    v_expected_database text := 'todo_saas'; -- operator-supplied; not independently queried here
+    v_expected_schema_signature text := 'b9284fc184186344f46a7e58e7c558dd'; -- operator-supplied PG 17.10 / role postgres
     v_operator text := NULL;
     v_approval_reference text := NULL;
     v_batch_id uuid := NULL; -- operator-generated unique ID; reuse for read-only postcheck
-    -- Paste ONLY the exact supplemental manifest, after independent per-operation evidence review.
+    -- Reuse the original supplemental_manifest already collected by the operator; do NOT rerun preflight to copy it.
+    -- Raw seven-row timestamps/hashes are not visible in Codex's accessible context: never reconstruct them.
+    -- Preserve its false/UNREVIEWED approval/evidence fields until each real approval/fence is established.
     -- All seven entries must have approved=true, workerFenced=true,
     -- httpOutcome=CONFIRMED_PRE_HTTP_NO_SUBMIT, noSubmitEvidenceReference,
     -- projectEventsReviewed=true, projectEventsReference, and applicationLogsReference.
