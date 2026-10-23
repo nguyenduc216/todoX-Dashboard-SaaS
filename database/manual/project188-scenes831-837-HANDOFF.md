@@ -1,5 +1,7 @@
 # Project 188 — evidence and fencing handoff
 
+Update 2026-10-23: production deployment hash `89B273F04615917348EC399B1F8DE6EE2B6CFE301755FF91F9A55143E77F48A7` and working UI are confirmed by the operator. Historical job outcome/fencing approvals remain unverified. Use [VERIFICATION](project188-scenes831-837-VERIFICATION.md) for the latest local scan results, missing-evidence-only commands and conditional IIS maintenance fence plan; no reconciliation run is currently directed.
+
 ## Recorded facts and present limits
 
 - Database: `todo_saas`; PostgreSQL: `17.10`; role: `postgres` — operator-supplied, not queried by Codex.

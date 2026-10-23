@@ -1,5 +1,7 @@
 # Project 188 — exact seven-scene pre-HTTP reconciliation
 
+**Current verification decision: HOLD.** Operator confirms the deployed DLL hash matches the application release and the new UI works. This does not settle the old pending jobs. See [the current verification findings and read-only server collection commands](project188-scenes831-837-VERIFICATION.md). No execution of reconciliation is directed while per-job evidence, schema sign-off and fleet fencing remain unapproved.
+
 Bộ SQL đã khóa đúng 7 cặp UUID do operator cung cấp. Script **chưa được chạy** và **mặc định không cho thực thi repair** khi chưa có supplemental snapshot, schema review, fencing và phê duyệt no-submit cho từng operation. Operator đã báo thu thập đủ supplemental_manifest; dùng nguyên bản đã lưu, không chạy lại preflight để thu thập dữ liệu đã có.
 
 ## Fixed scope from supplied evidence
