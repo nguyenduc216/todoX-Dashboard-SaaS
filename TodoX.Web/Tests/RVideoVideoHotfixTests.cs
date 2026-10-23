@@ -19,6 +19,28 @@ namespace TodoX.Web.Tests;
 public sealed class RVideoVideoHotfixTests
 {
     [Fact]
+    public async Task ReadinessVideoAdapterSubmitsOnceThenPollsSameConfirmedIdentityToSuccess()
+    {
+        var client = new CapturingAi79TaskClient
+        {
+            SubmitResult = new Ai79TaskSubmitResult("base-1", "{}", "task-1", "base-1", HttpStatusCode.OK),
+            StatusResult = new Ai79TaskStatusResult(Ai79TaskStatusNormalizer.Success, "{}", "https://example.test/result.mp4", null, null)
+        };
+        var adapter = new Ai79VideoGenerationProviderAdapter(new RuntimeBoundVideoService(Create79AiVideoService(client)));
+        var submit = await adapter.SubmitAsync(new(18, 99, "79ai", RVideoVideoModelPolicy.CapabilityCode,
+            RVideoVideoModelPolicy.GetInitial().Model, RVideoVideoModelPolicy.GetInitial().Mode,
+            "Animate the scene.", "9:16", "720P", 8, null, []));
+        Assert.Equal("task-1", submit.ProviderTaskId);
+        Assert.Equal("base-1", submit.ProviderVideoIdBase);
+        var poll = await adapter.PollAsync(new(18, 99, "79ai", RVideoVideoModelPolicy.CapabilityCode, submit.ProviderTaskId));
+        Assert.Equal(VideoProviderTaskStatus.Success, poll.Status);
+        Assert.Equal("task-1", poll.ProviderTaskId);
+        Assert.Equal("https://example.test/result.mp4", poll.OutputUrl);
+        Assert.Equal(1, client.SubmitCalls);
+        Assert.Equal("task-1", client.LastPollTaskId);
+    }
+
+    [Fact]
     public void RVideoVideoPolicyIs79AiOnly()
     {
         Assert.All(RVideoVideoModelPolicy.Models, model =>
@@ -2889,14 +2911,30 @@ public sealed class RVideoVideoHotfixTests
             });
     }
 
+    private sealed class RuntimeBoundVideoService(IRVideo79AiVideoService service) : IRVideo79AiVideoService
+    {
+        public Task<RVideo79AiRuntime> ResolveRuntimeAsync(long providerId, long providerCapabilityId, string providerCode, CancellationToken ct = default)
+            => Task.FromResult(Create79AiRuntime());
+        public Task<RVideo79AiProviderImageAsset> UploadSourceImageAsync(RVideo79AiRuntime runtime, RVideo79AiVideoSourceImage source, CancellationToken ct = default)
+            => throw new NotSupportedException();
+        public Task<RVideo79AiVideoSubmitResult> SubmitAsync(RVideo79AiVideoSubmitRequest request, CancellationToken ct = default)
+            => service.SubmitAsync(request, ct);
+        public Task<Ai79TaskStatusResult> PollAsync(RVideo79AiRuntime runtime, string taskId, CancellationToken ct = default)
+            => service.PollAsync(runtime, taskId, ct);
+    }
+
     private sealed class CapturingAi79TaskClient : IAi79TaskClient
     {
         public Ai79TaskSubmitRequest? LastSubmit { get; private set; }
         public Ai79TaskSubmitResult? SubmitResult { get; set; }
+        public int SubmitCalls { get; private set; }
+        public string? LastPollTaskId { get; private set; }
+        public Ai79TaskStatusResult? StatusResult { get; set; }
 
         public Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
         {
             LastSubmit = request;
+            SubmitCalls++;
             return Task.FromResult(SubmitResult ?? new Ai79TaskSubmitResult("task-123", """{"id":"task-123"}"""));
         }
 
@@ -2919,7 +2957,10 @@ public sealed class RVideoVideoHotfixTests
             => throw new NotSupportedException();
 
         public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
-            => throw new NotSupportedException();
+        {
+            LastPollTaskId = request.TaskId;
+            return Task.FromResult(StatusResult ?? throw new NotSupportedException());
+        }
     }
 
     private sealed class CapturingRVideo79AiVideoService : IRVideo79AiVideoService
