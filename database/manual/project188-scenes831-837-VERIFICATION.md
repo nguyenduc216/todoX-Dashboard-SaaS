@@ -91,15 +91,15 @@ Decision: HOLD. Accept the newly reported job/project-event findings as operator
 
 | Scene | Exact job ID | Guard event evidence | Exact guard-event ID |
 |---|---|---|---|
-| 831 | 30663c04-ea85-4738-87ed-a93d2414f694 | Operator reports exact=true | Not visible in accessible export/context |
-| 832 | e130accb-4423-445c-893e-46bce98b63e9 | Operator reports exact=true | Not visible in accessible export/context |
-| 833 | 0404a954-793a-4a2d-8cd1-706de24c9ca5 | Operator reports exact=true | Not visible in accessible export/context |
-| 834 | 47d877ea-1ab9-4f28-bec8-9fc5810d45c5 | Operator reports exact=true | Not visible in accessible export/context |
-| 835 | 1f53cedf-0347-4fff-9e42-1347ba8cec60 | Operator reports exact=true | Not visible in accessible export/context |
-| 836 | fca7c1b7-5829-495f-90e2-e47f5e074651 | Operator reports exact=true | Not visible in accessible export/context |
-| 837 | 236d182e-2c02-4238-8f87-8b9892e7bdf3 | Operator reports exact=true | Not visible in accessible export/context |
+| 831 | 30663c04-ea85-4738-87ed-a93d2414f694 | Operator reports exact=true | ec66be09-ee50-41aa-a7e3-be1311d7c1f6 |
+| 832 | e130accb-4423-445c-893e-46bce98b63e9 | Operator reports exact=true | d12f3df4-eebc-4a26-a625-0a5f5cfc78c4 |
+| 833 | 0404a954-793a-4a2d-8cd1-706de24c9ca5 | Operator reports exact=true | b2b379a3-5070-4509-b1ea-7c7f3b1b4a26 |
+| 834 | 47d877ea-1ab9-4f28-bec8-9fc5810d45c5 | Operator reports exact=true | 79d4b2f7-c01b-4300-a9ad-f509aeee4bf8 |
+| 835 | 1f53cedf-0347-4fff-9e42-1347ba8cec60 | Operator reports exact=true | 6f908024-cf11-44a1-86f5-636aef14ea9b |
+| 836 | fca7c1b7-5829-495f-90e2-e47f5e074651 | Operator reports exact=true | 376ac063-c9fd-42bc-afd3-bcf572d4537b |
+| 837 | 236d182e-2c02-4238-8f87-8b9892e7bdf3 | Operator reports exact=true | 9f7c7e5d-badd-4af6-9181-1c4c5964016d |
 
-For every row, operator reports FALLBACK_CANDIDATES_RESOLVED then MANUAL_REVIEW_REQUIRED, no exported progression/provider identity, no intent/task, expired lease. Bind the exact event IDs from the ALREADY-SAVED export to each approval; do not invent IDs or repeat collection. SQL audit captures matching IDs at execution. Original supplemental timestamps/hashes must likewise be copied verbatim from the saved manifest, not reconstructed here.
+For every row, operator reports FALLBACK_CANDIDATES_RESOLVED then MANUAL_REVIEW_REQUIRED, no exported progression/provider identity, no intent/task, expired lease. The seven exact event IDs above are supplied by the operator from the existing DBeaver export and mapped to the established scene/job pairs. Each is JOB_PENDING_RECONCILIATION with exact_identity_guard_evidence=true, progression_requires_review=false and provider_identity_present=false. No SQL recollection is required; these event facts do not approve the HTTP outcome across all attempts/hosts. SQL audit captures matching IDs at execution. Original supplemental timestamps/hashes must likewise be copied verbatim from the saved manifest, not reconstructed here.
 
 Historical source checked at `0550ebc5^`: HandleCoreAsync dispatches to HandleProviderVideoAsync; the ownership throw is before ClaimSubmitAsync, BeginSubmitAsync and adapter.SubmitAsync for that iteration. The other direct _tasks.SubmitAsync text is inside #if false (LegacyProviderPathDisabledAsync), not an executable alternate route. The ownership exception exits the candidate loop and is excluded from HandleAsync generic retry handling; SceneVideoJobWorker records pending reconciliation. This proves the throwing execution did not reach its later submit, not that every earlier claim/candidate/host did the same. Verify saved attempt counts, earliest claim through fence, full logical-request variants and other job-owned versions/intents against the existing exports. Current SQL rejects additional owned versions, any target intent and conflicting progression. No evidence of a new executable bypass was found in reviewed source; the exact historical deployed binary and all executions still require operator sign-off. The conclusion concerns video-submit HTTP; it is not a blanket claim about every service/network dependency.
 
@@ -109,7 +109,7 @@ Schema details/constraints/triggers/grants are not present in accessible local e
 
 Minimal operator sequence:
 
-1. From saved exports, bind seven exact guard-event IDs and approve each full execution/no-submit history only after resolving gaps, other attempts or ambiguous HTTP outcomes. Review the existing schema details and original manifest; no full preflight rerun.
+1. Use the seven recorded guard-event IDs and approve each full execution/no-submit history only after resolving gaps, other attempts or ambiguous HTTP outcomes. Review the existing schema details and original manifest; no full preflight rerun.
 2. Authorize maintenance scope, inventory apps sharing todoX.SaaS and all replicas/separate workers/watchdogs, block new enqueues and safely drain. Operator alone may stop the verified pool via IIS Manager and control other writers. Expired leases or a recycle do not fence workers. Account for outstanding HTTP before approval.
 3. Read-only server checks (run elevated if necessary):
 
