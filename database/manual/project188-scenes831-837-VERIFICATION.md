@@ -1,5 +1,7 @@
 # Project 188 — verification before reconciliation (2026-10-23)
 
+Latest recovery/maintenance handoff: [rvideo-final-recovery-operator.md](rvideo-final-recovery-operator.md). It records the subsequent operator-confirmed schema/identity review and baseline-test triage; the sections below preserve earlier evidence limitations. HTTP approvals and fencing are still not established.
+
 ## Current decision: HOLD — no reconciliation execution instruction yet
 
 Operator confirms production is deployed with TodoX.Web.dll SHA-256 `89B273F04615917348EC399B1F8DE6EE2B6CFE301755FF91F9A55143E77F48A7` and the updated RVideo UI works. This resolves the previously missing deployment-hash evidence **by operator confirmation**, not a new independent server read by Codex. The locked seven historical operations are not proof that the new DTO fix failed: the existing pending/manual-review states intentionally continue to hold Retry/Render again until their outcomes are safely settled.

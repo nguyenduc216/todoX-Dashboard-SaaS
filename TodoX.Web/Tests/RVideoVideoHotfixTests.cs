@@ -87,9 +87,11 @@ public sealed class RVideoVideoHotfixTests
             new SceneVideoVersionDto { LogicalRequestId = "scene-base-fallback-1", Status = "failed" }
         };
 
-        Assert.Equal(0, method!.Invoke(null, new object[] { "scene-base", active }));
-        Assert.Equal(1, method.Invoke(null, new object[] { "scene-base", failed }));
-        Assert.Equal(2, method.Invoke(null, new object[] { "scene-base", fallback }));
+        var candidateType = typeof(SceneVideoWorkerHandler).GetNestedType("ResolvedFallbackCandidate", BindingFlags.NonPublic)!;
+        var candidates = Array.CreateInstance(candidateType, 0);
+        Assert.Equal(0, method!.Invoke(null, new object[] { "scene-base", active, candidates }));
+        Assert.Equal(1, method.Invoke(null, new object[] { "scene-base", failed, candidates }));
+        Assert.Equal(2, method.Invoke(null, new object[] { "scene-base", fallback, candidates }));
     }
 
     [Fact]

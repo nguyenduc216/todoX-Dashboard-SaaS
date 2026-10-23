@@ -21,9 +21,10 @@ public sealed class RVideoProviderPollingRegressionTests
         var policy = Activator.CreateInstance(policyType, 0, "79ai", "veo3", "fast");
         var ctor = candidateType!.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)[0];
         var candidate = ctor.Invoke(new object?[] { policy, 5, "720P", false });
-        ((dynamic)candidates!).Add((dynamic)candidate);
+        ((System.Collections.IList)candidates!).Add(candidate);
 
-        var versions = Enumerable.Range(0, 12)
+        // Twelve claims poll ONE persisted owner; they must not fabricate twelve owner rows.
+        var versions = Enumerable.Range(0, 1)
             .Select(_ => new Services.VideoRender.SceneVideoVersionDto
             {
                 LogicalRequestId = "scene-base",
@@ -37,6 +38,22 @@ public sealed class RVideoProviderPollingRegressionTests
             Assert.Equal(0, method!.Invoke(null, new object[] { "scene-base", versions, candidates! }));
             Assert.All(versions, version => Assert.Equal("a9896cf26fd2ff29", version.ProviderTaskId));
         }
+    }
+
+    [Fact]
+    public void MultiplePersistedTaskOwnersStillRequireReconciliation()
+    {
+        var type = typeof(Services.VideoRender.SceneVideoWorkerHandler);
+        var method = type.GetMethod("ResolveNextAttemptIndex", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var candidateType = type.GetNestedType("ResolvedFallbackCandidate", BindingFlags.NonPublic)!;
+        var versions = new[]
+        {
+            new Services.VideoRender.SceneVideoVersionDto { LogicalRequestId = "scene-base", ProviderTaskId = "task-1" },
+            new Services.VideoRender.SceneVideoVersionDto { LogicalRequestId = "scene-base-fallback-1", ProviderTaskId = "task-2" }
+        };
+        var error = Assert.Throws<TargetInvocationException>(() => method.Invoke(null,
+            new object[] { "scene-base", versions, Array.CreateInstance(candidateType, 0) }));
+        Assert.IsType<Services.Render.RenderJobPendingReconciliationException>(error.InnerException);
     }
 
     [Fact]
