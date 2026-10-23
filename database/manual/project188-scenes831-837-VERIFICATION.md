@@ -84,3 +84,44 @@ A digest alone cannot reveal CHECK/enum values, grants, audit defaults, RLS visi
 Remain at HOLD until all seven individual event/HTTP outcome reviews and references, fleet-wide fence acknowledgements and existing-schema semantic sign-off are complete; the original saved supplemental manifest must be inserted verbatim without changing unapproved flags or fabricating timestamps/hashes. Only then may an authorized operator decide whether to approve the existing guarded repair and its read-only postcheck. This document does not direct running reconciliation now. Any one unresolved operation blocks the entire batch.
 
 Production deployment-hash confirmation does not settle the old operations. Seven scenes have NOT been declared unlocked.
+
+## Final readiness delta (operator evidence update)
+
+Decision: HOLD. Accept the newly reported job/project-event findings as operator evidence; do not recollect those exports. IIS application is `todoX.SaaS/`, pool `todoX.SaaS`, path `H:\WEBDEPLOYED\todoX\saas`. Claims in stdout without a submit marker are supporting evidence, not complete outbound coverage.
+
+| Scene | Exact job ID | Guard event evidence | Exact guard-event ID |
+|---|---|---|---|
+| 831 | 30663c04-ea85-4738-87ed-a93d2414f694 | Operator reports exact=true | Not visible in accessible export/context |
+| 832 | e130accb-4423-445c-893e-46bce98b63e9 | Operator reports exact=true | Not visible in accessible export/context |
+| 833 | 0404a954-793a-4a2d-8cd1-706de24c9ca5 | Operator reports exact=true | Not visible in accessible export/context |
+| 834 | 47d877ea-1ab9-4f28-bec8-9fc5810d45c5 | Operator reports exact=true | Not visible in accessible export/context |
+| 835 | 1f53cedf-0347-4fff-9e42-1347ba8cec60 | Operator reports exact=true | Not visible in accessible export/context |
+| 836 | fca7c1b7-5829-495f-90e2-e47f5e074651 | Operator reports exact=true | Not visible in accessible export/context |
+| 837 | 236d182e-2c02-4238-8f87-8b9892e7bdf3 | Operator reports exact=true | Not visible in accessible export/context |
+
+For every row, operator reports FALLBACK_CANDIDATES_RESOLVED then MANUAL_REVIEW_REQUIRED, no exported progression/provider identity, no intent/task, expired lease. Bind the exact event IDs from the ALREADY-SAVED export to each approval; do not invent IDs or repeat collection. SQL audit captures matching IDs at execution. Original supplemental timestamps/hashes must likewise be copied verbatim from the saved manifest, not reconstructed here.
+
+Historical source checked at `0550ebc5^`: HandleCoreAsync dispatches to HandleProviderVideoAsync; the ownership throw is before ClaimSubmitAsync, BeginSubmitAsync and adapter.SubmitAsync for that iteration. The other direct _tasks.SubmitAsync text is inside #if false (LegacyProviderPathDisabledAsync), not an executable alternate route. The ownership exception exits the candidate loop and is excluded from HandleAsync generic retry handling; SceneVideoJobWorker records pending reconciliation. This proves the throwing execution did not reach its later submit, not that every earlier claim/candidate/host did the same. Verify saved attempt counts, earliest claim through fence, full logical-request variants and other job-owned versions/intents against the existing exports. Current SQL rejects additional owned versions, any target intent and conflicting progression. No evidence of a new executable bypass was found in reviewed source; the exact historical deployed binary and all executions still require operator sign-off. The conclusion concerns video-submit HTTP; it is not a blanket claim about every service/network dependency.
+
+SQL review found an evidence predicate mismatch: the read-only exporter accepts the exact guard text in message OR data_json.errorMessage, whereas reconciliation previously accepted message only. Reconciliation and its audit ID selection now use the same exact-text predicate, tenant/job/event-type and job-created-time scope. No approval/fencing/status guard was removed. Newly reported project event types do not by themselves match the existing SUBMIT/PROVIDER/POLL progression rejection; no relaxation is justified.
+
+Schema details/constraints/triggers/grants are not present in accessible local evidence; the signature alone remains insufficient for semantic approval. Keep v_schema_reviewed=false pending review of the existing detailed export. Individual no-submit approvals and workerFenced remain unapproved.
+
+Minimal operator sequence:
+
+1. From saved exports, bind seven exact guard-event IDs and approve each full execution/no-submit history only after resolving gaps, other attempts or ambiguous HTTP outcomes. Review the existing schema details and original manifest; no full preflight rerun.
+2. Authorize maintenance scope, inventory apps sharing todoX.SaaS and all replicas/separate workers/watchdogs, block new enqueues and safely drain. Operator alone may stop the verified pool via IIS Manager and control other writers. Expired leases or a recycle do not fence workers. Account for outstanding HTTP before approval.
+3. Read-only server checks (run elevated if necessary):
+
+```powershell
+$appcmd = Join-Path $env:windir 'System32\inetsrv\appcmd.exe'
+& $appcmd list app /apppool.name:todoX.SaaS /xml
+& $appcmd list apppool 'todoX.SaaS' /text:state
+& $appcmd list wp /apppool.name:todoX.SaaS /xml
+```
+
+Require Stopped, no pool worker generations or associated out-of-process/separate worker processes on every host, and verified prevention of recovery/restart/takeover. Maintain this fence through postcheck. These commands alone do not prove other hosts/services are fenced.
+
+4. Only after all approvals, exact saved snapshots and schema review are complete, operator may execute the entire guarded reconciliation in one transaction, then the read-only postcheck with its audit batch ID. Any error means ROLLBACK, investigate actual drift, no forced update. Require seven matching job/project audit receipts, failed target jobs/versions, preserved billing/images/selection/parents, no target intents and zero old blockers. Any new competing operation keeps HOLD. Restore service only under the maintenance owner's procedure after verification; do not auto-render.
+
+No production action, new build/publish or application-source change accompanies this review. Seven scenes are not declared unlocked.

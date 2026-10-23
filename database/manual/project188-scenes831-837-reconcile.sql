@@ -226,7 +226,7 @@ SELECT md5(details::text),details INTO v_actual_schema,v_schema_details FROM fac
         END IF;
         IF NOT EXISTS (SELECT 1 FROM render.render_job_events e WHERE e.tenant_id=c_tenant AND e.job_id=op_job.id
              AND e.event_type='JOB_PENDING_RECONCILIATION'
-             AND e.message=c_message AND e.created_at>=op_job.created_at) THEN
+             AND (e.message=c_message OR e.data_json->>'errorMessage'=c_message) AND e.created_at>=op_job.created_at) THEN
             RAISE EXCEPTION 'STOP scene %: exact pre-HTTP identity-guard event is missing',op_target.scene_id;
         END IF;
         IF EXISTS (SELECT 1 FROM render.render_jobs other WHERE other.tenant_id=c_tenant AND other.job_type='render_scene_video'
@@ -267,7 +267,7 @@ SELECT md5(details::text),details INTO v_actual_schema,v_schema_details FROM fac
           FROM video_render.scene_video_versions o WHERE o.tenant_id=c_tenant AND o.scene_id=op_target.scene_id AND o.id<>op_version.id;
         v_before:=v_before||jsonb_build_array(jsonb_build_object('approval',op_target.approval,'sceneId',op_target.scene_id,'jobId',op_job.id,'versionId',op_version.id,
           'logicalRequestId',op_version.logical_request_id,
-          'guardEventIds',(SELECT jsonb_agg(e.id ORDER BY e.created_at,e.id) FROM render.render_job_events e WHERE e.tenant_id=c_tenant AND e.job_id=op_job.id AND e.event_type='JOB_PENDING_RECONCILIATION' AND e.message=c_message),'sceneHash',scene_hash,'imagesHash',images_hash,'billingHash',billing_hash,
+          'guardEventIds',(SELECT jsonb_agg(e.id ORDER BY e.created_at,e.id) FROM render.render_job_events e WHERE e.tenant_id=c_tenant AND e.job_id=op_job.id AND e.event_type='JOB_PENDING_RECONCILIATION' AND (e.message=c_message OR e.data_json->>'errorMessage'=c_message) AND e.created_at>=op_job.created_at),'sceneHash',scene_hash,'imagesHash',images_hash,'billingHash',billing_hash,
           'otherVersionsHash',other_versions_hash,
           'jobProtectedHash',md5((to_jsonb(op_job)-ARRAY['status','error_code','error_message','completed_at','updated_at','retry_after','lock_owner','worker_key','lock_until'])::text),
           'versionProtectedHash',md5((to_jsonb(op_version)-ARRAY['status','error_code','error_message','completed_at','updated_at'])::text),
