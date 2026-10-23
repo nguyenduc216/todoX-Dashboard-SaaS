@@ -57,7 +57,7 @@ ORDER BY e.created_at DESC LIMIT 100;
 SELECT b.logical_request_id, b.status, b.provider_task_id, b.render_job_id
 FROM billing.ai_image_billing_records b
 WHERE b.tenant_id=(SELECT tenant_id FROM render.render_jobs WHERE id='f991604f-c72e-4b4e-8c4d-71d232e854f9'::uuid)
-  AND replace(b.render_job_id,'-','')='f991604fc72e4b4e8c4d71d232e854f9';
+  AND replace(b.render_job_id::text,'-','')='f991604fc72e4b4e8c4d71d232e854f9';
 
 SELECT conname, pg_get_constraintdef(oid) AS definition
 FROM pg_constraint WHERE conrelid='render.scene_video_submit_intents'::regclass AND contype='c';

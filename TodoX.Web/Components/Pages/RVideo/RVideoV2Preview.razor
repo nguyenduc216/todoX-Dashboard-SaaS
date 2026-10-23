@@ -43,7 +43,7 @@ else if(!_optsReady)
         <span><div class="rv2-select-skeleton"></div></span>
         <span><div class="rv2-select-skeleton rv2-select-narrow"></div></span>
         <span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@VideoStatus(s)</MudChip></span>
-        <span><MudIcon Icon="@Icons.Material.Filled.MoreHoriz" Size="Size.Small" /></span>
+        <span><MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="true">Render lại video</MudButton></span>
       </div>
     }
   </div>
@@ -61,6 +61,7 @@ else if(!_optsReady)
         <div class="rv2-mobile-content" style="padding:8px 10px">
           <div class="rv2-text-skeleton" style="height:48px;width:100%"></div>
         </div>
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="true">Render lại video</MudButton>
       </div>
     }
   </div>
@@ -108,10 +109,10 @@ else{<span>Chưa có</span>}
 <span @onclick:stopPropagation="true"><MudSelect T="string" Value="@ResolveModelKey(s)" ValueChanged="@(v=>HandleModelChangedAsync(s,v))" Dense="true" Style="min-width:140px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect></span><span @onclick:stopPropagation="true"><MudSelect T="int" Value="@s.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(s,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect></span>
 <span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@VideoStatus(s)</MudChip></span>
 <span @onclick:stopPropagation="true">
+<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleRerenderVideoAsync(s))" Disabled="@VideoBlocked(s)">Render lại video</MudButton>
 <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
-<MudMenuItem OnClick="@(()=>HandleRerenderVideoAsync(s))" Disabled="@VideoBlocked(s)">Render lại video</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleRerenderImageAsync(s))" Disabled="@_busy">Tạo lại ảnh</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,-1))" Disabled="@(s.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,1))" Disabled="@(s.SceneIndex>=JobView.Project.Scenes.Count || _busy)">Xuống</MudMenuItem>
