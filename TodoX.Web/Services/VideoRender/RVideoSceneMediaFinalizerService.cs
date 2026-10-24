@@ -65,6 +65,7 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
 
         var selectedVideo = await _versions.GetSelectedVideoVersionAsync(sceneId, ct);
         var selectedAudio = await _versions.GetSelectedAudioVersionAsync(sceneId, ct);
+        if (selectedVideo is not null && !await _repo.IsVideoOwnerCurrentAsync(sceneId, selectedVideo.RenderJobId, ct)) return false;
         if (selectedVideo is null || selectedAudio is null)
         {
             return false;

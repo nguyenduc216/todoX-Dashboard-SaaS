@@ -160,6 +160,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
+        using var operationScope = SceneVideoOperationScope.Enter(job.Id);
         var input = JsonSerializer.Deserialize<SceneVideoRenderInput>(job.InputJson, JsonOptions)
             ?? throw new InvalidOperationException("Scene video batch job input invalid.");
         if (input.ProjectId <= 0)
@@ -366,7 +367,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var sourceImageVersionId = effectiveSource.SelectedImageVersionId;
         if (string.IsNullOrWhiteSpace(sourceImageUrl) && string.IsNullOrWhiteSpace(sourceImageObjectKey))
         {
-            await MarkSceneValidationFailedAsync(project.Id, scene, new VideoPromptValidationResult(
+            await MarkSceneValidationFailedAsync(parentJob.Id, project.Id, scene, new VideoPromptValidationResult(
                 false,
                 route.ModelName ?? string.Empty,
                 scene.VideoPrompt?.Trim() ?? string.Empty,
@@ -407,7 +408,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var validation = _promptValidator.Validate(finalPrompt, requestedModel, route.CapabilityConfigJson, scene.SceneIndex);
         if (!validation.IsValid)
         {
-            await MarkSceneValidationFailedAsync(project.Id, scene, validation, ct);
+            await MarkSceneValidationFailedAsync(parentJob.Id, project.Id, scene, validation, ct);
             return false;
         }
 
@@ -446,8 +447,8 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             ServiceSellPriceQualityTiers.Standard,
             false), ct);
 
-        await _repo.UpdateSceneAsync(
-            scene.Id,
+        await _repo.UpdateVideoOperationSceneAsync(
+            parentJob.Id, scene.Id,
             VideoSceneStatuses.VideoQueued,
             errorMessage: null,
             title: scene.Title,
@@ -737,13 +738,13 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     }
 
     private async Task MarkSceneValidationFailedAsync(
-        long projectId,
+        Guid ownerJobId, long projectId,
         VideoProjectSceneDto scene,
         VideoPromptValidationResult validation,
         CancellationToken ct)
     {
-        await _repo.UpdateSceneAsync(
-            scene.Id,
+        await _repo.UpdateVideoOperationSceneAsync(
+            ownerJobId, scene.Id,
             VideoSceneStatuses.Failed,
             errorMessage: validation.Message,
             title: scene.Title,

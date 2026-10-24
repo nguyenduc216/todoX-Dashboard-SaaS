@@ -89,6 +89,9 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
 
     public async Task<MediaFileDto> CompleteProviderVideoAsync(RVideoSceneVideoCompletionRequest request, CancellationToken ct = default)
     {
+        using var operationScope = request.RenderJobId is Guid owner ? SceneVideoOperationScope.Enter(owner) : null;
+        if (!await _projects.IsVideoOwnerCurrentAsync(request.SceneId, request.RenderJobId, ct))
+            throw new RenderJobPendingReconciliationException("Superseded video result retained as history; current scene completion is fenced.");
         if (string.IsNullOrWhiteSpace(request.OutputUrl))
         {
             throw new InvalidOperationException("PROVIDER_OUTPUT_URL_MISSING");

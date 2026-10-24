@@ -246,6 +246,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
             SELECT job_type AS JobType, input_json::text AS InputJson
               FROM render.render_jobs
              WHERE tenant_id=@tenant
+               AND (job_type NOT IN('render_scene_video','render_video_batch') OR video_render.scene_video_job_is_current(tenant_id,id))
                AND job_type = ANY(@jobTypes)
                AND status = ANY(@statuses)
                AND input_json->>'projectId' = CAST(@projectId AS text);
@@ -257,7 +258,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 jobTypes = new[]
                 {
                     SceneImageBatchRenderHandler.JobTypeName,
-                    SceneVideoRenderHandler.JobTypeName
+                    SceneVideoRenderHandler.JobTypeName,
+                    RenderJobTypes.RenderSceneVideo
                 },
                 statuses = new[]
                 {

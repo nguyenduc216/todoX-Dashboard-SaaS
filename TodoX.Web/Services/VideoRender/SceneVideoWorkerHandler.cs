@@ -12,6 +12,7 @@ namespace TodoX.Web.Services.VideoRender;
 public sealed class SceneVideoRenderWorkItemInput
 {
     public Guid ParentJobId { get; set; }
+    public long? OperationGeneration { get; set; }
     public long ProjectId { get; set; }
     public long SceneId { get; set; }
     public int SceneIndex { get; set; }
@@ -233,6 +234,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
+        using var operationScope = SceneVideoOperationScope.Enter(job.Id);
         try
         {
             await HandleCoreAsync(job, ct);
@@ -822,7 +824,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             Guid? submitToken = null;
             if (string.IsNullOrWhiteSpace(taskId))
             {
-                await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoRendering,
+                await _repo.UpdateVideoOperationSceneAsync(SceneVideoOperationScope.JobId ?? throw new InvalidOperationException("Video mutation owner scope missing"), scene.Id, VideoSceneStatuses.VideoRendering,
                     errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
 
                 try
@@ -942,31 +944,35 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         submitToken = claimedToken;
                     if (submitToken is { } activeToken)
                     {
-                        await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, activeToken, ct);
-                        if (!await _submitCoordinator.BeginSubmitAsync(activeToken, ct))
+                        VideoProviderSubmitResult submit;
+                        using (await _submitCoordinator.AcquireSubmitFenceAsync(job.Id, ct))
                         {
-                            // State conflict only: no request was sent, and the existing intent protection is preserved.
-                            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, submitToken, ct);
-                            await RecordPreHttpSubmitRefusalAsync(input, job, scene, version.Id, attemptLogicalRequestId,
-                                SceneVideoSubmitGuard.ErrorCodeIntentTransitionFailed, SceneVideoSubmitGuard.MessageIntentTransitionFailed,
-                                SceneVideoSubmitBlockReason.ExistingIntentUnresolved, intentAlreadyHadProviderTask: false, ct);
-                            throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageIntentTransitionFailed);
+                            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, activeToken, ct);
+                            if (!await _submitCoordinator.BeginSubmitAsync(activeToken, ct))
+                            {
+                                // State conflict only: no request was sent, and the existing intent protection is preserved.
+                                await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, submitToken, ct);
+                                await RecordPreHttpSubmitRefusalAsync(input, job, scene, version.Id, attemptLogicalRequestId,
+                                    SceneVideoSubmitGuard.ErrorCodeIntentTransitionFailed, SceneVideoSubmitGuard.MessageIntentTransitionFailed,
+                                    SceneVideoSubmitBlockReason.ExistingIntentUnresolved, intentAlreadyHadProviderTask: false, ct);
+                                throw new RenderJobTerminalFailureException(SceneVideoSubmitGuard.MessageIntentTransitionFailed);
+                            }
+                            await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, activeToken, ct);
+                            submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
+                                input.ProviderId,
+                                input.ProviderCapabilityId,
+                                input.ProviderCode,
+                                input.CapabilityCode,
+                                policy.Model,
+                                policy.Mode,
+                                providerPrompt,
+                                input.AspectRatio,
+                                candidate.ProviderResolution,
+                                candidate.ProviderDurationSeconds,
+                                sourceImageAsset,
+                                referenceImages,
+                                (diagnostic, token) => AddHttpSubmitDiagnosticAsync(project.Id, job, input, version.Id, diagnostic, token)), ct);
                         }
-                        await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, activeToken, ct);
-                        var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
-                            input.ProviderId,
-                            input.ProviderCapabilityId,
-                            input.ProviderCode,
-                            input.CapabilityCode,
-                            policy.Model,
-                            policy.Mode,
-                            providerPrompt,
-                            input.AspectRatio,
-                            candidate.ProviderResolution,
-                            candidate.ProviderDurationSeconds,
-                            sourceImageAsset,
-                            referenceImages,
-                            (diagnostic, token) => AddHttpSubmitDiagnosticAsync(project.Id, job, input, version.Id, diagnostic, token)), ct);
                         providerTaskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
                         providerVideoIdBase = RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
                             ? (string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase) ? null : submit.ProviderVideoIdBase.Trim())
@@ -1918,7 +1924,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         {
             if (reservation.ShouldSubmitProvider)
             {
-                await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoRendering,
+                await _repo.UpdateVideoOperationSceneAsync(SceneVideoOperationScope.JobId ?? throw new InvalidOperationException("Video mutation owner scope missing"), scene.Id, VideoSceneStatuses.VideoRendering,
                     errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
 
                 var payload = LegacyVideoMapper.BuildSubmitRequest(
@@ -4114,7 +4120,7 @@ public sealed partial class SceneVideoWorkerHandler
         {
             await _versions.FailSceneVideoVersionAsync(versionId, errorCode, errorMessage, ct);
         }
-        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
+        await _repo.UpdateVideoOperationSceneAsync(SceneVideoOperationScope.JobId ?? throw new InvalidOperationException("Video mutation owner scope missing"), scene.Id, VideoSceneStatuses.Failed,
             errorMessage: errorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
         await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_RENDER_FAILED", "error",
             $"Scene video render failed for scene {scene.SceneIndex}.",

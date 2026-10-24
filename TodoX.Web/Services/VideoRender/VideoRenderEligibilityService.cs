@@ -211,6 +211,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
               FROM render.render_jobs
              WHERE tenant_id=@tenant
                AND job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(tenant_id,id)
                AND status IN ('queued','preparing','rendering','post_processing','pending_reconciliation')
                AND (input_json->>'projectId')::bigint = @projectId
                AND (input_json->>'sceneId') IS NOT NULL

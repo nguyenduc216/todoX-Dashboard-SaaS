@@ -34,6 +34,7 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
+        using var operationScope = SceneVideoOperationScope.Enter(job.Id);
         var input = JsonSerializer.Deserialize<VideoProjectCreateRequest>(job.InputJson, new JsonSerializerOptions(JsonSerializerDefaults.Web))
             ?? throw new InvalidOperationException("Video job input invalid.");
 

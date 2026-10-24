@@ -18,6 +18,8 @@ public sealed class TodoXConnectionFactory
     {
         var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
+        try { await TodoX.Web.Services.VideoRender.SceneVideoOperationScope.BindConnectionAsync(connection); }
+        catch { await connection.DisposeAsync(); throw; }
         return connection;
     }
 }

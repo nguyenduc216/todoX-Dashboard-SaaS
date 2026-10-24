@@ -742,6 +742,7 @@ public sealed class RenderJobService : IRenderJobService
             parameters = new { };
         }
 
+        sql += " AND (job_type NOT IN ('render_scene_video','render_video_batch') OR video_render.scene_video_job_is_current(tenant_id,id))";
         sql += ResolveClaimOrderSql(includeJobTypes);
 
         var job = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(sql, parameters, tx);
@@ -1021,6 +1022,9 @@ public sealed class RenderJobService : IRenderJobService
 
     private async Task EnsureSceneVideoEnqueueAllowedAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, long sceneId, long projectId)
     {
+        if (await conn.ExecuteScalarAsync<bool>("SELECT EXISTS(SELECT 1 FROM video_render.scene_video_operation_heads WHERE tenant_id=@tenant AND scene_id=@sceneId);",
+            new { tenant = _tenant.TenantId, sceneId }, tx))
+            throw new InvalidOperationException("RVIDEO_OPERATION_ACK_REQUIRED: use the explicit generation-aware user action.");
         var state = await conn.QuerySingleOrDefaultAsync<(long SceneId, bool RequiresReview)>(
             """
             SELECT s.id AS SceneId, EXISTS (
@@ -1137,6 +1141,7 @@ public sealed class RenderJobService : IRenderJobService
              WHERE id=@jobId
                AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
                AND (job_type <> 'render_scene_video' OR (
+                    video_render.scene_video_job_is_current(tenant_id,id) AND
                     error_code IS DISTINCT FROM 'SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
                     AND NOT (COALESCE(input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt')
                     AND NULLIF(btrim(provider_task_id), '') IS NOT NULL
@@ -1214,6 +1219,7 @@ public sealed class RenderJobService : IRenderJobService
              WHERE id=@jobId
                AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
                AND (job_type <> 'render_scene_video' OR (
+                    video_render.scene_video_job_is_current(tenant_id,id) AND
                     error_code IS DISTINCT FROM 'SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
                     AND NOT (COALESCE(input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt')
                     AND NULLIF(btrim(provider_task_id), '') IS NOT NULL

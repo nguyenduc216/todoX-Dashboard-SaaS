@@ -67,6 +67,10 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
             .FirstOrDefault(x => x.Id == input.AudioVersionId)
             ?? throw new InvalidOperationException("Scene audio version not found.");
         ValidateSceneOwnership(scene.Id, sceneVideo, sceneAudio);
+        if (!await _repo.IsVideoOwnerCurrentAsync(scene.Id, sceneVideo.RenderJobId, ct))
+            throw new RenderJobPendingReconciliationException("Mux input belongs to an older video generation.");
+        using var operationScope = sceneVideo.RenderJobId is Guid videoOwner ? SceneVideoOperationScope.Enter(videoOwner) : null;
+
 
         if (!string.Equals(sceneVideo.Status, "completed", StringComparison.OrdinalIgnoreCase)
             || !string.Equals(sceneAudio.Status, "completed", StringComparison.OrdinalIgnoreCase))
@@ -82,7 +86,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
 
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
-        var finalDir = Path.Combine(projectRoot, "final-scenes", scene.SceneIndex.ToString("00"));
+        var finalDir = Path.Combine(projectRoot, "final-scenes", scene.SceneIndex.ToString("00"), sceneVideo.Id.ToString("N"), job.Id.ToString("N"));
         Directory.CreateDirectory(finalDir);
         var finalPath = Path.Combine(finalDir, "final.mp4");
         var sourceVideoPath = ResolveLocalPath(sceneVideo.SourceFilePath);

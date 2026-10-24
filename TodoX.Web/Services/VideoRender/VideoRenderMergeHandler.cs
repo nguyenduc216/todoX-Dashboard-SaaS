@@ -41,6 +41,9 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
         var projectId = TryReadLong(job.InputJson, "projectId") ?? TryReadLong(job.PromptJson, "projectId") ?? throw new InvalidOperationException("Thieu projectId trong job input.");
+        // Capture before reading consumed inputs; later DB writes reject any intervening generation/selection change.
+        var mergeSnapshot=await _repo.GetVideoMergeSnapshotAsync(projectId, ct);
+        using var mergeScope = SceneVideoOperationScope.Merge(mergeSnapshot);
         var project = await _repo.GetProjectAsync(projectId, ct) ?? throw new InvalidOperationException("Khong tim thay project video.");
         if (!project.Scenes.Any())
         {
@@ -94,10 +97,11 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             mergeItems = await BuildCurrentMergeItemsAsync(mergeableScenes, ct);
         }
 
+        ValidateConsumedSelection(mergeSnapshot,mergeItems.Select(i=>(i.SceneId,i.SceneVideoVersionId)));
         try
         {
             var finalDir = version is null
-                ? Path.Combine(projectRoot, "final")
+                ? Path.Combine(projectRoot, "final", job.Id.ToString("N"))
                 : Path.Combine(projectRoot, "final-videos", version.Id.ToString("N"), "output");
             Directory.CreateDirectory(finalDir);
             var concat = Path.Combine(finalDir, "concat.txt");
@@ -211,6 +215,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         }
     }
 
+    public static void ValidateConsumedSelection(string snapshot,IEnumerable<(long SceneId,Guid? VersionId)> inputs)
+    {
+        using var doc=JsonDocument.Parse(snapshot);
+        var selected=doc.RootElement.GetProperty("selected");
+        foreach(var item in inputs)
+            if(!selected.TryGetProperty(item.SceneId.ToString(),out var expected)
+                || !string.Equals(expected.GetString(),item.VersionId?.ToString()??"",StringComparison.OrdinalIgnoreCase))
+                throw new RenderJobDeferredException("Merge input no longer matches the captured selected-video snapshot.");
+    }
+
     private static void ValidateMergeInputs(IReadOnlyList<MergeInput> items)
     {
         if (items.Count == 0)
@@ -229,7 +243,8 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
 
     private static Task WriteCompositionManifestAsync(string finalDir, FinalVideoVersionDto? version, IReadOnlyList<MergeInput> items, CancellationToken ct)
     {
-        var manifestPath = Path.Combine(finalDir, "..", "manifests", "composition.json");
+        var manifestPath = version is null ? Path.Combine(finalDir,"manifests","composition.json")
+            : Path.Combine(finalDir, "..", "manifests", "composition.json");
         Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
         var json = JsonSerializer.Serialize(new
         {

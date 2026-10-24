@@ -50,6 +50,7 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
             return false;
         }
 
+        if (await _repo.HasVideoOperationHeadAsync(sceneId, ct)) return false; // Only explicit user action advances generation.
         var eligibility = await _eligibility.GetVideoRenderEligibilityAsync(projectId, new[] { sceneId }, ct);
         var result = eligibility.Results.FirstOrDefault();
         if (result is null)

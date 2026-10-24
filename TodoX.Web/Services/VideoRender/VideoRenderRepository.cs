@@ -601,7 +601,7 @@ public sealed class VideoRenderRepository
         try
         {
             using var conn = await _factory.OpenAsync(ct);
-            await conn.ExecuteAsync(
+            var affected = await conn.ExecuteAsync(
                 """
                 UPDATE video_render.video_project_scenes
                    SET status=@status,
@@ -615,9 +615,12 @@ public sealed class VideoRenderRepository
                        image_prompt=COALESCE(@imagePrompt, image_prompt),
                        video_prompt=COALESCE(@videoPrompt, video_prompt),
                        updated_at=now()
-                 WHERE id=@sceneId AND tenant_id=@tenant;
+                 WHERE id=@sceneId AND tenant_id=@tenant
+                   AND (@videoOwner IS NULL OR video_render.scene_video_job_is_current(@tenant,@videoOwner));
                 """,
-                new { sceneId, tenant = _tenant.TenantId, status, imageUrl, imagePath, videoUrl, videoPath, errorMessage, title, scenePrompt, imagePrompt, videoPrompt });
+                new { sceneId, videoOwner = SceneVideoOperationScope.JobId, tenant = _tenant.TenantId, status, imageUrl, imagePath, videoUrl, videoPath, errorMessage, title, scenePrompt, imagePrompt, videoPrompt });
+            if (SceneVideoOperationScope.JobId is not null && affected != 1)
+                throw new InvalidOperationException("VIDEO_OPERATION_MUTATION_CAS_REJECTED");
         }
         catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_update_scene"))
         {
@@ -625,8 +628,61 @@ public sealed class VideoRenderRepository
         }
     }
 
+    public async Task UpdateVideoOperationSceneAsync(Guid ownerJobId, long sceneId, string status,
+        string? imageUrl = null, string? imagePath = null, string? videoUrl = null, string? videoPath = null,
+        string? errorMessage = null, string? title = null, string? scenePrompt = null, string? imagePrompt = null,
+        string? videoPrompt = null, CancellationToken ct = default)
+    {
+        if (ownerJobId == Guid.Empty) throw new ArgumentException("Video writer owner required.");
+        await _tenant.EnsureLoadedAsync(ct);
+        using var operation = SceneVideoOperationScope.Enter(ownerJobId);
+        await UpdateSceneAsync(sceneId, status, imageUrl, imagePath, videoUrl, videoPath, errorMessage, title, scenePrompt, imagePrompt, videoPrompt, ct);
+    }
+
+    public async Task<bool> IsVideoOwnerCurrentAsync(long sceneId, Guid? ownerJobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>("""
+            SELECT NOT EXISTS(SELECT 1 FROM video_render.scene_video_operation_heads h WHERE h.tenant_id=@tenant AND h.scene_id=@scene)
+                OR EXISTS(SELECT 1 FROM video_render.scene_video_operation_heads h WHERE h.tenant_id=@tenant AND h.scene_id=@scene
+                    AND h.active_render_job_id=@owner AND video_render.scene_video_job_is_current(@tenant,@owner));
+            """, new { tenant = _tenant.TenantId, scene = sceneId, owner = ownerJobId });
+    }
+
+    public async Task<bool> HasOpenVideoGenerationAsync(long projectId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>("SELECT EXISTS(SELECT 1 FROM video_render.scene_video_operation_heads h JOIN render.render_jobs j ON j.id=h.active_render_job_id WHERE h.tenant_id=@tenant AND h.project_id=@project AND j.status<>'completed');",
+            new { tenant = _tenant.TenantId, project = projectId });
+    }
+
+    public async Task<bool> HasVideoOperationHeadAsync(long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>("SELECT EXISTS(SELECT 1 FROM video_render.scene_video_operation_heads WHERE tenant_id=@tenant AND scene_id=@scene);",
+            new { tenant = _tenant.TenantId, scene = sceneId });
+    }
+
+    public async Task<string> GetVideoMergeSnapshotAsync(long projectId, CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var snapshot = await conn.ExecuteScalarAsync<string>("""
+            SELECT jsonb_build_object('generations',COALESCE((SELECT jsonb_object_agg(scene_id::text,generation)
+                FROM video_render.scene_video_operation_heads WHERE tenant_id=@tenant AND project_id=@project),'{}'::jsonb),
+                'selected',COALESCE((SELECT jsonb_object_agg(id::text,COALESCE(selected_video_version_id::text,''))
+                FROM video_render.video_project_scenes WHERE tenant_id=@tenant AND project_id=@project),'{}'::jsonb))::text;
+            """, new { tenant = _tenant.TenantId, project = projectId });
+        return snapshot!;
+    }
+
     public async Task SaveSceneDraftAsync(VideoProjectSaveSceneDraftRequest request, Guid? selectedBy, CancellationToken ct = default)
     {
+        using var explicitSelection = SceneVideoOperationScope.JobId is null && request.SelectedVideoVersionId is not null && selectedBy is not null
+            ? SceneVideoOperationScope.UserSelection() : null;
         try
         {
             await _tenant.EnsureLoadedAsync(ct);
@@ -675,7 +731,7 @@ public sealed class VideoRenderRepository
                      FOR UPDATE;
                     """,
                     new { versionId = videoVersionId, sceneId = scene.Id, projectId = scene.ProjectId, tenant = _tenant.TenantId }, tx);
-                await conn.ExecuteAsync("UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;", new { sceneId = scene.Id, projectId = scene.ProjectId, tenant = _tenant.TenantId }, tx);
+                await conn.ExecuteAsync("UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant AND is_selected=true;", new { sceneId = scene.Id, projectId = scene.ProjectId, tenant = _tenant.TenantId }, tx);
                 await conn.ExecuteAsync(
                     "UPDATE video_render.scene_video_versions SET is_selected=true, selected_at=now(), selected_by=@selectedBy, updated_at=now() WHERE id=@versionId AND tenant_id=@tenant;",
                     new { versionId = videoVersionId, tenant = _tenant.TenantId, selectedBy }, tx);
@@ -1182,6 +1238,7 @@ public sealed class VideoRenderRepository
                AND btrim(v.provider_video_id_base) <> ''
                AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
                AND j.job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                AND j.status NOT IN ('completed', 'cancelled')
                AND (j.retry_after IS NULL OR j.retry_after <= now())
                AND (j.lock_until IS NULL OR j.lock_until <= now());
@@ -1202,6 +1259,7 @@ public sealed class VideoRenderRepository
              WHERE v.tenant_id=@tenant AND v.project_id=@projectId
                AND v.scene_id=ANY(@sceneIds)
                AND j.job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                AND j.status='pending_reconciliation'
                AND (j.error_code='SCENE_VIDEO_MANUAL_REVIEW_REQUIRED'
                     OR COALESCE(j.input_json, '{}'::jsonb) ? 'sceneVideoManualReviewAt');
@@ -1219,6 +1277,7 @@ public sealed class VideoRenderRepository
             SELECT EXISTS (SELECT 1 FROM video_render.video_project_scenes s
                 JOIN render.render_jobs j ON j.tenant_id=s.tenant_id
                  AND j.job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                  AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=s.id::text
                 WHERE s.id=@sceneId AND s.project_id=@projectId AND s.tenant_id=@tenant
                   AND j.status='pending_reconciliation'
@@ -1239,6 +1298,7 @@ public sealed class VideoRenderRepository
               FROM render.render_jobs j
               JOIN video_render.scene_video_versions v ON v.render_job_id=j.id AND v.tenant_id=j.tenant_id
              WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                AND j.status='pending_reconciliation'
                AND j.updated_at <= now() - (@timeoutSeconds * interval '1 second')
                AND (NULLIF(btrim(v.provider_task_id), '') IS NULL
@@ -1277,6 +1337,7 @@ public sealed class VideoRenderRepository
                     AND j.id=@jobId
                     AND v.scene_id=@sceneId
                    AND j.job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                     AND NULLIF(btrim(j.provider_task_id), '') IS NULL
                     AND NULLIF(btrim(j.provider_video_id_base), '') IS NULL
                     AND NOT EXISTS (SELECT 1 FROM render.scene_video_submit_intents i

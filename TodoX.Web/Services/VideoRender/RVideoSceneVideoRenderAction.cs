@@ -21,6 +21,11 @@ public interface IRVideoSceneVideoRenderAction
     /// </summary>
     Task<RVideoSceneVideoRenderEstimate> EstimateAsync(RVideoSceneVideoRenderRequest request, CancellationToken ct = default);
 
+    Task<SceneVideoSupersedeAcknowledgement> GetSupersedeAcknowledgementAsync(long projectId, long sceneId, CurrentUserSession user, Guid key, CancellationToken ct = default)
+        => throw new NotSupportedException("Generation-aware supersede requires canonical implementation.");
+    Task<RVideoSceneVideoRenderResult> SupersedeAsync(RVideoSceneVideoRenderRequest request, SceneVideoSupersedeAcknowledgement acknowledgement, CurrentUserSession user, CancellationToken ct = default)
+        => throw new NotSupportedException("Generation-aware supersede requires canonical implementation.");
+
     Task<RVideoSceneVideoRenderResult> EnqueueRerenderAsync(RVideoSceneVideoRenderRequest request, CurrentUserSession user, CancellationToken ct = default);
 }
 
@@ -63,6 +68,8 @@ public sealed record RVideoSceneVideoRenderResult(
 
 public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
 {
+    private readonly SceneVideoOperationDraftService? _operations;
+    private readonly IAiProviderModelService? _models;
     private readonly IRenderJobService _jobs;
     private readonly IRVideoTrustedPayerContextService _payers;
     private readonly IVideoRenderEligibilityService _eligibility;
@@ -80,8 +87,12 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         RVideoJobSettingsRepository settings,
         ISceneMediaVersioningService versions,
         VideoRenderRepository repo,
-        ILogger<RVideoSceneVideoRenderAction> logger)
+        ILogger<RVideoSceneVideoRenderAction> logger,
+        SceneVideoOperationDraftService? operations = null,
+        IAiProviderModelService? models = null)
     {
+        _operations = operations;
+        _models = models;
         _jobs = jobs;
         _payers = payers;
         _eligibility = eligibility;
@@ -116,6 +127,7 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
 
             // Legacy video confirmation: points = duration * VideoRate, availability from the estimate.
             var duration = (decimal)request.Scene.DurationSeconds;
+            if (request.Metadata.Extra.TryGetValue("video_duration",out var durationText) && int.TryParse(durationText,out var selectedDuration)) duration=selectedDuration;
             var points = duration * estimate.VideoRate;
             var available = estimate.AvailablePoints;
             if (estimate.VideoRate <= 0 || duration <= 0 || available < 0)
@@ -189,6 +201,7 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         {
             input.ManualOverride = true;
             input.RequestedModelCode = modelCode;
+            input.RequestedMode = ResolveRequestedMode(meta);
             if (meta.Extra.TryGetValue("video_duration", out var durStr) && int.TryParse(durStr, out var dur) && dur > 0)
                 input.RequestedDurationSeconds = dur;
         }
@@ -221,6 +234,93 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         return RVideoSceneVideoRenderResult.Ok(job.Id);
     }
 
+    public Task<SceneVideoSupersedeAcknowledgement> GetSupersedeAcknowledgementAsync(long projectId, long sceneId,
+        CurrentUserSession user, Guid key, CancellationToken ct = default)
+        => (_operations ?? throw new InvalidOperationException("Operation ledger unavailable"))
+            .ReadAcknowledgementAsync(projectId, sceneId, user, key, ct);
+
+    public async Task<RVideoSceneVideoRenderResult> SupersedeAsync(RVideoSceneVideoRenderRequest request,
+        SceneVideoSupersedeAcknowledgement acknowledgement, CurrentUserSession user, CancellationToken ct = default)
+    {
+        SceneVideoOperationDraftService.Validate(acknowledgement, user);
+        if (request.ProjectId != acknowledgement.ProjectId || request.Scene.Id != acknowledgement.SceneId)
+            throw new InvalidOperationException("Acknowledged scene differs from request.");
+        var service = _operations ?? throw new InvalidOperationException("Operation ledger unavailable.");
+        if(await service.TryResumeAsync(acknowledgement,user,ct) is Guid resumed) return RVideoSceneVideoRenderResult.Ok(resumed);
+        var project = await _repo.GetProjectAsync(request.ProjectId, user, ct) ?? throw new UnauthorizedAccessException();
+        var scene = project.Scenes.Single(s => s.Id == acknowledgement.SceneId);
+        var report = await _eligibility.GetVideoRenderEligibilityAsync(project.Id, new[] { scene.Id }, ct);
+        var decision = report.Results.Single(r => r.SceneId == scene.Id);
+        if (decision.Status is VideoRenderEligibilityStatus.MissingImage or VideoRenderEligibilityStatus.InvalidPrompt)
+            return RVideoSceneVideoRenderResult.Fail(decision.ErrorCode, decision.Message);
+        var estimate = await EstimateAsync(request with { Scene = scene, Metadata=ScenePromptMetadata.FromScene(scene) }, ct);
+        if (!estimate.CanStart) return RVideoSceneVideoRenderResult.Fail("RVIDEO_ESTIMATE_UNAVAILABLE", "Chưa thể tạo lượt video mới.");
+        var oldJob = await _jobs.GetAsync(acknowledgement.OldJobId, ct) ?? throw new InvalidOperationException("Acknowledged operation missing.");
+        var input = System.Text.Json.JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(oldJob.InputJson,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? throw new InvalidOperationException("Operation snapshot invalid.");
+        input.ProjectId = scene.ProjectId;
+        input.SceneId = scene.Id;
+        input.SceneIndex = scene.SceneIndex;
+        var settings = await _settings.GetAsync(project.Id, ct);
+        var metadata = ScenePromptMetadata.FromScene(scene);
+        var model = ResolveRequestedModel(metadata) ?? RVideoVideoModelPolicy.GetInitial().Model;
+        var duration = scene.DurationSeconds;
+        if (metadata.Extra.TryGetValue("video_duration",out var durationText) && int.TryParse(durationText,out var chosenDuration)) duration=chosenDuration;
+        var catalog = _models is null ? null : await _models.GetModelByCodeAsync(input.ProviderId,model,ct);
+        if(catalog is null || !catalog.Enabled || !catalog.AllowUserSelect || catalog.IsDeprecated
+            || !string.Equals(catalog.ProviderCode,input.ProviderCode,StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(catalog.MediaType,"video",StringComparison.OrdinalIgnoreCase)
+            || !catalog.SupportedDurations.Contains(duration))
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_MODEL_INVALID","Lựa chọn video hiện tại chưa thể sử dụng.");
+        input.ModelName=model;
+        input.RequestedModelCode=model;
+        input.ManualOverride=true;
+        input.RequestedMode=ResolveRequestedMode(metadata) ?? RVideoVideoModelPolicy.Models.FirstOrDefault(p=>string.Equals(p.ProviderCode,input.ProviderCode,StringComparison.OrdinalIgnoreCase)
+            && string.Equals(p.Model,model,StringComparison.OrdinalIgnoreCase))?.Mode;
+        input.RequestedDurationSeconds=duration;
+        input.DurationSeconds=duration;
+        input.AspectRatio=ResolveAspectRatio(request with { Metadata=metadata });
+        input.Resolution=ResolveResolution(request with { Metadata=metadata }).Trim().ToLowerInvariant();
+        if(!RVideoRules.SupportedAspectRatios.Contains(input.AspectRatio)
+            || !RVideoRules.SupportedResolutions.Contains(input.Resolution,StringComparer.OrdinalIgnoreCase)
+            || (catalog.SupportedResolutions.Count>0 && !catalog.SupportedResolutions.Contains(input.Resolution,StringComparer.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(input.RequestedMode) && catalog.SupportedModes.Count>0 && !catalog.SupportedModes.Contains(input.RequestedMode,StringComparer.OrdinalIgnoreCase)))
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_MODEL_INVALID","Video options are not supported by the selected model.");
+        var voiceMode=RVideoRules.ResolveVoiceMode(settings);
+        input.Voice=voiceMode==RVideoVoiceModes.Native ? RVideoRules.ResolveSceneVoiceText(scene) : null;
+        input.VoiceInstruction=voiceMode==RVideoVoiceModes.Native ? RVideoRules.ResolveSceneVoiceInstruction(scene) : null;
+        input.VideoPrompt=voiceMode==RVideoVoiceModes.Native
+            ? RVideoRules.ComposeNativeVoicePrompt(scene.VideoPrompt,input.Voice,input.VoiceInstruction) : scene.VideoPrompt ?? "";
+        input.ImagePrompt = scene.ImagePrompt;
+        input.UseSharedReferenceImage=settings?.UseReferenceImageForAllScenes==true;
+        input.ImageInputMode=input.UseSharedReferenceImage ? VideoSceneImageInputMode.SharedBaseImage : VideoSceneImageInputMode.SceneSource;
+        input.SharedReferenceImageMediaId=null; input.SharedReferenceImageUrl=null; input.SharedReferenceImageObjectKey=null;
+        input.SharedReferenceImageFileName=null; input.SharedReferenceImageMimeType=null;
+        if(input.UseSharedReferenceImage)
+        {
+            var reference=RVideoSceneImageReferenceSelection.Resolve(settings!).ToSnapshot();
+            input.SharedReferenceImageMediaId=reference.MediaId; input.SharedReferenceImageUrl=reference.PublicUrl;
+            input.SharedReferenceImageObjectKey=reference.ObjectKey; input.SharedReferenceImageFileName=reference.FileName;
+            input.SharedReferenceImageMimeType=reference.MimeType;
+        }
+        input.SourceImageVersionId=null; input.SelectedSourceImageVersionId=null;
+        input.SourceImageUrl=null; input.SourceImageObjectKey=null;
+        input.EstimatedUsd=null; input.TariffSnapshotJson=null; input.PricingRuleKey=null; input.CostSource=null;
+        input.TrustedPayerContext = await _payers.BuildRVideoTrustedPayerContextAsync(project.Id, scene.Id, ct);
+        input.CustomerPointRate = estimate.VideoRate;
+        var source = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+        if (!input.UseSharedReferenceImage)
+        {
+            input.SelectedSourceImageVersionId = source?.Id;
+            input.SourceImageVersionId = source?.Id;
+            input.SourceImageUrl = source?.PublicUrl ?? scene.StaticImageUrl;
+            input.SourceImageObjectKey = source?.SourceFilePath ?? scene.StaticImagePath;
+        }
+        var draft = await service.PrepareAsync(acknowledgement, user, input, ct);
+        var jobId = await service.ActivateAsync(acknowledgement, user, draft.TransitionId, ct);
+        return RVideoSceneVideoRenderResult.Ok(jobId);
+    }
+
     private static void ApplySharedReference(SceneVideoRenderInput input, RVideoJobSettingsDto? settings)
     {
         if (settings is null || !settings.UseReferenceImageForAllScenes) return;
@@ -236,8 +336,29 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         }
     }
 
-    private static string? ResolveRequestedModel(ScenePromptMetadata meta)
-        => meta.Extra.TryGetValue("video_model", out var model) && !string.IsNullOrWhiteSpace(model) ? model.Trim() : null;
+    public static (string? Model,string? Mode) ResolveRequestedSelection(ScenePromptMetadata meta)
+    {
+        if(!meta.Extra.TryGetValue("video_model",out var selected) || string.IsNullOrWhiteSpace(selected)) return(null,null);
+        selected=selected.Trim();
+        // Legacy metadata sanitizes pipe separators to slashes. Resolve known catalog keys
+        // before parsing, so model codes containing slashes are not split heuristically.
+        foreach(var policy in RVideoVideoModelPolicy.Models)
+        {
+            var key=RVideoSceneVideoModelOptionsService.BuildKey(policy.ProviderCode,policy.Model,policy.Mode);
+            if(string.Equals(selected,key,StringComparison.OrdinalIgnoreCase)
+                || string.Equals(selected,key.Replace('|','/'),StringComparison.OrdinalIgnoreCase))
+                return(policy.Model,policy.Mode);
+        }
+        if(selected.StartsWith(RVideoVideoModelPolicy.ProviderCode+"/",StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Unknown serialized scene video model selection.");
+        var parts=selected.Split('|');
+        if(parts.Length==1) return(parts[0],null); // Legacy stores the model code directly.
+        if(parts.Length!=3 || !string.Equals(parts[0],RVideoVideoModelPolicy.ProviderCode,StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(parts[1])) throw new ArgumentException("Invalid scene video model selection.");
+        return(parts[1].Trim(),string.IsNullOrWhiteSpace(parts[2])?null:parts[2].Trim());
+    }
+    private static string? ResolveRequestedModel(ScenePromptMetadata meta) => ResolveRequestedSelection(meta).Model;
+    private static string? ResolveRequestedMode(ScenePromptMetadata meta) => ResolveRequestedSelection(meta).Mode;
 
     private static string ResolveAspectRatio(RVideoSceneVideoRenderRequest request)
         => request.Metadata is not null && request.Metadata.Extra.TryGetValue("aspect_ratio", out var ar) && !string.IsNullOrWhiteSpace(ar)

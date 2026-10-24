@@ -55,6 +55,7 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             return NotEnqueued("project_missing", logicalRequestId);
         }
 
+        if (await _repo.HasOpenVideoGenerationAsync(projectId, ct)) return NotEnqueued("current_generation_pending", logicalRequestId);
         var settings = await _settings.GetAsync(projectId, ct);
         if (settings is null)
         {

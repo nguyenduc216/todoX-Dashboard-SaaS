@@ -1045,6 +1045,12 @@ else
                                                         Render lại video
 
                                                     </MudButton>
+                                                    <RVideoSupersedeButton @ref="_supersedeButtons[scene.Id]" ProjectId="@_project.Id" Scene="@scene" ServiceId="@ServiceId"
+                                                        Visible="@NeedsExplicitVideoOperation(scene)" Disabled="@_sceneVideoRetrying.Contains(scene.Id)"
+                                                        CurrentJobId="@SupersedeState(scene)?.LatestJob?.Id" Generation="@SupersedeState(scene)?.Generation"
+                                                        OutcomeUnknown="@(SupersedeState(scene)?.HasActiveJob == true || SupersedeState(scene)?.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)"
+                                                        OnQueued="OnSupersedeQueuedAsync" />
+
 
                                                     <MudTooltip Text="Tạo video scene">
 
@@ -2025,7 +2031,8 @@ else
 
             var selected = _sceneVideoModelOptions.FirstOrDefault(option =>
 
-                string.Equals(option.Key, draft.VideoModelSelectionKey, StringComparison.OrdinalIgnoreCase));
+                string.Equals(option.Key, draft.VideoModelSelectionKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(option.Key.Replace('|','/'),draft.VideoModelSelectionKey,StringComparison.OrdinalIgnoreCase));
 
             if (selected is not null)
 
@@ -9717,9 +9724,16 @@ else
 
     }
 
-    private Task RerenderSceneVideoAsync(VideoProjectSceneDto scene)
+    private readonly Dictionary<long, RVideoSupersedeButton> _supersedeButtons = new();
+    private TodoX.Web.Services.VideoRender.SceneVideoUiState? SupersedeState(VideoProjectSceneDto scene)
+        => _sceneVideoUiStates.GetValueOrDefault(scene.Id);
+    private bool NeedsExplicitVideoOperation(VideoProjectSceneDto scene) => SupersedeState(scene) is { } state
+        && (state.Generation is not null || state.HasActiveJob || state.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None);
+    private async Task OnSupersedeQueuedAsync() { await ReloadJobsAsync(); await StartPolling(); }
 
-        => ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);
+    private Task RerenderSceneVideoAsync(VideoProjectSceneDto scene)
+        => SupersedeState(scene)?.Generation is not null && _supersedeButtons.TryGetValue(scene.Id, out var button)
+            ? button.RunAsync() : ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);
 
     private async Task EnqueueSceneVideoAsync(
 

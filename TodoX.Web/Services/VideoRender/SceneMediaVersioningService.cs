@@ -348,7 +348,8 @@ public sealed record SceneVideoUiState(
     RenderJobDto? LatestJob,
     SceneVideoVersionDto? LatestJobVersion,
     SceneVideoSubmitBlockReason SubmitBlockReason,
-    bool HasActiveJob);
+    bool HasActiveJob,
+    long? Generation = null);
 
 public interface ISceneMediaVersioningService
 {
@@ -1128,22 +1129,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
         if (existing is not null)
         {
-            if (request.RenderJobId is not null)
-            {
-                await conn.ExecuteAsync(
-                    """
-                    UPDATE video_render.scene_video_versions
-                       SET render_job_id=COALESCE(render_job_id, @renderJobId),
-                           updated_at=now()
-                     WHERE id=@id AND tenant_id=@tenant;
-                    """,
-                    new { existing.Id, request.RenderJobId, tenant = _tenant.TenantId }, tx);
-            }
-            // Return the persisted owner after COALESCE, including an owner attached here.
-            // Never replace another job's owner in memory; the worker identity guard must reject it.
-            existing = await conn.QuerySingleAsync<SceneVideoVersionDto>(
-                SelectSceneVideoVersionSql + " WHERE id=@id AND tenant_id=@tenant;",
-                new { existing.Id, tenant = _tenant.TenantId }, tx);
+            // A logical-request hit is reuse of the SAME operation, never a transfer of ownership.
+            // Supersede must allocate a new job/version/logical identity through its separate transaction.
+            SceneVideoOperationOwnership.RequireSameOperation(existing, request);
             tx.Commit();
             return existing;
         }
@@ -1205,6 +1193,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 request.ActualModel,
                 request.ProviderCapabilityId
             }, tx);
+
+        if (request.RenderJobId is Guid ownerJob)
+        {
+            var bound = await conn.ExecuteAsync("""
+                INSERT INTO video_render.scene_video_operation_heads(tenant_id,project_id,scene_id,generation,active_render_job_id,active_video_version_id)
+                VALUES(@tenant,@project,@scene,0,@job,@version)
+                ON CONFLICT(tenant_id,scene_id) DO UPDATE SET active_video_version_id=EXCLUDED.active_video_version_id,updated_at=now()
+                WHERE video_render.scene_video_operation_heads.active_render_job_id=EXCLUDED.active_render_job_id;
+                """, new { tenant = _tenant.TenantId, project = request.ProjectId, scene = request.SceneId, job = ownerJob, version = id }, tx);
+            if (bound != 1) throw new RenderJobPendingReconciliationException("A different operation generation owns this scene.");
+        }
 
         tx.Commit();
         return new SceneVideoVersionDto
@@ -1342,7 +1341,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         }
 
         await conn.ExecuteAsync(
-            "UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            "UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant AND is_selected=true;",
             new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
@@ -1444,6 +1443,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    error_code AS ErrorCode, error_message AS ErrorMessage, created_at AS CreatedAt, queued_at AS QueuedAt
               FROM render.render_jobs
              WHERE tenant_id=@tenant AND job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(tenant_id,id)
                AND COALESCE(input_json->>'sceneId', input_json->>'scene_id')=@sceneText
              ORDER BY created_at DESC, queued_at DESC, id DESC LIMIT 1;
             """, args, tx);
@@ -1455,11 +1455,13 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         var active = await conn.ExecuteScalarAsync<bool>(
             """
             SELECT EXISTS (SELECT 1 FROM render.render_jobs WHERE tenant_id=@tenant AND job_type='render_scene_video'
+               AND NOT video_render.scene_video_job_is_superseded(tenant_id,id)
                 AND COALESCE(input_json->>'sceneId', input_json->>'scene_id')=@sceneText
                 AND status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation'));
             """, args, tx);
+        var generation = await conn.ExecuteScalarAsync<long?>("SELECT generation FROM video_render.scene_video_operation_heads WHERE tenant_id=@tenant AND scene_id=@sceneId;", args, tx);
         tx.Commit();
-        return new SceneVideoUiState(selected, latestJob, owner, blocker, active);
+        return new SceneVideoUiState(selected, latestJob, owner, blocker, active, generation);
     }
 
     public async Task<IReadOnlyList<SceneVideoVersionDto>> ListJobSceneVideoVersionsAsync(Guid jobId, CancellationToken ct = default)
@@ -1506,7 +1508,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """,
             new { versionId, sceneId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
-            "UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            "UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant AND is_selected=true;",
             new { sceneId, projectId = version.ProjectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
@@ -1526,6 +1528,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
     public async Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
     {
+        using var selectionScope = SceneVideoOperationScope.UserSelection();
         await EnsureSceneAccessAsync(sceneId, user, ct);
         await SelectSceneVideoVersionAsync(sceneId, versionId, user.UserId, ct);
     }
@@ -2243,6 +2246,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
+        // Same project-before-head ordering as generation activation; do not hold a head SHARE lock while waiting for project.
+        var projectForLock = await conn.ExecuteScalarAsync<long>("SELECT project_id FROM video_render.final_video_versions WHERE id=@id AND tenant_id=@tenant;", new { id = versionId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync("SELECT id FROM video_render.video_projects WHERE id=@id AND tenant_id=@tenant FOR UPDATE;", new { id = projectForLock, tenant = _tenant.TenantId }, tx);
         var version = await conn.QuerySingleAsync<FinalVideoVersionDto>(
             SelectFinalVideoVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
             new { versionId, tenant = _tenant.TenantId }, tx);
@@ -2348,6 +2354,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync("SELECT id FROM video_render.video_projects WHERE id=@id AND tenant_id=@tenant FOR UPDATE;", new { id = projectId, tenant = _tenant.TenantId }, tx);
         var version = await conn.QuerySingleAsync<FinalVideoVersionDto>(
             SelectFinalVideoVersionSql +
             """

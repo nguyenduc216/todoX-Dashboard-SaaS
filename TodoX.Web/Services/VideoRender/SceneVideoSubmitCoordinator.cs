@@ -305,6 +305,8 @@ public sealed class SceneVideoSubmitCoordinator
                     AND COALESCE(j.input_json->>'projectId', j.input_json->>'project_id')=p.id::text);
             """, new { projectId, sceneId, jobId, tenant = _tenant.TenantId }, tx);
         if (!owned) throw new InvalidOperationException("Scene-video submit tenant or job ownership mismatch.");
+        await SceneVideoOperationScope.AssertCurrentAsync(conn, _tenant.TenantId, jobId, tx);
+        await conn.ExecuteAsync("SELECT video_render.assert_video_operation_current(@tenant,@jobId);", new { tenant = _tenant.TenantId, jobId }, tx);
 
         // The reason is evaluated in the same precedence order as the previous combined EXISTS so that
         // refusals stay behaviourally identical while still being attributable for operators.
@@ -372,6 +374,7 @@ public sealed class SceneVideoSubmitCoordinator
                SET submit_state='CONFIRMED_NO_TASK', reconciled_at=COALESCE(reconciled_at, now()), updated_at=now()
              WHERE tenant_id=@tenant AND scene_id=@sceneId AND logical_request_id=@logicalRequestId
                AND submit_state='SUBMIT_INTENT_PERSISTED'
+               AND video_render.scene_video_job_is_current(tenant_id,render_job_id)
                AND COALESCE(NULLIF(btrim(provider_task_id), ''), NULL) IS NULL;
             """, new { tenant = _tenant.TenantId, sceneId, logicalRequestId });
         return await GetSubmitStateAsync(sceneId, logicalRequestId, ct);
@@ -393,9 +396,12 @@ public sealed class SceneVideoSubmitCoordinator
     internal const string SceneSubmitBlockReasonSql =
             """
             SELECT CASE
+                WHEN @jobId <> '00000000-0000-0000-0000-000000000000'::uuid
+                  AND NOT video_render.scene_video_job_is_current(@tenant,@jobId) THEN 2
                 WHEN EXISTS (SELECT 1 FROM render.scene_video_submit_intents i
                     JOIN render.render_jobs prior ON prior.id=i.render_job_id AND prior.tenant_id=i.tenant_id
                     WHERE i.tenant_id=@tenant AND i.scene_id=@sceneId
+                      AND NOT (i.render_job_id<>@jobId AND video_render.scene_video_job_is_superseded(i.tenant_id,i.render_job_id))
                       AND (
                             -- This job's own intent is always authoritative: it protects the double-click,
                             -- the automatic retry and any in-flight/ambiguous submit from being resent.
@@ -450,6 +456,7 @@ public sealed class SceneVideoSubmitCoordinator
                     THEN 1
                 WHEN EXISTS (SELECT 1 FROM render.render_jobs j
                     WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
+                      AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                       AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=@sceneText
                       -- A manual-review marker only holds the scene while its own job is still open.
                       -- Every other manual-review gate in the application reads the marker this way
@@ -476,6 +483,7 @@ public sealed class SceneVideoSubmitCoordinator
                     THEN 2
                 WHEN EXISTS (SELECT 1 FROM video_render.scene_video_versions v
                     WHERE v.tenant_id=@tenant AND v.scene_id=@sceneId
+                      AND NOT video_render.scene_video_job_is_superseded(v.tenant_id,v.render_job_id)
                       AND ((v.status NOT IN ('completed', 'failed') AND
                             (NULLIF(btrim(v.provider_task_id), '') IS NOT NULL
                              OR NULLIF(btrim(v.provider_video_id_base), '') IS NOT NULL))
@@ -505,10 +513,34 @@ public sealed class SceneVideoSubmitCoordinator
     // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261022-SCENE05-P0-001.
     // Refresh durable facts at each pre-HTTP boundary, including after BeginSubmitAsync.
     // The caller's own in-flight token is allowed; any accepted task always prohibits another submit.
+    // Hold the same scene advisory lock used by activation through the physical HTTP boundary.
+    // An activation either precedes this lease (submit rejected), or waits for this send to finish.
+    public async Task<IDisposable> AcquireSubmitFenceAsync(Guid jobId, CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        var conn = await _factory.OpenAsync(ct);
+        System.Data.IDbTransaction? tx = null;
+        try
+        {
+            tx = conn.BeginTransaction();
+            var scene = await conn.QuerySingleAsync<long>("SELECT COALESCE(input_json->>'sceneId',input_json->>'scene_id')::bigint FROM render.render_jobs WHERE tenant_id=@tenant AND id=@job;", new { tenant=_tenant.TenantId, job=jobId }, tx);
+            await conn.ExecuteAsync("SET LOCAL lock_timeout='5s'; SELECT pg_advisory_xact_lock(hashtextextended(@key,0));", new { key=RenderJobService.BuildSceneJobLockName(SceneVideoRenderHandler.JobTypeName,scene) },tx);
+            await conn.ExecuteAsync("SELECT video_render.assert_video_operation_current(@tenant,@job);",new { tenant=_tenant.TenantId, job=jobId },tx);
+            return new SubmitFence(conn,tx);
+        }
+        catch { tx?.Dispose(); conn.Dispose(); throw; }
+    }
+
+    private sealed class SubmitFence(System.Data.IDbConnection connection, System.Data.IDbTransaction transaction) : IDisposable
+    {
+        public void Dispose() { try { transaction.Dispose(); } finally { connection.Dispose(); } }
+    }
+
     public async Task AssertJobMaySubmitAsync(Guid jobId, Guid? ownToken, CancellationToken ct)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
+        await SceneVideoOperationScope.AssertCurrentAsync(conn, _tenant.TenantId, jobId);
         var blocked = await conn.ExecuteScalarAsync<bool>(
             """
             SELECT EXISTS (SELECT 1 FROM render.render_jobs
@@ -547,7 +579,15 @@ public sealed class SceneVideoSubmitCoordinator
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
-        return await conn.ExecuteAsync(
+        using var tx = conn.BeginTransaction();
+        if (next == "SUBMIT_IN_FLIGHT")
+        {
+            var owner = await conn.QuerySingleOrDefaultAsync<Guid?>("SELECT render_job_id FROM render.scene_video_submit_intents WHERE tenant_id=@tenant AND owner_token=@token;",
+                new { tenant = _tenant.TenantId, token }, tx);
+            if (owner is null) return false;
+            await conn.ExecuteAsync("SELECT video_render.assert_video_operation_current(@tenant,@job);", new { tenant = _tenant.TenantId, job = owner.Value }, tx);
+        }
+        var changed = await conn.ExecuteAsync(
             """
             UPDATE render.scene_video_submit_intents
                SET submit_state=@next, provider_task_id=COALESCE(@taskId, provider_task_id),
@@ -555,6 +595,8 @@ public sealed class SceneVideoSubmitCoordinator
                    reconciled_at=CASE WHEN @next IN ('CONFIRMED_PROVIDER_TASK', 'CONFIRMED_NO_TASK') THEN now() ELSE reconciled_at END,
                    updated_at=now()
              WHERE tenant_id=@tenant AND owner_token=@token AND submit_state=@expected;
-            """, new { tenant = _tenant.TenantId, token, next, expected, taskId, videoIdBase }) == 1;
+            """, new { tenant = _tenant.TenantId, token, next, expected, taskId, videoIdBase }, tx) == 1;
+        tx.Commit();
+        return changed;
     }
 }

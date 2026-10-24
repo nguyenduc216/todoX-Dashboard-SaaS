@@ -110,6 +110,9 @@ else{<span>Chưa có</span>}
 <span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@VideoStatus(s)</MudChip></span>
 <span @onclick:stopPropagation="true">
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleRerenderVideoAsync(s))" Disabled="@VideoBlocked(s)">Render lại video</MudButton>
+<RVideoSupersedeButton @ref="_supersedeButtons[s.Id]" ProjectId="@JobView.Project.Id" Scene="@s" ServiceId="@JobView.CoreJob.ServiceId"
+ Visible="@NeedsExplicitOperation(s)" Disabled="@_busy" CurrentJobId="@VideoState(s)?.LatestJob?.Id" Generation="@VideoState(s)?.Generation"
+ OutcomeUnknown="@(VideoState(s)?.HasActiveJob == true || VideoState(s)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
 <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
@@ -147,6 +150,9 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))">Chỉnh</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleSaveAsync(ActiveScene!))" Disabled="@_busy">Lưu</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(()=>HandleRerenderVideoAsync(ActiveScene!))" Disabled="@VideoBlocked(ActiveScene!)">Render lại video</MudButton>
+<RVideoSupersedeButton @ref="_supersedeButtons[ActiveScene!.Id]" ProjectId="@JobView.Project.Id" Scene="@(ActiveScene!)" ServiceId="@JobView.CoreJob.ServiceId"
+ Visible="@NeedsExplicitOperation(ActiveScene!)" Disabled="@_busy" CurrentJobId="@VideoState(ActiveScene!)?.LatestJob?.Id" Generation="@VideoState(ActiveScene!)?.Generation"
+ OutcomeUnknown="@(VideoState(ActiveScene!)?.HasActiveJob == true || VideoState(ActiveScene!)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(()=>HandleRerenderImageAsync(ActiveScene!))" Disabled="@(_busy||_rerenderingImage.Contains(ActiveScene!.Id))">Tạo lại ảnh</MudButton>
 <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" /><MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" />
 </div>
@@ -164,6 +170,11 @@ long? SelectedSceneId; string? _showRef; bool _showDetail; bool _busy; VideoProj
 private readonly SemaphoreSlim _gate = new(1,1);
 readonly HashSet<long> _rerenderingImage = new();
 readonly Dictionary<long, SceneVideoUiState> _videoStates = new();
+readonly Dictionary<long, RVideoSupersedeButton> _supersedeButtons = new();
+SceneVideoUiState? VideoState(VideoProjectSceneDto scene) => _videoStates.GetValueOrDefault(scene.Id);
+bool NeedsExplicitOperation(VideoProjectSceneDto scene) => VideoState(scene) is { } state
+  && (state.Generation is not null || state.HasActiveJob || state.SubmitBlockReason != SceneVideoSubmitBlockReason.None);
+
 int _videoStateRevision;
 protected override async Task OnParametersSetAsync()
 {
@@ -337,7 +348,9 @@ string ResolveModelKey(VideoProjectSceneDto scene){
  var meta = ScenePromptMetadata.FromScene(scene);
  if(meta.Extra.TryGetValue("video_model", out var k) && !string.IsNullOrWhiteSpace(k))
  {
-   if(_opts.Any(x=>string.Equals(x.Key,k,StringComparison.OrdinalIgnoreCase))) return k;
+   var selected=_opts.FirstOrDefault(x=>string.Equals(x.Key,k,StringComparison.OrdinalIgnoreCase)
+     || string.Equals(x.Key.Replace('|','/'),k,StringComparison.OrdinalIgnoreCase));
+   if(selected is not null) return selected.Key;
  }
  return _opts.FirstOrDefault()?.Key ?? string.Empty;
 }
@@ -361,7 +374,7 @@ async Task HandleModelChangedAsync(VideoProjectSceneDto scene, string key){
 }
 async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
  var meta = ScenePromptMetadata.FromScene(scene);
- var key = meta.Extra.TryGetValue("video_model", out var k) ? k : ResolveModelKey(scene);
+ var key = ResolveModelKey(scene);
  var opt = _opts.FirstOrDefault(x=>string.Equals(x.Key,key,StringComparison.OrdinalIgnoreCase));
  if(opt is null || !RVideoSceneVideoModelOptionsService.IsSupportedDuration(opt, dur))
  {
@@ -373,6 +386,9 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
 }
 async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
 {
+ if(VideoState(scene)?.Generation is not null && _supersedeButtons.TryGetValue(scene.Id,out var button))
+ { await button.RunAsync(); return; }
+
  if(JobView is null || AuthState.CurrentUser is null || !await _gate.WaitAsync(0)) return;
  _busy = true;
  try

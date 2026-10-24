@@ -1,0 +1,66 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.VideoRender
+@inject AuthStateService AuthState
+@inject IRVideoSceneVideoRenderAction VideoAction
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<RVideoSupersedeButton> Logger
+
+@if (Visible)
+{
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+               Disabled="@(Disabled || _busy)" OnClick="RunAsync">Tạo lượt video mới</MudButton>
+}
+
+@code {
+    [Parameter] public long ProjectId { get; set; }
+    [Parameter] public VideoProjectSceneDto Scene { get; set; } = default!;
+    [Parameter] public Guid? ServiceId { get; set; }
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool OutcomeUnknown { get; set; } = true;
+    [Parameter] public Guid? CurrentJobId { get; set; }
+    [Parameter] public long? Generation { get; set; }
+    [Parameter] public EventCallback OnQueued { get; set; }
+    private bool _busy;
+    private (long Scene, Guid? Job, long? Generation) _identity;
+    private Guid _key = Guid.NewGuid();
+    private SceneVideoSupersedeAcknowledgement? _ack;
+
+    protected override void OnParametersSet()
+    {
+        var identity = (Scene.Id, CurrentJobId, Generation);
+        if (!_busy && identity != _identity) { _identity = identity; _key = Guid.NewGuid(); _ack = null; }
+    }
+
+    public async Task RunAsync()
+    {
+        if (_busy || Disabled || !Visible || AuthState.CurrentUser is not { } user) return;
+        _busy = true;
+        try
+        {
+            _ack ??= await VideoAction.GetSupersedeAcknowledgementAsync(ProjectId, Scene.Id, user, _key);
+            var request = new RVideoSceneVideoRenderRequest(ProjectId, Scene, ScenePromptMetadata.FromScene(Scene), ServiceId);
+            var estimate = await VideoAction.EstimateAsync(request);
+            if (!estimate.CanStart) { Snackbar.Add("Chưa thể tạo lượt mới. Vui lòng kiểm tra ảnh, nội dung và số điểm.", Severity.Warning); return; }
+            var warning = OutcomeUnknown
+                ? "Lượt render trước chưa xác định kết quả. Tạo lượt mới có thể phát sinh thêm chi phí."
+                : "Lượt video mới được tính phí riêng. Video đã chọn được giữ nguyên cho đến khi lượt mới hoàn tất.";
+            var confirmed = await DialogService.ShowMessageBoxAsync("Tạo lượt video mới",
+                $"{warning} Dự kiến: {estimate.EstimatedPoints:0.##} điểm.",
+                yesText: "Xác nhận tạo lượt mới", cancelText: "Hủy");
+            if (confirmed != true) return;
+            var result = await VideoAction.SupersedeAsync(request, _ack with { RiskAcknowledged = true }, user);
+            if (!result.Success) { Snackbar.Add("Chưa thể tạo lượt video mới.", Severity.Warning); return; }
+            Snackbar.Add("Đang tạo video", Severity.Success);
+            await OnQueued.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVIDEO_SUPERSEDE_ACTION_FAILED sceneId={SceneId}", Scene.Id);
+            // Preserve acknowledgement/idempotency on uncertain transport results; never silently enqueue again.
+            Snackbar.Add("Chưa thể tạo lượt mới. Hãy tải lại trạng thái trước khi thử lại.", Severity.Warning);
+        }
+        finally { _busy = false; }
+    }
+}

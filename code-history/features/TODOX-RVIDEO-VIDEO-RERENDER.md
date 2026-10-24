@@ -16,3 +16,5 @@ Verified baseline: code-history/20261019_VIDEO-RERENDER-RELEASE.md and the curre
 
 1. 2026-10-22 — TODOX-20261022-SCENE05-P0-001: Tasks 1/2/3, selective main integration and operator package. See ../20261022_TODOX-20261022-SCENE05-P0-001.md. Main SHA and package evidence are reported after verification.
 2. 2026-10-22 — TODOX-20261022-SCENE05-RELEASE-002: scoped operator reconciliation SQL and audited terminal-failure submit-guard release. See ../20261022_TODOX-20261022-SCENE05-RELEASE-002.md. No production action; terminal evidence and operator approval are still required.
+
+3. 2026-10-24 — Operation Supersede V1: explicit generation-aware user operation in V2/Legacy; atomic draft activation, durable submit and writer fences, immutable old outcome/selection. Manual migration required; see ../../database/manual/scene-video-operation-v1-README.md. Local PostgreSQL transaction/concurrency and focused UI/backend tests cover the implementation. No production SQL/provider/IIS/deployment action.
