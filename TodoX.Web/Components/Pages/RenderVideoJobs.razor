@@ -127,7 +127,7 @@ else
 
         {
 
-            <div class="render-project-dialog" role="dialog" aria-modal="true">
+            <div id="rvideo-view-root" class="render-project-dialog" role="dialog" aria-modal="true">
 
                 <div class="render-project-dialog-surface">
 
@@ -153,13 +153,13 @@ else
 
                     </header>
 
-                    <main class="render-project-dialog-body">
+                    <main class="render-project-dialog-body" data-rvideo-scroll="body">
 
-                    <MudTabs Class="render-project-tabs" rounded="true" ApplyEffectsToContainer="true" panelClass="render-tab-panel" @bind-ActivePanelIndex="_tabIndex">
+                    <MudTabs Class="render-project-tabs" rounded="true" ApplyEffectsToContainer="true" panelClass="render-tab-panel" KeepPanelsAlive="true" ActivePanelIndex="_tabIndex" ActivePanelIndexChanged="OnViewTabChangedAsync">
 
             <MudTabPanel Text="Thông tin">
 
-                <div class="render-tab-scroll render-info-scroll">
+                <div class="render-tab-scroll render-info-scroll" data-rvideo-scroll="info">
 
                 <MudPaper Class="todox-card pa-4" rounded="true">
 
@@ -782,7 +782,7 @@ else
 
             <MudTabPanel Text="Xem trước">
 
-                <div class="scene-image-tab">
+                <div class="scene-image-tab" data-rvideo-scroll="preview">
 
                     @if (_project is null)
 
@@ -900,7 +900,7 @@ else
 
                             var sceneState = ResolveSceneImageState(scene);
 
-                            <MudPaper Class="scene-card scene-card-compact pa-3" Outlined="true">
+                            <MudPaper @key="scene.Id" Class="scene-card scene-card-compact pa-3" Outlined="true">
 
                                 <MudStack Spacing="2">
 
@@ -1197,7 +1197,7 @@ else
 
             <MudTabPanel Text="Kết quả">
 
-                <div class="render-tab-scroll render-result-scroll">
+                <div class="render-tab-scroll render-result-scroll" data-rvideo-scroll="result">
 
                     @if (_project is null)
 
@@ -1223,7 +1223,11 @@ else
 
                                     {
 
-                                        <video src="@_project.FinalVideoUrl" controls playsinline preload="metadata" @onclick="OpenFinalVideoPreview" style="width:100%;border-radius:12px;min-height:320px;cursor:pointer"></video>
+                                        @if (_displayedFinalVideoUrl is not null && _displayedFinalVideoUrl != _project.FinalVideoUrl)
+                                        {
+                                            <MudButton Size="Size.Small" OnClick="ShowLatestFinalVideo">Xem video mới</MudButton>
+                                        }
+                                        <video src="@DisplayedFinalVideoUrl" controls playsinline preload="metadata" @onclick="OpenFinalVideoPreview" style="width:100%;border-radius:12px;min-height:320px;cursor:pointer"></video>
 
                                     }
                                     else if (IsFinalMergeProcessing)
@@ -1231,7 +1235,7 @@ else
 
                                         <RenderMediaFrame IsVideo="true"
 
-                                                          MediaUrl="@_project.FinalVideoUrl"
+                                                          MediaUrl="@DisplayedFinalVideoUrl"
 
                                                           ThumbnailUrl="@(_project.Scenes.OrderBy(x => x.SceneIndex).Select(x => ResolveDraftImageUrl(x, GetSceneDraft(x))).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)))"
 
@@ -1251,7 +1255,7 @@ else
 
                                         <RenderMediaFrame IsVideo="true"
 
-                                                          MediaUrl="@_project.FinalVideoUrl"
+                                                          MediaUrl="@DisplayedFinalVideoUrl"
 
                                                           ThumbnailUrl="@(_project.Scenes.OrderBy(x => x.SceneIndex).Select(x => ResolveDraftImageUrl(x, GetSceneDraft(x))).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)))"
 
@@ -1321,7 +1325,7 @@ else
 
                                         }
 
-                                        <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => _tabIndex = 1)">Xem lỗi scene</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => OnViewTabChangedAsync(1))">Xem lỗi scene</MudButton>
 
                                         <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo project mới</MudButton>
 
@@ -2635,10 +2639,13 @@ else
 
         var incomingProjectId = ProjectId ?? QueryProjectId;
 
-        if (incomingProjectId != _projectId || JobId != _jobId)
+        if (!_viewParametersInitialized || incomingProjectId != _lastIncomingProjectId || JobId != _lastIncomingJobId)
 
         {
 
+            _viewParametersInitialized = true;
+            _lastIncomingProjectId = incomingProjectId;
+            _lastIncomingJobId = JobId;
             if (incomingProjectId != _projectId)
 
             {
@@ -2733,7 +2740,7 @@ else
 
                     }
 
-                    _tabIndex = 0;
+                    RequestViewRestore();
 
                 }
 
@@ -2883,7 +2890,7 @@ else
 
             Snackbar.Add("Đã tạo và phân tách scene.", Severity.Success);
 
-            _tabIndex = 1;
+            await OnViewTabChangedAsync(1);
 
             await AddDebugAsync("rvideo_scene_split_done", "Hoàn tất", "SUCCESS", $"Đã tạo {scenes.Count} scene.");
 
@@ -2965,7 +2972,7 @@ else
 
             await ReloadAsync();
 
-            _tabIndex = 1;
+            await OnViewTabChangedAsync(1);
 
             Snackbar.Add("Đã tạo project rỗng.", Severity.Success);
 
@@ -3214,6 +3221,7 @@ else
 
     {
 
+        var changedProject = _projectId != projectId;
         _projectId = projectId;
 
         QueryProjectId = projectId;
@@ -3232,7 +3240,7 @@ else
 
         await StartPolling();
 
-        _tabIndex = 0;
+        if (changedProject) RequestViewRestore();
 
     }
 
@@ -3262,6 +3270,7 @@ else
 
     }
 
+    // Full load for opening/explicit refresh and structural/editor operations; never used by the polling loop.
     private async Task ReloadAsync()
 
     {
@@ -3290,7 +3299,10 @@ else
 
             {
 
-                _project = await VideoRepo.GetProjectAsync(_projectId.Value, AuthState.CurrentUser);
+                var requestedProject = _projectId.Value;
+                var loaded = await VideoRepo.GetProjectAsync(requestedProject, AuthState.CurrentUser);
+                if (_projectId != requestedProject) return;
+                if (loaded is not null) _project = loaded;
 
             }
 
@@ -3444,6 +3456,84 @@ else
 
         }
 
+    }
+
+    private int _liveRefreshCount;
+    private bool _viewParametersInitialized;
+    private long? _lastIncomingProjectId;
+    private Guid? _lastIncomingJobId;
+    private Microsoft.JSInterop.IJSObjectReference? _viewModule;
+    private string? _restoredViewKey;
+    private bool _restoreView = true;
+    private string? _displayedFinalVideoUrl;
+    private string? DisplayedFinalVideoUrl => _displayedFinalVideoUrl ??= _project?.FinalVideoUrl;
+    private void ShowLatestFinalVideo() => _displayedFinalVideoUrl = _project?.FinalVideoUrl;
+    private string? ViewKey => _projectId is long id ? $"rvideo:view:{id}" : _jobId is Guid job ? $"rvideo:job:{job:N}" : null;
+    private void RequestViewRestore()
+    {
+        _restoreView = true;
+        _restoredViewKey = null;
+        _displayedFinalVideoUrl = null;
+        _tabIndex = 0;
+    }
+    private async Task OnViewTabChangedAsync(int index)
+    {
+        _tabIndex = Math.Clamp(index, 0, 2);
+        if (_viewModule is not null && ViewKey is { } key)
+            try { await _viewModule.InvokeVoidAsync("saveTab", key, _tabIndex); } catch (JSException) { }
+    }
+
+    // UI-only refresh: no catalog, prompt workspace, settings defaults or estimate hydration.
+    private async Task RefreshLiveStateAsync()
+    {
+        if (_projectId is not long id || _project is null || AuthState.CurrentUser is null) return;
+        if (!await _reloadLock.WaitAsync(0)) return;
+        try
+        {
+            var fresh = await VideoRepo.GetProjectAsync(id, AuthState.CurrentUser);
+            if (fresh is null || _projectId != id || _project?.Id != id) return;
+            var changed = fresh.UpdatedAt != _project.UpdatedAt
+                || fresh.Events.FirstOrDefault()?.Id != _project.Events.FirstOrDefault()?.Id;
+            ApplyLiveProject(fresh);
+            await ReloadJobsAsync();
+            if (_projectId != id) return;
+            if (changed || ++_liveRefreshCount % 3 == 0)
+            {
+                var scenes = _project.Scenes.ToArray();
+                await LoadSceneImageVersionsForStateAsync(scenes);
+                await LoadSceneVideoVersionsForStateAsync(scenes);
+                await LoadSceneAudioVersionsForStateAsync(scenes);
+                await LoadFinalHistoryAsync(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVIDEO_LIVE_REFRESH_FAILED projectId={ProjectId}", id);
+        }
+        finally { _reloadLock.Release(); }
+    }
+
+    private void ApplyLiveProject(VideoProjectDto fresh)
+    {
+        if (_project is null || fresh.Id != _project.Id) return;
+        _project.Status = fresh.Status;
+        _project.FinalVideoUrl = fresh.FinalVideoUrl;
+        _project.FinalVideoPath = fresh.FinalVideoPath;
+        _project.ErrorMessage = fresh.ErrorMessage;
+        _project.UpdatedAt = fresh.UpdatedAt;
+        _project.Events = fresh.Events;
+        foreach (var scene in _project.Scenes)
+        {
+            var live = fresh.Scenes.FirstOrDefault(s => s.Id == scene.Id);
+            if (live is null) continue;
+            scene.Status = live.Status;
+            scene.ErrorMessage = live.ErrorMessage;
+            scene.StaticImageUrl = live.StaticImageUrl;
+            scene.StaticImagePath = live.StaticImagePath;
+            scene.SceneVideoUrl = live.SceneVideoUrl;
+            scene.SceneVideoPath = live.SceneVideoPath;
+        }
+        RebuildSceneEventState();
     }
 
     private async Task RefreshInitialEstimateAsync()
@@ -5106,6 +5196,22 @@ else
     {
 
         await base.OnAfterRenderAsync(firstRender);
+        if (_projectDialogOpen && _project is not null && _project.Id == _projectId && ViewKey is { } viewKey)
+        {
+            try
+            {
+                _viewModule ??= await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>("import", "./js/rvideo-view-state.js");
+                if (_restoreView || _restoredViewKey != viewKey)
+                {
+                    var tab = await _viewModule.InvokeAsync<int>("open", viewKey, _tabIndex);
+                    _restoreView = false; _restoredViewKey = viewKey;
+                    if (tab != _tabIndex) { _tabIndex = tab; await InvokeAsync(StateHasChanged); }
+                }
+                await _viewModule.InvokeVoidAsync("attach", viewKey, _tabIndex);
+            }
+            catch (JSException ex) { Logger.LogDebug(ex, "RVIDEO_VIEW_STATE_UNAVAILABLE"); }
+        }
+
 
         if (!_mainSpeechInitStarted)
 
@@ -6217,7 +6323,7 @@ else
                 if (!await timer.WaitForNextTickAsync(ct)) break;
                 if (_projectId != projectId) break;
                 // Keep the viewed project live through the gap between scene completion and deferred final merge.
-                await InvokeAsync(ReloadAsync);
+                await InvokeAsync(RefreshLiveStateAsync);
                 await InvokeAsync(StateHasChanged);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -8172,17 +8278,15 @@ else
 
         if (_project is null || AuthState.CurrentUser is null) return;
 
-        _finalVersions = await SceneVersions.ListFinalVideoVersionsAsync(_project.Id, AuthState.CurrentUser, 0, 20);
-
+        var projectId = _project.Id;
+        var loaded = await SceneVersions.ListFinalVideoVersionsAsync(projectId, AuthState.CurrentUser, 0, 20);
+        var items = new Dictionary<Guid, IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionItemDto>>();
+        foreach (var version in loaded)
+            items[version.Id] = await SceneVersions.ListFinalVideoVersionItemsAsync(version.Id, AuthState.CurrentUser);
+        if (_project?.Id != projectId) return;
+        _finalVersions = loaded;
         _finalVersionItems.Clear();
-
-        foreach (var version in _finalVersions)
-
-        {
-
-            _finalVersionItems[version.Id] = await SceneVersions.ListFinalVideoVersionItemsAsync(version.Id, AuthState.CurrentUser);
-
-        }
+        foreach (var entry in items) _finalVersionItems[entry.Key] = entry.Value;
 
         if (showSnackbar)
 
@@ -10360,6 +10464,10 @@ else
     {
         StopPolling();
         if (_pollTask is not null) await _pollTask;
+        if (_viewModule is not null)
+        {
+            try { await _viewModule.InvokeVoidAsync("detach"); await _viewModule.DisposeAsync(); } catch (JSDisconnectedException) { }
+        }
 
         if (_mainSpeech is not null) await _mainSpeech.DisposeAsync();
 
