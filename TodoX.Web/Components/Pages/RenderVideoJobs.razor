@@ -156,9 +156,34 @@ else
 
                     <main class="render-project-dialog-body" data-rvideo-scroll="body">
 
+                    @if (_initialLoading)
+                    {
+                        <div role="status" aria-live="polite" class="pa-4" style="min-height:55vh">
+                            <MudSkeleton Width="45%" Height="48px" />
+                            <MudText>Thông tin · Xem trước · Kết quả</MudText>
+                            <MudText>Đang tải dữ liệu project...</MudText>
+                            <MudSkeleton Height="180px" />
+                        </div>
+                    }
+                    else if (_bootstrapError is not null)
+                    {
+                        <MudAlert Severity="Severity.Warning">@_bootstrapError</MudAlert>
+                        <MudButton OnClick="RetryChildBootstrapAsync">Thử tải lại</MudButton>
+                    }
+                    else
+                    {
+                    @if (!_supplementalReady)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">Đang tải cấu hình bổ sung. Các thao tác tạo/sửa sẽ sẵn sàng khi tải xong.</MudAlert>
+                        @if (!_supplementalLoading)
+                        {
+                            <MudButton OnClick="LoadSupplementalAsync">Thử tải lại cấu hình</MudButton>
+                        }
+                    }
                     <MudTabs Class="render-project-tabs" rounded="true" ApplyEffectsToContainer="true" panelClass="render-tab-panel" KeepPanelsAlive="true" ActivePanelIndex="_tabIndex" ActivePanelIndexChanged="OnViewTabChangedAsync">
 
             <MudTabPanel Text="Thông tin">
+                <fieldset disabled="@(!_supplementalReady)" style="border:0;padding:0;margin:0;min-width:0;min-height:0;height:100%;display:flex;flex-direction:column">
 
                 <div class="render-tab-scroll render-info-scroll" data-rvideo-scroll="info">
 
@@ -779,9 +804,11 @@ else
 
                 </div>
 
+                </fieldset>
             </MudTabPanel>
 
             <MudTabPanel Text="Xem trước">
+                <fieldset disabled="@(!_supplementalReady)" style="border:0;padding:0;margin:0;min-width:0;min-height:0;height:100%;display:flex;flex-direction:column">
 
                 <div class="scene-image-tab" data-rvideo-scroll="preview">
 
@@ -1194,9 +1221,11 @@ else
 
                 </div>
 
+                </fieldset>
             </MudTabPanel>
 
             <MudTabPanel Text="Kết quả">
+                <fieldset disabled="@(!_supplementalReady)" style="border:0;padding:0;margin:0;min-width:0;min-height:0;height:100%;display:flex;flex-direction:column">
 
                 <div class="render-tab-scroll render-result-scroll" data-rvideo-scroll="result">
 
@@ -1428,9 +1457,11 @@ else
 
                 </div>
 
+                </fieldset>
             </MudTabPanel>
 
                     </MudTabs>
+                    }
 
                     </main>
 
@@ -1438,7 +1469,7 @@ else
 
                         <a href="@(_jobId is null ? "/r-video" : $"/r-video/{_jobId}")" class="rv2-demo-link" style="margin-right:auto;font-size:.78rem;opacity:.7;text-decoration:underline;">Xem demo giao diện mới</a>
 
-                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@_busy">@(_jobId is null ? "LƯU JOB" : "LƯU THAY ĐỔI")</MudButton>
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_busy || !_supplementalReady)">@(_jobId is null ? "LƯU JOB" : "LƯU THAY ĐỔI")</MudButton>
 
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Close" OnClick="CloseProjectDialogAsync">Đóng</MudButton>
 
@@ -2488,281 +2519,132 @@ else
 
     private sealed record DebugEntry(DateTimeOffset Timestamp, int StepNumber, string StepCode, string StepName, string Status, long DurationMs, string Message, string? Details = null);
 
-    protected override async Task OnInitializedAsync()
-
-    {
-
-        if (!Embedded)
-
-        {
-
-            var target = QueryProjectId is long projectId ? $"/render-jobs?projectId={projectId}" : "/render-jobs";
-
-            Navigation.NavigateTo(target, replace: true);
-
-            return;
-
-        }
-
-        try
-
-        {
-
-            _loadWarning = null;
-
-            _jobId = JobId;
-
-            _projectId = ProjectId ?? QueryProjectId;
-
-            if (AuthState.CurrentUser is not null)
-
-            {
-
-                try
-
-                {
-
-                    _coreServices = await CoreCatalog.ListAsync();
-
-                    ApplyServiceJobDefaultsIfNeeded();
-
-                }
-
-                catch (Exception ex)
-
-                {
-
-                    Logger.LogWarning(ex, "RVIDEO_BOOTSTRAP_CORE_SERVICES_FAILED");
-
-                    _loadWarning = "Một phần dữ liệu khởi tạo chưa tải được. Trang vẫn sẵn sàng để tiếp tục.";
-
-                }
-
-                await LoadCharactersAsync();
-
-                await LoadAudioCatalogsAsync();
-
-            }
-
-            if (AuthState.CurrentUser is not null)
-
-            {
-
-                _projectDialogOpen = true;
-
-                if (_projectId is null && _jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
-
-                {
-
-                    try
-
-                    {
-
-                        var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
-
-                        _projectId = view?.Project.Id ?? _projectId;
-
-                        if (view is not null)
-
-                        {
-
-                            ServiceId = view.CoreJob.ServiceId;
-
-                            ServiceCode = view.CoreJob.ServiceCode;
-
-                            ApplyServiceJobDefaultsIfNeeded();
-
-                        }
-
-                    }
-
-                    catch (Exception ex)
-
-                    {
-
-                        Logger.LogWarning(ex, "RVIDEO_BOOTSTRAP_JOB_RESOLVE_FAILED jobId={JobId}", _jobId);
-
-                        _loadWarning = "Không thể tải đủ metadata job. Đang hiển thị phần project đã có.";
-
-                    }
-
-                }
-
-                if (_projectId is not null)
-
-                {
-
-                    await ReloadAsync();
-
-                }
-
-            }
-
-            if (_projectId is not null)
-
-            {
-
-                await StartPolling();
-
-            }
-
-        }
-
-        catch (Exception ex)
-
-        {
-
-            Logger.LogError(ex, "RVIDEO_BOOTSTRAP_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
-
-            _loadWarning = "Không thể hoàn tất khởi tạo RVIDEO. Vui lòng thử tải lại.";
-
-            _projectDialogOpen = true;
-
-        }
-
-    }
+    [Parameter] public VideoProjectDto? InitialProject { get; set; }
+    private bool _initialLoading = true;
+    private bool _supplementalReady;
+    private bool _supplementalPending;
+    private bool _supplementalLoading;
+    private string? _bootstrapError;
+    private long _bootstrapRevision;
+
+    protected override Task OnInitializedAsync() => Task.CompletedTask;
 
     protected override async Task OnParametersSetAsync()
-
     {
-
         if (!Embedded)
-
         {
-
-            var target = QueryProjectId is long projectId ? $"/render-jobs?projectId={projectId}" : "/render-jobs";
-
-            Navigation.NavigateTo(target, replace: true);
-
+            Navigation.NavigateTo(QueryProjectId is long id ? $"/render-jobs?projectId={id}" : "/render-jobs", replace:true);
             return;
-
         }
-
-        var incomingProjectId = ProjectId ?? QueryProjectId;
-
-        if (!_viewParametersInitialized || incomingProjectId != _lastIncomingProjectId || JobId != _lastIncomingJobId)
-
+        var incoming = ProjectId ?? QueryProjectId;
+        if (_viewParametersInitialized && incoming == _lastIncomingProjectId && JobId == _lastIncomingJobId) return;
+        _viewParametersInitialized = true;
+        _lastIncomingProjectId = incoming;
+        _lastIncomingJobId = JobId;
+        var revision = ++_bootstrapRevision;
+        _projectDialogOpen = true; // Child shell exists before its first asynchronous request.
+        _initialLoading = true;
+        _supplementalReady = false;
+        _bootstrapError = null;
+        var previousKey = ViewKey;
+        _projectId = incoming;
+        _jobId = JobId;
+        if (previousKey != ViewKey)
         {
-
-            _viewParametersInitialized = true;
-            _lastIncomingProjectId = incomingProjectId;
-            _lastIncomingJobId = JobId;
-            if (incomingProjectId != _projectId)
-
-            {
-
-                ResetInfoState();
-
-            }
-
-            try
-
-            {
-
-                _loadWarning = null;
-
-                _jobId = JobId;
-
-                _projectId = incomingProjectId;
-
-                _sceneDrafts.Clear();
-
-                _imageVersions.Clear();
-
-                _videoVersions.Clear();
-
-                _audioVersions.Clear();
-
-                if (AuthState.CurrentUser is not null)
-
-                {
-
-                    _projectDialogOpen = true;
-
-                    if (_projectId is null && _jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
-
-                    {
-
-                        try
-
-                        {
-
-                            var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
-
-                            _projectId = view?.Project.Id ?? _projectId;
-
-                        if (view is not null)
-
-                        {
-
-                            ServiceId = view.CoreJob.ServiceId;
-
-                            ServiceCode = view.CoreJob.ServiceCode;
-
-                            ApplyServiceJobDefaultsIfNeeded();
-
-                        }
-
-                        }
-
-                        catch (Exception ex)
-
-                        {
-
-                            Logger.LogWarning(ex, "RVIDEO_PARAMETER_JOB_RESOLVE_FAILED jobId={JobId}", _jobId);
-
-                            _loadWarning = "Không thể tải đủ metadata job. Đang hiển thị phần project đã có.";
-
-                        }
-
-                    }
-
-                    if (_projectId is null)
-
-                    {
-
-                        _project = null;
-
-                        _prompt = string.Empty;
-
-                        _aspectRatio = string.Empty;
-
-                        _resolution = string.Empty;
-
-                        StopPolling();
-
-                    }
-                    else
-                    {
-
-                        await ReloadAsync();
-
-                        await StartPolling();
-
-                    }
-
-                    RequestViewRestore();
-
-                }
-
-            }
-
-            catch (Exception ex)
-
-            {
-
-                Logger.LogError(ex, "RVIDEO_PARAMETERS_BOOTSTRAP_FAILED jobId={JobId} projectId={ProjectId}", JobId, incomingProjectId);
-
-                _loadWarning = "Không thể hoàn tất tải lại dữ liệu RVIDEO. Vui lòng thử refresh.";
-
-                _projectDialogOpen = true;
-
-            }
-
+            RequestViewRestore();
+            ResetInfoState();
+            _sceneDrafts.Clear(); _imageVersions.Clear(); _videoVersions.Clear(); _audioVersions.Clear();
+            _sceneVideoUiStates.Clear(); _pendingVideoOperations.Clear();
         }
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            if (AuthState.CurrentUser is not { } user) throw new InvalidOperationException("Phiên đăng nhập chưa sẵn sàng.");
+            if (_projectId is null && _jobId is Guid job)
+            {
+                var view = await RVideoJobs.GetByJobIdAsync(job, user).WaitAsync(TimeSpan.FromSeconds(20));
+                if (revision != _bootstrapRevision) return;
+                _projectId = view?.Project.Id;
+                if (view is not null) { ServiceId = view.CoreJob.ServiceId; ServiceCode = view.CoreJob.ServiceCode; }
+                _project = view?.Project;
+            }
+            else if (_projectId is long projectId)
+            {
+                var loaded = InitialProject?.Id == projectId ? InitialProject
+                    : await VideoRepo.GetProjectAsync(projectId, user).WaitAsync(TimeSpan.FromSeconds(20));
+                if (revision != _bootstrapRevision) return;
+                _project = loaded;
+            }
+            if (revision != _bootstrapRevision) return;
+            if (_projectId is not null && _project is null) throw new InvalidOperationException("Không tìm thấy project.");
+            if (_project is not null)
+            {
+                _prompt = _project.OriginalPrompt;
+                _thinkScenes = _project.ThinkScenes;
+                _totalSeconds = _project.TotalSeconds;
+                _sceneSeconds = _project.SceneSeconds;
+                _promptParseResult = PromptParser.Parse(_prompt);
+                ApplyVideoSettingsFromPrompt();
+                ReconcileSceneDrafts();
+                RebuildSceneEventState();
+                await TimedBootstrapStepAsync("critical_selected_video", LoadSceneVideoUiStatesAsync);
+                if (revision != _bootstrapRevision) return;
+            }
+            _initialLoading = false;
+            _supplementalPending = true;
+            Logger.LogInformation("RVIDEO_CHILD_CRITICAL_READY projectId={ProjectId} durationMs={DurationMs} reusedParent={Reused}", _projectId, watch.ElapsedMilliseconds, ReferenceEquals(_project, InitialProject));
+        }
+        catch (Exception ex)
+        {
+            if (revision != _bootstrapRevision) return;
+            _bootstrapError = "Không thể tải dữ liệu project. Vui lòng thử tải lại.";
+            Logger.LogWarning(ex, "RVIDEO_CHILD_CRITICAL_FAILED durationMs={DurationMs}", watch.ElapsedMilliseconds);
+        }
+        finally { if (revision == _bootstrapRevision) _initialLoading = false; }
+    }
 
-        ApplyServiceJobDefaultsIfNeeded();
+    private async Task RetryChildBootstrapAsync()
+    {
+        _viewParametersInitialized = false;
+        await OnParametersSetAsync();
+    }
 
+    private async Task LoadSupplementalAsync()
+    {
+        if (_supplementalLoading) return;
+        _supplementalPending = false;
+        _supplementalLoading = true;
+        var revision = _bootstrapRevision;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            await TimedBootstrapStepAsync("core_catalog", async () => { _coreServices = await CoreCatalog.ListAsync(); });
+            await TimedBootstrapStepAsync("characters", LoadCharactersAsync);
+            await TimedBootstrapStepAsync("audio_catalogs", LoadAudioCatalogsAsync);
+            if (revision != _bootstrapRevision) return;
+            await TimedBootstrapStepAsync("supplemental_project", () => FullLoadAsync(false));
+            if (revision != _bootstrapRevision) return;
+            _supplementalReady = true;
+            await StartPolling();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVIDEO_CHILD_SUPPLEMENTAL_FAILED projectId={ProjectId}", _projectId);
+            _loadWarning = "Một phần dữ liệu bổ sung chưa tải được. Vui lòng thử tải lại.";
+        }
+        finally
+        {
+            _supplementalLoading = false;
+            Logger.LogInformation("RVIDEO_CHILD_SUPPLEMENTAL_DURATION projectId={ProjectId} durationMs={DurationMs}", _projectId, watch.ElapsedMilliseconds);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task TimedBootstrapStepAsync(string step, Func<Task> load)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try { await load().WaitAsync(TimeSpan.FromSeconds(30)); }
+        finally { Logger.LogInformation("RVIDEO_CHILD_LOAD_STEP step={Step} durationMs={DurationMs}", step, watch.ElapsedMilliseconds); }
     }
 
     public void Dispose()
@@ -3272,8 +3154,9 @@ else
     }
 
     // Full load for opening/explicit refresh and structural/editor operations; never used by the polling loop.
-    private async Task ReloadAsync()
+    private Task ReloadAsync() => FullLoadAsync(true);
 
+    private async Task FullLoadAsync(bool refreshProject)
     {
 
         if (_projectId is null) return;
@@ -3284,7 +3167,8 @@ else
 
         // already reloading, skip this call instead of queueing (the next poll will catch the new state).
 
-        if (!await _reloadLock.WaitAsync(0))
+        if (!refreshProject) await _reloadLock.WaitAsync();
+        else if (!await _reloadLock.WaitAsync(0))
 
         {
 
@@ -3301,7 +3185,7 @@ else
             {
 
                 var requestedProject = _projectId.Value;
-                var loaded = await VideoRepo.GetProjectAsync(requestedProject, AuthState.CurrentUser);
+                var loaded = refreshProject ? await VideoRepo.GetProjectAsync(requestedProject, AuthState.CurrentUser) : _project;
                 if (_projectId != requestedProject) return;
                 if (loaded is not null) _project = loaded;
 
@@ -3409,7 +3293,7 @@ else
 
                 await LoadSceneImageVersionsForStateAsync(_project.Scenes);
 
-                await LoadSceneVideoVersionsForStateAsync(_project.Scenes);
+                await TimedBootstrapStepAsync("scene_video_versions", () => LoadSceneVideoVersionsForStateAsync(_project.Scenes));
 
                 await LoadSceneAudioVersionsForStateAsync(_project.Scenes);
 
@@ -5200,6 +5084,9 @@ else
     {
 
         await base.OnAfterRenderAsync(firstRender);
+        if (_supplementalPending && !_initialLoading && _bootstrapError is null)
+            _ = LoadSupplementalAsync();
+
         if (_projectDialogOpen && _project is not null && _project.Id == _projectId && ViewKey is { } viewKey)
         {
             try

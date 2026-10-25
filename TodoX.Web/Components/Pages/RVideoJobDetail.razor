@@ -42,6 +42,7 @@
             <RenderVideoJobs Embedded="true"
                              JobId="@JobId"
                              ProjectId="@_view.Project.Id"
+                             InitialProject="@_view.Project"
                              ServiceId="@_view.CoreJob.ServiceId"
                              ServiceCode="@_view.CoreJob.ServiceCode" />
         }
@@ -175,6 +176,7 @@
         Logger.LogInformation("RVIDEO_DETAIL_LOAD_START jobId={JobId}", JobId);
         CancellationTokenSource? timeout = null;
         var requestedJob = JobId;
+        var loadWatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             timeout = new CancellationTokenSource(LoadTimeout);
@@ -214,6 +216,7 @@
         }
         finally
         {
+            Logger.LogInformation("RVIDEO_PARENT_BOOTSTRAP_DURATION jobId={JobId} durationMs={DurationMs} state={State}", requestedJob, loadWatch.ElapsedMilliseconds, _bootstrapState);
             timeout?.Dispose();
             _loadInProgress = false;
             if (!_disposed && JobId != requestedJob) _ = InvokeAsync(LoadJobAsync);
