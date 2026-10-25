@@ -395,13 +395,63 @@ public sealed class SceneVideoSubmitCoordinator
 
     internal const string SceneSubmitBlockReasonSql =
             """
+            -- FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-SUPERSEDE-PRESUBMIT-001.
+            -- Direct acknowledgement names only one old job. Earlier attempts may remain unknown at
+            -- the provider, but cannot hold an explicitly ACTIVATED, independently owned generation.
+            -- Prove that boundary before excluding history; absence of a head or PREPARED alone is insufficient.
+            WITH activated_generation AS (
+                SELECT h.tenant_id,h.project_id,h.scene_id,h.generation,h.active_render_job_id,
+                       current_version.version_number
+                FROM video_render.scene_video_operation_heads h
+                JOIN video_render.scene_video_operation_transitions x
+                  ON x.tenant_id=h.tenant_id AND x.project_id=h.project_id AND x.scene_id=h.scene_id
+                  AND x.proposed_generation=h.generation AND x.new_job_id=h.active_render_job_id
+                  AND x.new_version_id=h.active_video_version_id
+                  AND x.transition_state='ACTIVATED' AND x.activated_at IS NOT NULL
+                JOIN render.render_jobs current_job
+                  ON current_job.tenant_id=h.tenant_id AND current_job.id=h.active_render_job_id
+                  AND current_job.job_type='render_scene_video'
+                  AND COALESCE(current_job.input_json->>'projectId',current_job.input_json->>'project_id')=h.project_id::text
+                  AND COALESCE(current_job.input_json->>'sceneId',current_job.input_json->>'scene_id')=h.scene_id::text
+                  AND current_job.input_json->>'operationGeneration'=h.generation::text
+                  AND current_job.input_json->>'logicalRequestId'=x.new_logical_request_id
+                JOIN video_render.scene_video_versions current_version
+                  ON current_version.tenant_id=h.tenant_id AND current_version.id=h.active_video_version_id
+                  AND current_version.render_job_id=h.active_render_job_id
+                  AND current_version.project_id=h.project_id AND current_version.scene_id=h.scene_id
+                  AND current_version.logical_request_id=x.new_logical_request_id
+                WHERE h.tenant_id=@tenant AND h.scene_id=@sceneId AND h.generation>0
+                  AND (@jobId='00000000-0000-0000-0000-000000000000'::uuid OR h.active_render_job_id=@jobId)
+            ), earlier_operations AS (
+                SELECT prior.id AS job_id,v.id AS version_id,v.logical_request_id
+                FROM activated_generation g
+                JOIN render.render_jobs prior ON prior.tenant_id=g.tenant_id AND prior.id<>g.active_render_job_id
+                  AND prior.job_type='render_scene_video'
+                  AND COALESCE(prior.input_json->>'projectId',prior.input_json->>'project_id')=g.project_id::text
+                  AND COALESCE(prior.input_json->>'sceneId',prior.input_json->>'scene_id')=g.scene_id::text
+                JOIN video_render.scene_video_versions v ON v.tenant_id=g.tenant_id AND v.render_job_id=prior.id
+                  AND v.project_id=g.project_id AND v.scene_id=g.scene_id AND v.version_number<g.version_number
+                WHERE CASE WHEN prior.input_json->>'operationGeneration' IS NULL THEN true
+                    WHEN prior.input_json->>'operationGeneration' ~ '^[0-9]+$'
+                      THEN (prior.input_json->>'operationGeneration')::numeric<g.generation ELSE false END
+                  AND CASE WHEN v.render_config_json->>'operationGeneration' IS NULL THEN true
+                    WHEN v.render_config_json->>'operationGeneration' ~ '^[0-9]+$'
+                      THEN (v.render_config_json->>'operationGeneration')::numeric<g.generation ELSE false END
+                  AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_versions other
+                    WHERE other.tenant_id=g.tenant_id AND other.render_job_id=prior.id
+                      AND (other.project_id<>g.project_id OR other.scene_id<>g.scene_id
+                        OR other.version_number>=g.version_number))
+            )
             SELECT CASE
                 WHEN @jobId <> '00000000-0000-0000-0000-000000000000'::uuid
                   AND NOT video_render.scene_video_job_is_current(@tenant,@jobId) THEN 2
                 WHEN EXISTS (SELECT 1 FROM render.scene_video_submit_intents i
                     JOIN render.render_jobs prior ON prior.id=i.render_job_id AND prior.tenant_id=i.tenant_id
                     WHERE i.tenant_id=@tenant AND i.scene_id=@sceneId
-                      AND NOT (i.render_job_id<>@jobId AND video_render.scene_video_job_is_superseded(i.tenant_id,i.render_job_id))
+                      AND NOT (i.render_job_id<>@jobId AND (
+                        video_render.scene_video_job_is_superseded(i.tenant_id,i.render_job_id)
+                        OR EXISTS(SELECT 1 FROM earlier_operations e WHERE e.job_id=i.render_job_id
+                          AND e.logical_request_id=i.logical_request_id)))
                       AND (
                             -- This job's own intent is always authoritative: it protects the double-click,
                             -- the automatic retry and any in-flight/ambiguous submit from being resent.
@@ -457,6 +507,7 @@ public sealed class SceneVideoSubmitCoordinator
                 WHEN EXISTS (SELECT 1 FROM render.render_jobs j
                     WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
                       AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
+                      AND NOT EXISTS(SELECT 1 FROM earlier_operations e WHERE e.job_id=j.id)
                       AND COALESCE(j.input_json->>'sceneId', j.input_json->>'scene_id')=@sceneText
                       -- A manual-review marker only holds the scene while its own job is still open.
                       -- Every other manual-review gate in the application reads the marker this way
@@ -484,6 +535,7 @@ public sealed class SceneVideoSubmitCoordinator
                 WHEN EXISTS (SELECT 1 FROM video_render.scene_video_versions v
                     WHERE v.tenant_id=@tenant AND v.scene_id=@sceneId
                       AND NOT video_render.scene_video_job_is_superseded(v.tenant_id,v.render_job_id)
+                      AND NOT EXISTS(SELECT 1 FROM earlier_operations e WHERE e.version_id=v.id)
                       AND ((v.status NOT IN ('completed', 'failed') AND
                             (NULLIF(btrim(v.provider_task_id), '') IS NOT NULL
                              OR NULLIF(btrim(v.provider_video_id_base), '') IS NOT NULL))

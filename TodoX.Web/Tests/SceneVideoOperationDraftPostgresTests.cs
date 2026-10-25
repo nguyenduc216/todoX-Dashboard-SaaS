@@ -33,6 +33,227 @@ public sealed class SupersedePostgresTheoryAttribute : TheoryAttribute
 public sealed class SceneVideoOperationDraftPostgresTests
 {
     [SupersedePostgresTheory]
+    [InlineData(865, 1, false)]
+    [InlineData(865, 2, false)]
+    [InlineData(865, 3, false)]
+    [InlineData(866, 1, false)]
+    [InlineData(866, 2, false)]
+    [InlineData(866, 3, false)]
+    [InlineData(869, 1, false)]
+    [InlineData(869, 2, false)]
+    [InlineData(869, 3, false)]
+    [InlineData(869, 1, true)]
+    public async Task ActivatedGenerationIgnoresOnlyProvenEarlierAttempts(long sceneId, int clause, bool failedGenerationOne)
+    {
+        var cs = Environment.GetEnvironmentVariable("TODOX_SUPERSEDE_TEST_DB")!;
+        ValidateIsolatedConnection(cs);
+        await using var conn = new NpgsqlConnection(cs);
+        await conn.OpenAsync();
+        Assert.Equal(0, await conn.ExecuteScalarAsync<int>("SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN('pg_catalog','information_schema');"));
+        var owned = false;
+        try
+        {
+            await conn.ExecuteAsync(FixtureSql);
+            owned = true;
+            await conn.ExecuteAsync(await File.ReadAllTextAsync(MigrationPath("scene-video-operation-v1-forward.sql")));
+            var tenant = Guid.NewGuid();
+            var actor = SceneVideoOperationDraftTests.Actor(); actor.IsRoot = true;
+            var earlierJob = Guid.NewGuid(); var earlierVersion = Guid.NewGuid();
+            var acknowledgedJob = Guid.NewGuid(); var acknowledgedVersion = Guid.NewGuid(); var source = Guid.NewGuid();
+            var historyTask = "bfba895dc188b468";
+            // Clause 1 reproduces the reported failed CONFIRMED_PROVIDER_TASK ancestor, not the
+            // directly acknowledged old job. Clauses 2/3 separately exercise job/version holds.
+            await conn.ExecuteAsync("""
+                INSERT INTO video_render.video_projects(id,tenant_id,user_id,status) VALUES(196,@tenant,@actor,'rendering');
+                INSERT INTO video_render.video_project_scenes(id,project_id,tenant_id,status) VALUES(@scene,196,@tenant,'failed');
+                INSERT INTO video_render.scene_image_versions VALUES(@source,196,@scene,@tenant,'completed');
+                INSERT INTO render.render_jobs(id,tenant_id,user_id,job_type,status,input_json,provider_task_id,created_at)
+                VALUES(@acknowledgedJob,@tenant,@actor,'render_scene_video','failed',
+                    jsonb_build_object('projectId',196,'sceneId',@scene),NULL,now()-interval '1 minute');
+                INSERT INTO video_render.scene_video_versions(id,project_id,scene_id,tenant_id,version_number,logical_request_id,render_job_id,status,provider_task_id)
+                VALUES(@acknowledgedVersion,196,@scene,@tenant,10,'acknowledged-operation',@acknowledgedJob,'failed',NULL);
+                INSERT INTO billing_fixture VALUES(100);
+                """, new { tenant, actor = actor.UserId, scene = sceneId, source, acknowledgedJob, acknowledgedVersion });
+            async Task SeedEarlierAsync()
+            {
+                await conn.ExecuteAsync("""
+                    INSERT INTO render.render_jobs(id,tenant_id,user_id,job_type,status,input_json,provider_task_id,created_at)
+                    VALUES(@earlierJob,@tenant,@actor,'render_scene_video',@jobStatus,
+                        jsonb_build_object('projectId',196,'sceneId',@scene),@historyTask,now()-interval '2 minutes');
+                    INSERT INTO video_render.scene_video_versions(id,project_id,scene_id,tenant_id,version_number,logical_request_id,render_job_id,status,provider_task_id)
+                    VALUES(@earlierVersion,196,@scene,@tenant,1,'earlier-operation',@earlierJob,@versionStatus,@historyTask);
+                    """, new { tenant, actor = actor.UserId, scene = sceneId, earlierJob, earlierVersion, historyTask,
+                        jobStatus = clause == 2 ? "rendering" : "failed", versionStatus = clause == 3 ? "pending_reconciliation" : "failed" });
+                if (clause == 1)
+                    await conn.ExecuteAsync("""
+                        INSERT INTO render.scene_video_submit_intents(tenant_id,scene_id,logical_request_id,render_job_id,owner_token,submit_state,provider_task_id)
+                        VALUES(@tenant,@scene,'earlier-operation',@earlierJob,@token,'CONFIRMED_PROVIDER_TASK',@historyTask);
+                        """, new { tenant, scene = sceneId, earlierJob, token = Guid.NewGuid(), historyTask });
+            }
+            // The reported failed ancestor is present before preparation. Defensive job/version
+            // cases import already-activated history; Prepare correctly refuses such live competitors.
+            if (clause == 1) await SeedEarlierAsync();
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                { ["ConnectionStrings:TodoXSaaS"] = cs, ["TodoX:TenantId"] = tenant.ToString() }).Build();
+            var factory = new TodoXConnectionFactory(config);
+            var coordinator = new SceneVideoSubmitCoordinator(factory, new TenantContext(factory, config));
+            var operations = new SceneVideoOperationDraftService(factory, new TenantContext(factory, config));
+            if (clause == 1)
+            {
+                var initialGuard = await coordinator.ClaimSubmitAsync(196, sceneId, "acknowledged-operation", acknowledgedJob);
+                Assert.Equal(SceneVideoSubmitBlockReason.ExistingIntentUnresolved, initialGuard.BlockReason);
+            }
+            var ack = (await operations.ReadAcknowledgementAsync(196, sceneId, actor, Guid.NewGuid())) with { RiskAcknowledged = true };
+            Assert.Equal(acknowledgedJob, ack.OldJobId);
+            SceneVideoRenderWorkItemInput Input() => new()
+                { ProjectId = 196, SceneId = sceneId, SelectedSourceImageVersionId = source,
+                    VideoPrompt = "video", ImagePrompt = "image", ProviderCode = "fake", ModelName = "fake-model" };
+            // Even an unacknowledged legacy send owns the same physical scene lease: preparation
+            // cannot establish a new generation while that HTTP boundary is still in flight.
+            Task<SceneVideoOperationDraft> preparation;
+            if (sceneId == 869 && clause == 1 && !failedGenerationOne)
+            {
+                using var lease = await coordinator.AcquireSubmitFenceAsync(earlierJob, CancellationToken.None);
+                preparation = operations.PrepareAsync(ack, actor, Input());
+                var deadline = DateTime.UtcNow.AddSeconds(3);
+                var waiting = false;
+                while (DateTime.UtcNow < deadline && !preparation.IsCompleted)
+                {
+                    waiting = await conn.ExecuteScalarAsync<bool>("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()));");
+                    if (waiting) break;
+                    await Task.Delay(20);
+                }
+                Assert.True(waiting); Assert.False(preparation.IsCompleted);
+            }
+            else preparation = operations.PrepareAsync(ack, actor, Input());
+            var draft = await preparation;
+            // PREPARED / generation zero must not waive an unresolved earlier operation.
+            if (clause == 1)
+            {
+                var preparedGuard = await coordinator.ClaimSubmitAsync(196, sceneId, "acknowledged-operation", acknowledgedJob);
+                Assert.Equal(SceneVideoSubmitBlockReason.ExistingIntentUnresolved, preparedGuard.BlockReason);
+            }
+            await operations.ActivateAsync(ack, actor, draft.TransitionId);
+            if (clause != 1) await SeedEarlierAsync();
+            var history = await conn.ExecuteScalarAsync<string>("""
+                SELECT jsonb_build_object('jobs',(SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) FROM render.render_jobs j WHERE j.id IN(@earlierJob,@acknowledgedJob)),
+                    'versions',(SELECT jsonb_agg(to_jsonb(v) ORDER BY v.id) FROM video_render.scene_video_versions v WHERE v.id IN(@earlierVersion,@acknowledgedVersion)),
+                    'intents',(SELECT jsonb_agg(to_jsonb(i) ORDER BY i.owner_token) FROM render.scene_video_submit_intents i WHERE i.render_job_id=@earlierJob))::text;
+                """, new { earlierJob, acknowledgedJob, earlierVersion, acknowledgedVersion });
+            Assert.False(await conn.ExecuteScalarAsync<bool>("SELECT video_render.scene_video_job_is_superseded(@tenant,@earlierJob);", new { tenant, earlierJob }));
+            Assert.True(await conn.ExecuteScalarAsync<bool>("SELECT video_render.scene_video_job_is_superseded(@tenant,@acknowledgedJob);", new { tenant, acknowledgedJob }));
+            Assert.Equal(0, await conn.ExecuteScalarAsync<int>("SELECT count(*) FROM render.scene_video_submit_intents WHERE render_job_id=@job;", new { job = draft.JobId }));
+            var jobs = new RenderJobService(factory, new TenantContext(factory, config), config, NullLogger<RenderJobService>.Instance);
+            var worker = await jobs.ClaimNextByJobTypeAsync("generation-probe", TimeSpan.FromMinutes(1), new[] { RenderJobTypes.RenderSceneVideo });
+            Assert.NotNull(worker); Assert.Equal(draft.JobId, worker.Id);
+            await jobs.MarkSceneVideoClaimRenderingAsync(worker, "generation-probe");
+            await jobs.VerifySceneVideoSubmitClaimAsync(worker, draft.VersionId, draft.LogicalRequestId);
+            if (failedGenerationOne)
+            {
+                // Model the already-failed, never-submitted generation through the normal worker APIs.
+                var failedDraft = draft;
+                using (SceneVideoOperationScope.Enter(draft.JobId))
+                {
+                    await new SceneMediaVersioningService(factory, new TenantContext(factory, config), config)
+                        .FailSceneVideoVersionAsync(draft.VersionId, SceneVideoSubmitGuard.ErrorCodeGuardRejected, "ExistingIntentUnresolved");
+                    await jobs.MarkStatusAsync(draft.JobId, "failed", errorCode: SceneVideoSubmitGuard.ErrorCodeGuardRejected);
+                }
+                var failedSnapshot = await conn.ExecuteScalarAsync<string>("SELECT to_jsonb(j)::text FROM render.render_jobs j WHERE id=@id;", new { id = draft.JobId });
+                var freshAck = (await operations.ReadAcknowledgementAsync(196, sceneId, actor, Guid.NewGuid())) with { RiskAcknowledged = true };
+                Assert.Equal(draft.JobId, freshAck.OldJobId);
+                draft = await operations.PrepareAsync(freshAck, actor, Input());
+                await operations.ActivateAsync(freshAck, actor, draft.TransitionId);
+                Assert.Equal(2, draft.ProposedGeneration);
+                Assert.NotEqual(failedDraft.JobId, draft.JobId);
+                Assert.NotEqual(failedDraft.LogicalRequestId, draft.LogicalRequestId);
+                Assert.Equal(0, await conn.ExecuteScalarAsync<int>("SELECT count(*) FROM render.scene_video_submit_intents WHERE render_job_id=@id;", new { id = failedDraft.JobId }));
+                Assert.Equal(failedSnapshot, await conn.ExecuteScalarAsync<string>("SELECT to_jsonb(j)::text FROM render.render_jobs j WHERE id=@id;", new { id = failedDraft.JobId }));
+                worker = await jobs.ClaimNextByJobTypeAsync("generation-probe", TimeSpan.FromMinutes(1), new[] { RenderJobTypes.RenderSceneVideo });
+                Assert.NotNull(worker); Assert.Equal(draft.JobId, worker.Id);
+                await jobs.MarkSceneVideoClaimRenderingAsync(worker, "generation-probe");
+                await jobs.VerifySceneVideoSubmitClaimAsync(worker, draft.VersionId, draft.LogicalRequestId);
+            }
+            var ui = await new SceneMediaVersioningService(factory, new TenantContext(factory, config), config)
+                .GetSceneVideoUiStateAsync(sceneId, actor);
+            Assert.Equal(draft.JobId, ui.LatestJob?.Id);
+            Assert.Equal(SceneVideoSubmitBlockReason.None, ui.SubmitBlockReason);
+
+            // A head alone must not waive history when its activation proof is incomplete.
+            var activatedAt = await conn.ExecuteScalarAsync<DateTime>("SELECT activated_at FROM video_render.scene_video_operation_transitions WHERE id=@id;", new { id = draft.TransitionId });
+            await conn.ExecuteAsync("UPDATE video_render.scene_video_operation_transitions SET activated_at=NULL WHERE id=@id;", new { id = draft.TransitionId });
+            var unproven = await coordinator.ClaimSubmitAsync(196, sceneId, draft.LogicalRequestId, draft.JobId);
+            Assert.Equal((SceneVideoSubmitBlockReason)clause, unproven.BlockReason);
+            await conn.ExecuteAsync("UPDATE video_render.scene_video_operation_transitions SET activated_at=@activatedAt WHERE id=@id;", new { id = draft.TransitionId, activatedAt });
+
+            // Unknown ownership and same/future/malformed generations still hold the scene.
+            foreach (var generation in new[] { draft.ProposedGeneration.ToString(), (draft.ProposedGeneration + 1).ToString(), "invalid", null })
+            {
+                var extraJob = Guid.NewGuid(); var extraVersion = Guid.NewGuid();
+                await conn.ExecuteAsync("""
+                    INSERT INTO render.render_jobs(id,tenant_id,job_type,status,input_json,provider_task_id)
+                    VALUES(@extraJob,@tenant,'render_scene_video','failed',
+                        jsonb_build_object('projectId',196,'sceneId',@scene,'operationGeneration',@generation::text),'unresolved-task');
+                    INSERT INTO render.scene_video_submit_intents(tenant_id,scene_id,logical_request_id,render_job_id,owner_token,submit_state,provider_task_id)
+                    VALUES(@tenant,@scene,'unproven-attempt',@extraJob,@token,'CONFIRMED_PROVIDER_TASK','unresolved-task');
+                    """, new { tenant, scene = sceneId, extraJob, generation, token = Guid.NewGuid() });
+                if (generation is not null)
+                    await conn.ExecuteAsync("""
+                        INSERT INTO video_render.scene_video_versions(id,project_id,scene_id,tenant_id,version_number,logical_request_id,render_job_id,status)
+                        VALUES(@extraVersion,196,@scene,@tenant,5,'unproven-attempt',@extraJob,'failed');
+                        """, new { tenant, scene = sceneId, extraJob, extraVersion });
+                var refusal = await coordinator.ClaimSubmitAsync(196, sceneId, draft.LogicalRequestId, draft.JobId);
+                Assert.Equal(SceneVideoSubmitBlockReason.ExistingIntentUnresolved, refusal.BlockReason);
+                await conn.ExecuteAsync("""
+                    DELETE FROM render.scene_video_submit_intents WHERE render_job_id=@extraJob;
+                    DELETE FROM video_render.scene_video_versions WHERE id=@extraVersion;
+                    DELETE FROM render.render_jobs WHERE id=@extraJob;
+                    """, new { extraJob, extraVersion });
+            }
+            // Even a known earlier job cannot waive an intent with no matching immutable version identity.
+            await conn.ExecuteAsync("""
+                INSERT INTO render.scene_video_submit_intents(tenant_id,scene_id,logical_request_id,render_job_id,owner_token,submit_state)
+                VALUES(@tenant,@scene,'unmatched-logical',@earlierJob,@token,'AMBIGUOUS_SUBMIT');
+                """, new { tenant, scene = sceneId, earlierJob, token = Guid.NewGuid() });
+            Assert.Equal(SceneVideoSubmitBlockReason.ExistingIntentUnresolved,
+                (await coordinator.ClaimSubmitAsync(196, sceneId, draft.LogicalRequestId, draft.JobId)).BlockReason);
+            await conn.ExecuteAsync("DELETE FROM render.scene_video_submit_intents WHERE tenant_id=@tenant AND scene_id=@scene AND logical_request_id='unmatched-logical';", new { tenant, scene = sceneId });
+            await coordinator.AssertJobMaySubmitAsync(draft.JobId, null, CancellationToken.None);
+            var claims = await Task.WhenAll(
+                coordinator.ClaimSubmitAsync(196, sceneId, draft.LogicalRequestId, draft.JobId),
+                coordinator.ClaimSubmitAsync(196, sceneId, draft.LogicalRequestId, draft.JobId));
+            var claim = Assert.Single(claims, result => result.Outcome == SceneVideoSubmitClaimOutcome.Claimed);
+            Assert.Single(claims, result => result.Outcome == SceneVideoSubmitClaimOutcome.Blocked);
+            Assert.Equal(SceneVideoSubmitBlockReason.None, claim.BlockReason);
+            Assert.Equal(1, await conn.ExecuteScalarAsync<int>("SELECT count(*) FROM render.scene_video_submit_intents WHERE render_job_id=@id;", new { id = draft.JobId }));
+            var duplicate = await coordinator.ClaimSubmitAsync(196, sceneId, draft.LogicalRequestId, draft.JobId);
+            Assert.Equal(SceneVideoSubmitClaimOutcome.Blocked, duplicate.Outcome);
+            Assert.Equal(SceneVideoSubmitBlockReason.ExistingIntentUnresolved, duplicate.BlockReason);
+            var begin = await Task.WhenAll(coordinator.BeginSubmitAsync(claim.OwnerToken!.Value), coordinator.BeginSubmitAsync(claim.OwnerToken.Value));
+            Assert.Single(begin, result => result);
+            using (await coordinator.AcquireSubmitFenceAsync(draft.JobId, CancellationToken.None))
+            {
+                await coordinator.AssertJobMaySubmitAsync(draft.JobId, claim.OwnerToken, CancellationToken.None);
+                await Assert.ThrowsAsync<RenderJobPendingReconciliationException>(() => coordinator.AssertJobMaySubmitAsync(draft.JobId, Guid.NewGuid(), CancellationToken.None));
+            }
+            Assert.True(await coordinator.ConfirmSubmittedAsync(claim.OwnerToken.Value, "fake-current-task", "fake-current-base"));
+            await Assert.ThrowsAsync<RenderJobPendingReconciliationException>(() => coordinator.AssertJobMaySubmitAsync(draft.JobId, claim.OwnerToken, CancellationToken.None));
+            await Assert.ThrowsAsync<PostgresException>(() => coordinator.AcquireSubmitFenceAsync(earlierJob, CancellationToken.None));
+            await Assert.ThrowsAsync<RenderJobPendingReconciliationException>(() => coordinator.ClaimSubmitAsync(196, sceneId, "earlier-operation", earlierJob));
+            var afterHistory = await conn.ExecuteScalarAsync<string>("""
+                SELECT jsonb_build_object('jobs',(SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) FROM render.render_jobs j WHERE j.id IN(@earlierJob,@acknowledgedJob)),
+                    'versions',(SELECT jsonb_agg(to_jsonb(v) ORDER BY v.id) FROM video_render.scene_video_versions v WHERE v.id IN(@earlierVersion,@acknowledgedVersion)),
+                    'intents',(SELECT jsonb_agg(to_jsonb(i) ORDER BY i.owner_token) FROM render.scene_video_submit_intents i WHERE i.render_job_id=@earlierJob))::text;
+                """, new { earlierJob, acknowledgedJob, earlierVersion, acknowledgedVersion });
+            Assert.Equal(history, afterHistory);
+            Assert.Equal(100, await conn.ExecuteScalarAsync<int>("SELECT points FROM billing_fixture;"));
+        }
+        finally
+        {
+            if (owned) await conn.ExecuteAsync("ROLLBACK; DROP SCHEMA video_render CASCADE; DROP SCHEMA render CASCADE; DROP TABLE billing_fixture;");
+        }
+    }
+
+    [SupersedePostgresTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GenerationFencesAllowImageRerenderInitialVideoCompletionAndCurrentFinalMerge(bool pascalCase)
