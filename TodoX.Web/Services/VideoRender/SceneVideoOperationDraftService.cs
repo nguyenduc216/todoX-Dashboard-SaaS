@@ -236,6 +236,8 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
     public static object PreparedRenderConfig(SceneVideoRenderWorkItemInput input,long generation,Guid transitionId)
         => new { operationGeneration=generation,transitionId,attemptIndex=0,provider=input.ProviderCode,
             capability=input.CapabilityCode,model=input.ModelName,mode=input.RequestedMode,
+            aspectRatio=input.AspectRatio,selectedSourceImageVersionId=input.SelectedSourceImageVersionId,
+            customerPointRate=input.CustomerPointRate,strictRequestedSettings=input.StrictRequestedSettings,
             requestedModel=input.RequestedModelCode,requestedMode=input.RequestedMode,
             requestedDurationSeconds=input.DurationSeconds,providerDurationSeconds=input.DurationSeconds,
             requestedResolution=input.Resolution,providerResolution=input.Resolution.Trim().ToLowerInvariant() };

@@ -64,6 +64,7 @@ public sealed class SceneVideoRenderWorkItemInput
     public string? RequestedMode { get; set; }
     public int? RequestedDurationSeconds { get; set; }
     public bool ManualOverride { get; set; }
+    public bool StrictRequestedSettings { get; set; }
 }
 
 public enum VideoSceneImageInputMode
@@ -2436,7 +2437,9 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 continue;
             }
 
-            var providerDuration = ResolveProviderDuration(input.DurationSeconds, supportedDurations);
+            var providerDuration = input.StrictRequestedSettings
+                ? (supportedDurations.Contains(input.DurationSeconds) ? (int?)input.DurationSeconds : null)
+                : ResolveProviderDuration(input.DurationSeconds, supportedDurations);
             if (providerDuration is not int duration)
             {
                 diagnostics.Add(new FallbackCandidateDiagnostic(
@@ -2455,6 +2458,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             }
 
             var providerResolution = ResolveProviderResolution(input.Resolution, model.SupportedResolutions);
+            if (input.StrictRequestedSettings && !string.Equals(providerResolution, requestedResolution, StringComparison.OrdinalIgnoreCase))
+                continue;
             AddResolvedCandidate(resolved, candidateKeys, policy, duration, providerResolution);
             diagnostics.Add(new FallbackCandidateDiagnostic(
                 policy.AttemptIndex,
@@ -2497,6 +2502,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 string.IsNullOrWhiteSpace(requestedMode) ? null : requestedMode);
         }
 
+        // Explicit new operations must fail rather than silently switch the confirmed model/mode.
+        if (input.StrictRequestedSettings) return new[] { selected };
         return new[] { selected }
             .Concat(policies.Where(policy => !IsSamePolicy(policy, selected)))
             .ToList();

@@ -107,7 +107,7 @@ public sealed class SceneVideoSupersedeUiTests
         {
             var states=(Dictionary<long,SceneVideoUiState>)component.GetType().GetField(field,flags)!.GetValue(component)!;
             states[42]=state;
-            Assert.Equal(expected,component.GetType().GetMethod(method,flags)!.Invoke(component,[scene]));
+            Assert.Equal(component is RenderVideoJobs || expected,component.GetType().GetMethod(method,flags)!.Invoke(component,[scene]));
             Assert.Same(selected,states[42].SelectedVersion);
             Assert.True(selected.IsSelected);
         }
@@ -129,6 +129,74 @@ public sealed class SceneVideoSupersedeUiTests
         var legacy=new RenderVideoJobs();
         typeof(RenderVideoJobs).GetField("_sceneVideoModelOptions",flags)!.SetValue(legacy,new[]{first,option});
         Assert.Same(option,typeof(RenderVideoJobs).GetMethod("ResolveSceneVideoModelOption",flags)!.Invoke(legacy,[scene]));
+    }
+
+    [Fact]
+    public async Task ConsentFreezesPromptDurationAndModelWhileParentChanges()
+    {
+        var (component, action, dialog) = Create(false);
+        component.HideTrigger = true;
+        component.Scene.VideoPrompt = "confirmed prompt";
+        component.Scene.DurationSeconds = 4;
+        component.Scene.ScenePrompt = "confirmed metadata";
+        dialog.Answer = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = component.RunAsync();
+        component.Scene.VideoPrompt = "later edit";
+        component.Scene.DurationSeconds = 8;
+        component.Scene.ScenePrompt = "later metadata";
+        dialog.Answer.SetResult(true);
+        await run;
+        Assert.Equal("confirmed prompt", action.Request!.Scene.VideoPrompt);
+        Assert.Equal(4, action.Request.Scene.DurationSeconds);
+        Assert.Equal("confirmed metadata", action.Request.Scene.ScenePrompt);
+    }
+
+    [Fact]
+    public void DropdownEditsRemainDirtyAndPersistThroughMetadata()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var page = new RenderVideoJobs();
+        var option = new SceneVideoModelOption("provider|model|flash", "provider", "model", "flash", "model", [4,6]);
+        typeof(RenderVideoJobs).GetField("_sceneVideoModelOptions", flags)!.SetValue(page, new[] { option });
+        var scene = new VideoProjectSceneDto { Id=42, DurationSeconds=6 };
+        typeof(RenderVideoJobs).GetMethod("OnSceneVideoModelChanged", flags)!.Invoke(page, [scene, option.Key]);
+        typeof(RenderVideoJobs).GetMethod("OnSceneVideoDurationChanged", flags)!.Invoke(page, [scene, 4]);
+        var draft = typeof(RenderVideoJobs).GetMethod("GetSceneDraft", flags)!.Invoke(page, [scene])!;
+        Assert.True((bool)draft.GetType().GetProperty("IsDirty")!.GetValue(draft)!);
+        var metadata = (ScenePromptMetadata)typeof(RenderVideoJobs).GetMethod("BuildMetadata", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [draft])!;
+        Assert.Equal(option.Key, metadata.Extra["video_model"]);
+        Assert.Equal("4", metadata.Extra["video_duration"]);
+    }
+
+    [Fact]
+    public void StrictNewOperationHasOnlyTheConfirmedModelAndMode()
+    {
+        var policy = RVideoVideoModelPolicy.Models.Last();
+        var input = new SceneVideoRenderWorkItemInput { ProviderCode=policy.ProviderCode,
+            RequestedModelCode=policy.Model, RequestedMode=policy.Mode, ManualOverride=true, StrictRequestedSettings=true };
+        var policies = (IReadOnlyList<RVideoVideoModelPolicyEntry>)typeof(SceneVideoWorkerHandler)
+            .GetMethod("ResolveOrderedPolicies", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [input])!;
+        var selected = Assert.Single(policies);
+        Assert.Equal(policy.Model, selected.Model);
+        Assert.Equal(policy.Mode, selected.Mode);
+    }
+
+    [Theory]
+    [InlineData(4, "720p", 1)]
+    [InlineData(5, "720p", 0)]
+    [InlineData(4, "1080p", 0)]
+    public void StrictNewOperationNeverRoundsDurationOrResolution(int duration, string resolution, int expected)
+    {
+        var policy = RVideoVideoModelPolicy.Models.First();
+        var input = new SceneVideoRenderWorkItemInput { ProviderCode=policy.ProviderCode,
+            RequestedModelCode=policy.Model, RequestedMode=policy.Mode, ManualOverride=true,
+            StrictRequestedSettings=true, DurationSeconds=duration, Resolution=resolution };
+        var catalog = new[] { new AiProviderModelListItemDto {
+            ProviderCode=policy.ProviderCode, ProviderModelCode=policy.Model, MediaType="video", Enabled=true,
+            SupportedDurations=[4,6], SupportedResolutions=["720p"] } };
+        var candidates = (System.Collections.IEnumerable)typeof(SceneVideoWorkerHandler)
+            .GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [input,catalog])!;
+        Assert.Equal(expected, candidates.Cast<object>().Count());
     }
 
     private static (RVideoSupersedeButton Component, FakeAction Action, DialogProxy Dialog) Create(bool unknown)
@@ -165,13 +233,14 @@ public sealed class SceneVideoSupersedeUiTests
     {
         public int Acknowledgements,Submits; public bool CanStart=true,ThrowAfterSubmit;
         public Guid JobId = Guid.NewGuid();
+        public RVideoSceneVideoRenderRequest? Request;
         public SceneVideoSupersedeAcknowledgement? Acknowledgement;
         public Task<SceneVideoSupersedeAcknowledgement> GetSupersedeAcknowledgementAsync(long projectId,long sceneId,CurrentUserSession user,Guid key,CancellationToken ct=default)
         { Acknowledgements++; return Task.FromResult(SceneVideoOperationDraftTests.Ack() with {SceneId=sceneId,IdempotencyKey=key,RiskAcknowledged=false}); }
         public Task<RVideoSceneVideoRenderEstimate> EstimateAsync(RVideoSceneVideoRenderRequest request,CancellationToken ct=default)
             =>Task.FromResult(new RVideoSceneVideoRenderEstimate(1,8,100,92,0,CanStart));
         public Task<RVideoSceneVideoRenderResult> SupersedeAsync(RVideoSceneVideoRenderRequest request,SceneVideoSupersedeAcknowledgement acknowledgement,CurrentUserSession user,CancellationToken ct=default)
-        { Submits++; Acknowledgement=acknowledgement; if(ThrowAfterSubmit) throw new IOException("lost response"); return Task.FromResult(RVideoSceneVideoRenderResult.Ok(JobId)); }
+        { Submits++; Request=request; Acknowledgement=acknowledgement; if(ThrowAfterSubmit) throw new IOException("lost response"); return Task.FromResult(RVideoSceneVideoRenderResult.Ok(JobId)); }
         public Task<RVideoSceneVideoRenderResult> EnqueueRerenderAsync(RVideoSceneVideoRenderRequest request,CurrentUserSession user,CancellationToken ct=default)
             =>throw new InvalidOperationException("Explicit operation must not use legacy retry.");
     }

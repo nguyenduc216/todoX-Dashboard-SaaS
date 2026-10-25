@@ -249,6 +249,11 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         if(await service.TryResumeAsync(acknowledgement,user,ct) is Guid resumed) return RVideoSceneVideoRenderResult.Ok(resumed);
         var project = await _repo.GetProjectAsync(request.ProjectId, user, ct) ?? throw new UnauthorizedAccessException();
         var scene = project.Scenes.Single(s => s.Id == acknowledgement.SceneId);
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-SCENE-SETTINGS-001.
+        // Consent applies to this saved snapshot, never a concurrent edit made during the dialog.
+        if (scene.ScenePrompt != request.Scene.ScenePrompt || scene.VideoPrompt != request.Scene.VideoPrompt
+            || scene.DurationSeconds != request.Scene.DurationSeconds)
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_SETTINGS_CHANGED", "Cấu hình scene đã thay đổi. Vui lòng tải lại và xác nhận lượt video mới.");
         var report = await _eligibility.GetVideoRenderEligibilityAsync(project.Id, new[] { scene.Id }, ct);
         var decision = report.Results.Single(r => r.SceneId == scene.Id);
         if (decision.Status is VideoRenderEligibilityStatus.MissingImage or VideoRenderEligibilityStatus.InvalidPrompt)
@@ -256,8 +261,19 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         var estimate = await EstimateAsync(request with { Scene = scene, Metadata=ScenePromptMetadata.FromScene(scene) }, ct);
         if (!estimate.CanStart) return RVideoSceneVideoRenderResult.Fail("RVIDEO_ESTIMATE_UNAVAILABLE", "Chưa thể tạo lượt video mới.");
         var oldJob = await _jobs.GetAsync(acknowledgement.OldJobId, ct) ?? throw new InvalidOperationException("Acknowledged operation missing.");
-        var input = System.Text.Json.JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(oldJob.InputJson,
+        var previous = System.Text.Json.JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(oldJob.InputJson,
             new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? throw new InvalidOperationException("Operation snapshot invalid.");
+        // Reuse routing infrastructure only. Render choices and operation/billing identity are rebuilt.
+        var input = new SceneVideoRenderWorkItemInput
+        {
+            ProviderId = previous.ProviderId,
+            ProviderCode = previous.ProviderCode,
+            ProviderConfigJson = previous.ProviderConfigJson,
+            ProviderCapabilityId = previous.ProviderCapabilityId,
+            CapabilityCode = previous.CapabilityCode,
+            CapabilityConfigJson = previous.CapabilityConfigJson,
+            MaxPromptCharacters = previous.MaxPromptCharacters
+        };
         input.ProjectId = scene.ProjectId;
         input.SceneId = scene.Id;
         input.SceneIndex = scene.SceneIndex;
@@ -265,7 +281,11 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         var metadata = ScenePromptMetadata.FromScene(scene);
         var model = ResolveRequestedModel(metadata) ?? RVideoVideoModelPolicy.GetInitial().Model;
         var duration = scene.DurationSeconds;
-        if (metadata.Extra.TryGetValue("video_duration",out var durationText) && int.TryParse(durationText,out var chosenDuration)) duration=chosenDuration;
+        if (metadata.Extra.TryGetValue("video_duration", out var durationText))
+        {
+            if (!int.TryParse(durationText, out duration) || duration <= 0)
+                return RVideoSceneVideoRenderResult.Fail("RVIDEO_DURATION_INVALID", "Thời lượng video không hợp lệ.");
+        }
         var catalog = _models is null ? null : await _models.GetModelByCodeAsync(input.ProviderId,model,ct);
         if(catalog is null || !catalog.Enabled || !catalog.AllowUserSelect || catalog.IsDeprecated
             || !string.Equals(catalog.ProviderCode,input.ProviderCode,StringComparison.OrdinalIgnoreCase)
@@ -275,6 +295,7 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         input.ModelName=model;
         input.RequestedModelCode=model;
         input.ManualOverride=true;
+        input.StrictRequestedSettings=true;
         input.RequestedMode=ResolveRequestedMode(metadata) ?? RVideoVideoModelPolicy.Models.FirstOrDefault(p=>string.Equals(p.ProviderCode,input.ProviderCode,StringComparison.OrdinalIgnoreCase)
             && string.Equals(p.Model,model,StringComparison.OrdinalIgnoreCase))?.Mode;
         input.RequestedDurationSeconds=duration;
@@ -282,6 +303,7 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         input.AspectRatio=ResolveAspectRatio(request with { Metadata=metadata });
         input.Resolution=ResolveResolution(request with { Metadata=metadata }).Trim().ToLowerInvariant();
         if(!RVideoRules.SupportedAspectRatios.Contains(input.AspectRatio)
+            || (catalog.SupportedRatios.Count > 0 && !catalog.SupportedRatios.Contains(input.AspectRatio, StringComparer.OrdinalIgnoreCase))
             || !RVideoRules.SupportedResolutions.Contains(input.Resolution,StringComparer.OrdinalIgnoreCase)
             || (catalog.SupportedResolutions.Count>0 && !catalog.SupportedResolutions.Contains(input.Resolution,StringComparer.OrdinalIgnoreCase))
             || (!string.IsNullOrWhiteSpace(input.RequestedMode) && catalog.SupportedModes.Count>0 && !catalog.SupportedModes.Contains(input.RequestedMode,StringComparer.OrdinalIgnoreCase)))
@@ -308,6 +330,7 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         input.EstimatedUsd=null; input.TariffSnapshotJson=null; input.PricingRuleKey=null; input.CostSource=null;
         input.TrustedPayerContext = await _payers.BuildRVideoTrustedPayerContextAsync(project.Id, scene.Id, ct);
         input.CustomerPointRate = estimate.VideoRate;
+        input.EstimatedPoints = estimate.EstimatedPoints;
         var source = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
         if (!input.UseSharedReferenceImage)
         {

@@ -922,15 +922,29 @@ else
 
                                                 <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
 
-                                                    <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Luu scene</MudMenuItem>
-
-                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))" OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))" OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Tạo lại ảnh")</MudMenuItem>
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
 
                                                 <MudDivider />
+                                                    @if (string.IsNullOrWhiteSpace(ResolveDraftVideoUrl(scene, draft)))
+                                                    {
+                                                    <MudMenuItem Disabled="@(_busy || !CanCreateSceneVideo(scene, draft))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudMenuItem>
+                                                    }
+
+                                                    <MudMenuItem Disabled="@(_busy || !CanRetrySceneVideo(scene) || _sceneVideoRetrying.Contains(scene.Id))" OnClick="@(() => RetrySceneVideoAsync(scene))">Retry video</MudMenuItem>
+                                                    <MudMenuItem Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id) || (!NeedsExplicitVideoOperation(scene) && !CanRerenderSceneVideo(scene, draft)))" OnClick="@(() => RerenderSceneVideoAsync(scene))">Render lại video</MudMenuItem>
+                                                    @if (NeedsExplicitVideoOperation(scene))
+                                                    {
+                                                    <MudMenuItem Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id))" OnClick="@(() => RerenderSceneVideoAsync(scene))">Tạo lượt video mới</MudMenuItem>
+                                                    }
+                                                    <MudMenuItem OnClick="@(() => OpenVideoHistoryAsync(scene))">Lịch sử video</MudMenuItem>
+                                                    <MudDivider />
+                                                    <MudMenuItem Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
+                                                    <MudMenuItem OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt</MudMenuItem>
+
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
 
@@ -972,9 +986,7 @@ else
 
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
 
-                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
-                                                           Disabled="@(!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))"
-                                                           OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton>
+
                                                 @if (!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))
                                                 {
                                                     <MudText Typo="Typo.caption">@SceneImageDisabledReason(scene)</MudText>
@@ -1033,47 +1045,21 @@ else
 
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
 
-                                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Error"
 
-                                                               Disabled="@(!CanRetrySceneVideo(scene) || _sceneVideoRetrying.Contains(scene.Id))"
 
-                                                               OnClick="@(() => RetrySceneVideoAsync(scene))">
 
-                                                        Retry video
-
-                                                    </MudButton>
-
-                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
-
-                                                               Disabled="@(_sceneVideoRetrying.Contains(scene.Id) || (!NeedsExplicitVideoOperation(scene) && !CanRerenderSceneVideo(scene, draft)))"
-
-                                                               OnClick="@(() => RerenderSceneVideoAsync(scene))">
-
-                                                        Render lại video
-
-                                                    </MudButton>
                                                     @if (!CanRetrySceneVideo(scene))
                                                     {
                                                         <MudText Typo="Typo.caption">@SceneVideoRetryDisabledReason(scene)</MudText>
                                                     }
                                                     <RVideoSupersedeButton @ref="_supersedeButtons[scene.Id]" ProjectId="@_project.Id" Scene="@scene" ServiceId="@ServiceId"
-                                                        Visible="@NeedsExplicitVideoOperation(scene)" Disabled="@_sceneVideoRetrying.Contains(scene.Id)"
+                                                        HideTrigger="true" Visible="@NeedsExplicitVideoOperation(scene)" Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id))"
                                                         CurrentJobId="@SupersedeState(scene)?.LatestJob?.Id" Generation="@SupersedeState(scene)?.Generation"
                                                         OutcomeUnknown="@(SupersedeState(scene)?.HasProviderIdentity == true || SupersedeState(scene)?.HasActiveJob == true || SupersedeState(scene)?.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)"
                                                         Prepare="@(() => PrepareSceneVideoOperationAsync(scene))" OnQueued="OnSupersedeQueuedAsync" />
 
 
-                                                    <MudTooltip Text="Tạo video scene">
 
-                                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
-
-                                                                       Disabled="@(!CanCreateSceneVideo(scene, draft))"
-
-                                                                       OnClick="@(() => RenderSceneVideoAsync(scene))"
-
-                                                                       aria-label="Tạo video scene" />
-
-                                                    </MudTooltip>
 
                                                     @if (RequiresExternalVoice(scene))
 
@@ -1125,9 +1111,9 @@ else
 
                                                 {
 
-                                                    <MudGrid Class="scene-video-override-grid">
+                                                    <div class="scene-video-override-grid" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start">
 
-                                                        <MudItem xs="12" sm="7">
+                                                        <div style="flex:2 1 180px; min-width:0">
 
                                                             <MudSelect T="string" Label="Model video" Value="@ResolveSceneVideoModelSelection(scene)" ValueChanged="@((string value) => OnSceneVideoModelChanged(scene, value))" Dense="true" Variant="Variant.Outlined">
 
@@ -1141,9 +1127,9 @@ else
 
                                                             </MudSelect>
 
-                                                        </MudItem>
+                                                        </div>
 
-                                                        <MudItem xs="12" sm="5">
+                                                        <div style="flex:1 1 100px; min-width:0">
 
                                                             <MudSelect T="int" Label="Thời lượng" Value="@ResolveSceneVideoDurationSelection(scene)" ValueChanged="@((int value) => OnSceneVideoDurationChanged(scene, value))" Dense="true" Variant="Variant.Outlined">
 
@@ -1157,9 +1143,13 @@ else
 
                                                             </MudSelect>
 
-                                                        </MudItem>
+                                                        </div>
 
-                                                    </MudGrid>
+                                                    </div>
+                                                    @if (HasPendingSceneVideoSettings(scene))
+                                                    {
+                                                        <MudText Typo="Typo.caption">Cấu hình mới sẽ áp dụng khi tạo lượt video tiếp theo.</MudText>
+                                                    }
 
                                                 }
 
@@ -2055,6 +2045,8 @@ else
 
         }
 
+        if (!string.IsNullOrWhiteSpace(draft.VideoModelSelectionKey)) return null;
+
         var latestCandidate = ResolveLatestSceneVideoCandidate(scene);
 
         if (latestCandidate.ModelCode is not null)
@@ -2116,8 +2108,9 @@ else
         draft.VideoModelSelectionKey = option.Key;
 
         draft.VideoOverrideTouched = true;
+        draft.IsDirty = true;
 
-        if (draft.VideoDurationOverrideSeconds is not int duration || !option.Durations.Contains(duration))
+        if (draft.VideoDurationOverrideSeconds is not int duration)
 
         {
 
@@ -2145,7 +2138,7 @@ else
 
         var latestCandidate = ResolveLatestSceneVideoCandidate(scene);
 
-        return draft.VideoDurationOverrideSeconds is int duration && option.Durations.Contains(duration)
+        return draft.VideoDurationOverrideSeconds is int duration
 
             ? duration
 
@@ -2176,6 +2169,7 @@ else
         draft.VideoDurationOverrideSeconds = value;
 
         draft.VideoOverrideTouched = true;
+        draft.IsDirty = true;
 
     }
 
@@ -2207,7 +2201,7 @@ else
 
         var draft = GetSceneDraft(scene);
 
-        if (draft.VideoOverrideTouched)
+        if (draft.VideoOverrideTouched || !string.IsNullOrWhiteSpace(draft.VideoModelSelectionKey))
 
         {
 
@@ -6390,6 +6384,7 @@ else
             scene.ImagePrompt = request.ImagePrompt;
 
             scene.VideoPrompt = request.VideoPrompt;
+            scene.DurationSeconds = request.DurationSeconds ?? scene.DurationSeconds;
 
             draft.IsDirty = false;
 
@@ -9720,14 +9715,55 @@ else
     private TodoX.Web.Services.VideoRender.SceneVideoUiState? SupersedeState(VideoProjectSceneDto scene)
         => _sceneVideoUiStates.GetValueOrDefault(scene.Id);
     private bool NeedsExplicitVideoOperation(VideoProjectSceneDto scene) => SupersedeState(scene) is { } state
-        && state.RequiresExplicitOperation;
+        && (state.RequiresExplicitOperation || state.SelectedVersion is not null || state.LatestJobVersion is not null);
     private async Task OnSupersedeQueuedAsync() { await ReloadAsync(); await StartPolling(); }
 
     private Task RetryOrSupersedeSceneVideoAsync(VideoProjectSceneDto scene)
         => NeedsExplicitVideoOperation(scene) ? RerenderSceneVideoAsync(scene) : RetrySceneVideoAsync(scene);
 
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-SCENE-SETTINGS-001.
     private async Task<bool> PrepareSceneVideoOperationAsync(VideoProjectSceneDto scene)
-        => !GetSceneDraft(scene).IsDirty || await SaveSceneAsync(scene);
+    {
+        var draft = GetSceneDraft(scene);
+        var option = ResolveSceneVideoModelOption(scene);
+        var duration = ResolveSceneVideoDurationSelection(scene);
+        if (option is null || !option.Durations.Contains(duration)
+            || (!string.IsNullOrWhiteSpace(draft.VideoModelSelectionKey)
+                && !string.Equals(option.Key, draft.VideoModelSelectionKey, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(option.Key.Replace('|', '/'), draft.VideoModelSelectionKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            Snackbar.Add("Model hoặc thời lượng video không hợp lệ. Vui lòng chọn lại.", Severity.Warning);
+            return false;
+        }
+        if (draft.VideoModelSelectionKey != option.Key || draft.VideoDurationOverrideSeconds != duration)
+        {
+            draft.VideoModelSelectionKey = option.Key;
+            draft.VideoDurationOverrideSeconds = duration;
+            draft.IsDirty = true;
+        }
+        if (!EnsureAspectRatioSelected() || !EnsureResolutionSelected()) return false;
+        if (draft.Extra.GetValueOrDefault("aspect_ratio") != ProjectAspectRatio
+            || draft.Extra.GetValueOrDefault("resolution") != ProjectResolution)
+        {
+            draft.Extra["aspect_ratio"] = ProjectAspectRatio;
+            draft.Extra["resolution"] = ProjectResolution;
+            draft.IsDirty = true;
+        }
+        return !draft.IsDirty || await SaveSceneAsync(scene);
+    }
+
+    private bool HasPendingSceneVideoSettings(VideoProjectSceneDto scene)
+    {
+        var latest = ResolveLatestSceneVideoCandidate(scene);
+        var option = ResolveSceneVideoModelOption(scene);
+        var draft = GetSceneDraft(scene);
+        var prompt = _voiceMode == RVideoVoiceModes.Native
+            ? RVideoRules.ComposeNativeVoicePrompt(draft.MotionPrompt, draft.Voice, draft.VoiceInstruction)
+            : draft.MotionPrompt;
+        return latest.ModelCode is not null && (option?.ModelCode != latest.ModelCode
+            || option?.Mode != latest.Mode || ResolveSceneVideoDurationSelection(scene) != latest.DurationSeconds
+            || !string.Equals(prompt?.Trim(), ResolveVideoVersion(scene)?.VideoPromptSnapshot?.Trim(), StringComparison.Ordinal));
+    }
 
     private async Task RerenderSceneVideoAsync(VideoProjectSceneDto scene)
     {

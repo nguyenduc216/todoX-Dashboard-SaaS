@@ -6,7 +6,7 @@
 @inject ISnackbar Snackbar
 @inject ILogger<RVideoSupersedeButton> Logger
 
-@if (Visible)
+@if (Visible && !HideTrigger)
 {
     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
                Disabled="@(Disabled || _busy)" OnClick="RunAsync">Tạo lượt video mới</MudButton>
@@ -17,6 +17,7 @@
     [Parameter] public VideoProjectSceneDto Scene { get; set; } = default!;
     [Parameter] public Guid? ServiceId { get; set; }
     [Parameter] public bool Visible { get; set; }
+    [Parameter] public bool HideTrigger { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public bool OutcomeUnknown { get; set; } = true;
     [Parameter] public Guid? CurrentJobId { get; set; }
@@ -42,7 +43,8 @@
         {
             if (Prepare is not null && !await Prepare()) return;
             _ack ??= await VideoAction.GetSupersedeAcknowledgementAsync(ProjectId, Scene.Id, user, _key);
-            var request = new RVideoSceneVideoRenderRequest(ProjectId, Scene, ScenePromptMetadata.FromScene(Scene), ServiceId);
+            var snapshot = System.Text.Json.JsonSerializer.Deserialize<VideoProjectSceneDto>(System.Text.Json.JsonSerializer.Serialize(Scene))!;
+            var request = new RVideoSceneVideoRenderRequest(ProjectId, snapshot, ScenePromptMetadata.FromScene(snapshot), ServiceId);
             var estimate = await VideoAction.EstimateAsync(request);
             if (!estimate.CanStart) { Snackbar.Add("Chưa thể tạo lượt mới. Vui lòng kiểm tra ảnh, nội dung và số điểm.", Severity.Warning); return; }
             var warning = OutcomeUnknown
