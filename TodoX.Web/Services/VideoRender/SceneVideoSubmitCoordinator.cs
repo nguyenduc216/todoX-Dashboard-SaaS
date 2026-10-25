@@ -588,6 +588,25 @@ public sealed class SceneVideoSubmitCoordinator
         public void Dispose() { try { transaction.Dispose(); } finally { connection.Dispose(); } }
     }
 
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-KNOWN-TASK-RECOVERY-001.
+    // This connection owns only a per-job advisory lock, never scene/head row locks. It spans poll,
+    // download and completion even if the queue lease expires; process/connection loss releases it.
+    public async Task<IDisposable?> TryAcquireKnownTaskPollFenceAsync(Guid jobId, CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        var conn = await _factory.OpenAsync(ct);
+        System.Data.IDbTransaction? tx = null;
+        try
+        {
+            tx = conn.BeginTransaction();
+            var acquired = await conn.ExecuteScalarAsync<bool>("SELECT pg_try_advisory_xact_lock(hashtextextended(@key,0));",
+                new { key = $"scene-video-known-task-poll:{_tenant.TenantId:N}:{jobId:N}" }, tx);
+            if (acquired) return new SubmitFence(conn, tx);
+            tx.Dispose(); conn.Dispose(); return null;
+        }
+        catch { tx?.Dispose(); conn.Dispose(); throw; }
+    }
+
     public async Task AssertJobMaySubmitAsync(Guid jobId, Guid? ownToken, CancellationToken ct)
     {
         await _tenant.EnsureLoadedAsync(ct);

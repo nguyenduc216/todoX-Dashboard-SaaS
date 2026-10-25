@@ -885,6 +885,8 @@ public sealed class RenderJobService : IRenderJobService
                        ELSE completed_at
                    END,
                    cancelled_at = CASE WHEN @status='cancelled' THEN now() ELSE cancelled_at END,
+                   lock_owner = CASE WHEN @sceneVideo AND @status IN ('pending_reconciliation','completed','failed','cancelled') THEN NULL ELSE lock_owner END,
+                   lock_until = CASE WHEN @sceneVideo AND @status IN ('pending_reconciliation','completed','failed','cancelled') THEN NULL ELSE lock_until END,
                    updated_at=now()
              WHERE id=@jobId
                AND (@sceneVideo=false OR (tenant_id=@tenant AND job_type='render_scene_video'
@@ -1131,7 +1133,9 @@ public sealed class RenderJobService : IRenderJobService
                            true),
                        '{providerPollStartedAt}',
                        COALESCE(input_json->'providerPollStartedAt', to_jsonb(now())),
-                       true),
+                       true) || CASE WHEN input_json->>'providerRecoveryStartedAt' IS NOT NULL
+                         THEN jsonb_build_object('providerRecoveryPollCount',COALESCE((input_json->>'providerRecoveryPollCount')::int,0)+1)
+                         ELSE '{}'::jsonb END,
                    retry_after=now() + (@delaySeconds || ' seconds')::interval,
                    error_code=@reasonCode,
                    error_message=@reasonMessage,
@@ -1156,7 +1160,11 @@ public sealed class RenderJobService : IRenderJobService
                AND (@enforceProviderPollTimeout = false
                     OR input_json->>'providerPollStartedAt' IS NULL
                     OR (input_json->>'providerPollStartedAt')::timestamptz
-                       + (@providerPollTimeoutMinutes || ' minutes')::interval > now());
+                       + (@providerPollTimeoutMinutes || ' minutes')::interval > now())
+               AND (job_type<>'render_scene_video' OR input_json->>'providerRecoveryStartedAt' IS NULL
+                    OR (COALESCE((input_json->>'providerRecoveryPollCount')::int,0)<@maxRecoveryPolls
+                        AND (input_json->>'providerRecoveryStartedAt')::timestamptz
+                            + (@recoveryWindowMinutes * interval '1 minute')>now()));
             """,
             new
             {
@@ -1168,6 +1176,8 @@ public sealed class RenderJobService : IRenderJobService
                 providerPollTimeoutMinutes = GetProviderPollTimeoutMinutes(),
                 enforceReconciliationLimit,
                 enforceProviderPollTimeout,
+                maxRecoveryPolls = GetMaxKnownTaskRecoveryPolls(),
+                recoveryWindowMinutes = GetKnownTaskRecoveryWindowMinutes(),
                 sceneVideo = sceneTx is not null,
                 tenant = _tenant.TenantId
             }, sceneTx);
@@ -1196,6 +1206,8 @@ public sealed class RenderJobService : IRenderJobService
     {
         using var conn = await _factory.OpenAsync(ct);
         using var sceneTx = await BeginSceneVideoWriterAsync(conn, jobId, ct);
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-KNOWN-TASK-RECOVERY-001.
+        // Recovery keeps the original poll clock and has a separate finite budget/window.
         var delaySeconds = Math.Max(1, (int)delay.TotalSeconds);
         var changed = await conn.ExecuteAsync(
             """
@@ -1209,7 +1221,9 @@ public sealed class RenderJobService : IRenderJobService
                            true),
                        '{providerPollStartedAt}',
                        COALESCE(input_json->'providerPollStartedAt', to_jsonb(now())),
-                       true),
+                       true) || jsonb_build_object(
+                           'providerRecoveryPollCount',COALESCE((input_json->>'providerRecoveryPollCount')::int,0)+1,
+                           'providerRecoveryStartedAt',COALESCE(input_json->'providerRecoveryStartedAt',to_jsonb(now()))),
                    retry_after=now() + (@delaySeconds || ' seconds')::interval,
                    error_code=@reasonCode,
                    error_message=@reasonMessage,
@@ -1229,10 +1243,31 @@ public sealed class RenderJobService : IRenderJobService
                          WHERE v.render_job_id=render.render_jobs.id AND v.tenant_id=render.render_jobs.tenant_id
                            AND (NULLIF(btrim(v.provider_task_id), '') IS NULL
                                 OR NULLIF(btrim(v.provider_video_id_base), '') IS NULL))))
+               AND status<>'queued'
+               AND (job_type<>'render_scene_video' OR (
+                    (SELECT count(*) FROM video_render.scene_video_versions v
+                        WHERE v.render_job_id=render.render_jobs.id AND v.tenant_id=render.render_jobs.tenant_id)=1
+                    AND EXISTS (SELECT 1 FROM video_render.scene_video_versions v
+                        JOIN render.scene_video_submit_intents i ON i.tenant_id=v.tenant_id AND i.render_job_id=v.render_job_id
+                          AND i.scene_id=v.scene_id AND i.logical_request_id=v.logical_request_id
+                        WHERE v.render_job_id=render.render_jobs.id AND v.tenant_id=render.render_jobs.tenant_id
+                          AND v.status IN ('submitted','processing','pending_reconciliation','rendering')
+                          AND v.provider_task_id=render.render_jobs.provider_task_id
+                          AND v.provider_video_id_base=render.render_jobs.provider_video_id_base
+                          AND i.submit_state='CONFIRMED_PROVIDER_TASK'
+                          AND i.provider_task_id=v.provider_task_id AND i.provider_video_id_base=v.provider_video_id_base)
+                    AND (SELECT count(*) FROM render.scene_video_submit_intents i
+                        WHERE i.render_job_id=render.render_jobs.id AND i.tenant_id=render.render_jobs.tenant_id)=1))
+               AND COALESCE((input_json->>'providerRecoveryPollCount')::int,0)<@maxRecoveryPolls
+               AND (input_json->>'providerRecoveryStartedAt' IS NULL
+                    OR (input_json->>'providerRecoveryStartedAt')::timestamptz
+                        + (@recoveryWindowMinutes * interval '1 minute')>now())
                AND (retry_after IS NULL OR retry_after <= now())
                AND (lock_until IS NULL OR lock_until <= now());
             """,
-            new { jobId, delaySeconds, reasonCode, reasonMessage });
+            new { jobId, delaySeconds, reasonCode, reasonMessage,
+                maxRecoveryPolls = GetMaxKnownTaskRecoveryPolls(), recoveryWindowMinutes = GetKnownTaskRecoveryWindowMinutes() }, sceneTx);
+        sceneTx?.Commit();
 
         if (changed <= 0)
         {
@@ -1587,4 +1622,10 @@ public sealed class RenderJobService : IRenderJobService
 
     private int GetProviderPollTimeoutMinutes()
         => Math.Max(1, _configuration.GetValue("VideoRender:MaxPollDurationMinutes", 30));
+
+    private int GetMaxKnownTaskRecoveryPolls()
+        => Math.Clamp(_configuration.GetValue("VideoRender:KnownTaskRecoveryMaxPolls", 20), 1, 200);
+
+    private int GetKnownTaskRecoveryWindowMinutes()
+        => Math.Clamp(_configuration.GetValue("VideoRender:KnownTaskRecoveryWindowMinutes", 1440), 1, 10080);
 }

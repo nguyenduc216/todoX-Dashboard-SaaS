@@ -1,0 +1,6 @@
+simulation: rvideo-known-task
+routing: path
+mocks:
+  - name: provider
+    routeKey: provider
+    path: postman/mocks/rvideo-known-task/config.yaml

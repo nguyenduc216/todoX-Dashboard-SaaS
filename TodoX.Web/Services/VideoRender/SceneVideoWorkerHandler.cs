@@ -235,6 +235,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
         using var operationScope = SceneVideoOperationScope.Enter(job.Id);
+        var knownTask = !string.IsNullOrWhiteSpace(job.ProviderTaskId) || !string.IsNullOrWhiteSpace(job.ProviderVideoIdBase);
+        using var pollFence = knownTask ? await _submitCoordinator.TryAcquireKnownTaskPollFenceAsync(job.Id, ct) : null;
+        if (knownTask && pollFence is null)
+            throw new RenderJobDeferredException("Existing provider task is already being polled or persisted by another worker.");
         try
         {
             await HandleCoreAsync(job, ct);
@@ -249,6 +253,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             and not RenderJobTerminalFailureException)
         {
             // Parser/catalog/storage errors cannot turn an accepted task into an application retry/fallback.
+            _logger.LogWarning(ex, "RVIDEO_VIDEO_EXISTING_TASK_GUARD jobId={JobId}; preserving any confirmed provider owner after a local error.", job.Id);
             await _submitCoordinator.AssertJobMaySubmitAsync(job.Id, null, ct);
             throw;
         }
@@ -1469,7 +1474,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                         await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
                             "provider_poll_timeout", "Local timeout is not a provider-confirmed terminal outcome.", ct,
                             providerTaskId, policy.Model, providerVideoIdBase);
-                        throw new RenderJobPendingReconciliationException("Known provider task exceeded local polling timeout; operator reconciliation required.");
+                        throw new RenderJobPendingReconciliationException("Known provider task exceeded local polling timeout; bounded same-task recovery will continue without another submit.");
                     }
 
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_PROCESSING", "info",

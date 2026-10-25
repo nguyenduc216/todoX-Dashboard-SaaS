@@ -1239,6 +1239,8 @@ public sealed class VideoRenderRepository
                AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
                AND j.job_type='render_scene_video'
                AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
+               AND video_render.scene_video_job_is_current(j.tenant_id,j.id)
+               AND j.status<>'queued'
                AND j.status NOT IN ('completed', 'cancelled')
                AND (j.retry_after IS NULL OR j.retry_after <= now())
                AND (j.lock_until IS NULL OR j.lock_until <= now());

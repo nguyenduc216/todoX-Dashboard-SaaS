@@ -30,7 +30,7 @@ public sealed class SupersedePostgresTheoryAttribute : TheoryAttribute
     }
 }
 
-public sealed class SceneVideoOperationDraftPostgresTests
+public sealed partial class SceneVideoOperationDraftPostgresTests
 {
     [SupersedePostgresTheory]
     [InlineData(865, 1, false)]
