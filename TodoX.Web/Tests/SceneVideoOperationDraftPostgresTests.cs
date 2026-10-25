@@ -32,6 +32,133 @@ public sealed class SupersedePostgresTheoryAttribute : TheoryAttribute
 
 public sealed class SceneVideoOperationDraftPostgresTests
 {
+    [SupersedePostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GenerationFencesAllowImageRerenderInitialVideoCompletionAndCurrentFinalMerge(bool pascalCase)
+    {
+        var cs = Environment.GetEnvironmentVariable("TODOX_SUPERSEDE_TEST_DB")!;
+        ValidateIsolatedConnection(cs);
+        await using var conn = new NpgsqlConnection(cs);
+        await conn.OpenAsync();
+        Assert.Equal(0, await conn.ExecuteScalarAsync<int>("SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN('pg_catalog','information_schema');"));
+        var owned = false;
+        try
+        {
+            await conn.ExecuteAsync(FixtureSql);
+            owned = true;
+            // Extend only this isolated contract fixture to exercise the real image/final persistence methods.
+            await conn.ExecuteAsync("""
+                ALTER TABLE render.render_jobs ADD project_id bigint, ADD attempts integer;
+                ALTER TABLE video_render.video_projects ADD selected_final_video_version_id uuid,
+                  ADD final_video_path text, ADD error_message text, ADD updated_at timestamptz;
+                ALTER TABLE video_render.video_project_scenes ADD selected_image_version_id uuid;
+                ALTER TABLE video_render.scene_image_versions
+                  ADD customer_id uuid, ADD created_by uuid, ADD version_number integer, ADD logical_request_id text,
+                  ADD render_job_id uuid REFERENCES render.render_jobs(id), ADD image_prompt_snapshot text,
+                  ADD compiled_image_prompt_snapshot text, ADD video_prompt_snapshot text, ADD negative_prompt_snapshot text,
+                  ADD scene_snapshot_json jsonb, ADD reference_snapshot_json jsonb, ADD render_config_json jsonb,
+                  ADD storage_key text, ADD public_url text, ADD source_file_path text, ADD result_media_id uuid,
+                  ADD provider_code text, ADD requested_model text, ADD actual_model text, ADD provider_capability_id bigint,
+                  ADD provider_task_id text, ADD billing_logical_request_id text, ADD estimated_usd numeric, ADD actual_usd numeric,
+                  ADD charged_points numeric DEFAULT 0, ADD refunded_points numeric DEFAULT 0,
+                  ADD error_message text, ADD provider_usage_json jsonb, ADD mime_type text, ADD cost_source text,
+                  ADD is_selected boolean DEFAULT false, ADD selected_at timestamptz, ADD selected_by uuid,
+                  ADD completed_at timestamptz, ADD created_at timestamptz, ADD updated_at timestamptz;
+                ALTER TABLE video_render.final_video_versions
+                  ADD version_number integer, ADD logical_request_id text, ADD is_selected boolean DEFAULT false,
+                  ADD storage_key text, ADD source_file_path text, ADD duration_seconds numeric, ADD poster_url text,
+                  ADD error_message text, ADD created_at timestamptz, ADD created_by uuid, ADD mime_type text,
+                  ADD selected_at timestamptz, ADD selected_by uuid, ADD completed_at timestamptz, ADD updated_at timestamptz;
+                """);
+            await conn.ExecuteAsync(await File.ReadAllTextAsync(MigrationPath("scene-video-operation-v1-forward.sql")));
+            var tenant = Guid.NewGuid();
+            var actor = Guid.NewGuid();
+            var videoJob = Guid.NewGuid();
+            await conn.ExecuteAsync("""
+                INSERT INTO video_render.video_projects(id,tenant_id,user_id,status) VALUES(1,@tenant,@actor,'rendering');
+                INSERT INTO video_render.video_project_scenes(id,project_id,tenant_id,status) VALUES(2,1,@tenant,'video_queued');
+                INSERT INTO render.render_jobs(id,tenant_id,job_type,status,input_json)
+                  VALUES(@videoJob,@tenant,'render_scene_video','rendering','{"projectId":1,"sceneId":2}');
+                """, new { tenant, actor, videoJob });
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                { ["ConnectionStrings:TodoXSaaS"] = cs, ["TodoX:TenantId"] = tenant.ToString() }).Build();
+            var factory = new TodoXConnectionFactory(config);
+            var versions = new SceneMediaVersioningService(factory, new TenantContext(factory, config), config);
+            SceneVideoVersionDto video;
+            using (SceneVideoOperationScope.Enter(videoJob))
+                video = await versions.CreateQueuedSceneVideoVersionAsync(new(1, 2, null, actor, null,
+                    videoJob, "initial-video", "image", "video", new { }, new { }));
+            Assert.Equal(0, await conn.ExecuteScalarAsync<long>("SELECT generation FROM video_render.scene_video_operation_heads;"));
+            var notReady = await Assert.ThrowsAsync<PostgresException>(() => conn.ExecuteAsync(
+                "UPDATE video_render.video_projects SET status='completed' WHERE id=1;"));
+            Assert.Equal("VIDEO_PROJECT_GENERATION_NOT_COMPLETED", notReady.MessageText);
+
+            // No video scope leaks into image enqueue or completion after leaving a video scope.
+            var imageInput = System.Text.Json.JsonSerializer.Serialize(new SceneImageRenderWorkItemInput
+                { ProjectId = 1, SceneId = 2, ImageVersionId = Guid.Empty, Prompt = "compiled image", LogicalRequestId = "image-rerender" },
+                new System.Text.Json.JsonSerializerOptions(pascalCase
+                    ? System.Text.Json.JsonSerializerDefaults.General : System.Text.Json.JsonSerializerDefaults.Web));
+            var image = await versions.CreateQueuedImageVersionWithJobAsync(new(1, 2, actor, null, null,
+                "image-rerender", "image", "compiled image", "video", null, new { }, new { }, new { }),
+                new("render_scene_image", actor, null, 1, "video-1", "image", null, null, 1,
+                    imageInput, "{}", "[]"));
+            Assert.Equal("queued", await conn.ExecuteScalarAsync<string>(
+                "SELECT status FROM render.render_jobs WHERE id=@id;", new { id = image.RenderJobId }));
+            var persistedInput = System.Text.Json.JsonSerializer.Deserialize<SceneImageRenderWorkItemInput>(
+                (await conn.ExecuteScalarAsync<string>("SELECT input_json::text FROM render.render_jobs WHERE id=@id;", new { id = image.RenderJobId }))!,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+            Assert.Equal(image.Version!.Id, persistedInput.ImageVersionId);
+            Assert.Equal("compiled image", persistedInput.Prompt);
+            Assert.True(await versions.TryCompleteImageVersionAsync(image.Version.Id, new("/image.png", "/image.png", "fake", "fake-model",
+                null, "fake-image-task", null, "image-rerender", null, null, 0, 0, null, "image/png", "fixture")));
+            Assert.Equal(image.Version.Id, await conn.ExecuteScalarAsync<Guid>(
+                "SELECT selected_image_version_id FROM video_render.video_project_scenes WHERE id=2;"));
+            Assert.Equal(videoJob, await conn.ExecuteScalarAsync<Guid>("SELECT active_render_job_id FROM video_render.scene_video_operation_heads;"));
+
+            using (SceneVideoOperationScope.Enter(videoJob))
+                await versions.CompleteSceneVideoVersionAsync(video.Id, new("/initial.mp4", "/initial.mp4", null, 8, "video/mp4"));
+            await conn.ExecuteAsync("UPDATE render.render_jobs SET status='completed' WHERE id=@videoJob;", new { videoJob });
+            Assert.Equal(video.Id, await conn.ExecuteScalarAsync<Guid>(
+                "SELECT selected_video_version_id FROM video_render.video_project_scenes WHERE id=2;"));
+
+            var selectedVideo = video.Id;
+            var generation = 0L;
+            if (pascalCase)
+            {
+                // Also complete and merge an explicitly activated generation, preserving initial history.
+                var user = new CurrentUserSession { IsAuthenticated = true, IsRoot = true, UserId = actor };
+                var operations = new SceneVideoOperationDraftService(factory, new TenantContext(factory, config));
+                var ack = (await operations.ReadAcknowledgementAsync(1, 2, user, Guid.NewGuid())) with { RiskAcknowledged = true };
+                var draft = await operations.PrepareAsync(ack, user, new SceneVideoRenderWorkItemInput
+                    { ProjectId = 1, SceneId = 2, SelectedSourceImageVersionId = image.Version.Id,
+                        VideoPrompt = "video", ImagePrompt = "image", ProviderCode = "fake", ModelName = "fake-model" });
+                await operations.ActivateAsync(ack, user, draft.TransitionId);
+                using (SceneVideoOperationScope.Enter(draft.JobId))
+                    await versions.CompleteSceneVideoVersionAsync(draft.VersionId, new("/rerender.mp4", "/rerender.mp4", null, 8, "video/mp4"));
+                await conn.ExecuteAsync("UPDATE render.render_jobs SET status='completed' WHERE id=@id;", new { id = draft.JobId });
+                selectedVideo = draft.VersionId;
+                generation = draft.ProposedGeneration;
+                Assert.Equal("completed", await conn.ExecuteScalarAsync<string>(
+                    "SELECT status FROM video_render.scene_video_versions WHERE id=@id;", new { id = video.Id }));
+            }
+
+            var final = Guid.NewGuid();
+            await conn.ExecuteAsync("INSERT INTO video_render.final_video_versions(id,project_id,tenant_id,status,created_by) VALUES(@final,1,@tenant,'queued',@actor);",
+                new { final, tenant, actor });
+            var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+                { generations = new Dictionary<string, long> { ["2"] = generation }, selected = new Dictionary<string, Guid> { ["2"] = selectedVideo } });
+            using (SceneVideoOperationScope.Merge(snapshot))
+                await versions.CompleteFinalVideoVersionAsync(final, new("/final.mp4", "/final.mp4", null, 8, "video/mp4"));
+            Assert.Equal("completed", await conn.ExecuteScalarAsync<string>("SELECT status FROM video_render.video_projects WHERE id=1;"));
+            Assert.Equal(final, await conn.ExecuteScalarAsync<Guid>("SELECT selected_final_video_version_id FROM video_render.video_projects WHERE id=1;"));
+        }
+        finally
+        {
+            if (owned) await conn.ExecuteAsync("ROLLBACK; DROP SCHEMA video_render CASCADE; DROP SCHEMA render CASCADE; DROP TABLE billing_fixture;");
+        }
+    }
+
     [SupersedePostgresFact]
     public async Task Scene07ReadOnlyCollectorResolvesExactIdentityWithAndWithoutOperationMigration()
     {
@@ -106,8 +233,8 @@ public sealed class SceneVideoOperationDraftPostgresTests
                 INSERT INTO video_render.video_projects(id,tenant_id,user_id,customer_id) VALUES(1,@tenant,@actor,NULL);
                 INSERT INTO video_render.video_project_scenes(id,project_id,tenant_id,selected_video_version_id,status,scene_video_url) VALUES(2,1,@tenant,@selectedPointer,'completed','/old.mp4');
                 INSERT INTO video_render.scene_image_versions VALUES(@source,1,2,@tenant,'completed');
-                INSERT INTO render.render_jobs(id,tenant_id,user_id,job_type,status,input_json,provider_task_id,provider_video_id_base)
-                VALUES(@job,@tenant,@actor,'render_scene_video','pending_reconciliation','{"projectId":1,"sceneId":2}',@oldTask,@oldBase);
+                INSERT INTO render.render_jobs(id,tenant_id,user_id,job_type,status,input_json,provider_task_id,provider_video_id_base,created_at)
+                VALUES(@job,@tenant,@actor,'render_scene_video','pending_reconciliation','{"projectId":1,"sceneId":2}',@oldTask,@oldBase,now()-interval '1 minute');
                 INSERT INTO video_render.scene_video_versions(id,project_id,scene_id,tenant_id,version_number,logical_request_id,render_job_id,status,is_selected,provider_task_id,provider_video_id_base)
                 VALUES(@version,1,2,@tenant,2,'old-request',@job,'pending_reconciliation',false,@oldTask,@oldBase),
                       (@selected,1,2,@tenant,1,'selected-completed',NULL,'completed',@hasSelected,NULL,NULL);
@@ -149,6 +276,13 @@ public sealed class SceneVideoOperationDraftPostgresTests
             Assert.Equal(sceneBefore, await conn.ExecuteScalarAsync<string>("SELECT to_jsonb(s)::text FROM video_render.video_project_scenes s WHERE id=2;"));
             Assert.Equal(100, await conn.ExecuteScalarAsync<int>("SELECT points FROM billing_fixture;"));
             Assert.Equal(oldJob, await conn.ExecuteScalarAsync<Guid>("SELECT active_render_job_id FROM video_render.scene_video_operation_heads;"));
+
+            // A PREPARED draft is not the current operation shown by either UI.
+            var preparedState = await new SceneMediaVersioningService(factory, new TenantContext(factory, config), config)
+                .GetSceneVideoUiStateAsync(2, actor);
+            Assert.Equal(oldJob, preparedState.LatestJob?.Id);
+            Assert.Equal(oldVersion, preparedState.LatestJobVersion?.Id);
+            Assert.Equal(existingProviderTask, preparedState.HasProviderIdentity);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => Service().PrepareAsync(a with { Reason = "changed-consent" }, actor, Input()));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service().PrepareAsync(a, new CurrentUserSession
@@ -254,8 +388,10 @@ public sealed class SceneVideoOperationDraftPostgresTests
                 using var oldMerge = await factory.OpenAsync();
                 var final=Guid.NewGuid();
                 await oldMerge.ExecuteAsync("INSERT INTO video_render.final_video_versions(id,project_id,tenant_id,status) VALUES(@id,1,@tenant,'queued');",new{id=final,tenant=tenantId});
-                await Assert.ThrowsAsync<PostgresException>(()=>oldMerge.ExecuteAsync("UPDATE video_render.final_video_versions SET status='completed',public_url='/stale.mp4' WHERE id=@id;",new{id=final}));
-                await Assert.ThrowsAsync<PostgresException>(() => oldMerge.ExecuteAsync("UPDATE video_render.video_projects SET status='completed',final_video_url='/old-merge.mp4' WHERE id=1;"));
+                var staleFinal = await Assert.ThrowsAsync<PostgresException>(()=>oldMerge.ExecuteAsync("UPDATE video_render.final_video_versions SET status='completed',public_url='/stale.mp4' WHERE id=@id;",new{id=final}));
+                Assert.Equal("VIDEO_MERGE_SNAPSHOT_STALE", staleFinal.MessageText);
+                var staleProject = await Assert.ThrowsAsync<PostgresException>(() => oldMerge.ExecuteAsync("UPDATE video_render.video_projects SET status='completed',final_video_url='/old-merge.mp4' WHERE id=1;"));
+                Assert.Equal("VIDEO_MERGE_SNAPSHOT_STALE", staleProject.MessageText);
             }
             Assert.Equal(newScene, await conn.ExecuteScalarAsync<string>("SELECT to_jsonb(s)::text FROM video_render.video_project_scenes s WHERE id=2;"));
             // Ordinary image/scene editing carries no video owner and remains usable.
@@ -299,8 +435,16 @@ public sealed class SceneVideoOperationDraftPostgresTests
             var freshDraft=await Service().PrepareAsync(freshAck,actor,Input());
             Assert.Equal("cancelled",await conn.ExecuteScalarAsync<string>("SELECT status FROM render.render_jobs WHERE id=@job;",new{job=nextDraft.JobId}));
             Assert.Equal("ABANDONED",await conn.ExecuteScalarAsync<string>("SELECT transition_state FROM video_render.scene_video_operation_transitions WHERE id=@id;",new{id=nextDraft.TransitionId}));
+            var beforeActivation = await versionsService.GetSceneVideoUiStateAsync(2, actor);
+            Assert.Equal(jobId, beforeActivation.LatestJob?.Id);
+            Assert.Equal(versionId, beforeActivation.LatestJobVersion?.Id);
+            Assert.False(beforeActivation.HasActiveJob);
             await Service().ActivateAsync(freshAck,actor,freshDraft.TransitionId);
             Assert.Equal(2,await conn.ExecuteScalarAsync<int>("SELECT generation FROM video_render.scene_video_operation_heads WHERE scene_id=2;"));
+            var afterActivation = await versionsService.GetSceneVideoUiStateAsync(2, actor);
+            Assert.Equal(freshDraft.JobId, afterActivation.LatestJob?.Id);
+            Assert.Equal(freshDraft.VersionId, afterActivation.LatestJobVersion?.Id);
+            Assert.True(afterActivation.HasActiveJob);
             Assert.Equal(versionId,await conn.ExecuteScalarAsync<Guid>("SELECT selected_video_version_id FROM video_render.video_project_scenes WHERE id=2;"));
             Assert.Equal(100,await conn.ExecuteScalarAsync<int>("SELECT points FROM billing_fixture;"));
             await conn.ExecuteAsync(await File.ReadAllTextAsync(MigrationPath("scene-video-operation-v1-postcheck.sql")));

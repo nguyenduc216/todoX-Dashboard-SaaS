@@ -125,14 +125,17 @@ BEGIN
  END IF;
  -- Merges carry the exact selected-version and head-generation snapshot they consumed.
  IF TG_TABLE_NAME IN('video_projects','final_video_versions') THEN
+  -- FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-FINALIZE-001.
+  -- Resolve the bigint project key before shared checks; final_video_versions.id is uuid.
+  -- SQL AND does not hide a bigint=uuid type error in an otherwise inactive table branch.
+  IF TG_TABLE_NAME='video_projects' THEN project:=NEW.id; ELSE project:=NEW.project_id; END IF;
   snapshot:=NULLIF(current_setting('todox.video_merge',true),'')::jsonb;
   IF TG_TABLE_NAME='video_projects' AND NEW.status='completed' AND EXISTS(
     SELECT 1 FROM video_render.scene_video_operation_heads h JOIN render.render_jobs j ON j.id=h.active_render_job_id
-    WHERE h.tenant_id=t AND h.project_id=NEW.id AND j.status<>'completed') THEN
+    WHERE h.tenant_id=t AND h.project_id=project AND j.status<>'completed') THEN
     RAISE EXCEPTION 'VIDEO_PROJECT_GENERATION_NOT_COMPLETED' USING ERRCODE='55000';
   END IF;
   IF snapshot IS NOT NULL THEN
-   IF TG_TABLE_NAME='video_projects' THEN project:=NEW.id; ELSE project:=NEW.project_id; END IF;
    PERFORM h.scene_id FROM video_render.scene_video_operation_heads h WHERE h.tenant_id=t AND h.project_id=project FOR SHARE;
    IF EXISTS(SELECT 1 FROM video_render.scene_video_operation_heads h WHERE h.tenant_id=t AND h.project_id=project
       AND COALESCE((snapshot->'generations'->>h.scene_id::text)::bigint,0)<>h.generation)

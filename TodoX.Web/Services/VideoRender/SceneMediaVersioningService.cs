@@ -679,6 +679,15 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
         // 4. Insert the render job as draft, still uncommitted: it cannot be claimed before activation.
         var jobId = Guid.NewGuid();
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-FINALIZE-001.
+        // The version identity is allocated here, so bind the worker input here in the same transaction.
+        // Preserve other input fields and remove casing aliases so deserialization cannot restore Guid.Empty.
+        var jobInput = JsonNode.Parse(jobDraft.InputJson) as JsonObject
+            ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_INPUT_INVALID");
+        foreach (var key in jobInput.Select(x => x.Key)
+            .Where(key => key.Equals("imageVersionId", StringComparison.OrdinalIgnoreCase)).ToArray())
+            jobInput.Remove(key);
+        jobInput["imageVersionId"] = versionId;
         var inserted = await conn.ExecuteAsync(
             """
             INSERT INTO render.render_jobs
@@ -699,7 +708,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 customerId = jobDraft.CustomerId,
                 projectId = jobDraft.ProjectId,
                 jobType = jobDraft.JobType,
-                input = jobDraft.InputJson,
+                input = jobInput.ToJsonString(JsonOptions),
                 prompt = jobDraft.PromptJson,
                 refs = jobDraft.ReferenceJson,
                 logCode = jobDraft.LogCode,
@@ -1466,6 +1475,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         var args = new { tenant = _tenant.TenantId, sceneId, sceneText = sceneId.ToString(), jobId = Guid.Empty };
         var selected = await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(SelectSceneVideoVersionSql +
             " WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true ORDER BY version_number DESC LIMIT 1;", args, tx);
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-FINALIZE-001.
+        // Prepared/abandoned drafts must never replace the head owner in Legacy/V2 controls or cost warnings.
         var latestJob = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
             """
             SELECT id AS Id, job_type AS JobType, status AS Status, input_json::text AS InputJson,
@@ -1474,6 +1485,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
               FROM render.render_jobs
              WHERE tenant_id=@tenant AND job_type='render_scene_video'
                AND NOT video_render.scene_video_job_is_superseded(tenant_id,id)
+               AND status<>'draft' AND video_render.scene_video_job_is_current(tenant_id,id)
                AND COALESCE(input_json->>'sceneId', input_json->>'scene_id')=@sceneText
              ORDER BY created_at DESC, queued_at DESC, id DESC LIMIT 1;
             """, args, tx);
@@ -1486,6 +1498,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """
             SELECT EXISTS (SELECT 1 FROM render.render_jobs WHERE tenant_id=@tenant AND job_type='render_scene_video'
                AND NOT video_render.scene_video_job_is_superseded(tenant_id,id)
+               AND video_render.scene_video_job_is_current(tenant_id,id)
                 AND COALESCE(input_json->>'sceneId', input_json->>'scene_id')=@sceneText
                 AND status IN ('queued','preparing','rendering','processing','post_processing','pending_reconciliation'));
             """, args, tx);
