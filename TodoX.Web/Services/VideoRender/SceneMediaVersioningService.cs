@@ -661,9 +661,20 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         // Preserve other input fields and remove casing aliases so deserialization cannot restore Guid.Empty.
         var jobInput = JsonNode.Parse(jobDraft.InputJson) as JsonObject
             ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_INPUT_INVALID");
-        foreach (var key in jobInput.Select(x => x.Key)
-            .Where(key => key.Equals("imageVersionId", StringComparison.OrdinalIgnoreCase)).ToArray())
+        // Both historical PascalCase and Web/camelCase callers must persist one canonical key.
+        foreach (var key in jobInput.Select(x => x.Key).ToArray())
+        {
+            var canonical = JsonNamingPolicy.CamelCase.ConvertName(key);
+            if (canonical == key) continue;
+            if (jobInput.ContainsKey(canonical))
+                throw new InvalidOperationException("SCENE_IMAGE_JOB_INPUT_AMBIGUOUS");
+            var value = jobInput[key];
             jobInput.Remove(key);
+            jobInput[canonical] = value;
+        }
+        if (jobInput["projectId"]?.GetValue<long>() != request.ProjectId
+            || jobInput["sceneId"]?.GetValue<long>() != request.SceneId)
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_IDENTITY_MISMATCH");
         jobInput["imageVersionId"] = versionId;
         var inserted = await conn.ExecuteAsync(
             """
@@ -2913,7 +2924,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         """
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId, version_number AS VersionNumber,
                logical_request_id AS LogicalRequestId, status AS Status, is_selected AS IsSelected, storage_key AS StorageKey,
-               public_url AS PublicUrl, source_file_path AS SourceFilePath, result_media_id AS ResultMediaId,
+               public_url AS PublicUrl, source_file_path AS SourceFilePath, result_media_id AS ResultMediaId, render_job_id AS RenderJobId,
                image_prompt_snapshot AS ImagePromptSnapshot, compiled_image_prompt_snapshot AS CompiledImagePromptSnapshot,
                video_prompt_snapshot AS VideoPromptSnapshot, provider_code AS ProviderCode,
                actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
