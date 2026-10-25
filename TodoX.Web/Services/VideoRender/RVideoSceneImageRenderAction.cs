@@ -210,7 +210,7 @@ var logicalRequestId = SceneImageRenderService.BuildLogicalRequestId("render_job
         };
         outcome = await _versions.CreateQueuedImageVersionWithJobAsync(new SceneImageVersionCreateRequest(
             request.ProjectId, scene.Id, user.UserId, user.CustomerId,
-            operationId, logicalRequestId, draft.ImagePrompt, prompt, draft.MotionPrompt, null,
+            null, logicalRequestId, draft.ImagePrompt, prompt, draft.MotionPrompt, null,
             new
             {
                 scene.Id,

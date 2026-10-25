@@ -7568,11 +7568,11 @@ else
 
             var operationId = Guid.NewGuid();
 
-            var version = await SceneVersions.CreateQueuedImageVersionAsync(new TodoX.Web.Services.VideoRender.SceneImageVersionCreateRequest(
+            var versionRequest = new TodoX.Web.Services.VideoRender.SceneImageVersionCreateRequest(
 
                 _project.Id, scene.Id, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId,
 
-                operationId, logicalRequestId, draft.ImagePrompt, prompt, draft.MotionPrompt, null,
+                null, logicalRequestId, draft.ImagePrompt, prompt, draft.MotionPrompt, null,
 
                 new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds,
 
@@ -7600,48 +7600,17 @@ else
 
                     billingIntent = TodoX.Web.Services.PointBillingIntent.UserRerender,
 
-                    billingOperationId = operationId }));
+                    billingOperationId = operationId });
 
-            var existingJobId = await SceneVersions.FindImageRenderJobAsync(version.Id);
-            if (existingJobId is Guid existingId)
-            {
-                var existingJob = await RenderJobs.GetAsync(existingId);
-                if (existingJob?.Status == RenderJobStatuses.Draft)
-                {
-                    if (!await SceneVersions.TryActivateImageRenderJobAsync(version.Id, existingId))
-                        throw new InvalidOperationException("SCENE_IMAGE_JOB_ACTIVATION_UNKNOWN");
-                }
-                else if (existingJob?.Status is not (RenderJobStatuses.Queued or RenderJobStatuses.Rendering or RenderJobStatuses.Completed))
-                    throw new InvalidOperationException("SCENE_IMAGE_JOB_OUTCOME_UNKNOWN");
-                _sceneEventState[scene.Id] = RenderSceneImageVisualState.Queued;
-                await StartPolling();
-                return;
-            }
-
-            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
-
-                title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
-
-                videoPrompt: scene.VideoPrompt);
-
-            var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
-
-            {
-
-                JobType = TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler.JobTypeName,
-                InitialStatus = RenderJobStatuses.Draft,
-
-                UserId = AuthState.CurrentUser.UserId,
-
-                CustomerId = AuthState.CurrentUser.CustomerId,
-
-                Input = new TodoX.Web.Services.Render.SceneImageRenderWorkItemInput
+            // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-IMAGE-RERENDER-FK-001.
+            // OperationId is billing identity only. The shared transaction allocates/persists the real job before binding the FK.
+            var jobInput = new TodoX.Web.Services.Render.SceneImageRenderWorkItemInput
 
                 {
 
                     ParentJobId = operationId,
 
-                    ImageVersionId = version.Id,
+                    ImageVersionId = Guid.Empty,
 
                     ProjectId = _project.Id,
 
@@ -7657,7 +7626,7 @@ else
 
                     TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser),
 
-                    Prompt = version.CompiledImagePromptSnapshot ?? prompt,
+                    Prompt = prompt,
 
                     AspectRatio = TodoX.Web.Services.Render.SceneImageRenderService.NormalizeAspectRatio(_aspectRatio),
 
@@ -7689,34 +7658,24 @@ else
 
                         : TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Standard
 
-                },
+                };
 
-                Prompt = new { projectId = _project.Id, sceneId = scene.Id, imageVersionId = version.Id },
-
-                References = Array.Empty<object>(),
-
-                LogCode = BuildLogCode(),
-
-                ProviderCode = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.RoutingProviderCode,
-
-                ModelCode = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.RoutingModelCode,
-
-                MaxAttempts = 100,
-
-                PointCostEstimate = 0,
-
-                PointStatus = RenderPointStatuses.NotRequired
-
-            });
-
-            if (!await SceneVersions.TryActivateImageRenderJobAsync(version.Id, job.Id))
-                throw new InvalidOperationException("SCENE_IMAGE_JOB_ACTIVATION_UNKNOWN");
+            var outcome = await SceneVersions.CreateQueuedImageVersionWithJobAsync(versionRequest,
+                new TodoX.Web.Services.VideoRender.SceneImageJobDraft(
+                    TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler.JobTypeName,
+                    AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, _project.Id,
+                    BuildLogCode(), $"Render scene {scene.SceneIndex}", null, null, 100,
+                    System.Text.Json.JsonSerializer.Serialize(jobInput),
+                    System.Text.Json.JsonSerializer.Serialize(new { projectId = _project.Id, sceneId = scene.Id }),
+                    System.Text.Json.JsonSerializer.Serialize(Array.Empty<object>())));
+            var version = outcome.Version ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_OUTCOME_UNKNOWN");
+            var jobId = outcome.RenderJobId ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_OUTCOME_UNKNOWN");
 
             _sceneEventState[scene.Id] = RenderSceneImageVisualState.Queued;
 
             await LogProjectEvent("SCENE_IMAGE_RERENDER_ENQUEUED", "info", $"Đã enqueue render lại ảnh scene {scene.SceneIndex}.",
 
-                new { job.Id, projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex,
+                new { Id = jobId, projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex,
 
                     imageVersionId = version.Id, characterId = reference.CharacterId, referenceSource = reference.Source,
 

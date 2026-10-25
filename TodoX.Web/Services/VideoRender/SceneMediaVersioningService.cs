@@ -594,12 +594,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     }
 
     // TODOX-20261015-RVIDEO-IMAGE-ATOMIC-ENQUEUE-001:
-    // One connection + one transaction for: version INSERT, job-draft INSERT, FK bind and draft->queued.
+    // One connection + one transaction for: job-draft INSERT, version INSERT, FK bind and draft->queued.
     // The intermediate state (version queued without a bound/activated job) is therefore unreachable, and a
     // retry after an unknown commit reconciles against a single durable row instead of a stranded version.
     public async Task<SceneImageEnqueueOutcome> CreateQueuedImageVersionWithJobAsync(
         SceneImageVersionCreateRequest request, SceneImageJobDraft jobDraft, CancellationToken ct = default)
     {
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-IMAGE-RERENDER-FK-001.
+        // Both UIs use one Draft -> version -> FK bind -> activation transaction.
+        if (jobDraft.JobType != "render_scene_image" || jobDraft.ProjectId != request.ProjectId
+            || jobDraft.UserId != request.UserId || jobDraft.CustomerId != request.CustomerId)
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_IDENTITY_MISMATCH");
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -613,14 +618,19 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         if (existing is not null)
         {
             // Already enqueued by this attempt: report the bound job so callers never double-enqueue.
+            if (existing.ProjectId != request.ProjectId || existing.SceneId != request.SceneId)
+                throw new InvalidOperationException("SCENE_IMAGE_JOB_IDENTITY_MISMATCH");
             var knownJobId = await conn.ExecuteScalarAsync<Guid?>(
                 """
                 SELECT id FROM render.render_jobs
-                 WHERE tenant_id=@tenant AND job_type='render_scene_image'
+                 WHERE tenant_id=@tenant AND job_type='render_scene_image' AND project_id=@projectId
                    AND input_json->>'imageVersionId'=@versionIdText
+                   AND id=(SELECT render_job_id FROM video_render.scene_image_versions WHERE id=@versionId AND tenant_id=@tenant)
                  ORDER BY created_at DESC LIMIT 1;
                 """,
-                new { versionIdText = existing.Id.ToString(), tenant = _tenant.TenantId }, tx);
+                new { versionIdText = existing.Id.ToString(), versionId = existing.Id, projectId = request.ProjectId, tenant = _tenant.TenantId }, tx);
+            if (knownJobId is null)
+                throw new InvalidOperationException("SCENE_IMAGE_JOB_OUTCOME_UNKNOWN");
             tx.Commit();
             existing.RenderJobId = knownJobId;
             return SceneImageEnqueueOutcome.Active(existing);
@@ -643,7 +653,51 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         var versionId = Guid.NewGuid();
         var storageKey = SceneMediaStorageKeys.SceneImageOutput(_tenant.TenantId, request.ProjectId, request.SceneId, versionId, "png");
 
-        // 3. Insert the queued version.
+        // 3. Persist the real draft job first; it remains invisible to workers until this transaction commits.
+        var jobId = Guid.NewGuid();
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-FINALIZE-001.
+        // The version identity is allocated here, so bind the worker input here in the same transaction.
+        // Preserve other input fields and remove casing aliases so deserialization cannot restore Guid.Empty.
+        var jobInput = JsonNode.Parse(jobDraft.InputJson) as JsonObject
+            ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_INPUT_INVALID");
+        foreach (var key in jobInput.Select(x => x.Key)
+            .Where(key => key.Equals("imageVersionId", StringComparison.OrdinalIgnoreCase)).ToArray())
+            jobInput.Remove(key);
+        jobInput["imageVersionId"] = versionId;
+        var inserted = await conn.ExecuteAsync(
+            """
+            INSERT INTO render.render_jobs
+                (id, tenant_id, user_id, customer_id, project_id, job_type, status, priority,
+                 input_json, prompt_json, reference_json, log_code, error_code, error_message,
+                 attempts, max_attempts, created_at, updated_at, provider_code, model_code, point_cost_estimate, point_status)
+            VALUES (@jobId, @tenant, @userId, @customerId, @projectId, @jobType, 'draft', 0,
+                   CAST(@input AS jsonb), CAST(@prompt AS jsonb), CAST(@refs AS jsonb),
+                   @logCode, @errorCode, @errorMessage, 0, @maxAttempts, now(), now(), @providerCode, @modelCode, 0, @pointStatus);
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                userId = jobDraft.UserId,
+                customerId = jobDraft.CustomerId,
+                projectId = jobDraft.ProjectId,
+                jobType = jobDraft.JobType,
+                input = jobInput.ToJsonString(JsonOptions),
+                prompt = jobDraft.PromptJson,
+                refs = jobDraft.ReferenceJson,
+                logCode = jobDraft.LogCode,
+                errorCode = jobDraft.ErrorCode,
+                errorMessage = jobDraft.ErrorMessage,
+                maxAttempts = jobDraft.MaxAttempts,
+                providerCode = SceneImageBatchRenderHandler.RoutingProviderCode,
+                modelCode = SceneImageBatchRenderHandler.RoutingModelCode,
+                pointStatus = RenderPointStatuses.NotRequired,
+                versionId
+            }, tx);
+        if (inserted != 1)
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_ENQUEUE_UNKNOWN");
+
+        // 4. Insert the version only after its real draft job exists; selection stays unchanged.
         await conn.ExecuteAsync(
             """
             INSERT INTO video_render.scene_image_versions
@@ -676,49 +730,6 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 renderConfig = ToJson(request.RenderConfigSnapshot),
                 storageKey
             }, tx);
-
-        // 4. Insert the render job as draft, still uncommitted: it cannot be claimed before activation.
-        var jobId = Guid.NewGuid();
-        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-FINALIZE-001.
-        // The version identity is allocated here, so bind the worker input here in the same transaction.
-        // Preserve other input fields and remove casing aliases so deserialization cannot restore Guid.Empty.
-        var jobInput = JsonNode.Parse(jobDraft.InputJson) as JsonObject
-            ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_INPUT_INVALID");
-        foreach (var key in jobInput.Select(x => x.Key)
-            .Where(key => key.Equals("imageVersionId", StringComparison.OrdinalIgnoreCase)).ToArray())
-            jobInput.Remove(key);
-        jobInput["imageVersionId"] = versionId;
-        var inserted = await conn.ExecuteAsync(
-            """
-            INSERT INTO render.render_jobs
-                (id, tenant_id, user_id, customer_id, project_id, job_type, status, priority,
-                 input_json, prompt_json, reference_json, log_code, error_code, error_message,
-                 attempts, max_attempts, created_at, updated_at)
-            SELECT @jobId, @tenant, @userId, @customerId, @projectId, @jobType, 'draft', 0,
-                   CAST(@input AS jsonb), CAST(@prompt AS jsonb), CAST(@refs AS jsonb),
-                   @logCode, @errorCode, @errorMessage, 0, @maxAttempts, now(), now()
-             WHERE EXISTS (SELECT 1 FROM video_render.scene_image_versions v
-                            WHERE v.id=@versionId AND v.tenant_id=@tenant AND v.status='queued');
-            """,
-            new
-            {
-                jobId,
-                tenant = _tenant.TenantId,
-                userId = jobDraft.UserId,
-                customerId = jobDraft.CustomerId,
-                projectId = jobDraft.ProjectId,
-                jobType = jobDraft.JobType,
-                input = jobInput.ToJsonString(JsonOptions),
-                prompt = jobDraft.PromptJson,
-                refs = jobDraft.ReferenceJson,
-                logCode = jobDraft.LogCode,
-                errorCode = jobDraft.ErrorCode,
-                errorMessage = jobDraft.ErrorMessage,
-                maxAttempts = jobDraft.MaxAttempts,
-                versionId
-            }, tx);
-        if (inserted != 1)
-            throw new InvalidOperationException("SCENE_IMAGE_JOB_ENQUEUE_UNKNOWN");
 
         // 5. Bind FK and activate draft->queued inside the same transaction.
         var bound = await conn.ExecuteAsync(

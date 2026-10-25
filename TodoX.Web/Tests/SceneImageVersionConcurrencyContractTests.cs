@@ -10,12 +10,17 @@ public sealed class SceneImageVersionConcurrencyContractTests
         var root = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..");
         var page = File.ReadAllText(Path.Combine(root, "Components", "Pages", "RenderVideoJobs.razor"));
         var service = File.ReadAllText(Path.Combine(root, "Services", "VideoRender", "SceneMediaVersioningService.cs"));
-        var start = page.IndexOf("var job = await RenderJobs.EnqueueAsync", StringComparison.Ordinal);
-        var end = page.IndexOf("_sceneEventState[scene.Id] = RenderSceneImageVisualState.Queued", start, StringComparison.Ordinal);
+        var start = page.IndexOf("private async Task RerenderSceneImageAsync(", StringComparison.Ordinal);
+        var end = page.IndexOf("private async Task ConfirmAndRerenderSceneImageAsync(", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var enqueue = page[start..end];
-        Assert.Contains("InitialStatus = RenderJobStatuses.Draft", enqueue);
-        Assert.Contains("TryActivateImageRenderJobAsync(version.Id, job.Id)", enqueue);
+        Assert.Contains("CreateQueuedImageVersionWithJobAsync(versionRequest,", enqueue);
+        Assert.Contains("if (!_sceneRerendering.Add(scene.Id)) return", enqueue);
+        Assert.Contains("null, logicalRequestId, draft.ImagePrompt", enqueue);
+        Assert.Contains("BillingReferenceId = operationId", enqueue);
+        Assert.DoesNotContain("CreateQueuedImageVersionAsync(", enqueue);
+        Assert.DoesNotContain("RenderJobs.EnqueueAsync", enqueue);
+        Assert.DoesNotContain("VideoRepo.UpdateSceneAsync", enqueue);
         var activation = service[service.IndexOf("public async Task<bool> TryActivateImageRenderJobAsync", StringComparison.Ordinal)..];
         Assert.True(activation.IndexOf("SET render_job_id=@renderJobId", StringComparison.Ordinal)
                     < activation.IndexOf("SET status='queued'", StringComparison.Ordinal));
@@ -87,11 +92,11 @@ public sealed class SceneImageVersionConcurrencyContractTests
         var commit = method.IndexOf("tx.Commit()", activate, StringComparison.Ordinal);
 
         Assert.True(insertVersion >= 0, "version insert must exist");
-        Assert.True(insertJob > insertVersion, "job insert must follow the version insert");
-        Assert.True(bind > insertJob, "FK bind must follow the job insert");
+        Assert.True(insertJob >= 0 && insertJob < insertVersion, "persist the Draft job before inserting the version");
+        Assert.True(bind > insertVersion, "FK bind must follow both real rows");
         Assert.True(activate > bind, "draft->queued activation must follow the FK bind");
         Assert.True(commit > activate, "the single commit must come after activation");
         // Exactly one commit on the create path: from the version insert to the end of the method.
-        Assert.Equal(1, method[insertVersion..].Split("tx.Commit()", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, method[insertJob..].Split("tx.Commit()", StringSplitOptions.None).Length - 1);
     }
 }
