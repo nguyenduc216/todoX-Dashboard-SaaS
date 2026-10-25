@@ -49,7 +49,15 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var finalization = scope.ServiceProvider.GetRequiredService<IRVideoProjectFinalizationService>();
                 foreach (var setting in settings)
                 {
-                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, finalizer, autoChain, versions, finalization, factory, tenant, catalog, stoppingToken);
+                    try
+                    {
+                        await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, finalizer, autoChain, versions, finalization, factory, tenant, catalog, stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "RVIDEO_PROJECT_LIFECYCLE_FAILED projectId={ProjectId}", setting.ProjectId);
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -69,6 +77,9 @@ public sealed class RVideoLifecycleWorker : BackgroundService
     {
         var project = await repo.GetProjectAsync(setting.ProjectId, ct);
         if (project is null || project.Scenes.Count == 0) return;
+        // Completed projects remain eligible for selection-driven re-merge, independently of generation setup validation.
+        if (!string.IsNullOrWhiteSpace(project.FinalVideoUrl))
+            await finalization.TryEnqueueFinalMergeAsync(project.Id, RVideoProjectFinalizationContracts.TriggerAuto, ct);
         try
         {
             RVideoRules.ValidateAutoProject(project, setting);

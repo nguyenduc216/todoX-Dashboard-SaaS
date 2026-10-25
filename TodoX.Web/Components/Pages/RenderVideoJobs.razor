@@ -918,7 +918,7 @@ else
 
                                             <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
 
-                                            @RenderSceneStatusBadge(scene, "image")
+                                            @RenderSceneStatusBadge(scene, SupersedeState(scene)?.LatestJob is not null ? "video" : "image")
 
                                                 <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
 
@@ -1019,6 +1019,7 @@ else
 
                                             <MudStack Spacing="1">
 
+                                                <div style="position:relative">
                                                 <RenderMediaFrame IsVideo="true"
 
                                                                   MediaUrl="@ResolveDraftVideoUrl(scene, draft)"
@@ -1040,6 +1041,19 @@ else
                                                                   OnRetry="@(() => RetryOrSupersedeSceneVideoAsync(scene))"
 
                                                                   OnClick="@(() => OpenSceneVideoPreview(scene))" />
+                                                    @if (!string.IsNullOrWhiteSpace(ResolveDraftVideoUrl(scene, draft))
+                                                        && ResolveVideoMediaState(scene) is MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading or MediaRenderState.Failed)
+                                                    {
+                                                        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.45);color:white;pointer-events:none" role="status" aria-live="polite">
+                                                            @if (ResolveVideoMediaState(scene) != MediaRenderState.Failed)
+                                                            {
+                                                                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+                                                            }
+                                                            <span>@ResolveVideoSceneLabel(scene)</span>
+                                                            <small>Video đã chọn vẫn có thể xem</small>
+                                                        </div>
+                                                    }
+                                                </div>
 
                                                 <div class="scene-media-actions">
 
@@ -1056,7 +1070,7 @@ else
                                                         HideTrigger="true" Visible="@NeedsExplicitVideoOperation(scene)" Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id))"
                                                         CurrentJobId="@SupersedeState(scene)?.LatestJob?.Id" Generation="@SupersedeState(scene)?.Generation"
                                                         OutcomeUnknown="@(SupersedeState(scene)?.HasProviderIdentity == true || SupersedeState(scene)?.HasActiveJob == true || SupersedeState(scene)?.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)"
-                                                        PrepareRequest="@(() => PrepareSceneVideoRequestAsync(scene))" OnQueued="OnSupersedeQueuedAsync" />
+                                                        PrepareRequest="@(() => PrepareSceneVideoRequestAsync(scene))" OnOperationQueued="@(result => OnSupersedeQueuedAsync(scene.Id, result))" />
 
 
 
@@ -4191,7 +4205,7 @@ else
             VideoSceneStatuses.VideoRendering => "Đang tạo video",
             VideoSceneStatuses.VideoReady => "Hoàn tất",
             VideoSceneStatuses.Failed => "Tạo video thất bại",
-            "pending_reconciliation" => "Chưa thể thử lại",
+            "pending_reconciliation" => "Đang chờ đối soát",
             "state_unavailable" => "Chưa thể thử lại",
             _ => "Chưa thể thử lại"
         };
@@ -6156,7 +6170,6 @@ else
 
         {
 
-            _sceneVideoUiStates.Clear();
             Logger.LogError(ex, "VIDEO_RENDER_LOAD_JOBS_FAILED logCode={LogCode}", logCode);
 
             await AddDebugAsync("jobs_failed", "Tải job thất bại", "FAILED", ex.Message, ex.ToString());
@@ -6169,122 +6182,50 @@ else
 
     }
 
-    private async Task StartPolling()
-
+    private Task? _pollTask;
+    private long? _pollProjectId;
+    private Task StartPolling()
     {
-
-        if (_projectId is null)
-
-        {
-
-            StopPolling();
-
-            return;
-
-        }
-
-        _pollCts?.Cancel();
-
+        if (_projectId is null) { StopPolling(); return Task.CompletedTask; }
+        if (_pollProjectId == _projectId && _pollTask is { IsCompleted: false }
+            && _pollCts is { IsCancellationRequested: false }) return Task.CompletedTask;
+        StopPolling();
+        _pollProjectId = _projectId;
         _pollCts = new CancellationTokenSource();
-
-        _pollTimer?.Dispose();
-
-        _pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(VideoOptions.CurrentValue.PollIntervalSeconds));
-
-        _ = PollLoopAsync(_pollCts.Token);
-
+        var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, VideoOptions.CurrentValue.PollIntervalSeconds)));
+        _pollTimer = timer;
+        _pollTask = PollLoopAsync(_projectId.Value, timer, _pollCts.Token);
+        return Task.CompletedTask;
     }
 
     private void StopPolling()
-
     {
-
         _pollCts?.Cancel();
-
         _pollCts?.Dispose();
-
         _pollCts = null;
-
         _pollTimer?.Dispose();
-
         _pollTimer = null;
-
+        _pollProjectId = null;
     }
 
-    private async Task PollLoopAsync(CancellationToken ct)
-
+    private async Task PollLoopAsync(long projectId, PeriodicTimer timer, CancellationToken ct)
     {
-
-        if (_projectId is null) return;
-
-        while (!ct.IsCancellationRequested && _pollTimer is not null)
-
+        while (!ct.IsCancellationRequested && _projectId == projectId)
         {
-
             try
-
             {
-
-                if (!await _pollTimer.WaitForNextTickAsync(ct)) break;
-
-                if (_project is null) continue;
-
-                // Keep polling while a configured image-provider batch is active, scenes are actively rendering/retrying,
-
-                // scenes are still pending an image, or the video pipeline is mid-flight. Stop once everything
-
-                // has settled to avoid churn.
-
-                var hasPendingSceneImages = HasPendingSceneImages();
-
-                var scenesPending = _batchActive || HasActiveSceneRenders();
-
-                var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging
-
-                                  || _project.Scenes.Any(IsVideoSceneActive)
-                                  || _jobs.Any(job => job.JobType == TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo
-                                      && IsActiveRenderJobStatus(job.Status))
-                                  || _sceneVideoUiStates.Values.Any(state => state.HasActiveJob
-                                      || state.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None);
-
-                if (scenesPending || videoActive)
-
-                {
-
-                    await InvokeAsync(ReloadAsync);
-
-                    // Batch is done when no scene is still waiting for its first image.
-
-                    if (_batchActive && !hasPendingSceneImages)
-
-                    {
-
-                        _batchActive = false;
-
-                    }
-
-                    await InvokeAsync(StateHasChanged);
-
-                }
-                else
-                {
-
-                    await ContinueAutoFinishAsync();
-
-                }
-
+                if (!await timer.WaitForNextTickAsync(ct)) break;
+                if (_projectId != projectId) break;
+                // Keep the viewed project live through the gap between scene completion and deferred final merge.
+                await InvokeAsync(ReloadAsync);
+                await InvokeAsync(StateHasChanged);
             }
-
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch (Exception ex)
             {
-
-                break;
-
+                Logger.LogWarning(ex, "RVIDEO_UI_POLL_FAILED projectId={ProjectId}", projectId);
             }
-
         }
-
     }
 
     private async Task ContinueAutoFinishAsync()
@@ -8982,6 +8923,19 @@ else
     private MediaRenderState ResolveVideoMediaState(VideoProjectSceneDto scene)
 
     {
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-LIVE-REMERGE-003.
+        // Playback selection is independent of the active operation, including failed/reconciling attempts.
+        if (_sceneVideoUiStates.GetValueOrDefault(scene.Id)?.LatestJob is not null)
+        {
+            switch (ResolveVideoSceneStatus(scene))
+            {
+                case VideoSceneStatuses.VideoQueued: return MediaRenderState.Queued;
+                case VideoSceneStatuses.VideoRendering: return MediaRenderState.Rendering;
+                case "pending_reconciliation": return MediaRenderState.Rendering;
+                case VideoSceneStatuses.Failed: return MediaRenderState.Failed;
+            }
+        }
+
 
         var versions = _videoVersions.TryGetValue(scene.Id, out var loadedVersions)
 
@@ -9204,15 +9158,17 @@ else
     private async Task LoadSceneVideoUiStatesAsync()
     {
         if (_project is null || AuthState.CurrentUser is null) return;
-        foreach (var scene in _project.Scenes)
+        var projectId = _project.Id;
+        var scenes = _project.Scenes.ToArray();
+        foreach (var scene in scenes)
         {
-            _sceneVideoUiStates.Remove(scene.Id);
             try
             {
                 var state = await SceneVersions.GetSceneVideoUiStateAsync(scene.Id, AuthState.CurrentUser);
+                if (_project?.Id != projectId) return;
+                if (!ApplySceneVideoUiState(scene.Id, state)) continue;
                 if (state.SelectedVersion is { } selected && _videoVersions.TryGetValue(scene.Id, out var versions))
                     _videoVersions[scene.Id] = versions.Where(v => v.Id != selected.Id).Append(selected).ToArray();
-                _sceneVideoUiStates[scene.Id] = state;
             }
             catch (Exception ex)
             {
@@ -9716,7 +9672,36 @@ else
         => _sceneVideoUiStates.GetValueOrDefault(scene.Id);
     private bool NeedsExplicitVideoOperation(VideoProjectSceneDto scene) => SupersedeState(scene) is { } state
         && (state.RequiresExplicitOperation || state.SelectedVersion is not null || state.LatestJobVersion is not null);
-    private async Task OnSupersedeQueuedAsync() { await ReloadAsync(); await StartPolling(); }
+    private readonly Dictionary<long, Guid> _pendingVideoOperations = new();
+    private async Task OnSupersedeQueuedAsync(long sceneId, TodoX.Web.Services.VideoRender.RVideoSceneVideoRenderResult result)
+    {
+        if (result.RenderJobId is not Guid jobId) return;
+        ApplySupersedeQueued(sceneId, jobId);
+        await InvokeAsync(StateHasChanged);
+        await StartPolling();
+        await ReloadAsync();
+    }
+
+    private void ApplySupersedeQueued(long sceneId, Guid jobId)
+    {
+        var previous = _sceneVideoUiStates.GetValueOrDefault(sceneId);
+        _pendingVideoOperations[sceneId] = jobId;
+        _sceneVideoUiStates[sceneId] = new(previous?.SelectedVersion,
+            new RenderJobDto { Id=jobId, JobType=TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo, Status=RenderJobStatuses.Queued },
+            null, TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None, true, previous?.Generation);
+    }
+
+    private bool ApplySceneVideoUiState(long sceneId, TodoX.Web.Services.VideoRender.SceneVideoUiState state)
+    {
+        if (_pendingVideoOperations.TryGetValue(sceneId, out var pending))
+        {
+            var observedGeneration = _sceneVideoUiStates.GetValueOrDefault(sceneId)?.Generation ?? 0;
+            if (state.LatestJob?.Id != pending && (state.Generation ?? 0) <= observedGeneration) return false;
+            _pendingVideoOperations.Remove(sceneId);
+        }
+        _sceneVideoUiStates[sceneId] = state;
+        return true;
+    }
 
     private Task RetryOrSupersedeSceneVideoAsync(VideoProjectSceneDto scene)
         => NeedsExplicitVideoOperation(scene) ? RerenderSceneVideoAsync(scene) : RetrySceneVideoAsync(scene);
@@ -10373,6 +10358,8 @@ else
     public async ValueTask DisposeAsync()
 
     {
+        StopPolling();
+        if (_pollTask is not null) await _pollTask;
 
         if (_mainSpeech is not null) await _mainSpeech.DisposeAsync();
 

@@ -218,7 +218,8 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             "SCENE_VIDEO_READY",
             "info",
             $"Scene {request.SceneIndex} rendered successfully.",
-            new { request.SceneId, request.SceneIndex, request.ProviderTaskId, videoUrl = saved.PublicUrl ?? saved.FileUrl },
+            new { projectId = request.ProjectId, request.SceneId, request.SceneIndex, selectedVideoVersionId = request.SceneVideoVersionId,
+                mergeSourceJobId = request.RenderJobId, request.ProviderTaskId, videoUrl = saved.PublicUrl ?? saved.FileUrl },
             ct);
 
         try

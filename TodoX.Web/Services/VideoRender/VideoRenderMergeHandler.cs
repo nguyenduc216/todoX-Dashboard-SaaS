@@ -13,6 +13,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     public const string JobTypeName = RenderJobTypes.MergeProjectVideo;
     public string JobType => JobTypeName;
 
+    private readonly IRVideoProjectFinalizationService? _finalization;
     private readonly ILogger<VideoRenderMergeHandler> _logger;
     private readonly IOptionsMonitor<VideoRenderOptions> _options;
     private readonly VideoRenderRepository _repo;
@@ -24,8 +25,9 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     private readonly TodoX.Web.Services.Media.IMediaFileService _media;
     private readonly TodoX.Web.Services.TenantContext _tenant;
 
-    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, RVideoJobSettingsRepository settings, IRVideoJobService rvideoJobs, IConfiguration configuration, TodoX.Web.Services.Media.IMediaFileService media, TodoX.Web.Services.TenantContext tenant)
+    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, RVideoJobSettingsRepository settings, IRVideoJobService rvideoJobs, IConfiguration configuration, TodoX.Web.Services.Media.IMediaFileService media, TodoX.Web.Services.TenantContext tenant, IRVideoProjectFinalizationService? finalization = null)
     {
+        _finalization = finalization;
         _logger = logger;
         _options = options;
         _repo = repo;
@@ -43,8 +45,22 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         var projectId = TryReadLong(job.InputJson, "projectId") ?? TryReadLong(job.PromptJson, "projectId") ?? throw new InvalidOperationException("Thieu projectId trong job input.");
         // Capture before reading consumed inputs; later DB writes reject any intervening generation/selection change.
         var mergeSnapshot=await _repo.GetVideoMergeSnapshotAsync(projectId, ct);
+        using (var queued = JsonDocument.Parse(job.InputJson))
+        {
+            if (queued.RootElement.TryGetProperty("mergeSnapshot", out var expected) && expected.ValueKind == JsonValueKind.String)
+            {
+                RequireCurrentSnapshot(expected.GetString()!, mergeSnapshot);
+                if (_finalization is not null && await _finalization.IsCurrentFinalVideoAsync(projectId, ct)) return;
+            }
+        }
         using var mergeScope = SceneVideoOperationScope.Merge(mergeSnapshot);
         var project = await _repo.GetProjectAsync(projectId, ct) ?? throw new InvalidOperationException("Khong tim thay project video.");
+        using (var queued = JsonDocument.Parse(job.InputJson))
+        {
+            if (queued.RootElement.TryGetProperty("sceneOrder", out var order)
+                && !order.EnumerateArray().Select(x => x.GetInt64()).SequenceEqual(project.Scenes.OrderBy(s => s.SceneIndex).Select(s => s.Id)))
+                throw new RenderJobTerminalFailureException("RVIDEO_MERGE_INPUT_STALE: scene order changed.");
+        }
         if (!project.Scenes.Any())
         {
             throw new InvalidOperationException("Project khong co scene de merge.");
@@ -183,6 +199,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             var finalDurationSeconds = RVideoRules.CalculateMergedDuration(mergeableScenes);
             await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new
             {
+                projectId = project.Id, mergeJobId = job.Id, finalVideoVersionId = version?.Id, mergeSnapshot,
                 finalPath,
                 url,
                 mergedSceneCount = mergeableScenes.Count,
@@ -210,9 +227,15 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
 
             await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Failed, errorMessage: ex.Message, ct: ct);
             await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Failed, ct);
-            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_FAILED", "error", "Final video merge failed.", new { versionId = version?.Id, error = ex.Message }, ct);
+            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_FAILED", "error", "Final video merge failed.", new { projectId = project.Id, mergeJobId = job.Id, versionId = version?.Id, mergeSnapshot, error = ex.Message }, ct);
             throw;
         }
+    }
+
+    internal static void RequireCurrentSnapshot(string expected, string actual)
+    {
+        if (!JsonNode.DeepEquals(JsonNode.Parse(expected), JsonNode.Parse(actual)))
+            throw new RenderJobTerminalFailureException("RVIDEO_MERGE_INPUT_STALE: selections changed; lifecycle will enqueue the current snapshot.");
     }
 
     public static void ValidateConsumedSelection(string snapshot,IEnumerable<(long SceneId,Guid? VersionId)> inputs)

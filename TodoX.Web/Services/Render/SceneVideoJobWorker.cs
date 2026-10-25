@@ -73,7 +73,8 @@ public sealed class SceneVideoJobWorker : BackgroundService
                     }
 
                     await DispatchClaimAsync(jobs, dispatcher, job, workerKey, stoppingToken);
-                    await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Completed, ct: stoppingToken);
+                    await MarkCompletedAndFinalizeAsync(jobs,
+                        scope.ServiceProvider.GetRequiredService<IRVideoProjectFinalizationService>(), job, _logger, stoppingToken);
                 }
                 catch (RenderJobPendingReconciliationException ex)
                 {
@@ -131,6 +132,26 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 _logger.LogError(ex, "Scene video job worker lane {Lane} failed.", lane);
                 await Task.Delay(idleDelay, stoppingToken);
             }
+        }
+    }
+
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-LIVE-REMERGE-003.
+    // Final readiness requires the active generation's job to be completed, not just its selected media.
+    internal static async Task MarkCompletedAndFinalizeAsync(IRenderJobService jobs,
+        IRVideoProjectFinalizationService finalization, RenderJobDto job, ILogger logger, CancellationToken ct)
+    {
+        await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Completed, ct: ct);
+        try
+        {
+            var input = JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(job.InputJson, JsonOptions);
+            if (input is { ProjectId: > 0 })
+                await finalization.TryEnqueueFinalMergeAsync(input.ProjectId,
+                    RVideoProjectFinalizationContracts.TriggerSceneVideoReady, ct);
+        }
+        catch (Exception ex)
+        {
+            // A downstream merge failure must never turn a completed provider operation into a retry.
+            logger.LogWarning(ex, "RVIDEO_COMPLETED_JOB_FINAL_MERGE_CHECK_FAILED jobId={JobId}", job.Id);
         }
     }
 

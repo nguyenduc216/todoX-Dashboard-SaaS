@@ -322,6 +322,23 @@ public sealed class RenderJobService : IRenderJobService
         }
 
         var inputJson = ToJson(model.Input ?? new { });
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-LIVE-REMERGE-003.
+        // Under the existing admission lock, close the completion/preflight race for the same merge snapshot.
+        if (jobType == RenderJobTypes.MergeProjectVideo)
+        {
+            using var input = JsonDocument.Parse(inputJson);
+            if (input.RootElement.TryGetProperty("mergeSelectionKey", out var snapshot) && snapshot.ValueKind == JsonValueKind.String)
+            {
+                var completed = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(SelectJobSql + "\n" + """
+                    WHERE tenant_id=@tenant AND job_type=@jobType AND log_code=@logCode AND status='completed'
+                      AND input_json->>'mergeSelectionKey'=@snapshot
+                      AND id IN (SELECT render_job_id FROM video_render.final_video_versions
+                                 WHERE tenant_id=@tenant AND status='completed' AND is_selected=true)
+                    ORDER BY created_at DESC LIMIT 1;
+                    """, new { tenant=_tenant.TenantId, jobType, logCode=uniqueLogCode, snapshot=snapshot.GetString() }, tx);
+                if (completed is not null) { tx.Commit(); return (completed, true); }
+            }
+        }
         var promptJson = ToJson(model.Prompt ?? new { });
         var referenceJson = ToJson(model.References ?? Array.Empty<object>());
         var customerScope = model.CustomerId is null ? "system" : "customer";

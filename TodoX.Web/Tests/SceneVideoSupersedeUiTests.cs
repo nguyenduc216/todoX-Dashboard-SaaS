@@ -68,12 +68,16 @@ public sealed class SceneVideoSupersedeUiTests
         var (component, action, dialog) = Create(true);
         dialog.Answer = new TaskCompletionSource<bool?>(); dialog.Answer.SetResult(true);
         var reloads = 0;
+        Guid? queuedJobId = null;
+        component.OnOperationQueued = new Microsoft.AspNetCore.Components.EventCallback<RVideoSceneVideoRenderResult>(
+            null, (Action<RVideoSceneVideoRenderResult>)(result => queuedJobId = result.RenderJobId));
         component.OnQueued = new Microsoft.AspNetCore.Components.EventCallback(null, (Action)(() => reloads++));
         await component.RunAsync();
         var snackbar = (SnackbarProxy)(object)typeof(RVideoSupersedeButton)
             .GetProperty("Snackbar", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!;
         Assert.Contains(action.JobId.ToString(), snackbar.Message);
         Assert.Equal(1, reloads);
+        Assert.Equal(action.JobId, queuedJobId);
     }
 
     [Fact]

@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Render;
 
@@ -5,6 +8,7 @@ namespace TodoX.Web.Services.VideoRender;
 
 public interface IRVideoProjectFinalizationService
 {
+    Task<bool> IsCurrentFinalVideoAsync(long projectId, CancellationToken ct = default) => Task.FromResult(false);
     Task<RVideoProjectFinalizationResult> TryEnqueueFinalMergeAsync(long projectId, string triggerSource, CancellationToken ct = default);
 }
 
@@ -55,7 +59,14 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             return NotEnqueued("project_missing", logicalRequestId);
         }
 
-        if (await _repo.HasOpenVideoGenerationAsync(projectId, ct)) return NotEnqueued("current_generation_pending", logicalRequestId);
+        if (await _repo.HasOpenVideoGenerationAsync(projectId, ct))
+        {
+            if (triggerSource != RVideoProjectFinalizationContracts.TriggerAuto)
+                await _repo.AddProjectEventAsync(projectId, "PROJECT_FINAL_MERGE_NOT_READY", "info",
+                    "Final merge is waiting for current video generations to complete.",
+                    new { projectId, triggerSource, reason = "current_generation_pending" }, ct);
+            return NotEnqueued("current_generation_pending", logicalRequestId);
+        }
         var settings = await _settings.GetAsync(projectId, ct);
         if (settings is null)
         {
@@ -96,12 +107,15 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             return NotEnqueued("not_ready", logicalRequestId);
         }
 
+        var mergeSnapshot = await _repo.GetVideoMergeSnapshotAsync(project.Id, ct);
+        var sceneOrder = project.Scenes.OrderBy(s => s.SceneIndex).Select(s => s.Id).ToArray();
+        var mergeSelectionKey = BuildMergeSelectionKey(mergeSnapshot, sceneOrder);
         var (job, alreadyActive) = await _jobs.EnqueueForLogCodeIfNoneActiveAsync(new RenderJobCreateModel
         {
             JobType = RenderJobTypes.MergeProjectVideo,
             UserId = project.UserId,
             CustomerId = project.CustomerId,
-            Input = new { projectId = project.Id, logicalRequestId, source = triggerSource },
+            Input = new { projectId = project.Id, logicalRequestId, source = triggerSource, mergeSnapshot, sceneOrder, mergeSelectionKey },
             Prompt = new { projectId = project.Id, source = triggerSource, stage = "merge", voiceMode = RVideoRules.ResolveVoiceMode(settings) },
             References = Array.Empty<object>(),
             LogCode = logicalRequestId,
@@ -112,6 +126,11 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             PointStatus = RenderPointStatuses.NotRequired
         }, logicalRequestId, ct);
 
+        if (alreadyActive && job.Status == RenderJobStatuses.Completed)
+        {
+            await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Completed, ct);
+            return NotEnqueued("already_final", logicalRequestId);
+        }
         if (alreadyActive)
         {
             await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Merging, ct);
@@ -120,13 +139,24 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
 
         await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_AUTO_ENQUEUED", "info",
             "Project final merge auto-enqueued.",
-            new { projectId = project.Id, renderJobId = job.Id, logicalRequestId, voiceMode = RVideoRules.ResolveVoiceMode(settings), triggerSource }, ct);
+            new { projectId = project.Id, renderJobId = job.Id, logicalRequestId, voiceMode = RVideoRules.ResolveVoiceMode(settings), triggerSource, mergeSnapshot, mergeSelectionKey }, ct);
         await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Merging, ct);
         return new(true, false, "enqueued", job.Id, logicalRequestId);
     }
 
+    internal static string BuildMergeSelectionKey(string mergeSnapshot, IEnumerable<long> sceneOrder)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(new { mergeSnapshot, sceneOrder = sceneOrder.ToArray() }))));
+
     public static string BuildMergeLogicalRequestKey(long projectId)
         => $"rvideo-final-merge:{projectId}";
+
+    public async Task<bool> IsCurrentFinalVideoAsync(long projectId, CancellationToken ct = default)
+    {
+        var project = await _repo.GetProjectAsync(projectId, ct);
+        return project is not null && !string.IsNullOrWhiteSpace(project.FinalVideoUrl)
+            && await IsCurrentFinalVideoAsync(projectId, project.Scenes, ct);
+    }
 
     private async Task<bool> IsCurrentFinalVideoAsync(long projectId, IReadOnlyCollection<VideoProjectSceneDto> scenes, CancellationToken ct)
     {

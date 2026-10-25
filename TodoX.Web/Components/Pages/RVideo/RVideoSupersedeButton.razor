@@ -23,6 +23,7 @@
     [Parameter] public Guid? CurrentJobId { get; set; }
     [Parameter] public long? Generation { get; set; }
     [Parameter] public EventCallback OnQueued { get; set; }
+    [Parameter] public EventCallback<RVideoSceneVideoRenderResult> OnOperationQueued { get; set; }
     [Parameter] public Func<Task<bool>>? Prepare { get; set; }
     [Parameter] public Func<Task<RVideoSceneVideoRenderRequest?>>? PrepareRequest { get; set; }
     private RVideoSceneVideoRenderRequest? _submittedRequest;
@@ -93,6 +94,7 @@
                 return;
             }
             Snackbar.Add($"Đang tạo video. Job: {result.RenderJobId}", Severity.Success);
+            await OnOperationQueued.InvokeAsync(result);
             await OnQueued.InvokeAsync();
         }
         catch (Exception ex)
