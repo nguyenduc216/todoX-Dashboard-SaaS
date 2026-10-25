@@ -32,6 +32,56 @@ public sealed class SupersedePostgresTheoryAttribute : TheoryAttribute
 
 public sealed class SceneVideoOperationDraftPostgresTests
 {
+    [SupersedePostgresFact]
+    public async Task Scene07ReadOnlyCollectorResolvesExactIdentityWithAndWithoutOperationMigration()
+    {
+        var cs = Environment.GetEnvironmentVariable("TODOX_SUPERSEDE_TEST_DB")!;
+        ValidateIsolatedConnection(cs);
+        await using var conn = new NpgsqlConnection(cs);
+        await conn.OpenAsync();
+        Assert.Equal(0, await conn.ExecuteScalarAsync<int>("SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN('pg_catalog','information_schema');"));
+        var owned = false;
+        try
+        {
+            await conn.ExecuteAsync(FixtureSql);
+            owned = true;
+            await conn.ExecuteAsync("""
+                ALTER TABLE video_render.video_projects ADD core_job_id uuid;
+                ALTER TABLE video_render.video_project_scenes ADD scene_index integer;
+                ALTER TABLE video_render.scene_image_versions ADD version_number integer, ADD render_job_id uuid, ADD is_selected boolean DEFAULT false;
+                CREATE TABLE video_render.video_project_events(id uuid,tenant_id uuid,project_id bigint,event_type text,created_at timestamptz,data_json jsonb);
+                INSERT INTO video_render.video_projects(id,tenant_id) VALUES(900,'11111111-1111-1111-1111-111111111111');
+                INSERT INTO video_render.video_project_scenes(id,project_id,tenant_id,scene_index,status) VALUES(901,900,'11111111-1111-1111-1111-111111111111',7,'video_rendering');
+                INSERT INTO render.render_jobs(id,tenant_id,job_type,status,input_json,provider_task_id)
+                  VALUES('38e0399b-9d50-42a0-8ebe-a9d6de5e3adf','11111111-1111-1111-1111-111111111111','render_scene_video','failed','{"projectId":900,"sceneId":901}','known-task');
+                """);
+            var notices = new List<string>();
+            conn.Notice += (_, args) => notices.Add(args.Notice.MessageText);
+            var script = await File.ReadAllTextAsync(MigrationPath("scene07-job-38e0399b-readonly.sql"));
+            foreach (var migrated in new[] { false, true })
+            {
+                if (migrated) await conn.ExecuteAsync(await File.ReadAllTextAsync(MigrationPath("scene-video-operation-v1-forward.sql")));
+                notices.Clear();
+                using var results = await conn.QueryMultipleAsync(script);
+                var deployment = await results.ReadSingleAsync();
+                Assert.Equal(migrated, (bool)deployment.operation_heads_present);
+                var rows = (await results.ReadAsync()).ToArray();
+                var scene = rows.Single(x => (string)x.section == "04_scenes");
+                using var json = System.Text.Json.JsonDocument.Parse((string)scene.evidence);
+                Assert.Equal(901, json.RootElement.GetProperty("id").GetInt64());
+                Assert.Equal(7, json.RootElement.GetProperty("sceneIndex").GetInt32());
+                if (migrated) Assert.Contains(notices, n => n.StartsWith("ui_current_snapshot:"));
+                else Assert.Contains(notices, n => n.Contains("DEPLOYMENT_MISMATCH"));
+            }
+            Assert.Equal("failed", await conn.ExecuteScalarAsync<string>("SELECT status FROM render.render_jobs WHERE id='38e0399b-9d50-42a0-8ebe-a9d6de5e3adf';"));
+            Assert.Equal("known-task", await conn.ExecuteScalarAsync<string>("SELECT provider_task_id FROM render.render_jobs WHERE id='38e0399b-9d50-42a0-8ebe-a9d6de5e3adf';"));
+        }
+        finally
+        {
+            if (owned) await conn.ExecuteAsync("ROLLBACK; DROP SCHEMA video_render CASCADE; DROP SCHEMA render CASCADE; DROP TABLE billing_fixture;");
+        }
+    }
+
     [SupersedePostgresTheory]
     [InlineData(false)]
     [InlineData(true)]
@@ -92,6 +142,7 @@ public sealed class SceneVideoOperationDraftPostgresTests
             var jobId = requests[0].JobId; var versionId = requests[0].VersionId;
             Assert.Equal("draft", await conn.ExecuteScalarAsync<string>("SELECT status FROM render.render_jobs WHERE id=@id;", new { id = jobId }));
             Assert.Equal(jobId, await conn.ExecuteScalarAsync<Guid>("SELECT render_job_id FROM video_render.scene_video_versions WHERE id=@id;", new { id = versionId }));
+            Assert.Equal(source, await conn.ExecuteScalarAsync<Guid>("SELECT source_image_version_id FROM video_render.scene_video_versions WHERE id=@id;", new { id = versionId }));
             Assert.Equal(3, await conn.ExecuteScalarAsync<int>("SELECT version_number FROM video_render.scene_video_versions WHERE id=@id;", new { id = versionId }));
             Assert.Equal(jobHash, await conn.ExecuteScalarAsync<string>("SELECT md5(to_jsonb(j)::text) FROM render.render_jobs j WHERE id=@id;", new { id = oldJob }));
             Assert.Equal(versionHash, await conn.ExecuteScalarAsync<string>("SELECT md5(to_jsonb(v)::text) FROM video_render.scene_video_versions v WHERE id=@id;", new { id = oldVersion }));

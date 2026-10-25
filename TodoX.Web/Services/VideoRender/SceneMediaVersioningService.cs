@@ -349,7 +349,37 @@ public sealed record SceneVideoUiState(
     SceneVideoVersionDto? LatestJobVersion,
     SceneVideoSubmitBlockReason SubmitBlockReason,
     bool HasActiveJob,
-    long? Generation = null);
+    long? Generation = null)
+{
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-SCENE07-UI-001.
+    // Only the backend's current-operation snapshot drives controls, never selected historical media.
+    public bool HasProviderIdentity => !string.IsNullOrWhiteSpace(LatestJob?.ProviderTaskId)
+        || !string.IsNullOrWhiteSpace(LatestJob?.ProviderVideoIdBase)
+        || !string.IsNullOrWhiteSpace(LatestJobVersion?.ProviderTaskId)
+        || !string.IsNullOrWhiteSpace(LatestJobVersion?.ProviderVideoIdBase);
+
+    public bool RequiresExplicitOperation => Generation is not null || HasActiveJob
+        || SubmitBlockReason != SceneVideoSubmitBlockReason.None
+        || (LatestJob is not null && LatestJobVersion is not null
+            && (HasProviderIdentity || LatestJob.Status.Equals("pending_reconciliation", StringComparison.OrdinalIgnoreCase)
+                || LatestJobVersion.Status.Equals("pending_reconciliation", StringComparison.OrdinalIgnoreCase)
+                || LatestJob.Status.Equals("failed", StringComparison.OrdinalIgnoreCase)));
+
+    public string RetryDisabledReason => Generation is not null
+        ? "Lượt video có generation fence. Hãy chọn Tạo lượt video mới."
+        : HasProviderIdentity ? "Lượt cũ đã có mã tác vụ provider. Hãy chọn Tạo lượt video mới."
+        : HasActiveJob || SubmitBlockReason != SceneVideoSubmitBlockReason.None
+            || LatestJob?.Status.Equals("pending_reconciliation", StringComparison.OrdinalIgnoreCase) == true
+            || LatestJobVersion?.Status.Equals("pending_reconciliation", StringComparison.OrdinalIgnoreCase) == true
+            ? "Lượt cũ đang chạy hoặc chưa xác định kết quả gửi. Hãy chọn Tạo lượt video mới."
+        : LatestJob is null || LatestJobVersion is null || LatestJobVersion.RenderJobId != LatestJob.Id
+            ? "Chưa xác minh được job và phiên bản video hiện tại."
+        : !LatestJob.Status.Equals("failed", StringComparison.OrdinalIgnoreCase)
+            ? "Chỉ thử lại lượt video đã thất bại và được xác minh an toàn."
+        // Legacy retry creates a different child job, but the version's job owner is immutable.
+        // No-task alone does not authorize transferring that version to the new child.
+        : "Phiên bản video cũ giữ nguyên job sở hữu. Hãy chọn Tạo lượt video mới.";
+}
 
 public interface ISceneMediaVersioningService
 {

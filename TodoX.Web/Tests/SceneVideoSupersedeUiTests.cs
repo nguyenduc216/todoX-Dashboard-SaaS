@@ -52,6 +52,30 @@ public sealed class SceneVideoSupersedeUiTests
     }
 
     [Fact]
+    public async Task FailedDraftSavePreventsAcknowledgementAndSubmission()
+    {
+        var (component, action, _) = Create(true);
+        component.Prepare = () => Task.FromResult(false);
+        await component.RunAsync();
+        Assert.Equal(0, action.Acknowledgements);
+        Assert.Equal(0, action.Submits);
+    }
+
+    [Fact]
+    public async Task SuccessfulSupersedeReportsNewJobAndReloadsWithoutManualRefresh()
+    {
+        var (component, action, dialog) = Create(true);
+        dialog.Answer = new TaskCompletionSource<bool?>(); dialog.Answer.SetResult(true);
+        var reloads = 0;
+        component.OnQueued = new Microsoft.AspNetCore.Components.EventCallback(null, (Action)(() => reloads++));
+        await component.RunAsync();
+        var snackbar = (SnackbarProxy)(object)typeof(RVideoSupersedeButton)
+            .GetProperty("Snackbar", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!;
+        Assert.Contains(action.JobId.ToString(), snackbar.Message);
+        Assert.Equal(1, reloads);
+    }
+
+    [Fact]
     public async Task LostResponseRetryRetainsTheSameAcknowledgementKey()
     {
         var (component,action,dialog)=Create(true);
@@ -131,17 +155,23 @@ public sealed class SceneVideoSupersedeUiTests
             throw new InvalidOperationException(method.Name);
         }
     }
-    public class SnackbarProxy:DispatchProxy { protected override object? Invoke(MethodInfo? method,object?[]? args)=>null; }
+    public class SnackbarProxy:DispatchProxy
+    {
+        public string Message = "";
+        protected override object? Invoke(MethodInfo? method,object?[]? args)
+        { if (method?.Name == "Add") Message = args?[0]?.ToString() ?? ""; return null; }
+    }
     private sealed class FakeAction:IRVideoSceneVideoRenderAction
     {
         public int Acknowledgements,Submits; public bool CanStart=true,ThrowAfterSubmit;
+        public Guid JobId = Guid.NewGuid();
         public SceneVideoSupersedeAcknowledgement? Acknowledgement;
         public Task<SceneVideoSupersedeAcknowledgement> GetSupersedeAcknowledgementAsync(long projectId,long sceneId,CurrentUserSession user,Guid key,CancellationToken ct=default)
         { Acknowledgements++; return Task.FromResult(SceneVideoOperationDraftTests.Ack() with {SceneId=sceneId,IdempotencyKey=key,RiskAcknowledged=false}); }
         public Task<RVideoSceneVideoRenderEstimate> EstimateAsync(RVideoSceneVideoRenderRequest request,CancellationToken ct=default)
             =>Task.FromResult(new RVideoSceneVideoRenderEstimate(1,8,100,92,0,CanStart));
         public Task<RVideoSceneVideoRenderResult> SupersedeAsync(RVideoSceneVideoRenderRequest request,SceneVideoSupersedeAcknowledgement acknowledgement,CurrentUserSession user,CancellationToken ct=default)
-        { Submits++; Acknowledgement=acknowledgement; if(ThrowAfterSubmit) throw new IOException("lost response"); return Task.FromResult(RVideoSceneVideoRenderResult.Ok(Guid.NewGuid())); }
+        { Submits++; Acknowledgement=acknowledgement; if(ThrowAfterSubmit) throw new IOException("lost response"); return Task.FromResult(RVideoSceneVideoRenderResult.Ok(JobId)); }
         public Task<RVideoSceneVideoRenderResult> EnqueueRerenderAsync(RVideoSceneVideoRenderRequest request,CurrentUserSession user,CancellationToken ct=default)
             =>throw new InvalidOperationException("Explicit operation must not use legacy retry.");
     }

@@ -46,7 +46,8 @@ public sealed class SceneImageVersionConcurrencyContractTests
         var root = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..");
         var page = File.ReadAllText(Path.Combine(root, "Components", "Pages", "RVideo", "RVideoV2Preview.razor"));
         var action = File.ReadAllText(Path.Combine(root, "Services", "VideoRender", "RVideoSceneImageRenderAction.cs"));
-        Assert.Equal(2, page.Split("OnClick=\"@(()=>HandleRerenderImageAsync(", StringSplitOptions.None).Length - 1);
+        // Desktop under-image action, desktop overflow and mobile action share one handler.
+        Assert.Equal(3, page.Split("OnClick=\"@(()=>HandleRerenderImageAsync(", StringSplitOptions.None).Length - 1);
         Assert.Contains("SceneImageRender.EnqueueRerenderAsync(", page);
         // The V2 preview keeps the separate video re-render action for videos; the image path must not
         // route through the video action. Assert that the image handler calls the image action, not the video one.

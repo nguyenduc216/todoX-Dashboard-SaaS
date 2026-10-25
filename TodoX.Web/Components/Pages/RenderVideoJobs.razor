@@ -924,7 +924,7 @@ else
 
                                                     <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Luu scene</MudMenuItem>
 
-                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_useReferenceImageForAllScenes || IsSceneRendering(scene))" OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))" OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
 
@@ -966,12 +966,19 @@ else
 
                                                                   FailedText="Lỗi render ảnh"
 
-                                                                  RetryDisabled="@_sceneRerendering.Contains(scene.Id)"
+                                                                  RetryDisabled="@(!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))"
 
                                                                   OnRetry="@(() => ConfirmAndRerenderSceneImageAsync(scene))"
 
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
 
+                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                                           Disabled="@(!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))"
+                                                           OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton>
+                                                @if (!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))
+                                                {
+                                                    <MudText Typo="Typo.caption">@SceneImageDisabledReason(scene)</MudText>
+                                                }
                                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@ProjectAspectRatio · @ProjectResolution</MudText>
 
                                                 <div class="scene-media-actions">
@@ -1016,9 +1023,9 @@ else
 
                                                                   FailedText="Tạo video thất bại"
 
-                                                                  RetryDisabled="@(_sceneVideoRetrying.Contains(scene.Id) || !CanRerenderSceneVideo(scene, draft))"
+                                                                  RetryDisabled="@(_sceneVideoRetrying.Contains(scene.Id) || (!NeedsExplicitVideoOperation(scene) && !CanRetrySceneVideo(scene)))"
 
-                                                                  OnRetry="@(() => RenderSceneVideoAsync(scene))"
+                                                                  OnRetry="@(() => RetryOrSupersedeSceneVideoAsync(scene))"
 
                                                                   OnClick="@(() => OpenSceneVideoPreview(scene))" />
 
@@ -1038,18 +1045,22 @@ else
 
                                                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
 
-                                                               Disabled="@(_sceneVideoRetrying.Contains(scene.Id) || !CanRerenderSceneVideo(scene, draft))"
+                                                               Disabled="@(_sceneVideoRetrying.Contains(scene.Id) || (!NeedsExplicitVideoOperation(scene) && !CanRerenderSceneVideo(scene, draft)))"
 
                                                                OnClick="@(() => RerenderSceneVideoAsync(scene))">
 
                                                         Render lại video
 
                                                     </MudButton>
+                                                    @if (!CanRetrySceneVideo(scene))
+                                                    {
+                                                        <MudText Typo="Typo.caption">@SceneVideoRetryDisabledReason(scene)</MudText>
+                                                    }
                                                     <RVideoSupersedeButton @ref="_supersedeButtons[scene.Id]" ProjectId="@_project.Id" Scene="@scene" ServiceId="@ServiceId"
                                                         Visible="@NeedsExplicitVideoOperation(scene)" Disabled="@_sceneVideoRetrying.Contains(scene.Id)"
                                                         CurrentJobId="@SupersedeState(scene)?.LatestJob?.Id" Generation="@SupersedeState(scene)?.Generation"
-                                                        OutcomeUnknown="@(SupersedeState(scene)?.HasActiveJob == true || SupersedeState(scene)?.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)"
-                                                        OnQueued="OnSupersedeQueuedAsync" />
+                                                        OutcomeUnknown="@(SupersedeState(scene)?.HasProviderIdentity == true || SupersedeState(scene)?.HasActiveJob == true || SupersedeState(scene)?.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)"
+                                                        Prepare="@(() => PrepareSceneVideoOperationAsync(scene))" OnQueued="OnSupersedeQueuedAsync" />
 
 
                                                     <MudTooltip Text="Tạo video scene">
@@ -4397,14 +4408,19 @@ else
     private bool CanRerenderSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
         => string.IsNullOrWhiteSpace(SceneVideoDisabledReason(scene, draft));
 
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-SCENE07-UI-001.
+    // Keep immutable old ownership; the explicit button owns consent and new-generation enqueue.
     private bool CanRetrySceneVideo(VideoProjectSceneDto scene)
     {
-        var version = ResolveLatestSceneVideoAttempt(scene);
-        return version is not null && string.IsNullOrWhiteSpace(version.ProviderTaskId)
-            && string.IsNullOrWhiteSpace(version.ProviderVideoIdBase)
-            && ResolveVideoSceneStatus(scene) == VideoSceneStatuses.Failed
+        return _sceneVideoUiStates.TryGetValue(scene.Id, out var state)
+            && string.IsNullOrEmpty(state.RetryDisabledReason)
             && CanRerenderSceneVideo(scene, GetSceneDraft(scene));
     }
+
+    private string SceneVideoRetryDisabledReason(VideoProjectSceneDto scene)
+        => SupersedeState(scene) is not { } state ? "Chưa tải được trạng thái video."
+            : !string.IsNullOrEmpty(state.RetryDisabledReason) ? state.RetryDisabledReason
+            : SceneVideoDisabledReason(scene, GetSceneDraft(scene));
 
     private string SceneVideoRerenderDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
         => _sceneVideoRetrying.Contains(scene.Id) ? "Đang tạo video" : SceneVideoDisabledReason(scene, draft);
@@ -4414,16 +4430,18 @@ else
         if (!_sceneVideoUiStates.TryGetValue(scene.Id, out var state))
             return "Chưa thể thử lại";
         if (state.LatestJob?.Status == RenderJobStatuses.PendingReconciliation)
-            return "Chưa thể thử lại";
+            return "Lượt cũ đang chờ xác minh. Hãy chọn Tạo lượt video mới.";
         if (state.HasActiveJob && state.LatestJob is { } activeJob && IsActiveRenderJobStatus(activeJob.Status))
             return "Đang tạo video";
         if (state.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)
-            return "Chưa thể thử lại";
+            return "Lượt cũ còn submit chưa được giải quyết. Hãy chọn Tạo lượt video mới.";
+        if (state.Generation is not null || state.HasProviderIdentity)
+            return "Hãy chọn Tạo lượt video mới để giữ generation fence.";
         if (state.HasActiveJob) return "Đang tạo video";
         if (string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) && !(_useReferenceImageForAllScenes && HasSharedReferenceImage))
             return "Thiếu ảnh đầu vào";
         if (string.IsNullOrWhiteSpace(draft.MotionPrompt)) return "Thiếu motion prompt";
-        if (_defaultImageToVideoProvider is null) return "Chưa thể thử lại";
+        if (_defaultImageToVideoProvider is null) return "Chưa cấu hình provider video";
         if (!HasProjectAspectRatio) return "Cần chọn tỉ lệ video";
         if (!HasProjectResolution) return "Cần chọn độ phân giải video";
         return !IsSceneVideoPromptValid(scene, draft) ? ResolveVideoPromptState(scene, draft).Text : string.Empty;
@@ -7752,6 +7770,12 @@ else
 
         }
 
+        if (!string.IsNullOrEmpty(SceneImageDisabledReason(scene)))
+        {
+            Snackbar.Add(SceneImageDisabledReason(scene), Severity.Info);
+            return;
+        }
+
         await RefreshInitialEstimateAsync();
 
         var imageRate = _initialEstimate?.ImageRate ?? 0m;
@@ -7837,6 +7861,15 @@ else
     }
 
     private bool IsSceneRendering(VideoProjectSceneDto scene) => _sceneRerendering.Contains(scene.Id);
+
+    // Scene-image activity is independent of a failed or pending video operation.
+    private string SceneImageDisabledReason(VideoProjectSceneDto scene)
+        => _useReferenceImageForAllScenes
+            ? "Đang dùng ảnh tham chiếu chung. Tắt chế độ dùng chung để tạo ảnh scene riêng; ảnh tham chiếu chung được giữ nguyên."
+            : _sceneRerendering.Contains(scene.Id)
+                || (_imageVersions.TryGetValue(scene.Id, out var images) && images.Any(IsActiveSceneImageVersion))
+                ? "Đang tạo ảnh scene." : string.Empty;
+
 
     private async Task ToggleImageHistoryAsync(VideoProjectSceneDto scene)
 
@@ -9728,12 +9761,25 @@ else
     private TodoX.Web.Services.VideoRender.SceneVideoUiState? SupersedeState(VideoProjectSceneDto scene)
         => _sceneVideoUiStates.GetValueOrDefault(scene.Id);
     private bool NeedsExplicitVideoOperation(VideoProjectSceneDto scene) => SupersedeState(scene) is { } state
-        && (state.Generation is not null || state.HasActiveJob || state.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None);
-    private async Task OnSupersedeQueuedAsync() { await ReloadJobsAsync(); await StartPolling(); }
+        && state.RequiresExplicitOperation;
+    private async Task OnSupersedeQueuedAsync() { await ReloadAsync(); await StartPolling(); }
 
-    private Task RerenderSceneVideoAsync(VideoProjectSceneDto scene)
-        => SupersedeState(scene)?.Generation is not null && _supersedeButtons.TryGetValue(scene.Id, out var button)
-            ? button.RunAsync() : ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);
+    private Task RetryOrSupersedeSceneVideoAsync(VideoProjectSceneDto scene)
+        => NeedsExplicitVideoOperation(scene) ? RerenderSceneVideoAsync(scene) : RetrySceneVideoAsync(scene);
+
+    private async Task<bool> PrepareSceneVideoOperationAsync(VideoProjectSceneDto scene)
+        => !GetSceneDraft(scene).IsDirty || await SaveSceneAsync(scene);
+
+    private async Task RerenderSceneVideoAsync(VideoProjectSceneDto scene)
+    {
+        if (NeedsExplicitVideoOperation(scene))
+        {
+            // The shared button saves the draft before reading consent and rebuilding persisted inputs.
+            if (_supersedeButtons.TryGetValue(scene.Id, out var button)) await button.RunAsync();
+            return;
+        }
+        await ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);
+    }
 
     private async Task EnqueueSceneVideoAsync(
 
@@ -9929,8 +9975,9 @@ else
 
                 new { job.Id, sceneId = scene.Id, scene.SceneIndex, provider = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode, model = jobModelCode, selectedOverride.Option?.Mode, selectedOverride.DurationSeconds, billingIntent = billingIntent.ToString() });
 
-            Snackbar.Add("Đang tạo video", Severity.Success);
+            Snackbar.Add($"Đang tạo video. Job: {job.Id}", Severity.Success);
 
+            await ReloadJobsAsync();
             await StartPolling();
 
         }

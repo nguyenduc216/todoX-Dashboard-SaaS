@@ -72,12 +72,18 @@ else
 <MudChip T="string" Size="Size.Small">@JobView.Project.Scenes.Count scene</MudChip>
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="HandleAddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
 </div>
+@if(JobView.Settings?.UseReferenceImageForAllScenes == true)
+{
+ <MudText Typo="Typo.caption">Đang dùng ảnh tham chiếu chung. Tắt chế độ dùng chung trong cấu hình để tạo ảnh scene riêng; ảnh tham chiếu chung được giữ nguyên.</MudText>
+}
 <div class="rv2-preview-desktop">
 <div class="rv2-scene-table-head"><span>#</span><span>Tham chiếu</span><span>Video</span><span>Nội dung</span><span>Model</span><span>Thời lượng</span><span>Trạng thái</span><span>Hành động</span></div>
 @foreach(var s in JobView.Project.Scenes.OrderBy(x=>x.SceneIndex)){
 <div class="rv2-scene-row @(SelectedSceneId==s.Id?"rv2-scene-row--active":"")" @onclick="@(()=>SelectScene(s.Id))">
 <span>@s.SceneIndex</span>
-<span>@if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)){<img src="@s.StaticImageUrl" class="rv2-thumb" loading="lazy" @onclick:stopPropagation="true" @onclick="@(()=>OpenRef(s.StaticImageUrl!))" />}else{<span>-</span>}</span>
+<span>@if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)){<img src="@s.StaticImageUrl" class="rv2-thumb" loading="lazy" @onclick:stopPropagation="true" @onclick="@(()=>OpenRef(s.StaticImageUrl!))" />}else{<span>-</span>}
+<div @onclick:stopPropagation="true"><MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleRerenderImageAsync(s))" Disabled="@ImageBlocked(s)">@(string.IsNullOrWhiteSpace(s.StaticImageUrl) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton></div>
+</span>
 <span>
 @if(SelectedSceneId==s.Id && !string.IsNullOrWhiteSpace(s.SceneVideoUrl))
 {
@@ -112,11 +118,11 @@ else{<span>Chưa có</span>}
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleRerenderVideoAsync(s))" Disabled="@VideoBlocked(s)">Render lại video</MudButton>
 <RVideoSupersedeButton @ref="_supersedeButtons[s.Id]" ProjectId="@JobView.Project.Id" Scene="@s" ServiceId="@JobView.CoreJob.ServiceId"
  Visible="@NeedsExplicitOperation(s)" Disabled="@_busy" CurrentJobId="@VideoState(s)?.LatestJob?.Id" Generation="@VideoState(s)?.Generation"
- OutcomeUnknown="@(VideoState(s)?.HasActiveJob == true || VideoState(s)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
+ OutcomeUnknown="@(VideoState(s)?.HasProviderIdentity == true || VideoState(s)?.HasActiveJob == true || VideoState(s)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
 <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
-<MudMenuItem OnClick="@(()=>HandleRerenderImageAsync(s))" Disabled="@_busy">Tạo lại ảnh</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleRerenderImageAsync(s))" Disabled="@ImageBlocked(s)">Tạo lại ảnh</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,-1))" Disabled="@(s.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,1))" Disabled="@(s.SceneIndex>=JobView.Project.Scenes.Count || _busy)">Xuống</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleDeleteAsync(s))" Disabled="@_busy">Xóa</MudMenuItem>
@@ -140,6 +146,7 @@ else{<span>Chưa có</span>}
 }
 else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv2-mobile-play" @onclick="@(()=>OpenVideoAsync(ActiveScene.SceneVideoUrl!, ActiveScene.SceneIndex))"><video src="@ActiveScene.SceneVideoUrl" muted preload="metadata" playsinline class="rv2-mobile-vid" @onerror="@(()=>OnMediaError(ActiveScene.Id))"></video><span class="rv2-play-badge rv2-play-badge-lg"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Large" /></span></button>}else if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" class="rv2-mobile-img" loading="lazy" />}else{<div>Chưa có media</div>}
 <div class="rv2-mobile-ref" @onclick="@(()=>OpenRef(ActiveScene.StaticImageUrl!))">@if(!string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl)){<img src="@ActiveScene.StaticImageUrl" loading="lazy" />}</div>
+<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(()=>HandleRerenderImageAsync(ActiveScene!))" Disabled="@ImageBlocked(ActiveScene!)">@(string.IsNullOrWhiteSpace(ActiveScene.StaticImageUrl) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton>
 </div>
 <div class="rv2-mobile-meta"><MudChip T="string" Size="Size.Small" Color="@StatusColor(ActiveScene.Status)">@VideoStatus(ActiveScene)</MudChip><MudSelect T="string" Value="@ResolveModelKey(ActiveScene)" ValueChanged="@(v=>HandleModelChangedAsync(ActiveScene,v))" Dense="true" Style="min-width:120px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect><MudSelect T="int" Value="@ActiveScene.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(ActiveScene,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(()=>_showDetail=true)">Xem chi tiết</MudButton></div>
 <div class="rv2-mobile-content">
@@ -152,8 +159,7 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(()=>HandleRerenderVideoAsync(ActiveScene!))" Disabled="@VideoBlocked(ActiveScene!)">Render lại video</MudButton>
 <RVideoSupersedeButton @ref="_supersedeButtons[ActiveScene!.Id]" ProjectId="@JobView.Project.Id" Scene="@(ActiveScene!)" ServiceId="@JobView.CoreJob.ServiceId"
  Visible="@NeedsExplicitOperation(ActiveScene!)" Disabled="@_busy" CurrentJobId="@VideoState(ActiveScene!)?.LatestJob?.Id" Generation="@VideoState(ActiveScene!)?.Generation"
- OutcomeUnknown="@(VideoState(ActiveScene!)?.HasActiveJob == true || VideoState(ActiveScene!)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
-<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(()=>HandleRerenderImageAsync(ActiveScene!))" Disabled="@(_busy||_rerenderingImage.Contains(ActiveScene!.Id))">Tạo lại ảnh</MudButton>
+ OutcomeUnknown="@(VideoState(ActiveScene!)?.HasProviderIdentity == true || VideoState(ActiveScene!)?.HasActiveJob == true || VideoState(ActiveScene!)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
 <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" /><MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" />
 </div>
 </div>}
@@ -169,17 +175,42 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
 long? SelectedSceneId; string? _showRef; bool _showDetail; bool _busy; VideoProjectSceneDto? _pendingDelete;
 private readonly SemaphoreSlim _gate = new(1,1);
 readonly HashSet<long> _rerenderingImage = new();
+readonly HashSet<long> _activeImageScenes = new();
+// FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-SCENE07-UI-001.
+// Poll persisted operation state through the existing shell reload; never enqueue from a timer.
+readonly CancellationTokenSource _pollCancellation = new();
+Task? _operationPolling;
+bool HasRunningOperation() => _activeImageScenes.Count > 0 || _videoStates.Values.Any(state => state.HasActiveJob
+    && state.LatestJob?.Status != "pending_reconciliation");
+
+async Task PollOperationsAsync(CancellationToken ct)
+{
+ try
+ {
+  using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+  while(await timer.WaitForNextTickAsync(ct))
+  {
+   if(!HasRunningOperation() || !OnReloadRequested.HasDelegate) return;
+   await InvokeAsync(async () => { if(!_busy && !ct.IsCancellationRequested) await OnReloadRequested.InvokeAsync(); });
+  }
+ }
+ catch(OperationCanceledException) when(ct.IsCancellationRequested) { }
+ catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_OPERATION_POLL_FAILED"); }
+}
+bool ImageBlocked(VideoProjectSceneDto scene) => _busy || _rerenderingImage.Contains(scene.Id)
+    || _activeImageScenes.Contains(scene.Id) || JobView?.Settings?.UseReferenceImageForAllScenes == true;
 readonly Dictionary<long, SceneVideoUiState> _videoStates = new();
 readonly Dictionary<long, RVideoSupersedeButton> _supersedeButtons = new();
 SceneVideoUiState? VideoState(VideoProjectSceneDto scene) => _videoStates.GetValueOrDefault(scene.Id);
 bool NeedsExplicitOperation(VideoProjectSceneDto scene) => VideoState(scene) is { } state
-  && (state.Generation is not null || state.HasActiveJob || state.SubmitBlockReason != SceneVideoSubmitBlockReason.None);
+  && state.RequiresExplicitOperation;
 
 int _videoStateRevision;
 protected override async Task OnParametersSetAsync()
 {
   var revision = ++_videoStateRevision;
   _videoStates.Clear();
+  _activeImageScenes.Clear();
   if(JobView is null || AuthState.CurrentUser is not { } user) return;
   foreach(var scene in JobView.Project.Scenes.ToArray())
   {
@@ -188,6 +219,9 @@ protected override async Task OnParametersSetAsync()
       var state = await SceneVersions.GetSceneVideoUiStateAsync(scene.Id, user);
       if(revision != _videoStateRevision) return;
       _videoStates[scene.Id] = state;
+      var imageActive = await SceneVersions.HasActiveImageVersionAsync(scene.Id);
+      if(revision != _videoStateRevision) return;
+      if(imageActive) _activeImageScenes.Add(scene.Id); else _activeImageScenes.Remove(scene.Id);
     }
     catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_VIDEO_STATE_UNAVAILABLE sceneId={SceneId}", scene.Id); }
   }
@@ -229,6 +263,8 @@ protected override void OnParametersSet()
 
 protected override async Task OnAfterRenderAsync(bool firstRender)
 {
+  if(!_pollCancellation.IsCancellationRequested && HasRunningOperation() && (_operationPolling is null || _operationPolling.IsCompleted))
+    _operationPolling = PollOperationsAsync(_pollCancellation.Token);
   if(firstRender && !_optsReady)
   {
     // Load model options in background — UI already rendered with skeleton/metadata.
@@ -386,7 +422,7 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
 }
 async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
 {
- if(VideoState(scene)?.Generation is not null && _supersedeButtons.TryGetValue(scene.Id,out var button))
+ if(NeedsExplicitOperation(scene) && _supersedeButtons.TryGetValue(scene.Id,out var button))
  { await button.RunAsync(); return; }
 
  if(JobView is null || AuthState.CurrentUser is null || !await _gate.WaitAsync(0)) return;
@@ -412,8 +448,8 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
    yesText: "Xác nhận render lại", cancelText: "Hủy");
   if(confirm != true) return;
   var result = await SceneVideoRender.EnqueueRerenderAsync(request, user);
-  if(!result.Success) { Snackbar.Add("Không thể render lại video.", Severity.Error); return; }
-  Snackbar.Add("Đang tạo video", result.AlreadyActive ? Severity.Info : Severity.Success);
+  if(!result.Success) { Snackbar.Add(RVideoUserText.ActionError(result.ErrorCode, result.ErrorMessage), Severity.Error); return; }
+  Snackbar.Add(result.AlreadyActive ? "Scene đang có job video." : $"Đang tạo video. Job: {result.RenderJobId}", result.AlreadyActive ? Severity.Info : Severity.Success);
   if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
  }
  catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_RENDER_ACTION_FAILED"); Snackbar.Add("Chưa thể thử lại", Severity.Error); }
@@ -421,11 +457,14 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
 }
 async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
 {
+ if(ImageBlocked(scene)) return;
  if(JobView is null || AuthState.CurrentUser is null || !await _gate.WaitAsync(0)) return;
  _busy = true; _rerenderingImage.Add(scene.Id);
  try
  {
   var user = AuthState.CurrentUser;
+  if(await SceneVersions.HasActiveImageVersionAsync(scene.Id))
+  { _activeImageScenes.Add(scene.Id); Snackbar.Add("Scene đang có job ảnh.", Severity.Info); return; }
   var meta = ScenePromptMetadata.FromScene(scene);
   if(string.IsNullOrWhiteSpace(meta.ImagePrompt)) { Snackbar.Add("Cần nhập prompt ảnh trước khi render.", Severity.Warning); return; }
   var aspectRatio = new TodoXVideoPromptParser().Parse(JobView.Project.OriginalPrompt ?? string.Empty).Model.AspectRatio;
@@ -435,12 +474,12 @@ async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
   var confirm = await DialogService.ShowMessageBoxAsync("Render lại hình", $"Scene {scene.SceneIndex:00}: {estimate.ImageRate:0.##} điểm; hiện có {estimate.AvailablePoints:0.##} điểm.", yesText:"Xác nhận render lại", cancelText:"Hủy");
   if(confirm != true) return;
   var result = await SceneImageRender.EnqueueRerenderAsync(request, user);
-  if(!result.Success) { Snackbar.Add("Chưa thể thử lại", Severity.Error); return; }
-  Snackbar.Add(result.AlreadyActive ? "Scene đang có job ảnh." : "Đã gửi render lại ảnh.", result.AlreadyActive ? Severity.Info : Severity.Success);
+  if(!result.Success) { Snackbar.Add(RVideoUserText.ActionError(result.ErrorCode, result.ErrorMessage), Severity.Error); return; }
+  Snackbar.Add(result.AlreadyActive ? "Scene đang có job ảnh." : $"Đã gửi render lại ảnh. Job: {result.RenderJobId}", result.AlreadyActive ? Severity.Info : Severity.Success);
   if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
  }
  catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_RENDER_ACTION_FAILED"); Snackbar.Add("Chưa thể thử lại", Severity.Error); }
  finally { _rerenderingImage.Remove(scene.Id); _busy = false; _gate.Release(); }
 }
-public void Dispose(){ _gate.Dispose(); }
+public void Dispose(){ _pollCancellation.Cancel(); _pollCancellation.Dispose(); _gate.Dispose(); }
 }

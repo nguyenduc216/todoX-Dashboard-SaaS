@@ -22,6 +22,7 @@
     [Parameter] public Guid? CurrentJobId { get; set; }
     [Parameter] public long? Generation { get; set; }
     [Parameter] public EventCallback OnQueued { get; set; }
+    [Parameter] public Func<Task<bool>>? Prepare { get; set; }
     private bool _busy;
     private (long Scene, Guid? Job, long? Generation) _identity;
     private Guid _key = Guid.NewGuid();
@@ -39,6 +40,7 @@
         _busy = true;
         try
         {
+            if (Prepare is not null && !await Prepare()) return;
             _ack ??= await VideoAction.GetSupersedeAcknowledgementAsync(ProjectId, Scene.Id, user, _key);
             var request = new RVideoSceneVideoRenderRequest(ProjectId, Scene, ScenePromptMetadata.FromScene(Scene), ServiceId);
             var estimate = await VideoAction.EstimateAsync(request);
@@ -51,8 +53,8 @@
                 yesText: "Xác nhận tạo lượt mới", cancelText: "Hủy");
             if (confirmed != true) return;
             var result = await VideoAction.SupersedeAsync(request, _ack with { RiskAcknowledged = true }, user);
-            if (!result.Success) { Snackbar.Add("Chưa thể tạo lượt video mới.", Severity.Warning); return; }
-            Snackbar.Add("Đang tạo video", Severity.Success);
+            if (!result.Success) { Snackbar.Add(RVideoUserText.ActionError(result.ErrorCode, result.ErrorMessage), Severity.Warning); return; }
+            Snackbar.Add($"Đang tạo video. Job: {result.RenderJobId}", Severity.Success);
             await OnQueued.InvokeAsync();
         }
         catch (Exception ex)
