@@ -65,6 +65,7 @@ public sealed class SceneVideoRenderWorkItemInput
     public int? RequestedDurationSeconds { get; set; }
     public bool ManualOverride { get; set; }
     public bool StrictRequestedSettings { get; set; }
+    public RVideoSceneVideoOperationSettings? ConfirmedOperationSettings { get; set; }
 }
 
 public enum VideoSceneImageInputMode
@@ -172,6 +173,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
     private const string DurationRejectedFailureClassification = "PROVIDER_DURATION_REJECTED";
     private const string PollResourceUnavailableNoProgressFailureClassification = "POLL_RESOURCE_UNAVAILABLE_NO_PROGRESS";
 
+    private readonly IPointPricingService? _pointPricing;
     private readonly VideoRenderRepository _repo;
     private readonly SceneVideoSubmitCoordinator _submitCoordinator;
     private readonly ISceneMediaVersioningService _versions;
@@ -211,8 +213,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         IRVideoSceneMediaFinalizerService finalizer,
         IRVideoSceneVideoCompletionService completion,
         IOptionsMonitor<VideoRenderOptions> options,
-        ILogger<SceneVideoWorkerHandler> logger)
+        ILogger<SceneVideoWorkerHandler> logger,
+        IPointPricingService? pointPricing = null)
     {
+        _pointPricing = pointPricing;
         _repo = repo;
         _submitCoordinator = submitCoordinator;
         _versions = versions;
@@ -729,6 +733,17 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             AiImageBillingReservation reservation;
             if (string.IsNullOrWhiteSpace(taskId))
             {
+                // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002.
+                // Only newly quoted operations revalidate price; known tasks/old jobs keep their historical billing.
+                if (input.ConfirmedOperationSettings is { } quote)
+                {
+                    if (!await quote.IsPriceCurrentAsync(_pointPricing, ct))
+                    {
+                        await FailAsync(project.Id, scene, version.Id, "RVIDEO_QUOTE_CHANGED",
+                            "Giá video đã thay đổi. Vui lòng báo giá lại và xác nhận lượt video mới.", ct);
+                        throw new RenderJobTerminalFailureException("RVIDEO_QUOTE_CHANGED");
+                    }
+                }
                 // Provider reconciliation still needs a durable record, but customer points are
                 // charged only after TodoX has accepted the final provider result.
                 var billingCost = _billing.BuildConfiguredCost(0, 1);

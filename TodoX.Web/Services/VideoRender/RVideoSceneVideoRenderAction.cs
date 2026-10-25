@@ -1,4 +1,5 @@
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Render;
 
@@ -37,7 +38,11 @@ public sealed record RVideoSceneVideoRenderRequest(
     Guid? ServiceId = null,
     Guid? AcknowledgedVersionId = null,
     Guid? AcknowledgedRenderJobId = null,
-    bool ExplicitRiskAcknowledgement = false);
+    bool ExplicitRiskAcknowledgement = false)
+{
+    public bool ForSupersede { get; init; }
+    public RVideoSceneVideoOperationSettings? ConfirmedSettings { get; init; }
+}
 
 /// <summary>Cost preflight mirrored from the legacy video confirmation.</summary>
 public sealed record RVideoSceneVideoRenderEstimate(
@@ -48,6 +53,8 @@ public sealed record RVideoSceneVideoRenderEstimate(
     decimal MissingPoints,
     bool CanStart)
 {
+    public RVideoSceneVideoOperationSettings? OperationSettings { get; init; }
+    public string? ErrorMessage { get; init; }
     public static readonly RVideoSceneVideoRenderEstimate Unavailable = new(0m, 0m, 0m, 0m, 0m, false);
 }
 
@@ -68,6 +75,8 @@ public sealed record RVideoSceneVideoRenderResult(
 
 public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
 {
+    private readonly IVideoProviderRoutingService? _routing;
+    private readonly IPointPricingService? _pointPricing;
     private readonly SceneVideoOperationDraftService? _operations;
     private readonly IAiProviderModelService? _models;
     private readonly IRenderJobService _jobs;
@@ -89,8 +98,12 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         VideoRenderRepository repo,
         ILogger<RVideoSceneVideoRenderAction> logger,
         SceneVideoOperationDraftService? operations = null,
-        IAiProviderModelService? models = null)
+        IAiProviderModelService? models = null,
+        IVideoProviderRoutingService? routing = null,
+        IPointPricingService? pointPricing = null)
     {
+        _routing = routing;
+        _pointPricing = pointPricing;
         _operations = operations;
         _models = models;
         _jobs = jobs;
@@ -105,6 +118,7 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
 
     public async Task<RVideoSceneVideoRenderEstimate> EstimateAsync(RVideoSceneVideoRenderRequest request, CancellationToken ct = default)
     {
+        if (request.ForSupersede) return await EstimateSupersedeAsync(request, ct);
         var project = await _repo.GetProjectAsync(request.ProjectId, ct);
         if (project is null || request.Scene is null) return RVideoSceneVideoRenderEstimate.Unavailable;
         try
@@ -247,101 +261,137 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
             throw new InvalidOperationException("Acknowledged scene differs from request.");
         var service = _operations ?? throw new InvalidOperationException("Operation ledger unavailable.");
         if(await service.TryResumeAsync(acknowledgement,user,ct) is Guid resumed) return RVideoSceneVideoRenderResult.Ok(resumed);
+        if (request.ConfirmedSettings is not { } confirmed)
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_QUOTE_CHANGED", "Vui lòng báo giá lại và xác nhận cấu hình video.");
         var project = await _repo.GetProjectAsync(request.ProjectId, user, ct) ?? throw new UnauthorizedAccessException();
-        var scene = project.Scenes.Single(s => s.Id == acknowledgement.SceneId);
-        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-SCENE-SETTINGS-001.
-        // Consent applies to this saved snapshot, never a concurrent edit made during the dialog.
-        if (scene.ScenePrompt != request.Scene.ScenePrompt || scene.VideoPrompt != request.Scene.VideoPrompt
-            || scene.DurationSeconds != request.Scene.DurationSeconds)
-            return RVideoSceneVideoRenderResult.Fail("RVIDEO_SETTINGS_CHANGED", "Cấu hình scene đã thay đổi. Vui lòng tải lại và xác nhận lượt video mới.");
-        var report = await _eligibility.GetVideoRenderEligibilityAsync(project.Id, new[] { scene.Id }, ct);
-        var decision = report.Results.Single(r => r.SceneId == scene.Id);
+        var report = await _eligibility.GetVideoRenderEligibilityAsync(project.Id, new[] { request.Scene.Id }, ct);
+        var decision = report.Results.Single(r => r.SceneId == request.Scene.Id);
         if (decision.Status is VideoRenderEligibilityStatus.MissingImage or VideoRenderEligibilityStatus.InvalidPrompt)
             return RVideoSceneVideoRenderResult.Fail(decision.ErrorCode, decision.Message);
-        var estimate = await EstimateAsync(request with { Scene = scene, Metadata=ScenePromptMetadata.FromScene(scene) }, ct);
-        if (!estimate.CanStart) return RVideoSceneVideoRenderResult.Fail("RVIDEO_ESTIMATE_UNAVAILABLE", "Chưa thể tạo lượt video mới.");
-        var oldJob = await _jobs.GetAsync(acknowledgement.OldJobId, ct) ?? throw new InvalidOperationException("Acknowledged operation missing.");
-        var previous = System.Text.Json.JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(oldJob.InputJson,
-            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? throw new InvalidOperationException("Operation snapshot invalid.");
-        // Reuse routing infrastructure only. Render choices and operation/billing identity are rebuilt.
-        var input = new SceneVideoRenderWorkItemInput
+        var current = await EstimateSupersedeAsync(request, ct);
+        if (current.OperationSettings != confirmed)
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_QUOTE_CHANGED", "Cấu hình hoặc giá video đã thay đổi. Vui lòng báo giá lại và xác nhận.");
+        if (!current.CanStart)
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_ESTIMATE_UNAVAILABLE", "Chưa thể tạo lượt video mới. Vui lòng kiểm tra số điểm.");
+        var input = confirmed.CreateWorkItem();
+        input.ConfirmedOperationSettings = confirmed;
+        input.TrustedPayerContext = await _payers.BuildRVideoTrustedPayerContextAsync(request.ProjectId, request.Scene.Id, ct);
+        try
         {
-            ProviderId = previous.ProviderId,
-            ProviderCode = previous.ProviderCode,
-            ProviderConfigJson = previous.ProviderConfigJson,
-            ProviderCapabilityId = previous.ProviderCapabilityId,
-            CapabilityCode = previous.CapabilityCode,
-            CapabilityConfigJson = previous.CapabilityConfigJson,
-            MaxPromptCharacters = previous.MaxPromptCharacters
-        };
-        input.ProjectId = scene.ProjectId;
-        input.SceneId = scene.Id;
-        input.SceneIndex = scene.SceneIndex;
-        var settings = await _settings.GetAsync(project.Id, ct);
-        var metadata = ScenePromptMetadata.FromScene(scene);
-        var model = ResolveRequestedModel(metadata) ?? RVideoVideoModelPolicy.GetInitial().Model;
-        var duration = scene.DurationSeconds;
-        if (metadata.Extra.TryGetValue("video_duration", out var durationText))
-        {
-            if (!int.TryParse(durationText, out duration) || duration <= 0)
-                return RVideoSceneVideoRenderResult.Fail("RVIDEO_DURATION_INVALID", "Thời lượng video không hợp lệ.");
+            var draft = await service.PrepareAsync(acknowledgement, user, input, ct);
+            var jobId = await service.ActivateAsync(acknowledgement, user, draft.TransitionId, ct);
+            return RVideoSceneVideoRenderResult.Ok(jobId);
         }
-        var catalog = _models is null ? null : await _models.GetModelByCodeAsync(input.ProviderId,model,ct);
-        if(catalog is null || !catalog.Enabled || !catalog.AllowUserSelect || catalog.IsDeprecated
-            || !string.Equals(catalog.ProviderCode,input.ProviderCode,StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(catalog.MediaType,"video",StringComparison.OrdinalIgnoreCase)
-            || !catalog.SupportedDurations.Contains(duration))
-            return RVideoSceneVideoRenderResult.Fail("RVIDEO_MODEL_INVALID","Lựa chọn video hiện tại chưa thể sử dụng.");
-        input.ModelName=model;
-        input.RequestedModelCode=model;
-        input.ManualOverride=true;
-        input.StrictRequestedSettings=true;
-        input.RequestedMode=ResolveRequestedMode(metadata) ?? RVideoVideoModelPolicy.Models.FirstOrDefault(p=>string.Equals(p.ProviderCode,input.ProviderCode,StringComparison.OrdinalIgnoreCase)
-            && string.Equals(p.Model,model,StringComparison.OrdinalIgnoreCase))?.Mode;
-        input.RequestedDurationSeconds=duration;
-        input.DurationSeconds=duration;
-        input.AspectRatio=ResolveAspectRatio(request with { Metadata=metadata });
-        input.Resolution=ResolveResolution(request with { Metadata=metadata }).Trim().ToLowerInvariant();
-        if(!RVideoRules.SupportedAspectRatios.Contains(input.AspectRatio)
-            || (catalog.SupportedRatios.Count > 0 && !catalog.SupportedRatios.Contains(input.AspectRatio, StringComparer.OrdinalIgnoreCase))
-            || !RVideoRules.SupportedResolutions.Contains(input.Resolution,StringComparer.OrdinalIgnoreCase)
-            || (catalog.SupportedResolutions.Count>0 && !catalog.SupportedResolutions.Contains(input.Resolution,StringComparer.OrdinalIgnoreCase))
-            || (!string.IsNullOrWhiteSpace(input.RequestedMode) && catalog.SupportedModes.Count>0 && !catalog.SupportedModes.Contains(input.RequestedMode,StringComparer.OrdinalIgnoreCase)))
-            return RVideoSceneVideoRenderResult.Fail("RVIDEO_MODEL_INVALID","Video options are not supported by the selected model.");
-        var voiceMode=RVideoRules.ResolveVoiceMode(settings);
-        input.Voice=voiceMode==RVideoVoiceModes.Native ? RVideoRules.ResolveSceneVoiceText(scene) : null;
-        input.VoiceInstruction=voiceMode==RVideoVoiceModes.Native ? RVideoRules.ResolveSceneVoiceInstruction(scene) : null;
-        input.VideoPrompt=voiceMode==RVideoVoiceModes.Native
-            ? RVideoRules.ComposeNativeVoicePrompt(scene.VideoPrompt,input.Voice,input.VoiceInstruction) : scene.VideoPrompt ?? "";
-        input.ImagePrompt = scene.ImagePrompt;
-        input.UseSharedReferenceImage=settings?.UseReferenceImageForAllScenes==true;
-        input.ImageInputMode=input.UseSharedReferenceImage ? VideoSceneImageInputMode.SharedBaseImage : VideoSceneImageInputMode.SceneSource;
-        input.SharedReferenceImageMediaId=null; input.SharedReferenceImageUrl=null; input.SharedReferenceImageObjectKey=null;
-        input.SharedReferenceImageFileName=null; input.SharedReferenceImageMimeType=null;
-        if(input.UseSharedReferenceImage)
+        catch (InvalidOperationException ex) when (ex.Message == "RVIDEO_QUOTE_CHANGED")
         {
-            var reference=RVideoSceneImageReferenceSelection.Resolve(settings!).ToSnapshot();
-            input.SharedReferenceImageMediaId=reference.MediaId; input.SharedReferenceImageUrl=reference.PublicUrl;
-            input.SharedReferenceImageObjectKey=reference.ObjectKey; input.SharedReferenceImageFileName=reference.FileName;
-            input.SharedReferenceImageMimeType=reference.MimeType;
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_QUOTE_CHANGED", "Cấu hình video đã thay đổi. Vui lòng báo giá lại.");
         }
-        input.SourceImageVersionId=null; input.SelectedSourceImageVersionId=null;
-        input.SourceImageUrl=null; input.SourceImageObjectKey=null;
-        input.EstimatedUsd=null; input.TariffSnapshotJson=null; input.PricingRuleKey=null; input.CostSource=null;
-        input.TrustedPayerContext = await _payers.BuildRVideoTrustedPayerContextAsync(project.Id, scene.Id, ct);
-        input.CustomerPointRate = estimate.VideoRate;
-        input.EstimatedPoints = estimate.EstimatedPoints;
-        var source = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
-        if (!input.UseSharedReferenceImage)
+    }
+
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002.
+    // One saved-settings/point-rate snapshot supplies both consent and the generation-owned work item.
+    private async Task<RVideoSceneVideoRenderEstimate> EstimateSupersedeAsync(RVideoSceneVideoRenderRequest request, CancellationToken ct)
+    {
+        try
         {
-            input.SelectedSourceImageVersionId = source?.Id;
-            input.SourceImageVersionId = source?.Id;
-            input.SourceImageUrl = source?.PublicUrl ?? scene.StaticImageUrl;
-            input.SourceImageObjectKey = source?.SourceFilePath ?? scene.StaticImagePath;
+            if (_routing is null || _pointPricing is null || _models is null)
+                throw new InvalidOperationException("Video pricing services unavailable.");
+            var project = await _repo.GetProjectAsync(request.ProjectId, ct)
+                ?? throw new InvalidOperationException("Video project unavailable.");
+            var scene = project.Scenes.Single(s => s.Id == request.Scene.Id);
+            // The page must return the saved scene explicitly; do not silently quote a stale DTO.
+            if (scene.ScenePrompt != request.Scene.ScenePrompt || scene.VideoPrompt != request.Scene.VideoPrompt
+                || scene.DurationSeconds != request.Scene.DurationSeconds)
+                return RVideoSceneVideoRenderEstimate.Unavailable with { ErrorMessage = "Scene đã thay đổi. Vui lòng tải lại và báo giá lại." };
+            var metadata = ScenePromptMetadata.FromScene(scene);
+            var selection = ResolveRequestedSelection(metadata);
+            var modelCode = selection.Model ?? RVideoVideoModelPolicy.GetInitial().Model;
+            var mode = selection.Mode ?? RVideoVideoModelPolicy.Models.FirstOrDefault(p => p.Model == modelCode)?.Mode;
+            var duration = scene.DurationSeconds;
+            if (metadata.Extra.TryGetValue("video_duration", out var durationText)
+                && (!int.TryParse(durationText, out duration) || duration <= 0))
+                throw new InvalidOperationException("Invalid video duration.");
+            var route = await _routing.ResolveAsync(RVideoVideoModelPolicy.CapabilityCode, ct: ct);
+            var catalog = await _models.GetModelByCodeAsync(route.ProviderId, modelCode, ct);
+            var aspect = ResolveAspectRatio(request with { Metadata = metadata });
+            var resolution = ResolveResolution(request with { Metadata = metadata }).Trim().ToLowerInvariant();
+            if (catalog is null || !catalog.Enabled || !catalog.AllowUserSelect || catalog.IsDeprecated
+                || catalog.ProviderCode != route.ProviderCode || catalog.MediaType != "video"
+                || route.ProviderCode != RVideoVideoModelPolicy.ProviderCode
+                || route.CapabilityCode != RVideoVideoModelPolicy.CapabilityCode
+                || !catalog.SupportedDurations.Contains(duration)
+                || !RVideoRules.SupportedAspectRatios.Contains(aspect)
+                || !RVideoRules.SupportedResolutions.Contains(resolution, StringComparer.OrdinalIgnoreCase)
+                || (catalog.SupportedRatios.Count > 0 && !catalog.SupportedRatios.Contains(aspect, StringComparer.OrdinalIgnoreCase))
+                || (catalog.SupportedResolutions.Count > 0 && !catalog.SupportedResolutions.Contains(resolution, StringComparer.OrdinalIgnoreCase))
+                || (catalog.SupportedModes.Count > 0 && !catalog.SupportedModes.Contains(mode ?? "", StringComparer.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Invalid video model/options.");
+            // Same configured route tier and points service as the canonical scene-video handler.
+            // Provider catalog cost is not the customer's point rate; do not convert or invent a markup.
+            var tier = SceneVideoRenderHandler.ResolveQualityTier(route);
+            var rate = await _pointPricing.ResolveRateAsync(request.ServiceId, PointPricingResourceTypes.Video, tier, ct);
+            if (rate.Rate <= 0 || !string.Equals(rate.Unit, "per_second", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Video point rate must be configured per_second.");
+            var settings = await _settings.GetAsync(project.Id, ct);
+            var voiceMode = RVideoRules.ResolveVoiceMode(settings);
+            var voice = voiceMode == RVideoVoiceModes.Native ? RVideoRules.ResolveSceneVoiceText(scene) : null;
+            var instruction = voiceMode == RVideoVoiceModes.Native ? RVideoRules.ResolveSceneVoiceInstruction(scene) : null;
+            var points = RVideoSceneVideoCompletionService.CalculateActualVideoPoints(duration, rate.Rate);
+            var input = new SceneVideoRenderWorkItemInput
+            {
+                ProjectId = project.Id, SceneId = scene.Id, SceneIndex = scene.SceneIndex,
+                ProviderId = route.ProviderId, ProviderCode = route.ProviderCode,
+                ProviderCapabilityId = route.ProviderCapabilityId, CapabilityCode = route.CapabilityCode,
+                ProviderConfigJson = route.ProviderConfigJson, CapabilityConfigJson = route.CapabilityConfigJson,
+                ModelName = modelCode, RequestedModelCode = modelCode, RequestedMode = mode,
+                DurationSeconds = duration, RequestedDurationSeconds = duration,
+                ManualOverride = true, StrictRequestedSettings = true, AspectRatio = aspect, Resolution = resolution,
+                ImagePrompt = scene.ImagePrompt, Voice = voice, VoiceInstruction = instruction,
+                VideoPrompt = (voiceMode == RVideoVoiceModes.Native
+                    ? RVideoRules.ComposeNativeVoicePrompt(scene.VideoPrompt, voice, instruction) : scene.VideoPrompt ?? "").Trim(),
+                CustomerPointRate = rate.Rate, CustomerPointQuality = rate.QualityTier, EstimatedPoints = points,
+                PricingMode = rate.Unit, CostSource = rate.Source,
+                UseSharedReferenceImage = settings?.UseReferenceImageForAllScenes == true
+            };
+            input.ImageInputMode = input.UseSharedReferenceImage ? VideoSceneImageInputMode.SharedBaseImage : VideoSceneImageInputMode.SceneSource;
+            if (input.UseSharedReferenceImage)
+            {
+                var source = RVideoSceneImageReferenceSelection.Resolve(settings!).ToSnapshot();
+                input.SharedReferenceImageMediaId = source.MediaId; input.SharedReferenceImageUrl = source.PublicUrl;
+                input.SharedReferenceImageObjectKey = source.ObjectKey; input.SharedReferenceImageFileName = source.FileName;
+                input.SharedReferenceImageMimeType = source.MimeType;
+            }
+            else
+            {
+                var source = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+                input.SelectedSourceImageVersionId = source?.Id; input.SourceImageVersionId = source?.Id;
+                input.SourceImageUrl = source?.PublicUrl ?? scene.StaticImageUrl;
+                input.SourceImageObjectKey = source?.SourceFilePath ?? scene.StaticImagePath;
+            }
+            if (input.UseSharedReferenceImage)
+                input.VideoPrompt = RVideoSharedBaseImagePromptGuard.Apply(input.VideoPrompt, true);
+            input.TariffSnapshotJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                provider = input.ProviderCode, model = input.ModelName, mode = input.RequestedMode,
+                durationSeconds = duration, input.AspectRatio, input.Resolution,
+                customerPointRate = rate.Rate, qualityTier = rate.QualityTier, rateUnit = rate.Unit,
+                rateSource = rate.Source, serviceId = request.ServiceId, estimatedPoints = points
+            });
+            var quote = RVideoSceneVideoOperationSettings.Capture(scene, input, catalog.DisplayName, request.ServiceId, rate);
+            var estimate = await _estimate.EstimateInitialRVideoPointsAsync(new RVideoInitialPointEstimateRequest(
+                Guid.NewGuid(), Guid.NewGuid(), project.Id, request.ServiceId, project.CustomerId, project,
+                new[] { scene }, Array.Empty<VideoProjectSceneDto>(), settings, null,
+                ServiceSellPriceQualityTiers.Premium, tier, ServiceSellPriceQualityTiers.Standard), ct);
+            return new(rate.Rate, points, estimate.AvailablePoints,
+                Math.Max(0m, estimate.AvailablePoints - points), Math.Max(0m, points - estimate.AvailablePoints),
+                !string.IsNullOrWhiteSpace(input.VideoPrompt) && points <= estimate.AvailablePoints)
+                { OperationSettings = quote };
         }
-        var draft = await service.PrepareAsync(acknowledgement, user, input, ct);
-        var jobId = await service.ActivateAsync(acknowledgement, user, draft.TransitionId, ct);
-        return RVideoSceneVideoRenderResult.Ok(jobId);
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RVIDEO_SUPERSEDE_QUOTE_FAILED projectId={ProjectId} sceneId={SceneId}", request.ProjectId, request.Scene.Id);
+            return RVideoSceneVideoRenderEstimate.Unavailable with { ErrorMessage = "Không thể báo giá cấu hình video này. Vui lòng kiểm tra model, thời lượng và bảng giá." };
+        }
     }
 
     private static void ApplySharedReference(SceneVideoRenderInput input, RVideoJobSettingsDto? settings)

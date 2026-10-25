@@ -24,6 +24,9 @@
     [Parameter] public long? Generation { get; set; }
     [Parameter] public EventCallback OnQueued { get; set; }
     [Parameter] public Func<Task<bool>>? Prepare { get; set; }
+    [Parameter] public Func<Task<RVideoSceneVideoRenderRequest?>>? PrepareRequest { get; set; }
+    private RVideoSceneVideoRenderRequest? _submittedRequest;
+    private RVideoSceneVideoRenderEstimate? _submittedEstimate;
     private bool _busy;
     private (long Scene, Guid? Job, long? Generation) _identity;
     private Guid _key = Guid.NewGuid();
@@ -32,7 +35,7 @@
     protected override void OnParametersSet()
     {
         var identity = (Scene.Id, CurrentJobId, Generation);
-        if (!_busy && identity != _identity) { _identity = identity; _key = Guid.NewGuid(); _ack = null; }
+        if (!_busy && identity != _identity) { _identity = identity; _key = Guid.NewGuid(); _ack = null; _submittedRequest = null; _submittedEstimate = null; }
     }
 
     public async Task RunAsync()
@@ -41,21 +44,54 @@
         _busy = true;
         try
         {
-            if (Prepare is not null && !await Prepare()) return;
-            _ack ??= await VideoAction.GetSupersedeAcknowledgementAsync(ProjectId, Scene.Id, user, _key);
-            var snapshot = System.Text.Json.JsonSerializer.Deserialize<VideoProjectSceneDto>(System.Text.Json.JsonSerializer.Serialize(Scene))!;
-            var request = new RVideoSceneVideoRenderRequest(ProjectId, snapshot, ScenePromptMetadata.FromScene(snapshot), ServiceId);
-            var estimate = await VideoAction.EstimateAsync(request);
-            if (!estimate.CanStart) { Snackbar.Add("Chưa thể tạo lượt mới. Vui lòng kiểm tra ảnh, nội dung và số điểm.", Severity.Warning); return; }
+            var request = _submittedRequest;
+            var estimate = _submittedEstimate;
+            if (request is null)
+            {
+                if (PrepareRequest is not null)
+                {
+                    request = await PrepareRequest();
+                    if (request is null) return;
+                }
+                else
+                {
+                    if (Prepare is not null && !await Prepare()) return;
+                    request = new RVideoSceneVideoRenderRequest(ProjectId, Scene, ScenePromptMetadata.FromScene(Scene), ServiceId);
+                }
+                var snapshot = System.Text.Json.JsonSerializer.Deserialize<VideoProjectSceneDto>(System.Text.Json.JsonSerializer.Serialize(request.Scene))!;
+                request = request with { Scene = snapshot, Metadata = ScenePromptMetadata.FromScene(snapshot), ForSupersede = true };
+                estimate = await VideoAction.EstimateAsync(request);
+                if (!estimate.CanStart || estimate.OperationSettings is null)
+                {
+                    Snackbar.Add(estimate.ErrorMessage ?? "Chưa thể tạo lượt mới. Vui lòng kiểm tra ảnh, nội dung và số điểm.", Severity.Warning);
+                    return;
+                }
+                request = request with { ConfirmedSettings = estimate.OperationSettings };
+            }
+            _ack ??= await VideoAction.GetSupersedeAcknowledgementAsync(request.ProjectId, request.Scene.Id, user, _key);
             var warning = OutcomeUnknown
                 ? "Lượt render trước chưa xác định kết quả. Tạo lượt mới có thể phát sinh thêm chi phí."
                 : "Lượt video mới được tính phí riêng. Video đã chọn được giữ nguyên cho đến khi lượt mới hoàn tất.";
-            var confirmed = await DialogService.ShowMessageBoxAsync("Tạo lượt video mới",
-                $"{warning} Dự kiến: {estimate.EstimatedPoints:0.##} điểm.",
+            var options = estimate!.OperationSettings!;
+            var modelLabel = string.IsNullOrWhiteSpace(options.ModelDisplayName) ? options.ModelCode : options.ModelDisplayName;
+            if (!string.IsNullOrWhiteSpace(options.Mode)) modelLabel += $" / {options.Mode}";
+            var details = $"Model: {modelLabel}\nThời lượng: {options.DurationSeconds} giây\nĐơn giá: {options.VideoRate:0.############################} điểm/giây ({options.QualityTier})\nDự kiến: {options.EstimatedPoints:0.############################} điểm.";
+            var message = new Microsoft.AspNetCore.Components.MarkupString(
+                System.Net.WebUtility.HtmlEncode($"{warning}\n\n{details}").Replace("\n", "<br />"));
+            var confirmed = await DialogService.ShowMessageBoxAsync("Tạo lượt video mới", message,
                 yesText: "Xác nhận tạo lượt mới", cancelText: "Hủy");
             if (confirmed != true) return;
+            // Preserve the exact consent on an uncertain transport response, together with its idempotency key.
+            _submittedRequest = request; _submittedEstimate = estimate;
             var result = await VideoAction.SupersedeAsync(request, _ack with { RiskAcknowledged = true }, user);
-            if (!result.Success) { Snackbar.Add(RVideoUserText.ActionError(result.ErrorCode, result.ErrorMessage), Severity.Warning); return; }
+            if (!result.Success)
+            {
+                _submittedRequest = null; _submittedEstimate = null;
+                Snackbar.Add(result.ErrorCode == "RVIDEO_QUOTE_CHANGED"
+                    ? "Cấu hình hoặc giá video đã thay đổi. Vui lòng báo giá lại và xác nhận."
+                    : RVideoUserText.ActionError(result.ErrorCode, result.ErrorMessage), Severity.Warning);
+                return;
+            }
             Snackbar.Add($"Đang tạo video. Job: {result.RenderJobId}", Severity.Success);
             await OnQueued.InvokeAsync();
         }

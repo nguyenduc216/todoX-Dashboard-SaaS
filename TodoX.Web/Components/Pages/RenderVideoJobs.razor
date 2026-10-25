@@ -931,19 +931,19 @@ else
                                                 <MudDivider />
                                                     @if (string.IsNullOrWhiteSpace(ResolveDraftVideoUrl(scene, draft)))
                                                     {
-                                                    <MudMenuItem Disabled="@(_busy || !CanCreateSceneVideo(scene, draft))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudMenuItem>
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.MovieCreation" Disabled="@(_busy || !CanCreateSceneVideo(scene, draft))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudMenuItem>
                                                     }
 
-                                                    <MudMenuItem Disabled="@(_busy || !CanRetrySceneVideo(scene) || _sceneVideoRetrying.Contains(scene.Id))" OnClick="@(() => RetrySceneVideoAsync(scene))">Retry video</MudMenuItem>
-                                                    <MudMenuItem Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id) || (!NeedsExplicitVideoOperation(scene) && !CanRerenderSceneVideo(scene, draft)))" OnClick="@(() => RerenderSceneVideoAsync(scene))">Render lại video</MudMenuItem>
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.Refresh" Disabled="@(_busy || !CanRetrySceneVideo(scene) || _sceneVideoRetrying.Contains(scene.Id))" OnClick="@(() => RetrySceneVideoAsync(scene))">Retry video</MudMenuItem>
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.Autorenew" Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id) || (!NeedsExplicitVideoOperation(scene) && !CanRerenderSceneVideo(scene, draft)))" OnClick="@(() => RerenderSceneVideoAsync(scene))">Render lại video</MudMenuItem>
                                                     @if (NeedsExplicitVideoOperation(scene))
                                                     {
-                                                    <MudMenuItem Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id))" OnClick="@(() => RerenderSceneVideoAsync(scene))">Tạo lượt video mới</MudMenuItem>
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.AddCircleOutline" Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id))" OnClick="@(() => RerenderSceneVideoAsync(scene))">Tạo lượt video mới</MudMenuItem>
                                                     }
-                                                    <MudMenuItem OnClick="@(() => OpenVideoHistoryAsync(scene))">Lịch sử video</MudMenuItem>
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenVideoHistoryAsync(scene))">Lịch sử video</MudMenuItem>
                                                     <MudDivider />
-                                                    <MudMenuItem Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
-                                                    <MudMenuItem OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt</MudMenuItem>
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.EditNote" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt</MudMenuItem>
 
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
@@ -1056,7 +1056,7 @@ else
                                                         HideTrigger="true" Visible="@NeedsExplicitVideoOperation(scene)" Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id))"
                                                         CurrentJobId="@SupersedeState(scene)?.LatestJob?.Id" Generation="@SupersedeState(scene)?.Generation"
                                                         OutcomeUnknown="@(SupersedeState(scene)?.HasProviderIdentity == true || SupersedeState(scene)?.HasActiveJob == true || SupersedeState(scene)?.SubmitBlockReason != TodoX.Web.Services.VideoRender.SceneVideoSubmitBlockReason.None)"
-                                                        Prepare="@(() => PrepareSceneVideoOperationAsync(scene))" OnQueued="OnSupersedeQueuedAsync" />
+                                                        PrepareRequest="@(() => PrepareSceneVideoRequestAsync(scene))" OnQueued="OnSupersedeQueuedAsync" />
 
 
 
@@ -9750,6 +9750,15 @@ else
             draft.IsDirty = true;
         }
         return !draft.IsDirty || await SaveSceneAsync(scene);
+    }
+
+    private async Task<TodoX.Web.Services.VideoRender.RVideoSceneVideoRenderRequest?> PrepareSceneVideoRequestAsync(VideoProjectSceneDto scene)
+    {
+        if (!await PrepareSceneVideoOperationAsync(scene)) return null;
+        // SaveSceneAsync reloads/replaces the project DTO collection. Return the saved instance explicitly.
+        var saved = _project?.Scenes.SingleOrDefault(s => s.Id == scene.Id);
+        return saved is null ? null : new TodoX.Web.Services.VideoRender.RVideoSceneVideoRenderRequest(
+            saved.ProjectId, saved, ScenePromptMetadata.FromScene(saved), ServiceId);
     }
 
     private bool HasPendingSceneVideoSettings(VideoProjectSceneDto scene)

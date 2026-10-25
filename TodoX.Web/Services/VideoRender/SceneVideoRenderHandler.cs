@@ -795,7 +795,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             new { jobId, tenant = _tenant.TenantId });
     }
 
-    private static string ResolveQualityTier(VideoProviderRoute route)
+    internal static string ResolveQualityTier(VideoProviderRoute route)
     {
         return ResolveConfiguredQualityTier(route.CapabilityConfigJson)
             ?? ResolveConfiguredQualityTier(route.ProviderConfigJson)

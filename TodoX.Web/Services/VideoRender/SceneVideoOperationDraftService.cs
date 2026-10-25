@@ -181,6 +181,29 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
         var transitionId = Guid.NewGuid();
         var jobId = Guid.NewGuid();
         var versionId = Guid.NewGuid();
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002.
+        // Recheck one quoted scene/image under existing tenant/scene locks; no historical operation is updated.
+        if (input.ConfirmedOperationSettings is { } confirmed)
+        {
+            var saved = await conn.QuerySingleAsync<VideoProjectSceneDto>("""
+                SELECT scene_prompt AS ScenePrompt, image_prompt AS ImagePrompt, video_prompt AS VideoPrompt,
+                       duration_seconds AS DurationSeconds, voice_text AS VoiceText, voice_instruction AS VoiceInstruction,
+                       static_image_url AS StaticImageUrl, static_image_path AS StaticImagePath
+                FROM video_render.video_project_scenes WHERE id=@scene AND project_id=@project AND tenant_id=@tenant;
+                """, args, tx);
+            if (RVideoSceneVideoOperationSettings.CaptureSceneConfig(saved) != confirmed.SceneConfigJson)
+                throw new InvalidOperationException("RVIDEO_QUOTE_CHANGED");
+            if (!input.UseSharedReferenceImage)
+            {
+                var selected = await conn.QuerySingleOrDefaultAsync<Guid?>("""
+                    SELECT id FROM video_render.scene_image_versions
+                    WHERE scene_id=@scene AND project_id=@project AND tenant_id=@tenant AND is_selected=true LIMIT 1;
+                    """, args, tx);
+                if (selected != confirmed.SelectedImageVersionId)
+                    throw new InvalidOperationException("RVIDEO_QUOTE_CHANGED");
+            }
+        }
+
         var generation = checked(a.ExpectedGeneration + 1);
         var logical = $"scene-video-operation-{jobId:N}-scene-{a.SceneId}";
         input.ProjectId = a.ProjectId;
@@ -238,6 +261,7 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
             capability=input.CapabilityCode,model=input.ModelName,mode=input.RequestedMode,
             aspectRatio=input.AspectRatio,selectedSourceImageVersionId=input.SelectedSourceImageVersionId,
             customerPointRate=input.CustomerPointRate,strictRequestedSettings=input.StrictRequestedSettings,
+            confirmedOperationSettings=input.ConfirmedOperationSettings,
             requestedModel=input.RequestedModelCode,requestedMode=input.RequestedMode,
             requestedDurationSeconds=input.DurationSeconds,providerDurationSeconds=input.DurationSeconds,
             requestedResolution=input.Resolution,providerResolution=input.Resolution.Trim().ToLowerInvariant() };
