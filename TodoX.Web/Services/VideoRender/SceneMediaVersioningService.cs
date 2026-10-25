@@ -623,12 +623,13 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             var knownJobId = await conn.ExecuteScalarAsync<Guid?>(
                 """
                 SELECT id FROM render.render_jobs
-                 WHERE tenant_id=@tenant AND job_type='render_scene_image' AND project_id=@projectId
+                 WHERE tenant_id=@tenant AND job_type='render_scene_image'
+                   AND COALESCE(input_json->>'projectId', input_json->>'project_id')=@projectIdText
                    AND input_json->>'imageVersionId'=@versionIdText
                    AND id=(SELECT render_job_id FROM video_render.scene_image_versions WHERE id=@versionId AND tenant_id=@tenant)
                  ORDER BY created_at DESC LIMIT 1;
                 """,
-                new { versionIdText = existing.Id.ToString(), versionId = existing.Id, projectId = request.ProjectId, tenant = _tenant.TenantId }, tx);
+                new { versionIdText = existing.Id.ToString(), versionId = existing.Id, projectIdText = request.ProjectId.ToString(), tenant = _tenant.TenantId }, tx);
             if (knownJobId is null)
                 throw new InvalidOperationException("SCENE_IMAGE_JOB_OUTCOME_UNKNOWN");
             tx.Commit();
@@ -667,10 +668,10 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         var inserted = await conn.ExecuteAsync(
             """
             INSERT INTO render.render_jobs
-                (id, tenant_id, user_id, customer_id, project_id, job_type, status, priority,
+                (id, tenant_id, user_id, customer_id, job_type, status, priority,
                  input_json, prompt_json, reference_json, log_code, error_code, error_message,
-                 attempts, max_attempts, created_at, updated_at, provider_code, model_code, point_cost_estimate, point_status)
-            VALUES (@jobId, @tenant, @userId, @customerId, @projectId, @jobType, 'draft', 0,
+                 attempt_count, max_attempts, created_at, updated_at, provider_code, model_code, point_cost_estimate, point_status)
+            VALUES (@jobId, @tenant, @userId, @customerId, @jobType, 'draft', 0,
                    CAST(@input AS jsonb), CAST(@prompt AS jsonb), CAST(@refs AS jsonb),
                    @logCode, @errorCode, @errorMessage, 0, @maxAttempts, now(), now(), @providerCode, @modelCode, 0, @pointStatus);
             """,
