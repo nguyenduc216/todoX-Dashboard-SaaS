@@ -1,3 +1,4 @@
+@attribute [StreamRendering]
 @using TodoX.Web.Components.Pages.RVideo
 @page "/render-job"
 
@@ -3465,6 +3466,7 @@ else
     private Microsoft.JSInterop.IJSObjectReference? _viewModule;
     private string? _restoredViewKey;
     private bool _restoreView = true;
+    private long _tabSelectionRevision;
     private string? _displayedFinalVideoUrl;
     private string? DisplayedFinalVideoUrl => _displayedFinalVideoUrl ??= _project?.FinalVideoUrl;
     private void ShowLatestFinalVideo() => _displayedFinalVideoUrl = _project?.FinalVideoUrl;
@@ -3474,10 +3476,12 @@ else
         _restoreView = true;
         _restoredViewKey = null;
         _displayedFinalVideoUrl = null;
+        _tabSelectionRevision = 0;
         _tabIndex = 0;
     }
     private async Task OnViewTabChangedAsync(int index)
     {
+        _tabSelectionRevision++;
         _tabIndex = Math.Clamp(index, 0, 2);
         if (_viewModule is not null && ViewKey is { } key)
             try { await _viewModule.InvokeVoidAsync("saveTab", key, _tabIndex); } catch (JSException) { }
@@ -5203,9 +5207,18 @@ else
                 _viewModule ??= await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>("import", "./js/rvideo-view-state.js");
                 if (_restoreView || _restoredViewKey != viewKey)
                 {
-                    var tab = await _viewModule.InvokeAsync<int>("open", viewKey, _tabIndex);
+                    var revision = _tabSelectionRevision;
                     _restoreView = false; _restoredViewKey = viewKey;
-                    if (tab != _tabIndex) { _tabIndex = tab; await InvokeAsync(StateHasChanged); }
+                    var tab = await _viewModule.InvokeAsync<int>("open", viewKey, _tabIndex);
+                    if (ViewKey != viewKey) return;
+                    if (revision == 0 && _tabSelectionRevision == 0 && tab != _tabIndex)
+                    {
+                        _tabIndex = tab;
+                        await InvokeAsync(StateHasChanged);
+                        return; // Restore scroll only after the selected panel has rendered.
+                    }
+                    if (_tabSelectionRevision != 0)
+                        await _viewModule.InvokeVoidAsync("saveTab", viewKey, _tabIndex);
                 }
                 await _viewModule.InvokeVoidAsync("attach", viewKey, _tabIndex);
             }

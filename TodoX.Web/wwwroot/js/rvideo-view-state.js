@@ -15,7 +15,8 @@ export function open(key, tab) {
     current = { tab: Number.isInteger(saved.tab) ? Math.max(0, Math.min(2, saved.tab)) : tab, scroll: saved.scroll || {} };
     return current.tab;
 }
-export function attach(key, tab) {
+export async function attach(key, tab) {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (key !== currentKey) return;
     const next = document.getElementById('rvideo-view-root');
     if (!next) return;
@@ -29,7 +30,7 @@ export function attach(key, tab) {
         root.addEventListener('scroll', handler, true);
     }
     root.querySelectorAll('[data-rvideo-scroll]').forEach(el => {
-        if (!el.clientHeight || restored.has(el)) return;
+        if (!el.clientHeight || !el.getClientRects().length || restored.has(el)) return;
         const top = Number(current.scroll[el.dataset.rvideoScroll]) || 0;
         el.scrollTop = Math.max(0, Math.min(top, el.scrollHeight - el.clientHeight));
         restored.add(el);

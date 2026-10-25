@@ -1,3 +1,4 @@
+@attribute [StreamRendering]
 @page "/jobs/rvideo/{JobId:guid}"
 @implements IDisposable
 @inject AuthStateService AuthState
@@ -8,17 +9,27 @@
 @switch (_bootstrapState)
 {
     case RVideoDetailBootstrapState.WaitingForAuth:
-        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
-        break;
     case RVideoDetailBootstrapState.LoadingJob:
-        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        <MudPaper Class="pa-6 ma-4" Outlined="true" Style="min-height:65vh" role="status" aria-live="polite">
+            <MudSkeleton Width="45%" Height="48px" />
+            <MudStack Row="true" Spacing="3" Class="my-4">
+                <MudText>Thông tin</MudText><MudText>Xem trước</MudText><MudText>Kết quả</MudText>
+            </MudStack>
+            <MudDivider />
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="my-4">
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+                <MudText>@(_loadingSlow ? "Dữ liệu đang tải lâu hơn dự kiến, vui lòng đợi..." : "Đang tải dữ liệu job...")</MudText>
+            </MudStack>
+            <MudSkeleton Height="180px" /><MudSkeleton Width="80%" Height="32px" />
+            <MudSkeleton Width="65%" Height="32px" />
+        </MudPaper>
         break;
     case RVideoDetailBootstrapState.Error:
         <MudAlert Severity="@_alertSeverity">
             @_loadWarning
         </MudAlert>
         <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="LoadJobAsync" Disabled="@_loadInProgress">
-            Retry
+            Thử tải lại
         </MudButton>
         break;
     case RVideoDetailBootstrapState.Ready:
@@ -49,6 +60,9 @@
     private bool _loadInProgress;
     private Guid? _loadedJobId;
     private Guid? _currentJobId;
+    private bool _loadingSlow;
+    private bool _disposed;
+    private CancellationTokenSource? _loadingNotice;
 
     private enum RVideoDetailBootstrapState
     {
@@ -61,6 +75,7 @@
     protected override void OnInitialized()
     {
         AuthState.OnChange += HandleAuthStateChanged;
+        _ = ObserveLoadingAsync();
     }
 
     protected override async Task OnParametersSetAsync()
@@ -91,6 +106,9 @@
 
     public void Dispose()
     {
+        _disposed = true;
+        _loadingNotice?.Cancel();
+        _loadingNotice?.Dispose();
         AuthState.OnChange -= HandleAuthStateChanged;
     }
 
@@ -105,12 +123,33 @@
         StateHasChanged();
     });
 
+    private async Task ObserveLoadingAsync()
+    {
+        _loadingNotice = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), _loadingNotice.Token);
+            if (_disposed) return;
+            _loadingSlow = true;
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(TimeSpan.FromSeconds(20), _loadingNotice.Token);
+            if (!_disposed && _bootstrapState == RVideoDetailBootstrapState.WaitingForAuth)
+            {
+                _loadWarning = "Chưa thể khởi tạo phiên đăng nhập. Vui lòng thử tải lại.";
+                _bootstrapState = RVideoDetailBootstrapState.Error;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
     private async Task LoadJobAsync()
     {
         if (!AuthState.IsInitialized)
         {
             Logger.LogInformation("RVIDEO_DETAIL_WAITING_AUTH jobId={JobId}", JobId);
-            _bootstrapState = RVideoDetailBootstrapState.WaitingForAuth;
+            _loadWarning = "Phiên đăng nhập chưa sẵn sàng. Vui lòng thử tải lại sau ít giây.";
+            _bootstrapState = RVideoDetailBootstrapState.Error;
             return;
         }
 
@@ -135,10 +174,13 @@
         _bootstrapState = RVideoDetailBootstrapState.LoadingJob;
         Logger.LogInformation("RVIDEO_DETAIL_LOAD_START jobId={JobId}", JobId);
         CancellationTokenSource? timeout = null;
+        var requestedJob = JobId;
         try
         {
             timeout = new CancellationTokenSource(LoadTimeout);
-            _view = await RVideoJobs.GetByJobIdAsync(JobId, user, timeout.Token);
+            var loaded = await RVideoJobs.GetByJobIdAsync(requestedJob, user, timeout.Token).WaitAsync(LoadTimeout);
+            if (_disposed || JobId != requestedJob) return;
+            _view = loaded;
             if (_view is null)
             {
                 _loadedJobId = null;
@@ -152,26 +194,29 @@
                 Logger.LogInformation("RVIDEO_DETAIL_LOAD_SUCCESS jobId={JobId} projectId={ProjectId}", JobId, _view.Project.Id);
             }
         }
-        catch (OperationCanceledException ex) when (timeout?.Token.IsCancellationRequested == true)
+        catch (Exception ex) when (ex is TimeoutException || ex is OperationCanceledException && timeout?.Token.IsCancellationRequested == true)
         {
+            if (_disposed || JobId != requestedJob) return;
             Logger.LogWarning(ex, "RVIDEO_DETAIL_LOAD_TIMEOUT jobId={JobId} timeoutSeconds={TimeoutSeconds}", JobId, LoadTimeout.TotalSeconds);
             _view = null;
             _loadedJobId = null;
-            _loadWarning = "RVIDEO loading timed out. Please try again.";
+            _loadWarning = "Tải dữ liệu job quá thời gian chờ. Vui lòng thử tải lại.";
             _bootstrapState = RVideoDetailBootstrapState.Error;
         }
         catch (Exception ex)
         {
+            if (_disposed || JobId != requestedJob) return;
             Logger.LogError(ex, "RVIDEO_DETAIL_LOAD_FAILED jobId={JobId}", JobId);
             _view = null;
             _loadedJobId = null;
-            _loadWarning = "RVIDEO could not be loaded. Please try again.";
+            _loadWarning = "Không thể tải dữ liệu job. Vui lòng thử tải lại.";
             _bootstrapState = RVideoDetailBootstrapState.Error;
         }
         finally
         {
             timeout?.Dispose();
             _loadInProgress = false;
+            if (!_disposed && JobId != requestedJob) _ = InvokeAsync(LoadJobAsync);
         }
     }
 }
