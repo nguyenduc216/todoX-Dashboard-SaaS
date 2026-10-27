@@ -76,8 +76,11 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
         }
         if (manual && project.UserId != _currentUser()!.UserId)
             return NotEnqueued("unauthorized", logicalRequestId);
-        if (manual && !await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct))
-            return NotEnqueued("final_versioning_required", logicalRequestId);
+        if (manual)
+        {
+            var versioning = await _versions.GetFinalVideoVersioningStateAsync(ct);
+            if (!versioning.Ready) return NotEnqueued(versioning.Reason, logicalRequestId);
+        }
 
         var settings = await _getSettings(projectId, ct);
         if (settings is null)

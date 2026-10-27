@@ -10,7 +10,7 @@ else{
 <section class="rv2-result-video">
 <MudText Typo="Typo.subtitle2" Class="mb-2">Video hoàn chỉnh</MudText>
 @if(!string.IsNullOrWhiteSpace(JobView.Project.FinalVideoUrl)){
-<video src="@JobView.Project.FinalVideoUrl" controls playsinline class="rv2-final-video"></video>
+<video @key="JobView.Project.FinalVideoUrl" src="@JobView.Project.FinalVideoUrl" controls playsinline class="rv2-final-video"></video>
 }else{<div class="rv2-final-ph">Chưa có final video</div>}
 <div class="rv2-result-summary">
 <div class="rv2-summary-item"><span>Tổng điểm</span><strong>@ScoreDisplay</strong></div>
@@ -22,7 +22,7 @@ else{
 <MudAlert Severity="Severity.Error" Dense="true">Ghép video thất bại: @JobView.Project.ErrorMessage. Bạn có thể ghép lại; bản final trước vẫn được giữ.</MudAlert>
 }
 <div class="rv2-result-actions">
-<MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Merge" OnClick="ReMergeAsync" Disabled="@_merging">@(_merging ? "Đang ghép..." : "Ghép lại video")</MudButton>
+<RVideoRecomposeAction @key="JobView.Project.Id" @ref="_recompose" Project="JobView.Project" OnReloadRequested="OnReloadRequested" OnSubmitRequested="ReMergeAsync" />
 @if(!string.IsNullOrWhiteSpace(JobView.Project.FinalVideoUrl)){
 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Href="@JobView.Project.FinalVideoUrl" Target="_blank">Tải video</MudButton>
 }else{
@@ -54,35 +54,11 @@ else{
 [Parameter] public RVideoJobView? JobView{get;set;}
 [Parameter] public EventCallback OnReloadRequested { get; set; }
 bool _showDetail;
-bool _merging;
+RVideoRecomposeAction? _recompose;
 
-// RVID-UI-V2-SCENE-RERENDER-HISTORY.1: explicit re-merge using the canonical finalization flow.
-// Ownership, readiness and duplicate merge guards live in RVideoProjectFinalizationService;
-// this only surfaces loading/error state and reuses the canonical selected versions + scene order.
 async Task ReMergeAsync()
 {
-  if(JobView is null || AuthState.CurrentUser is null || _merging) return;
-  _merging = true;
-  try
-  {
-    var result = await RVideoFinalization.TryEnqueueFinalMergeAsync(JobView.Project.Id, RVideoProjectFinalizationContracts.TriggerManual);
-    if(result.AlreadyActive) Snackbar.Add("Project này đang có job ghép video.", Severity.Info);
-    else if(!result.Enqueued)
-      Snackbar.Add(result.Reason switch
-      {
-        "unauthorized" => "Bạn không có quyền ghép lại project này.",
-        "final_versioning_required" => "Cần bật final video versioning trước khi ghép lại để giữ bản final cũ.",
-        "already_final" => "Final video đã sẵn sàng.",
-        _ => "Chưa thể ghép: cần tất cả scene có video đang dùng đã hoàn tất."
-      }, Severity.Warning);
-    else Snackbar.Add("Đã enqueue ghép lại final video.", Severity.Success);
-    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
-  }
-  catch(Exception ex)
-  {
-    Snackbar.Add(ex.Message, Severity.Error);
-  }
-  finally { _merging = false; }
+    if (_recompose is not null) await _recompose.SubmitAsync();
 }
 string ScoreDisplay=> "—";
 string FileSizeDisplay=> "—";

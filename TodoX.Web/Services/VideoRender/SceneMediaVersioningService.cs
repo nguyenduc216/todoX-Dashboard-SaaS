@@ -309,6 +309,7 @@ public sealed class SceneRenderErrorDetailDto
 public interface ISceneMediaVersioningService
 {
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
+    Task<FinalVideoVersioningState> GetFinalVideoVersioningStateAsync(CancellationToken ct = default);
     Task<SceneImageVersionDto> CreateQueuedImageVersionAsync(SceneImageVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
     Task<bool> TryCompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
@@ -392,6 +393,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         _factory = factory;
         _tenant = tenant;
     }
+
+    public Task<FinalVideoVersioningState> GetFinalVideoVersioningStateAsync(CancellationToken ct = default)
+        => FinalVideoVersioningState.ReadAsync(_factory, ct);
 
     public async Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default)
     {
@@ -1694,8 +1698,10 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
         var selectedVideos = (await conn.QueryAsync<SelectedSceneVideoRow>(
             """
-            SELECT s.id AS SceneId, s.scene_index AS SceneIndex, s.selected_video_version_id AS SceneVideoVersionId
+            SELECT s.id AS SceneId, s.scene_index AS SceneIndex, v.id AS SceneVideoVersionId, s.duration_seconds AS DurationSeconds
               FROM video_render.video_project_scenes s
+              LEFT JOIN video_render.scene_video_versions v ON v.id=s.selected_video_version_id
+                AND v.scene_id=s.id AND v.project_id=s.project_id AND v.tenant_id=s.tenant_id AND v.status='completed'
              WHERE s.project_id=@projectId AND s.tenant_id=@tenant
              ORDER BY s.scene_index;
             """,
@@ -1746,9 +1752,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 INSERT INTO video_render.final_video_version_items
                     (final_video_version_id, scene_id, scene_video_version_id, item_order, config_json)
                 VALUES
-                    (@finalVersionId, @sceneId, @sceneVideoVersionId, @itemOrder, '{}'::jsonb);
+                    (@finalVersionId, @sceneId, @sceneVideoVersionId, @itemOrder, jsonb_build_object('durationSeconds', @durationSeconds));
                 """,
-                new { finalVersionId = id, item.SceneId, item.SceneVideoVersionId, itemOrder = item.SceneIndex }, tx);
+                new { finalVersionId = id, item.SceneId, item.SceneVideoVersionId, itemOrder = item.SceneIndex, durationSeconds = item.DurationSeconds }, tx);
         }
 
         tx.Commit();
@@ -1769,6 +1775,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
+        // Serialize final publication/selection on the same project row as version creation.
+        await conn.ExecuteAsync("""
+            SELECT p.id FROM video_render.video_projects p
+            JOIN video_render.final_video_versions v ON v.project_id=p.id AND v.tenant_id=p.tenant_id
+            WHERE v.id=@versionId AND p.tenant_id=@tenant FOR UPDATE OF p;
+            """, new { versionId, tenant = _tenant.TenantId }, tx);
         var version = await conn.QuerySingleAsync<FinalVideoVersionDto>(
             SelectFinalVideoVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
             new { versionId, tenant = _tenant.TenantId }, tx);
@@ -2515,6 +2527,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         public long SceneId { get; init; }
         public int SceneIndex { get; init; }
         public Guid? SceneVideoVersionId { get; init; }
+        public int DurationSeconds { get; init; }
     }
 
     private sealed class SceneErrorDetailRow

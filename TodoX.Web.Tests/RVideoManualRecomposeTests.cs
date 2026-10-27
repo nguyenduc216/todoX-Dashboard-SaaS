@@ -40,6 +40,7 @@ public sealed class RVideoManualRecomposeTests
             var versions = FinalMergeProxy.Create<ISceneMediaVersioningService>((method, args) => method.Name switch
             {
                 "IsEnabledAsync" => Task.FromResult(Enabled),
+                "GetFinalVideoVersioningStateAsync" => Task.FromResult(FinalVideoVersioningState.FromFlag(Enabled ? "true" : "false", 1)),
                 "GetSelectedVideoVersionAsync" => Task.FromResult<SceneVideoVersionDto?>(Ready ? new() { Id = Guid.NewGuid(), Status = "completed" } : null),
                 "GetSelectedAudioVersionAsync" => Task.FromResult<SceneAudioVersionDto?>(null),
                 _ => throw new InvalidOperationException("Unexpected version write or lookup: " + method.Name)
