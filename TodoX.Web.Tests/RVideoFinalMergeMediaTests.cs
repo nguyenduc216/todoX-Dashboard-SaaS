@@ -144,8 +144,25 @@ public sealed class RVideoFinalMergeMediaTests : IDisposable
         var error = await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, frozen, inputs, Timeout, default);
         Assert.NotNull(error);
         Assert.Contains("scene_motion_lost", error);
-        var repaired = await Merge(source, source);
-        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, repaired.Output, inputs, Timeout, default));
+        // Inject a valid-but-frozen copy input through a stale concat manifest while the
+        // selected source list is moving. Exercise the REAL copy -> motion reject -> fallback.
+        var concat = Path.Combine(_root, "concat-frozen.txt");
+        await File.WriteAllLinesAsync(concat, VideoRenderMergeHandler.BuildConcatLines([frozen]), new System.Text.UTF8Encoding(false));
+        var repaired = Path.Combine(_root, "recomposed.mp4");
+        var reasons = new List<string>();
+        await FinalMergeMedia.MergeAsync(Ffmpeg, _root, concat, repaired, inputs, 4, Timeout,
+            reason => { reasons.Add(reason); return Task.CompletedTask; }, default);
+        Assert.Contains(reasons, reason => reason.StartsWith("scene_motion_lost", StringComparison.Ordinal));
+        Assert.Contains("exitCode=0", await File.ReadAllTextAsync(Path.Combine(_root, "ffmpeg-copy.log")));
+        Assert.Equal("PASS", await File.ReadAllTextAsync(Path.Combine(_root, "fallback-validation.log")));
+        Assert.True(File.Exists(Path.Combine(_root, "normalized-0000.mp4")));
+        Assert.True(File.Exists(Path.Combine(_root, "normalized-0001.mp4")));
+        var probe = await FinalMergeMedia.InspectAsync(Ffmpeg, repaired, Timeout, default);
+        Assert.Equal("h264", probe.Codec);
+        Assert.Contains("aac/", probe.AudioSignature);
+        Assert.Null(await FinalMergeMedia.ValidateAsync(Ffmpeg, repaired, 4, Timeout, default));
+        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, repaired, inputs, Timeout, default));
+        Assert.True(File.Exists(frozen)); // The old final/source fixture was never overwritten.
     }
 
     [LocalFfmpegFact]
