@@ -76,8 +76,76 @@ internal static class FinalMergeMedia
             .Select(f => decimal.TryParse(Text(f, "best_effort_timestamp_time"), NumberStyles.Float, CultureInfo.InvariantCulture, out var t) ? (decimal?)t : null).ToArray();
         var error = ValidateTimeline(times, seconds);
         if (error is not null) return error;
-        var decode = await RunAsync(ffmpeg, ["-v", "error", "-xerror", "-err_detect", "explode", "-i", path, "-map", "0:v:0", "-an", "-f", "null", "-"], timeout, ct);
-        return decode.ExitCode == 0 && string.IsNullOrWhiteSpace(decode.Error) ? null : "video_decode_failed: " + decode.Error;
+        var decode = await RunAsync(ffmpeg, ["-v", "error", "-xerror", "-err_detect", "explode", "-i", path, "-map", "0:v:0", "-map", "0:a?", "-f", "null", "-"], timeout, ct);
+        if (decode.ExitCode != 0 || !string.IsNullOrWhiteSpace(decode.Error)) return "media_decode_failed: " + decode.Error;
+        return await ValidateAudioAsync(ffmpeg, path, seconds, timeout, ct);
+    }
+
+    internal static async Task<string?> ValidateAudioAsync(string ffmpeg, string path, decimal seconds, TimeSpan timeout, CancellationToken ct)
+    {
+        var probe = await RunAsync(ProbeExecutable(ffmpeg),
+            ["-v", "error", "-select_streams", "a", "-show_streams", "-show_frames", "-show_entries",
+                "stream=start_time,duration:frame=best_effort_timestamp_time,nb_samples,sample_rate", "-of", "json", path], timeout, ct);
+        if (probe.ExitCode != 0 || !string.IsNullOrWhiteSpace(probe.Error)) return "audio_probe_failed";
+        using var metadata = JsonDocument.Parse(probe.Output);
+        var streams = metadata.RootElement.GetProperty("streams");
+        if (streams.GetArrayLength() == 0) return null; // Silent selected sources are supported.
+        if (streams.GetArrayLength() != 1) return "unexpected_audio_stream_count";
+        var audio = streams[0];
+        bool Number(JsonElement element, string key, out decimal value)
+            => decimal.TryParse(Text(element, key), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        if (!Number(audio, "start_time", out var start) || Math.Abs(start) > .25m
+            || !Number(audio, "duration", out var duration) || Math.Abs(duration - seconds) > .25m)
+            return "audio_video_timeline_mismatch";
+        var times = metadata.RootElement.GetProperty("frames").EnumerateArray()
+            .Select(f => Number(f, "best_effort_timestamp_time", out var time) ? (decimal?)time : null).ToArray();
+        return ValidateTimeline(times, seconds) is null ? null : "audio_timestamp_coverage_invalid";
+    }
+
+    // Compare each configured output interval with its selected source. A static source is valid;
+    // a moving source becoming a single repeated sampled picture is not. This is a bounded
+    // motion-loss screen, not proof of semantic/lip synchronization or frame-exact identity.
+    internal static async Task<string?> ValidateMotionAsync(string ffmpeg, string output, IReadOnlyList<Input> inputs, TimeSpan timeout, CancellationToken ct)
+    {
+        decimal offset = 0;
+        for (var i = 0; i < inputs.Count; i++)
+        {
+            var source = await MotionSamplesAsync(ffmpeg, inputs[i].Path, 0, inputs[i].Seconds, timeout, ct);
+            var final = await MotionSamplesAsync(ffmpeg, output, offset, inputs[i].Seconds, timeout, ct);
+            if (source.Length < 2048 || final.Length < 2048) return $"scene_motion_samples_missing:{i}";
+            if (HasMotion(source) && !HasMotion(final))
+                return $"scene_motion_lost:{i}:offset={offset.ToString(CultureInfo.InvariantCulture)}";
+            offset += inputs[i].Seconds;
+        }
+        return null;
+    }
+
+    private static bool HasMotion(byte[] frames)
+    {
+        const int pixels = 32 * 32;
+        for (var offset = pixels; offset < frames.Length; offset += pixels)
+        {
+            long difference = 0;
+            for (var pixel = 0; pixel < pixels; pixel++)
+                difference += Math.Abs(frames[offset + pixel] - frames[offset - pixels + pixel]);
+            if (difference > pixels) return true; // Ignore sub-luma compression noise.
+        }
+        return false;
+    }
+
+    private static async Task<byte[]> MotionSamplesAsync(string ffmpeg, string path, decimal start, int seconds, TimeSpan timeout, CancellationToken ct)
+    {
+        var samples = Path.Combine(Path.GetTempPath(), $"todox-motion-{Guid.NewGuid():N}.gray");
+        try
+        {
+            var result = await RunAsync(ffmpeg, ["-y", "-v", "error", "-ss", start.ToString(CultureInfo.InvariantCulture), "-i", path,
+                "-t", seconds.ToString(CultureInfo.InvariantCulture), "-map", "0:v:0", "-an", "-vf", "fps=2,scale=32:32,format=gray", "-f", "rawvideo", samples], timeout, ct);
+            if (result.ExitCode != 0 || !string.IsNullOrWhiteSpace(result.Error)) throw new InvalidOperationException("Motion validation decode failed: " + result.Error);
+            var bytes = await File.ReadAllBytesAsync(samples, ct);
+            if (bytes.Length % 1024 != 0) throw new InvalidOperationException("Incomplete motion samples.");
+            return bytes;
+        }
+        finally { if (File.Exists(samples)) File.Delete(samples); }
     }
 
     internal static string? ValidateTimeline(IReadOnlyList<decimal?> times, decimal seconds)
@@ -107,6 +175,9 @@ internal static class FinalMergeMedia
             var copy = await RunAsync(ffmpeg, VideoRenderMergeHandler.BuildCopyConcatArguments(concat, output, seconds), timeout, ct);
             await File.WriteAllTextAsync(Path.Combine(directory, "ffmpeg-copy.log"), copy.Log, ct);
             reason = copy.ExitCode == 0 ? await ValidateAsync(ffmpeg, output, seconds, timeout, ct) : "copy_exit_code_" + copy.ExitCode;
+            if (reason is null) reason = await ValidateMotionAsync(ffmpeg, output, inputs, timeout, ct);
+            if (reason is null && probes.Any(p => p.Audio) && !(await InspectAsync(ffmpeg, output, timeout, ct)).Audio)
+                reason = "selected_scene_audio_missing";
         }
         else await File.WriteAllTextAsync(Path.Combine(directory, "ffmpeg-copy.log"), "skipped: " + reason, ct);
         await File.WriteAllTextAsync(Path.Combine(directory, "copy-validation.log"), reason ?? "PASS", ct);
@@ -139,6 +210,9 @@ internal static class FinalMergeMedia
         var fallback = await RunAsync(ffmpeg, VideoRenderMergeHandler.BuildTranscodeConcatArguments(normalizedConcat, output, seconds), timeout, ct);
         await File.WriteAllTextAsync(Path.Combine(directory, "ffmpeg-fallback.log"), fallback.Log, ct);
         var validation = fallback.ExitCode == 0 ? await ValidateAsync(ffmpeg, output, seconds, timeout, ct) : "fallback_exit_code_" + fallback.ExitCode;
+        if (validation is null) validation = await ValidateMotionAsync(ffmpeg, output, inputs, timeout, ct);
+        if (validation is null && anyAudio && !(await InspectAsync(ffmpeg, output, timeout, ct)).Audio)
+            validation = "selected_scene_audio_missing";
         await File.WriteAllTextAsync(Path.Combine(directory, "fallback-validation.log"), validation ?? "PASS", ct);
         if (validation is not null) throw new InvalidOperationException("Final merge validation failed: " + validation);
     }
