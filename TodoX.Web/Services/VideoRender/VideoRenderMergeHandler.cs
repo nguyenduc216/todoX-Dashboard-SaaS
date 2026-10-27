@@ -81,6 +81,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
         }
 
+        using (var input = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
+        {
+            if (input.RootElement.TryGetProperty("source", out var source)
+                && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual)
+            {
+                var versioning = await _versions.GetFinalVideoVersioningStateAsync(ct);
+                if (!versioning.Ready) throw new InvalidOperationException(versioning.Reason);
+            }
+        }
+
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
         var mergeableScenes = project.Scenes
             .OrderBy(x => x.SceneIndex)
@@ -90,6 +100,9 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
         var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
+        using (var input = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
+            if (input.RootElement.TryGetProperty("source", out var source) && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual && !versioningEnabled)
+                throw new InvalidOperationException("final_versioning_required");
         FinalVideoVersionDto? version = null;
         var finalPublished = false;
         IReadOnlyList<MergeInput> mergeItems;
@@ -103,7 +116,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                     project.CustomerId,
                     job.Id,
                     $"final-video-job-{job.Id:N}-attempt-{job.AttemptCount}-project-{project.Id}",
-                    CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = mergeableScenes.Count, scenes = mergeableScenes.Select(x => new { x.Id, x.SceneIndex, x.DurationSeconds }) },
+                    CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = mergeableScenes.Count, scenes = mergeableScenes.Select(x => new { x.Id, x.SceneIndex, x.DurationSeconds }), previousFinal = new { project.FinalVideoUrl, project.FinalVideoPath } },
                     TransitionConfigSnapshot: new { mode = "validated_copy_or_normalized_transcode" },
                     AudioConfigSnapshot: new { music = settings.MusicSnapshotJson, musicVolume = settings.MusicVolume },
                     SubtitleConfigSnapshot: new { }), ct);

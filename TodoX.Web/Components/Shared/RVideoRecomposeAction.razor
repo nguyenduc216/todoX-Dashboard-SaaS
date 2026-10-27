@@ -1,0 +1,147 @@
+@implements IAsyncDisposable
+@inject IRVideoProjectFinalizationService Finalization
+@inject IRenderJobService Jobs
+@inject IOptionsMonitor<VideoRenderOptions> VideoOptions
+@inject ISnackbar Snackbar
+@inject ILogger<RVideoRecomposeAction> Logger
+
+<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Merge"
+           Disabled="@(_submitting || _active || _checking)" OnClick="ClickAsync">
+    @(_submitting || _active ? "Đang ghép..." : "Ghép lại video")
+</MudButton>
+@if (!string.IsNullOrWhiteSpace(_message))
+{
+    <MudAlert Severity="@_severity" Dense="true">@_message</MudAlert>
+}
+
+@code {
+    [Parameter, EditorRequired] public VideoProjectDto Project { get; set; } = null!;
+    [Parameter] public EventCallback OnReloadRequested { get; set; }
+    [Parameter] public EventCallback OnSubmitRequested { get; set; }
+    private CancellationTokenSource? _watch;
+    private Task? _watchTask;
+    private long? _projectId;
+    private Guid? _requestedJob;
+    private string? _lastState;
+    private bool _submitting, _active, _disposed, _checking = true;
+    private string? _message;
+    private Severity _severity = Severity.Info;
+
+    protected override void OnParametersSet()
+    {
+        if (_projectId == Project.Id) return;
+        _watch?.Cancel();
+        _projectId = Project.Id;
+        _requestedJob = null;
+        _lastState = null;
+        _checking = true;
+        _active = false;
+        _message = null;
+        _watch = new CancellationTokenSource();
+        _watchTask = WatchAsync(Project.Id, _watch.Token);
+    }
+
+    private Task ClickAsync() => OnSubmitRequested.HasDelegate ? OnSubmitRequested.InvokeAsync() : SubmitAsync();
+
+    public async Task SubmitAsync()
+    {
+        if (_submitting || _active || _checking || _watch is null) return;
+        _submitting = true;
+        _message = null;
+        var projectId = Project.Id;
+        var token = _watch.Token;
+        try
+        {
+            var result = await Finalization.TryEnqueueFinalMergeAsync(projectId, RVideoProjectFinalizationContracts.TriggerManual, token);
+            if (token.IsCancellationRequested || projectId != Project.Id) return;
+            _severity = result.Enqueued || result.AlreadyActive ? Severity.Info : Severity.Warning;
+            _message = result.Enqueued || result.AlreadyActive ? "Đang ghép video từ các scene đang chọn. Bản final cũ tiếp tục sử dụng được." : FinalMergeMessages.Blocked(result.Reason);
+            if (result.Enqueued || result.AlreadyActive)
+            {
+                _requestedJob = result.RenderJobId;
+                _active = true;
+                await OnReloadRequested.InvokeAsync();
+            }
+            Snackbar.Add(_message, _severity);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Manual final merge request failed for project {ProjectId}", projectId);
+            _severity = Severity.Error;
+            _message = "Chưa gửi được yêu cầu ghép. Bản final cũ được giữ nguyên; vui lòng thử lại.";
+        }
+        finally { _submitting = false; }
+    }
+
+    private async Task WatchAsync(long projectId, CancellationToken ct)
+    {
+        await Task.Yield();
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var jobs = await Jobs.ListByLogCodeAsync(RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(projectId), ct);
+                var latest = jobs.Where(j => j.JobType == RenderJobTypes.MergeProjectVideo)
+                    .OrderByDescending(j => j.CreatedAt).FirstOrDefault();
+                var job = jobs.FirstOrDefault(j => j.Id == _requestedJob) ?? latest;
+                // An active row always wins over a historical terminal attempt.
+                var active = jobs.FirstOrDefault(j => j.JobType == RenderJobTypes.MergeProjectVideo && FinalMergeMessages.IsActive(j.Status));
+                job = active ?? job;
+                if (ct.IsCancellationRequested || _disposed) break;
+                await InvokeAsync(async () =>
+                {
+                    if (ct.IsCancellationRequested) return;
+                    _checking = false;
+                    _active = active is not null;
+                    var state = job is null ? null : $"{job.Id}:{job.Status}";
+                    if (state != _lastState)
+                    {
+                        var previous = _lastState;
+                        _lastState = state;
+                        if (_active)
+                        {
+                            _message = "Đang ghép video. Bản final cũ tiếp tục sử dụng được.";
+                            _severity = Severity.Info;
+                        }
+                        else if (job?.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
+                        {
+                            _message = "Ghép video thất bại hoặc đã hủy. Bản final cũ được giữ nguyên; bạn có thể thử ghép lại. " + job.ErrorMessage;
+                            _severity = Severity.Error;
+                        }
+                        else if (job?.Status == RenderJobStatuses.Completed && (previous is not null || _requestedJob == job.Id))
+                        {
+                            _message = "Video mới đã ghép thành công.";
+                            _severity = Severity.Success;
+                        }
+                        if (job is not null) await OnReloadRequested.InvokeAsync();
+                    }
+                    StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Final merge status check failed for project {ProjectId}", projectId);
+                if (ct.IsCancellationRequested || _disposed) break;
+                await InvokeAsync(() =>
+                {
+                    _checking = true;
+                    _message = "Chưa kiểm tra được job ghép đang chạy. Hệ thống sẽ kiểm tra lại; bản final cũ được giữ nguyên.";
+                    _severity = Severity.Warning;
+                    StateHasChanged();
+                });
+            }
+            try { await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, VideoOptions.CurrentValue.PollIntervalSeconds)), ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        _watch?.Cancel();
+        if (_watchTask is not null) await _watchTask;
+        _watch?.Dispose();
+    }
+}

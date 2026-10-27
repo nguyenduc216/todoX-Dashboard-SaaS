@@ -76,6 +76,17 @@ public sealed class RVideoFinalMergeMediaTests : IDisposable
         Assert.Equal("h264", probe.Codec);
         Assert.True(probe.Audio);
         Assert.Equal(160, probe.Width);
+        var timing = await FinalMergeMedia.RunAsync(FinalMergeMedia.ProbeExecutable(Ffmpeg),
+            ["-v", "error", "-show_streams", "-of", "json", result.Output], Timeout, default);
+        Assert.Equal(0, timing.ExitCode);
+        using var metadata = System.Text.Json.JsonDocument.Parse(timing.Output);
+        var streams = metadata.RootElement.GetProperty("streams").EnumerateArray().ToArray();
+        var videoStream = streams.Single(x => x.GetProperty("codec_type").GetString() == "video");
+        var audioStream = streams.Single(x => x.GetProperty("codec_type").GetString() == "audio");
+        decimal Number(System.Text.Json.JsonElement stream, string field)
+            => decimal.Parse(stream.GetProperty(field).GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(Math.Abs(Number(videoStream, "start_time") - Number(audioStream, "start_time")), 0, .05m);
+        Assert.InRange(Math.Abs(Number(videoStream, "duration") - Number(audioStream, "duration")), 0, .25m);
     }
 
     [LocalFfmpegFact]

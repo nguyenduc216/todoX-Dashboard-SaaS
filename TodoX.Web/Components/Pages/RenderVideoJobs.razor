@@ -1257,7 +1257,7 @@ else
                                         {
                                             <MudButton Size="Size.Small" OnClick="ShowLatestFinalVideo">Xem video mới</MudButton>
                                         }
-                                        <video src="@DisplayedFinalVideoUrl" controls playsinline preload="metadata" @onclick="OpenFinalVideoPreview" style="width:100%;border-radius:12px;min-height:320px;cursor:pointer"></video>
+                                        <video @key="DisplayedFinalVideoUrl" src="@DisplayedFinalVideoUrl" controls playsinline preload="metadata" @onclick="OpenFinalVideoPreview" style="width:100%;border-radius:12px;min-height:320px;cursor:pointer"></video>
 
                                     }
                                     else if (IsFinalMergeProcessing)
@@ -1338,6 +1338,11 @@ else
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 pt-2">
 
                                         <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download" Disabled="@string.IsNullOrWhiteSpace(_project.FinalVideoUrl)" OnClick="@(() => OpenUrl(_project.FinalVideoUrl!))">Tải video</MudButton>
+
+                                        @if (!string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
+                                        {
+                                            <RVideoRecomposeAction @key="_project.Id" Project="_project" OnReloadRequested="ReloadAsync" />
+                                        }
 
                                         @if (string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
 
@@ -9549,7 +9554,7 @@ else
 
         _finalMergeFinalizing = true;
 
-        project.Status = VideoProjectStatuses.Merging;
+        // Project status is updated by the worker only after the backend accepts the request.
 
         await InvokeAsync(StateHasChanged);
 
@@ -9569,7 +9574,7 @@ else
             else if (!result.Enqueued)
             {
 
-                Snackbar.Add(result.Reason == "already_final" ? "Final video đã sẵn sàng." : FinalMergeReadinessText, Severity.Warning);
+                Snackbar.Add(FinalMergeMessages.Blocked(result.Reason), Severity.Warning);
 
             }
             else

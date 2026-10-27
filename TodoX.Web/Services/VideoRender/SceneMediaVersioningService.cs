@@ -385,6 +385,7 @@ public interface ISceneMediaVersioningService
 {
     Task<SceneVideoUiState> GetSceneVideoUiStateAsync(long sceneId, CurrentUserSession user, CancellationToken ct = default);
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
+    Task<FinalVideoVersioningState> GetFinalVideoVersioningStateAsync(CancellationToken ct = default);
     Task<SceneImageVersionDto> CreateQueuedImageVersionAsync(SceneImageVersionCreateRequest request, CancellationToken ct = default);
     /// <summary>
     /// TODOX-20261015-RVIDEO-IMAGE-ATOMIC-ENQUEUE-001: creates the queued image version and its
@@ -482,6 +483,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         _tenant = tenant;
         _reconciliationConfiguration = reconciliationConfiguration;
     }
+
+    public Task<FinalVideoVersioningState> GetFinalVideoVersioningStateAsync(CancellationToken ct = default)
+        => FinalVideoVersioningState.ReadAsync(_factory, ct);
 
     public async Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default)
     {
@@ -2237,8 +2241,10 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
         var selectedVideos = (await conn.QueryAsync<SelectedSceneVideoRow>(
             """
-            SELECT s.id AS SceneId, s.scene_index AS SceneIndex, s.selected_video_version_id AS SceneVideoVersionId
+            SELECT s.id AS SceneId, s.scene_index AS SceneIndex, v.id AS SceneVideoVersionId, s.duration_seconds AS DurationSeconds
               FROM video_render.video_project_scenes s
+              LEFT JOIN video_render.scene_video_versions v ON v.id=s.selected_video_version_id
+                AND v.scene_id=s.id AND v.project_id=s.project_id AND v.tenant_id=s.tenant_id AND v.status='completed'
              WHERE s.project_id=@projectId AND s.tenant_id=@tenant
              ORDER BY s.scene_index;
             """,
@@ -2289,9 +2295,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 INSERT INTO video_render.final_video_version_items
                     (final_video_version_id, scene_id, scene_video_version_id, item_order, config_json)
                 VALUES
-                    (@finalVersionId, @sceneId, @sceneVideoVersionId, @itemOrder, '{}'::jsonb);
+                    (@finalVersionId, @sceneId, @sceneVideoVersionId, @itemOrder, jsonb_build_object('durationSeconds', @durationSeconds));
                 """,
-                new { finalVersionId = id, item.SceneId, item.SceneVideoVersionId, itemOrder = item.SceneIndex }, tx);
+                new { finalVersionId = id, item.SceneId, item.SceneVideoVersionId, itemOrder = item.SceneIndex, durationSeconds = item.DurationSeconds }, tx);
         }
 
         tx.Commit();
@@ -3083,6 +3089,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         public long SceneId { get; init; }
         public int SceneIndex { get; init; }
         public Guid? SceneVideoVersionId { get; init; }
+        public int DurationSeconds { get; init; }
     }
 
     private sealed class SceneErrorDetailRow
