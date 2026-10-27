@@ -148,6 +148,9 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
 
             var validationError = await FinalMergeMedia.ValidateAsync(ffmpegPath, finalPath, timelineDurationSeconds, timeout, ct);
+            if (validationError is null)
+                validationError = await FinalMergeMedia.ValidateMotionAsync(ffmpegPath, finalPath,
+                    mergeItems.Select(x => new FinalMergeMedia.Input(x.VideoPath!, x.DurationSeconds)).ToArray(), timeout, ct);
             await File.WriteAllTextAsync(Path.Combine(finalDir, "final-validation.log"), validationError ?? "PASS", ct);
             if (validationError is not null)
                 throw new InvalidOperationException("Final output rejected: " + validationError);

@@ -7,7 +7,7 @@
 
 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Merge"
            Disabled="@(_submitting || _active || _checking)" OnClick="ClickAsync">
-    @(_submitting || _active ? "Đang ghép..." : "Ghép lại video")
+    @(_submitting || _active ? "Đang ghép..." : "Ghép lại video cuối")
 </MudButton>
 @if (!string.IsNullOrWhiteSpace(_message))
 {

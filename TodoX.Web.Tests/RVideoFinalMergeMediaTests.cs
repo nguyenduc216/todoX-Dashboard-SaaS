@@ -129,4 +129,61 @@ public sealed class RVideoFinalMergeMediaTests : IDisposable
         var result = await Merge(first, second);
         Assert.Contains("incompatible_input_streams", result.Reasons);
     }
+
+    [LocalFfmpegFact]
+    public async Task FullDurationAudioWithFrozenPictureIsRejectedAgainstMovingSelectedSources()
+    {
+        var source = await Fixture("moving");
+        var frozen = Path.Combine(_root, "frozen-with-audio.mp4");
+        var result = await FinalMergeMedia.RunAsync(Ffmpeg,
+            ["-y", "-v", "error", "-i", source, "-vf", "select=eq(n\\,0),setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=4,fps=25", "-af", "apad", "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", frozen], Timeout, default);
+        Assert.Equal(0, result.ExitCode);
+        Assert.True((await FinalMergeMedia.InspectAsync(Ffmpeg, frozen, Timeout, default)).Audio);
+        Assert.Null(await FinalMergeMedia.ValidateAsync(Ffmpeg, frozen, 4, Timeout, default));
+        var inputs = new[] { new FinalMergeMedia.Input(source, 2), new FinalMergeMedia.Input(source, 2) };
+        var error = await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, frozen, inputs, Timeout, default);
+        Assert.NotNull(error);
+        Assert.Contains("scene_motion_lost", error);
+        var repaired = await Merge(source, source);
+        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, repaired.Output, inputs, Timeout, default));
+    }
+
+    [LocalFfmpegFact]
+    public async Task ShortAudioIsRejectedEvenWhenPictureTimelineIsValid()
+    {
+        var source = await Fixture("moving");
+        var output = Path.Combine(_root, "short-audio.mp4");
+        var result = await FinalMergeMedia.RunAsync(Ffmpeg,
+            ["-y", "-v", "error", "-i", source, "-af", "atrim=duration=0.5", "-c:v", "copy", "-c:a", "aac", output], Timeout, default);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("audio_video_timeline_mismatch", await FinalMergeMedia.ValidateAsync(Ffmpeg, output, 2, Timeout, default));
+    }
+
+    [LocalFfmpegFact]
+    public async Task StaticSelectedSourceIsAllowedAndEverySceneIntervalIsChecked()
+    {
+        var moving = await Fixture("moving");
+        var still = Path.Combine(_root, "static.mp4");
+        var result = await FinalMergeMedia.RunAsync(Ffmpeg,
+            ["-y", "-v", "error", "-i", moving, "-vf", "select=eq(n\\,0),setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=2,fps=25", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", still], Timeout, default);
+        Assert.Equal(0, result.ExitCode);
+        var merged = await Merge(still, moving);
+        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, merged.Output, [new(still, 2), new(moving, 2)], Timeout, default));
+        var error = await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, merged.Output, [new(moving, 2), new(moving, 2)], Timeout, default);
+        Assert.NotNull(error);
+        Assert.Contains("scene_motion_lost:0", error);
+    }
+
+    [LocalFfmpegFact]
+    public async Task NineSelectedScenesRecomposeInConfiguredOrderWithAudioAndMotion()
+    {
+        var first = await Fixture("first");
+        var second = await Fixture("second", "mpeg4", "30", "30000");
+        var selected = Enumerable.Range(0, 9).Select(i => i % 2 == 0 ? first : second).ToArray();
+        var result = await Merge(selected);
+        Assert.Contains("incompatible_input_streams", result.Reasons);
+        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, result.Output,
+            selected.Select(p => new FinalMergeMedia.Input(p, 2)).ToArray(), Timeout, default));
+        Assert.True((await FinalMergeMedia.InspectAsync(Ffmpeg, result.Output, Timeout, default)).Audio);
+    }
 }
