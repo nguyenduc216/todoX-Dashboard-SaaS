@@ -1,8 +1,10 @@
-﻿# RVideo recompose rollback and enablement gates
+# RVideo recompose rollback and enablement gates
 
 No production changes are made by these files. `preflight.sql` and `verify.sql` are READ ONLY and end with ROLLBACK. Run with an operator-managed read-only pg_service, never paste a connection string into source, command history or reports.
 
 ## Enablement
+
+Read the later `project-201-recovery.md` for the corrected FK gate and conditional recovery procedure. Five exact validated FK relationships are required; `final_video_versions.render_job_id -> render.render_jobs.id` is an optional integrity audit, not a readiness prerequisite. FK names and total FK counts are not used to infer these relationships. No additional FK or migration is required solely because that optional FK is absent.
 
 1. Stop and review if schema_ready is false. Inspect columns/types, index definitions (including the partial unique selected index), validated foreign keys and check constraints. Runtime readiness checks required columns, unique index key shapes/predicate and validated FK prerequisites; it does not prove the complete schema or media are correct. Catalog presence is not a substitute for data review.
 2. Review verify.sql results. Legacy final without a selected final version is supported; missing selected COMPLETED scene versions, mismatched project/tenant pointers, orphan items and duplicate active merges require operator investigation. Do not auto-pick versions or render missing media.
