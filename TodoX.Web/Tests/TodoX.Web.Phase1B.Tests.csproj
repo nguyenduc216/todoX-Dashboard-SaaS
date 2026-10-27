@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\TodoX.Web.Tests\RVideoMergeCrossInstanceInputRecoveryTests.cs" Link="RVideoMergeCrossInstanceInputRecoveryTests.cs" />
     <Compile Include="..\..\TodoX.Web.Tests\RVideoRecomposeUiTests.cs" Link="RVideoRecomposeUiTests.cs" />
     <Compile Include="..\..\TodoX.Web.Tests\RVideoRecomposePostgresTests.cs" Link="RVideoRecomposePostgresTests.cs" />
     <Compile Include="..\..\TodoX.Web.Tests\RVideoRecomposeCompatibilityTests.cs" Link="RVideoRecomposeCompatibilityTests.cs" />

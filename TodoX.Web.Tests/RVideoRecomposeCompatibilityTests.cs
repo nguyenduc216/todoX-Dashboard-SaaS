@@ -78,4 +78,44 @@ public sealed class RVideoRecomposeCompatibilityTests
         Assert.DoesNotContain("'completed',true", create);
         Assert.DoesNotContain("UPDATE video_render.video_projects", create);
     }
+
+    [Fact]
+    public void ReadinessChecksExactForeignKeyRelationsWithoutRequiringRenderJobFk()
+    {
+        var sql = FinalVideoVersioningState.SchemaReadySql;
+        Assert.Contains("required_fks(source_table,source_columns,target_table,target_columns)", sql);
+        var required = sql[sql.IndexOf("required_fks(", StringComparison.Ordinal)..sql.IndexOf("missing_fks AS", StringComparison.Ordinal)];
+        Assert.Contains("('video_render.video_projects','selected_final_video_version_id','video_render.final_video_versions','id')", required);
+        Assert.Contains("('video_render.final_video_versions','project_id','video_render.video_projects','id')", required);
+        Assert.Contains("('video_render.final_video_version_items','final_video_version_id','video_render.final_video_versions','id')", required);
+        Assert.Contains("('video_render.final_video_version_items','scene_id','video_render.video_project_scenes','id')", required);
+        Assert.Contains("('video_render.final_video_version_items','scene_video_version_id','video_render.scene_video_versions','id')", required);
+        Assert.DoesNotContain("render.render_jobs", required);
+        foreach (var clause in new[] { "fk.contype='f'", "fk.convalidated", "fk.conrelid=to_regclass(r.source_table)", "fk.confrelid=to_regclass(r.target_table)", "fk.conkey=ARRAY", "fk.confkey=ARRAY" })
+            Assert.Contains(clause, sql);
+        Assert.DoesNotContain("count(*) FROM pg_constraint", sql);
+    }
+
+    [Fact]
+    public void RuntimeAndOperatorSchemaVerificationUseIdenticalPredicate()
+    {
+        static string Normalize(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", "");
+        var runtime = Normalize(FinalVideoVersioningState.SchemaReadySql.Trim().TrimEnd(';'));
+        var verification = Normalize(Read("database/manual/rvideo-recompose/verify.sql"));
+        Assert.Contains(runtime, verification);
+    }
+
+    [Fact]
+    public void FinalSnapshotKeepsExactPointerLineageAndRejectsDifferentResolutionVersion()
+    {
+        var source = Read("Services/VideoRender/SceneMediaVersioningService.cs");
+        var start = source.IndexOf("public async Task<FinalVideoVersionDto> CreateQueuedFinalVideoVersionAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("public async Task CompleteFinalVideoVersionAsync", start, StringComparison.Ordinal);
+        var snapshot = source[start..end];
+        foreach (var condition in new[] { "v.id=s.selected_video_version_id", "v.scene_id=s.id", "v.project_id=s.project_id", "v.tenant_id=s.tenant_id", "v.status='completed'" })
+            Assert.Contains(condition, snapshot);
+        var handler = Read("Services/VideoRender/VideoRenderMergeHandler.cs");
+        Assert.Contains("snapshot.Single(x => x.SceneId == scene.Id).SceneVideoVersionId != selectedVideo.Id", handler);
+        Assert.Contains("ResolveLocalMergeInputAsync(selectedVideo, scene.Id, ct)", handler);
+    }
 }

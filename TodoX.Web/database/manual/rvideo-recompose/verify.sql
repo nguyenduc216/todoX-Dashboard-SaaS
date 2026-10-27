@@ -27,16 +27,31 @@ missing_indexes AS (
         FROM unnest(i.indkey) WITH ORDINALITY k(attnum,ordinality)
         JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum)=x.key_columns
       AND CASE WHEN x.partial THEN pg_get_expr(i.indpred,i.indrelid)='is_selected' ELSE i.indpred IS NULL END)),
+required_fks(source_table,source_columns,target_table,target_columns) AS (VALUES
+  ('video_render.video_projects','selected_final_video_version_id','video_render.final_video_versions','id'),
+  ('video_render.final_video_versions','project_id','video_render.video_projects','id'),
+  ('video_render.final_video_version_items','final_video_version_id','video_render.final_video_versions','id'),
+  ('video_render.final_video_version_items','scene_id','video_render.video_project_scenes','id'),
+  ('video_render.final_video_version_items','scene_video_version_id','video_render.scene_video_versions','id')),
 missing_fks AS (
-  SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('video_render.video_projects')
-    AND conname='fk_project_selected_final_video_version' AND contype='f' AND convalidated)
-  UNION ALL SELECT 1 WHERE (SELECT count(*) FROM pg_constraint
-    WHERE conrelid=to_regclass('video_render.final_video_version_items') AND contype='f' AND convalidated)<3
-  UNION ALL SELECT 1 WHERE (SELECT count(*) FROM pg_constraint
-    WHERE conrelid=to_regclass('video_render.final_video_versions') AND contype='f' AND convalidated)<2)
+  SELECT r.* FROM required_fks r WHERE NOT EXISTS (
+    SELECT 1 FROM pg_constraint fk
+    WHERE fk.contype='f' AND fk.convalidated
+      AND fk.conrelid=to_regclass(r.source_table) AND fk.confrelid=to_regclass(r.target_table)
+      AND fk.conkey=ARRAY(SELECT a.attnum FROM unnest(string_to_array(r.source_columns,',')) WITH ORDINALITY c(name,position)
+        JOIN pg_attribute a ON a.attrelid=fk.conrelid AND a.attname=c.name AND a.attnum>0 AND NOT a.attisdropped ORDER BY c.position)
+      AND fk.confkey=ARRAY(SELECT a.attnum FROM unnest(string_to_array(r.target_columns,',')) WITH ORDINALITY c(name,position)
+        JOIN pg_attribute a ON a.attrelid=fk.confrelid AND a.attname=c.name AND a.attnum>0 AND NOT a.attisdropped ORDER BY c.position)))
 SELECT NOT EXISTS(SELECT 1 FROM missing) AND NOT EXISTS(SELECT 1 FROM missing_indexes) AND NOT EXISTS(SELECT 1 FROM missing_fks)) AS schema_ready \gset
 \echo schema_ready=:schema_ready
 \if :schema_ready
+-- Optional integrity audit only: its absence does NOT make schema_ready false.
+SELECT 'optional_final_render_job_fk' AS check_name,EXISTS(
+ SELECT 1 FROM pg_constraint fk WHERE fk.contype='f' AND fk.convalidated
+ AND fk.conrelid=to_regclass('video_render.final_video_versions') AND fk.confrelid=to_regclass('render.render_jobs')
+ AND fk.conkey=ARRAY(SELECT attnum FROM pg_attribute WHERE attrelid=fk.conrelid AND attname='render_job_id' AND NOT attisdropped)
+ AND fk.confkey=ARRAY(SELECT attnum FROM pg_attribute WHERE attrelid=fk.confrelid AND attname='id' AND NOT attisdropped)
+) AS present_validated,'informational only; not a composition readiness prerequisite' AS requirement;
 SELECT setting_key,setting_value,is_active FROM system.app_settings
 WHERE setting_key='features.final_video_versioning';
 SELECT 'legacy_final_without_selected_version_supported' AS check_name,p.id,p.tenant_id,p.status,p.final_video_url,p.final_video_path
