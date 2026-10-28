@@ -5,6 +5,10 @@ namespace TodoX.Web.Services.VideoRender;
 
 public sealed record FinalVideoVersioningState(bool Ready, string Reason)
 {
+    // Explicitly disabled history uses the existing validated, non-versioned merge path.
+    // Unknown configuration/schema/database failures must still block manual requests.
+    internal bool AllowsManualMerge => Ready || Reason == "final_versioning_required";
+
     internal static FinalVideoVersioningState FromFlag(string? value, int activeCount)
         => activeCount != 1 ? new(false, "final_versioning_setting_missing_or_ambiguous")
             : value is not null && (value.Equals("true", StringComparison.OrdinalIgnoreCase)

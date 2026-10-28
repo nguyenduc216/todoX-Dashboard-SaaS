@@ -90,7 +90,7 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
         if (manual)
         {
             var versioning = await _versions.GetFinalVideoVersioningStateAsync(ct);
-            if (!versioning.Ready) return NotEnqueued(versioning.Reason, logicalRequestId);
+            if (!versioning.AllowsManualMerge) return NotEnqueued(versioning.Reason, logicalRequestId);
         }
 
         if (await _hasOpenVideoGeneration(projectId, ct))

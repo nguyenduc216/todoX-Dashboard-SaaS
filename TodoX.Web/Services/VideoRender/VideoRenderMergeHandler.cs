@@ -81,15 +81,13 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
         }
 
+        bool manual;
         using (var input = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
         {
-            if (input.RootElement.TryGetProperty("source", out var source)
-                && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual)
-            {
-                var versioning = await _versions.GetFinalVideoVersioningStateAsync(ct);
-                if (!versioning.Ready) throw new InvalidOperationException(versioning.Reason);
-            }
+            manual = input.RootElement.TryGetProperty("source", out var source)
+                && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual;
         }
+        var versioningEnabled = await ResolveVersioningEnabledAsync(_versions, manual, ct);
 
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
         var mergeableScenes = project.Scenes
@@ -99,10 +97,6 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             throw new InvalidOperationException("Chua co scene video ready de merge.");
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
-        var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
-        using (var input = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
-            if (input.RootElement.TryGetProperty("source", out var source) && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual && !versioningEnabled)
-                throw new InvalidOperationException("final_versioning_required");
         FinalVideoVersionDto? version = null;
         var finalPublished = false;
         IReadOnlyList<MergeInput> mergeItems;
@@ -258,6 +252,15 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             if(!selected.TryGetProperty(item.SceneId.ToString(),out var expected)
                 || !string.Equals(expected.GetString(),item.VersionId?.ToString()??"",StringComparison.OrdinalIgnoreCase))
                 throw new RenderJobDeferredException("Merge input no longer matches the captured selected-video snapshot.");
+    }
+
+    internal static async Task<bool> ResolveVersioningEnabledAsync(ISceneMediaVersioningService versions, bool manual, CancellationToken ct)
+    {
+        if (!manual) return await versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
+        var state = await versions.GetFinalVideoVersioningStateAsync(ct);
+        if (!state.AllowsManualMerge) throw new InvalidOperationException(state.Reason);
+        // Keep the checked state for this attempt; disabled history uses the same validated pipeline.
+        return state.Ready;
     }
 
     private static void ValidateMergeInputs(IReadOnlyList<MergeInput> items)
