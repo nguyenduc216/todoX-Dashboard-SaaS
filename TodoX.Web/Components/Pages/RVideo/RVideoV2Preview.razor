@@ -355,6 +355,7 @@ async Task HandleModelChangedAsync(VideoProjectSceneDto scene, string key){
  {
    // keep existing duration if supported
  }
+ meta.Extra["video_duration"] = dur.ToString(System.Globalization.CultureInfo.InvariantCulture);
  await DoSaveAsync(scene, meta, dur);
 }
 async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
@@ -366,7 +367,7 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
    Snackbar.Add("Thời lượng không được model đã chọn hỗ trợ.", Severity.Error); return;
  }
  meta.Extra["video_model"]=opt.Key;
- meta.Extra["video_duration"]=dur.ToString();
+ meta.Extra["video_duration"] = dur.ToString(System.Globalization.CultureInfo.InvariantCulture);
  await DoSaveAsync(scene, meta, dur);
 }
 // === RVID-UI-V2-SCENE-RERENDER-HISTORY.1: dirty-aware re-render + history + selection ===
@@ -413,16 +414,16 @@ bool CanRerenderImage(VideoProjectSceneDto s)
   return RVideoSceneRerenderDirtyPolicy.CanRerenderImage(WorkingImagePrompt(s), iv?.ImagePromptSnapshot, hasImageBaseline);
 }
 
-// "Tạo lại video" is enabled when the working video prompt differs from the active video baseline,
-// OR when the active image version changed since the active video was rendered (image→video
-// dependency), even if the video prompt itself did not change.
+// Explicit new versions may reuse the prompt or change only render settings.
+// Submission retains canonical eligibility and active/unknown submission guards.
 bool CanRerenderVideo(VideoProjectSceneDto s)
 {
   if(_busy || _rerenderingVideo.Contains(s.Id)) return false;
   var hasVideoBaseline = _activeVideoVersions.TryGetValue(s.Id, out var vv);
   var hasImageBaseline = _activeImageVersions.TryGetValue(s.Id, out var iv);
   var hasAnyImageSource = hasImageBaseline || !string.IsNullOrWhiteSpace(s.StaticImageUrl);
-  return RVideoSceneRerenderDirtyPolicy.CanRerenderVideo(
+  return (hasVideoBaseline && hasAnyImageSource && !string.IsNullOrWhiteSpace(WorkingVideoPrompt(s)))
+    || RVideoSceneRerenderDirtyPolicy.CanRerenderVideo(
     WorkingVideoPrompt(s), vv?.VideoPromptSnapshot, hasVideoBaseline,
     vv?.SourceImageVersionId, iv?.Id, hasAnyImageSource);
 }
@@ -518,7 +519,17 @@ RVideoSceneImageRenderRequest BuildImageRequest(VideoProjectSceneDto scene, Scen
   => new(JobView!.Project.Id, scene, metadata, ProjectAspectRatio(), JobView.CoreJob.ServiceId, JobView.CoreJob.JobId);
 
 RVideoSceneVideoRenderRequest BuildVideoRequest(VideoProjectSceneDto scene, ScenePromptMetadata metadata)
-  => new(JobView!.Project.Id, scene, metadata, JobView.CoreJob.ServiceId);
+  => new(JobView!.Project.Id, scene, WithRenderSettings(metadata), JobView.CoreJob.ServiceId,
+      _latestVideoVersions.GetValueOrDefault(scene.Id)?.Id,
+      _latestVideoVersions.GetValueOrDefault(scene.Id)?.RenderJobId);
+
+ScenePromptMetadata WithRenderSettings(ScenePromptMetadata metadata)
+{
+  var settings = RVideoRules.ResolveRenderSettings(JobView!.Project.OriginalPrompt);
+  metadata.Extra["aspect_ratio"] = settings.AspectRatio;
+  metadata.Extra["resolution"] = settings.Resolution;
+  return metadata;
+}
 // === Scene media history (image / video) with strict type + ownership separation ===
 
 async Task OpenImageHistoryAsync(VideoProjectSceneDto scene)

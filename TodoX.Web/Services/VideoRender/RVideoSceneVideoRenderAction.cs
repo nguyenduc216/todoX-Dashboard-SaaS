@@ -152,12 +152,12 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
                 "Lần gửi video trước chưa được xác minh. Vui lòng tải lại và liên hệ hỗ trợ trước khi tạo attempt mới.");
 
         // Canonical eligibility guard: requires a selected (or shared-reference) source image, a
-        // non-empty valid video prompt and no already-active/completed video for the scene.
+        // non-empty valid video prompt and no already-active video for the scene. Completed output is retained during an explicit rerender.
         var report = await _eligibility.GetVideoRenderEligibilityAsync(request.ProjectId, new[] { scene.Id }, ct);
         var decision = report.Results.FirstOrDefault(x => x.SceneId == scene.Id);
         if (decision is null)
             return RVideoSceneVideoRenderResult.Fail("RVIDEO_SCENE_REQUIRED", "Không tìm thấy scene.");
-        if (decision.Status != VideoRenderEligibilityStatus.Eligible)
+        if (!RVideoRerenderRequestPolicy.CanProceed(decision.Status, PointBillingIntent.UserRerender))
             return RVideoSceneVideoRenderResult.Fail(decision.ErrorCode, decision.Message);
 
         var estimate = await EstimateAsync(request, ct);
@@ -183,14 +183,9 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         ApplySharedReference(input, settings);
 
         var meta = request.Metadata ?? ScenePromptMetadata.FromScene(scene);
-        var modelCode = ResolveRequestedModel(meta);
-        if (!string.IsNullOrWhiteSpace(modelCode))
-        {
-            input.ManualOverride = true;
-            input.RequestedModelCode = modelCode;
-            if (meta.Extra.TryGetValue("video_duration", out var durStr) && int.TryParse(durStr, out var dur) && dur > 0)
-                input.RequestedDurationSeconds = dur;
-        }
+        if (!RVideoRerenderRequestPolicy.ApplySavedOverride(meta, input))
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_VIDEO_OVERRIDE_INVALID", "Model hoặc thời lượng video đã lưu không hợp lệ.");
+        var modelCode = input.RequestedModelCode;
 
         var (job, alreadyActive) = await _jobs.EnqueueGuardedVideoRerenderAsync(new RenderJobCreateModel
         {
@@ -234,9 +229,6 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
             // Reference requested but unavailable: eligibility already guarantees a usable image source.
         }
     }
-
-    private static string? ResolveRequestedModel(ScenePromptMetadata meta)
-        => meta.Extra.TryGetValue("video_model", out var model) && !string.IsNullOrWhiteSpace(model) ? model.Trim() : null;
 
     private static string ResolveAspectRatio(RVideoSceneVideoRenderRequest request)
         => request.Metadata is not null && request.Metadata.Extra.TryGetValue("aspect_ratio", out var ar) && !string.IsNullOrWhiteSpace(ar)

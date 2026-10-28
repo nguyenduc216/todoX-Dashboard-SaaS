@@ -973,6 +973,12 @@ else
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
 
+                                                <MudMenuItem Icon="@Icons.Material.Filled.Movie" Disabled="@(_busy || _sceneVideoRetrying.Contains(scene.Id) || !CanCreateSceneVideo(scene, draft, allowCompletedVersion: true))" OnClick="@(() => RerenderSceneVideoAsync(scene))">Tạo lượt video mới</MudMenuItem>
+
+                                                <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt video</MudMenuItem>
+
+                                                <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenVideoHistoryAsync(scene))">Lịch sử video</MudMenuItem>
+
                                                 <MudDivider />
 
                                                 <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
@@ -1081,7 +1087,7 @@ else
 
                                                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
 
-                                                               Disabled="@(_sceneVideoRetrying.Contains(scene.Id) || (!CanCreateSceneVideo(scene, draft) && !CanRetrySceneVideo(scene)))"
+                                                               Disabled="@(_sceneVideoRetrying.Contains(scene.Id) || (!CanCreateSceneVideo(scene, draft, allowCompletedVersion: true) && !CanRetrySceneVideo(scene)))"
 
                                                                OnClick="@(() => RerenderSceneVideoAsync(scene))">
 
@@ -4599,7 +4605,7 @@ else
 
         };
 
-    private bool CanCreateSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
+    private bool CanCreateSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft, bool allowCompletedVersion = false)
 
         => (!string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) || (_useReferenceImageForAllScenes && HasSharedReferenceImage))
 
@@ -4611,7 +4617,7 @@ else
 
            && _defaultImageToVideoProvider is not null
 
-           && !HasCompletedVideoVersion(scene)
+           && !(!allowCompletedVersion && HasCompletedVideoVersion(scene))
 
            && !string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
 
@@ -9921,7 +9927,7 @@ else
 
     private Task RerenderSceneVideoAsync(VideoProjectSceneDto scene)
 
-        => ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);
+        => ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender, allowCompletedVersion: true);
 
     private async Task EnqueueSceneVideoAsync(
 
@@ -9933,7 +9939,9 @@ else
 
         Guid? existingVersionId = null,
 
-        bool reuseExistingVersion = false)
+        bool reuseExistingVersion = false,
+
+        bool allowCompletedVersion = false)
 
     {
 
@@ -9961,7 +9969,7 @@ else
 
         {
 
-            if (!CanCreateSceneVideo(scene, draft))
+            if (!CanCreateSceneVideo(scene, draft, allowCompletedVersion))
 
             {
 
@@ -10023,7 +10031,7 @@ else
 
                                          && overrideDuration.HasValue
 
-                                         && IsSceneVideoOverrideIntentional(scene, selectedOverride.Option, overrideDuration.Value);
+                                         && (allowCompletedVersion || IsSceneVideoOverrideIntentional(scene, selectedOverride.Option, overrideDuration.Value));
 
             if (hasIntentionalOverride && selectedOverride.Option is not null && overrideDuration.HasValue)
 
@@ -10045,7 +10053,7 @@ else
 
                 ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model;
 
-            var (job, alreadyActive) = await RenderJobs.EnqueueForSceneIfNoneActiveAsync(new RenderJobCreateModel
+            var jobModel = new RenderJobCreateModel
 
             {
 
@@ -10071,7 +10079,14 @@ else
 
                 PointStatus = RenderPointStatuses.Pending
 
-            }, scene.Id, logicalRequestOverride);
+            };
+
+            var latestVersion = allowCompletedVersion
+                ? (await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser)).OrderByDescending(x => x.VersionNumber).FirstOrDefault()
+                : null;
+            var (job, alreadyActive) = allowCompletedVersion
+                ? await RenderJobs.EnqueueGuardedVideoRerenderAsync(jobModel, _project.Id, scene.Id, latestVersion?.Id, latestVersion?.RenderJobId, false)
+                : await RenderJobs.EnqueueForSceneIfNoneActiveAsync(jobModel, scene.Id, logicalRequestOverride);
 
             if (alreadyActive)
 
@@ -10149,7 +10164,7 @@ else
 
     }
 
-    private async Task ConfirmAndRenderSceneVideoAsync(VideoProjectSceneDto scene, PointBillingIntent billingIntent)
+    private async Task ConfirmAndRenderSceneVideoAsync(VideoProjectSceneDto scene, PointBillingIntent billingIntent, bool allowCompletedVersion = false)
 
     {
 
@@ -10161,6 +10176,10 @@ else
 
         }
 
+        if (GetSceneDraft(scene).IsDirty && !await SaveSceneAsync(scene)) return;
+
+        scene = _project.Scenes.FirstOrDefault(x => x.Id == scene.Id) ?? scene;
+
         if (!await ConfirmVideoSceneAsync(scene, billingIntent))
 
         {
@@ -10169,7 +10188,7 @@ else
 
         }
 
-        await EnqueueSceneVideoAsync(scene, billingIntent);
+        await EnqueueSceneVideoAsync(scene, billingIntent, allowCompletedVersion: allowCompletedVersion);
 
     }
 

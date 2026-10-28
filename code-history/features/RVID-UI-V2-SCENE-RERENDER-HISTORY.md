@@ -8,6 +8,10 @@ Four approval-gated PostgreSQL test methods now compile against production repos
 
 # RVID-UI-V2-SCENE-RERENDER-HISTORY
 
+## Explicit new video version restore (2026-10-28)
+
+CHANGE_ID: TODOX-20261028-RVIDEO-RERENDER-RESTORE-001. Legacy/V2 presentation and the existing video submission boundary now distinguish explicit rerender from initial generation. Completed versions remain in history, active/unknown submissions remain blocked, and saved model/mode/duration plus project render settings reach the existing worker. No DB/schema, provider, image, voice, billing or final-merge changes. Focused 50 PASS; full-suite failures and Phase1B compile blocker reproduced on baseline. Release publish verified; see `../TODOX-20261028-RVIDEO-RERENDER-RESTORE-001.md` for exact commands and limitations.
+
 Track B `RVID-VIDEO-SUBMIT-RECOVERY.1` expanded-boundary checkpoint: persisted scene-video error code is projected for future evidence-based UI classification; UNKNOWN rerender remains fail-closed. Selection of completed versions changes only `is_selected` and is not acknowledgement evidence. See `../20261014_RVID-VIDEO-SUBMIT-RECOVERY.1.md`; PostgreSQL atomicity and poll-only Retry remain unverified.
 
 Writer-sync continuation: queued video version creation now shares guarded enqueue's unsuffixed scene advisory lock, acquired before the authorized scene-row lock and version insertion. Other video status/identifier/bind writers and render-job progress writers are not yet covered; UNKNOWN remains fail-closed and PostgreSQL concurrency remains unverified. See existing Track B per-change history.
