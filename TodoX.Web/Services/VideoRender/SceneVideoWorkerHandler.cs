@@ -166,6 +166,12 @@ public static class RVideoSharedBaseImagePromptGuard
 
 public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 {
+    internal static async Task<T> SubmitWithVerifiedClaimAsync<T>(Func<Task> verify, Func<Task<T>> submit)
+    {
+        await verify();
+        return await submit();
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int DefaultMaxReconciliationRetries = 3;
     private const string KnownNoResourcesFailureClassification = "KNOWN_NO_RESOURCES";
@@ -903,6 +909,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId
                         }, ct);
+                    // Verify this worker still holds the job lease before creating any submit intent.
+                    await _jobs.VerifySceneVideoSubmitClaimAsync(job, version.Id, attemptLogicalRequestId, ct);
                     // A rejected claim (guard/duplicate intent) is decided entirely before any provider HTTP
                     // request. It must not be reported as an ambiguous in-flight submit: no request was sent,
                     // so no reconciliation is warranted and no manual review flag is set.
@@ -1270,7 +1278,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
                     throw;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException
+                    && ex is not InvalidOperationException { Message: "RVIDEO_JOB_CALLER_OWNERSHIP_LOST" })
                 {
                     if (submitToken is not null)
                     {
@@ -3216,10 +3225,9 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             return false;
         }
 
-        if (IsKnownNoResourcesSubmit(exception))
-        {
-            return true;
-        }
+        // A business error (even with countTasks=0) does not prove that no task was created.
+        // Keep the submit outcome ambiguous and prohibit a second provider submit.
+        if (IsKnownNoResourcesSubmit(exception)) return false;
 
         if (IsDurationRejectedError(exception))
         {
@@ -3252,6 +3260,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
     private static bool IsDefinitelyNotSubmitted(Ai79TaskSubmitException exception)
     {
+        if (IsKnownNoResourcesSubmit(exception)) return false;
         if (exception.HttpStatusCode is not { } statusCode
             || (int)statusCode < 200
             || (int)statusCode >= 300

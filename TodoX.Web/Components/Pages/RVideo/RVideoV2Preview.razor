@@ -123,6 +123,8 @@ else{<span>Chưa có</span>}
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleRerenderImageAsync(s))" Disabled="@ImageBlocked(s)">Tạo lại ảnh</MudMenuItem>
+<MudMenuItem OnClick="@(()=>OpenImageHistoryAsync(s))">Lịch sử ảnh</MudMenuItem>
+<MudMenuItem OnClick="@(()=>OpenVideoHistoryAsync(s))">Lịch sử video</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,-1))" Disabled="@(s.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,1))" Disabled="@(s.SceneIndex>=JobView.Project.Scenes.Count || _busy)">Xuống</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleDeleteAsync(s))" Disabled="@_busy">Xóa</MudMenuItem>
@@ -153,13 +155,17 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
   <MudText Typo="Typo.subtitle2">Nội dung scene @ActiveScene.SceneIndex</MudText>
   <MudTextField T="string" Value="@UserSceneText(ActiveScene)" ValueChanged="@(v=>HandleContentChangedAsync(ActiveScene,v))" Variant="Variant.Outlined" Lines="4" Placeholder="Nội dung scene..." FullWidth="true" Margin="Margin.Dense" />
 </div>
-<div class="d-flex gap-1 mt-2">
-<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))">Chỉnh</MudButton>
+<div class="d-flex gap-1 mt-2 flex-wrap">
+<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))" Disabled="@_busy">Chỉnh</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleSaveAsync(ActiveScene!))" Disabled="@_busy">Lưu</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(()=>HandleRerenderVideoAsync(ActiveScene!))" Disabled="@VideoBlocked(ActiveScene!)">Render lại video</MudButton>
 <RVideoSupersedeButton @ref="_supersedeButtons[ActiveScene!.Id]" ProjectId="@JobView.Project.Id" Scene="@(ActiveScene!)" ServiceId="@JobView.CoreJob.ServiceId"
  Visible="@NeedsExplicitOperation(ActiveScene!)" Disabled="@_busy" CurrentJobId="@VideoState(ActiveScene!)?.LatestJob?.Id" Generation="@VideoState(ActiveScene!)?.Generation"
  OutcomeUnknown="@(VideoState(ActiveScene!)?.HasProviderIdentity == true || VideoState(ActiveScene!)?.HasActiveJob == true || VideoState(ActiveScene!)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
+<MudMenu Icon="@Icons.Material.Filled.History" Size="Size.Small" Dense="true">
+<MudMenuItem OnClick="@(()=>OpenImageHistoryAsync(ActiveScene!))">Lịch sử ảnh</MudMenuItem>
+<MudMenuItem OnClick="@(()=>OpenVideoHistoryAsync(ActiveScene!))">Lịch sử video</MudMenuItem>
+</MudMenu>
 <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" /><MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" />
 </div>
 </div>}
@@ -481,5 +487,100 @@ async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
  catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_RENDER_ACTION_FAILED"); Snackbar.Add("Chưa thể thử lại", Severity.Error); }
  finally { _rerenderingImage.Remove(scene.Id); _busy = false; _gate.Release(); }
 }
+// RVID-UI-V2-SCENE-RERENDER-HISTORY: per-scene media history and version selection (from production line).
+// === Scene media history (image / video) with strict type + ownership separation ===
+
+async Task OpenImageHistoryAsync(VideoProjectSceneDto scene)
+{
+  if(AuthState.CurrentUser is null) return;
+  IReadOnlyList<SceneImageVersionDto> versions;
+  try { versions = await SceneVersions.ListImageVersionsAsync(scene.Id, AuthState.CurrentUser); }
+  catch { Snackbar.Add("Không tải được lịch sử ảnh.", Severity.Error); return; }
+  var items = versions.Select(v => new TodoX.Web.Components.Dialogs.MediaHistoryItem
+  {
+    Key = v.Id.ToString(),
+    VersionLabel = $"Ảnh v{v.VersionNumber}",
+    Title = $"Scene {scene.SceneIndex} · ảnh v{v.VersionNumber}",
+    Status = v.Status,
+    StatusColor = StatusColorFor(v.Status),
+    CreatedAt = v.CreatedAt,
+    IsSelected = v.IsSelected,
+    CanSelect = string.Equals(v.Status, "completed", StringComparison.OrdinalIgnoreCase),
+    IsVideo = false,
+    MediaUrl = v.PublicUrl,
+    Prompt = v.ImagePromptSnapshot
+  }).ToList();
+  var p = new DialogParameters{ ["Title"]="Lịch sử ảnh", ["Items"]=items };
+  var dlg = await DialogService.ShowAsync<TodoX.Web.Components.Dialogs.MediaHistoryDialog>("Lịch sử ảnh", p, new DialogOptions{ CloseButton=true, MaxWidth=MaxWidth.Medium, FullWidth=true });
+  var result = await dlg.Result;
+  if(result is null || result.Canceled || result.Data is not string key || !Guid.TryParse(key, out var versionId)) return;
+  await SelectImageVersionAsync(scene, versionId);
+}
+
+async Task OpenVideoHistoryAsync(VideoProjectSceneDto scene)
+{
+  if(AuthState.CurrentUser is null) return;
+  IReadOnlyList<SceneVideoVersionDto> versions;
+  try { versions = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser); }
+  catch { Snackbar.Add("Không tải được lịch sử video.", Severity.Error); return; }
+  var items = versions.Select(v => new TodoX.Web.Components.Dialogs.MediaHistoryItem
+  {
+    Key = v.Id.ToString(),
+    VersionLabel = $"Video v{v.VersionNumber}",
+    Title = $"Scene {scene.SceneIndex} · video v{v.VersionNumber}",
+    Status = v.Status,
+    StatusColor = StatusColorFor(v.Status),
+    CreatedAt = v.CreatedAt,
+    IsSelected = v.IsSelected,
+    CanSelect = string.Equals(v.Status, "completed", StringComparison.OrdinalIgnoreCase),
+    IsVideo = true,
+    MediaUrl = v.PublicUrl ?? v.PosterUrl,
+    Prompt = v.VideoPromptSnapshot
+  }).ToList();
+  var p = new DialogParameters{ ["Title"]="Lịch sử video", ["Items"]=items };
+  var dlg = await DialogService.ShowAsync<TodoX.Web.Components.Dialogs.MediaHistoryDialog>("Lịch sử video", p, new DialogOptions{ CloseButton=true, MaxWidth=MaxWidth.Medium, FullWidth=true });
+  var result = await dlg.Result;
+  if(result is null || result.Canceled || result.Data is not string key || !Guid.TryParse(key, out var versionId)) return;
+  await SelectVideoVersionAsync(scene, versionId);
+}
+
+async Task SelectImageVersionAsync(VideoProjectSceneDto scene, Guid versionId)
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  if(!await _gate.WaitAsync(0)) return;
+  _busy = true;
+  try
+  {
+    await SceneVersions.SelectImageVersionAsync(scene.Id, versionId, AuthState.CurrentUser);
+    Snackbar.Add("Đã chọn phiên bản ảnh đang dùng.", Severity.Success);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+  }
+  finally { _busy = false; _gate.Release(); }
+}
+
+async Task SelectVideoVersionAsync(VideoProjectSceneDto scene, Guid versionId)
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  if(!await _gate.WaitAsync(0)) return;
+  _busy = true;
+  try
+  {
+    await SceneVersions.SelectSceneVideoVersionAsync(scene.Id, versionId, AuthState.CurrentUser);
+    Snackbar.Add("Đã chọn phiên bản video đang dùng.", Severity.Success);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+  }
+  finally { _busy = false; _gate.Release(); }
+}
+
+static Color StatusColorFor(string s)
+  => string.Equals(s,"completed",StringComparison.OrdinalIgnoreCase) ? Color.Success
+   : string.Equals(s,"failed",StringComparison.OrdinalIgnoreCase) ? Color.Error
+   : (_pendingFor(s) ? Color.Warning : Color.Default);
+static bool _pendingFor(string s)
+  => string.Equals(s,"queued",StringComparison.OrdinalIgnoreCase)
+  || string.Equals(s,"submitted",StringComparison.OrdinalIgnoreCase)
+  || string.Equals(s,"rendering",StringComparison.OrdinalIgnoreCase)
+  || string.Equals(s,"pending_reconciliation",StringComparison.OrdinalIgnoreCase);
+
 public void Dispose(){ _pollCancellation.Cancel(); _pollCancellation.Dispose(); _gate.Dispose(); }
 }

@@ -298,6 +298,9 @@ public sealed class DanceSellRenderHandlerTests
 
     private sealed class FakeRenderJobService : IRenderJobService
     {
+        public Task MarkSceneVideoClaimRenderingAsync(RenderJobDto claim, string workerKey, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task VerifySceneVideoSubmitClaimAsync(RenderJobDto claim, Guid versionId, string logicalRequestId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> QuarantineRejectedSceneVideoClaimAsync(RenderJobDto claim, string workerKey, string reason, CancellationToken ct = default) => throw new NotSupportedException();
         public int MarkStatusCallCount { get; private set; }
         public int AddEventCallCount { get; private set; }
 

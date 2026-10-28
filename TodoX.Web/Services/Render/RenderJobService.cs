@@ -1160,6 +1160,7 @@ public sealed class RenderJobService : IRenderJobService
                    lock_until=NULL,
                    updated_at=now()
              WHERE id=@jobId
+               AND (@sceneVideo=false OR (tenant_id=@tenant AND job_type='render_scene_video' AND status <> 'failed'))
                AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
                AND (job_type <> 'render_scene_video' OR (
                     video_render.scene_video_job_is_current(tenant_id,id) AND
@@ -1248,6 +1249,7 @@ public sealed class RenderJobService : IRenderJobService
                    lock_until=NULL,
                    updated_at=now()
              WHERE id=@jobId
+               AND (@sceneVideo=false OR (tenant_id=@tenant AND job_type='render_scene_video' AND status <> 'failed'))
                AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
                AND (job_type <> 'render_scene_video' OR (
                     video_render.scene_video_job_is_current(tenant_id,id) AND

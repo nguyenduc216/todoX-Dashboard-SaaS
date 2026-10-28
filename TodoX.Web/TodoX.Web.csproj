@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <InternalsVisibleTo Include="TodoX.Web.Tests" />
+  </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -66,6 +69,11 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
+  </ItemGroup>
+
+  <!-- Runtime uploads are user data, not deployable static assets. -->
+  <ItemGroup>
+    <Content Update="wwwroot/uploads/**/*" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
   <!-- Stale published output lives under ./publish and must not be scanned by the build -->

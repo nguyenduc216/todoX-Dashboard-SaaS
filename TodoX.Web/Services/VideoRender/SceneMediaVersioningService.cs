@@ -1102,7 +1102,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 """
                 UPDATE video_render.scene_image_versions
                    SET status='pending_reconciliation', error_code='RENDER_JOB_ENQUEUE_UNKNOWN',
-                       error_message='C???n ?????i so??t render job tr?????c khi render l???i.', updated_at=now(),
+                       error_message='Cần đối soát render job trước khi render lại.', updated_at=now(),
                        enqueue_reconcile_after=now(),
                        enqueue_reconcile_deadline=now() + @window,
                        enqueue_reconcile_attempts=0
@@ -1112,7 +1112,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             await conn.ExecuteAsync("""
                 UPDATE video_render.scene_image_versions
                    SET status='pending_reconciliation', error_code='RENDER_JOB_ENQUEUE_UNKNOWN',
-                       error_message='C???n ?????i so??t render job tr?????c khi render l???i.', updated_at=now()
+                       error_message='Cần đối soát render job trước khi render lại.', updated_at=now()
                  WHERE id=@versionId AND tenant_id=@tenant AND status='queued';
                 """, new { versionId, tenant = _tenant.TenantId });
     }

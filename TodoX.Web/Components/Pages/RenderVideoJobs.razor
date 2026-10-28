@@ -343,7 +343,7 @@ else
 
                                         <MudStack Spacing="2">
 
-                                            <MudCheckBox T="bool" @bind-Value="_aiPromptCreativeMode" Color="Color.Warning" Label="TodoX sáng tạo nội dung" />
+                                            <MudCheckBox T="bool" @bind-Value="_aiPromptCreativeMode" @bind-Value:after="OnCreativeModeChanged" Color="Color.Warning" Label="TodoX sáng tạo nội dung" />
 
                                             <div class="prompt-input-toolbar">
 
@@ -6575,6 +6575,10 @@ else
                 await ProjectCreated.InvokeAsync(created.ProjectId);
 
                 _resolutionDirty = false;
+
+                _creativeModeDirty = false;
+
+                _creativeModeProjectId = created.ProjectId;
 
                 await ReloadAsync();
 
