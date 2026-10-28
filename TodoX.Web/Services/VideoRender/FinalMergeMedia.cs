@@ -103,7 +103,7 @@ internal static class FinalMergeMedia
     }
 
     // Compare each configured output interval with its selected source. A static source is valid;
-    // a moving source becoming a single repeated sampled picture is not. This is a bounded
+    // a moving source becoming a repeated sampled picture within a scene is not. This is a bounded
     // motion-loss screen, not proof of semantic/lip synchronization or frame-exact identity.
     internal static async Task<string?> ValidateMotionAsync(string ffmpeg, string output, IReadOnlyList<Input> inputs, TimeSpan timeout, CancellationToken ct)
     {
@@ -115,12 +115,22 @@ internal static class FinalMergeMedia
             if (source.Length < 2048 || final.Length < 2048) return $"scene_motion_samples_missing:{i}";
             if (HasMotion(source) && !HasMotion(final))
                 return $"scene_motion_lost:{i}:offset={offset.ToString(CultureInfo.InvariantCulture)}";
+            // Inspect overlapping two-second windows as well: movement at the start of a
+            // scene must not hide a frozen middle/tail while audio and timestamps continue.
+            const int pixels = 32 * 32;
+            const int windowBytes = 4 * pixels; // The existing sampler produces two frames/second.
+            var comparableBytes = Math.Min(source.Length, final.Length);
+            for (var start = 0; start + windowBytes <= comparableBytes; start += pixels)
+            {
+                if (HasMotion(source.AsSpan(start, windowBytes)) && !HasMotion(final.AsSpan(start, windowBytes)))
+                    return $"scene_motion_lost:{i}:offset={(offset + start / pixels / 2m).ToString(CultureInfo.InvariantCulture)}";
+            }
             offset += inputs[i].Seconds;
         }
         return null;
     }
 
-    private static bool HasMotion(byte[] frames)
+    private static bool HasMotion(ReadOnlySpan<byte> frames)
     {
         const int pixels = 32 * 32;
         for (var offset = pixels; offset < frames.Length; offset += pixels)
