@@ -412,6 +412,7 @@ async Task HandleModelChangedAsync(VideoProjectSceneDto scene, string key){
  {
    // keep existing duration if supported
  }
+ meta.Extra["video_duration"] = dur.ToString(System.Globalization.CultureInfo.InvariantCulture);
  await DoSaveAsync(scene, meta, dur);
 }
 async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
@@ -423,7 +424,7 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
    Snackbar.Add("Thời lượng không được model đã chọn hỗ trợ.", Severity.Error); return;
  }
  meta.Extra["video_model"]=opt.Key;
- meta.Extra["video_duration"]=dur.ToString();
+ meta.Extra["video_duration"] = dur.ToString(System.Globalization.CultureInfo.InvariantCulture);
  await DoSaveAsync(scene, meta, dur);
 }
 async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
@@ -444,7 +445,7 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
   if(versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault()?.Status == "pending_reconciliation")
   { Snackbar.Add("Chưa thể thử lại", Severity.Warning); return; }
   var latest = versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault();
-  var request = new RVideoSceneVideoRenderRequest(JobView.Project.Id, scene, ScenePromptMetadata.FromScene(scene), JobView.CoreJob.ServiceId,
+  var request = new RVideoSceneVideoRenderRequest(JobView.Project.Id, scene, WithRenderSettings(ScenePromptMetadata.FromScene(scene)), JobView.CoreJob.ServiceId,
    latest?.Id, latest?.RenderJobId);
   var estimate = await SceneVideoRender.EstimateAsync(request);
   if(!estimate.CanStart)
@@ -488,6 +489,15 @@ async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
  finally { _rerenderingImage.Remove(scene.Id); _busy = false; _gate.Release(); }
 }
 // RVID-UI-V2-SCENE-RERENDER-HISTORY: per-scene media history and version selection (from production line).
+
+// TODOX-20261028-RVIDEO-RERENDER-RESTORE-001: rerender with the project's saved aspect ratio/resolution, not provider defaults.
+ScenePromptMetadata WithRenderSettings(ScenePromptMetadata metadata)
+{
+  var settings = RVideoRules.ResolveRenderSettings(JobView!.Project.OriginalPrompt);
+  metadata.Extra["aspect_ratio"] = settings.AspectRatio;
+  metadata.Extra["resolution"] = settings.Resolution;
+  return metadata;
+}
 // === Scene media history (image / video) with strict type + ownership separation ===
 
 async Task OpenImageHistoryAsync(VideoProjectSceneDto scene)

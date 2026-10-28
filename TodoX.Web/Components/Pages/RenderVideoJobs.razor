@@ -9793,7 +9793,9 @@ else
 
         Guid? existingVersionId = null,
 
-        bool reuseExistingVersion = false)
+        bool reuseExistingVersion = false,
+
+        bool allowCompletedVersion = false)
 
     {
 
@@ -9883,7 +9885,7 @@ else
 
                                          && overrideDuration.HasValue
 
-                                         && IsSceneVideoOverrideIntentional(scene, selectedOverride.Option, overrideDuration.Value);
+                                         && (allowCompletedVersion || IsSceneVideoOverrideIntentional(scene, selectedOverride.Option, overrideDuration.Value));
 
             if (hasIntentionalOverride && selectedOverride.Option is not null && overrideDuration.HasValue)
 
@@ -9905,7 +9907,7 @@ else
 
                 ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model;
 
-            var (job, alreadyActive) = await RenderJobs.EnqueueForSceneIfNoneActiveAsync(new RenderJobCreateModel
+            var jobModel = new RenderJobCreateModel
 
             {
 
@@ -9931,7 +9933,14 @@ else
 
                 PointStatus = RenderPointStatuses.Pending
 
-            }, scene.Id, logicalRequestOverride);
+            };
+
+            var latestVersion = allowCompletedVersion
+                ? (await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser)).OrderByDescending(x => x.VersionNumber).FirstOrDefault()
+                : null;
+            var (job, alreadyActive) = allowCompletedVersion
+                ? await RenderJobs.EnqueueGuardedVideoRerenderAsync(jobModel, _project.Id, scene.Id, latestVersion?.Id, latestVersion?.RenderJobId, false)
+                : await RenderJobs.EnqueueForSceneIfNoneActiveAsync(jobModel, scene.Id, logicalRequestOverride);
 
             if (alreadyActive)
 
@@ -10010,7 +10019,7 @@ else
 
     }
 
-    private async Task ConfirmAndRenderSceneVideoAsync(VideoProjectSceneDto scene, PointBillingIntent billingIntent)
+    private async Task ConfirmAndRenderSceneVideoAsync(VideoProjectSceneDto scene, PointBillingIntent billingIntent, bool allowCompletedVersion = false)
 
     {
 
@@ -10028,6 +10037,10 @@ else
             return;
         }
 
+        if (GetSceneDraft(scene).IsDirty && !await SaveSceneAsync(scene)) return;
+
+        scene = _project.Scenes.FirstOrDefault(x => x.Id == scene.Id) ?? scene;
+
         if (!await ConfirmVideoSceneAsync(scene, billingIntent))
 
         {
@@ -10036,7 +10049,7 @@ else
 
         }
 
-        await EnqueueSceneVideoAsync(scene, billingIntent);
+        await EnqueueSceneVideoAsync(scene, billingIntent, allowCompletedVersion: allowCompletedVersion);
 
     }
 

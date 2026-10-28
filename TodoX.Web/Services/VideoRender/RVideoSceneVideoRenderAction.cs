@@ -178,13 +178,12 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
                 "Lần gửi video trước chưa được xác minh. Vui lòng tải lại và liên hệ hỗ trợ trước khi tạo attempt mới.");
 
         // Canonical eligibility guard: requires a selected (or shared-reference) source image, a
-        // non-empty valid video prompt and no already-active/completed video for the scene.
+        // non-empty valid video prompt and no already-active video for the scene. Completed output is retained during an explicit rerender.
         var report = await _eligibility.GetVideoRenderEligibilityAsync(request.ProjectId, new[] { scene.Id }, ct);
         var decision = report.Results.FirstOrDefault(x => x.SceneId == scene.Id);
         if (decision is null)
             return RVideoSceneVideoRenderResult.Fail("RVIDEO_SCENE_REQUIRED", "Không tìm thấy scene.");
-        if (decision.Status != VideoRenderEligibilityStatus.Eligible
-            && decision.Status != VideoRenderEligibilityStatus.AlreadyCompleted)
+        if (!RVideoRerenderRequestPolicy.CanProceed(decision.Status, PointBillingIntent.UserRerender))
             return RVideoSceneVideoRenderResult.Fail(decision.ErrorCode, decision.Message);
 
         var estimate = await EstimateAsync(request, ct);
@@ -210,7 +209,12 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         ApplySharedReference(input, settings);
 
         var meta = request.Metadata ?? ScenePromptMetadata.FromScene(scene);
-        var modelCode = ResolveRequestedModel(meta);
+        string? modelCode;
+        try { modelCode = ResolveRequestedModel(meta); }
+        catch (ArgumentException)
+        {
+            return RVideoSceneVideoRenderResult.Fail("RVIDEO_VIDEO_OVERRIDE_INVALID", "Model hoặc thời lượng video đã lưu không hợp lệ.");
+        }
         if (!string.IsNullOrWhiteSpace(modelCode))
         {
             input.ManualOverride = true;

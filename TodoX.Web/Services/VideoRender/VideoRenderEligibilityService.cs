@@ -155,20 +155,6 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
             }
 
             var versions = await _versions.ListSceneVideoVersionsAsync(scene.Id, 0, 100, ct);
-            var selectedCompleted = versions.FirstOrDefault(x => x.IsSelected && x.Status.Equals("completed", StringComparison.OrdinalIgnoreCase));
-            if (selectedCompleted is not null)
-            {
-                eligible.Add(new VideoRenderEligibilityResult(
-                    scene.Id,
-                    scene.SceneIndex,
-                    VideoRenderEligibilityStatus.AlreadyCompleted,
-                    "RVIDEO_VIDEO_ALREADY_COMPLETED",
-                    $"Scene {scene.SceneIndex:00} đã có video hoàn tất.",
-                    imageVersion?.Id,
-                    selectedCompleted.Id));
-                continue;
-            }
-
             var activeVersion = versions.FirstOrDefault(x => x.Status is not null && ActiveVideoStatuses.Contains(x.Status));
             if (IsSceneVideoVersionActivelyRunning(activeVersion, activeJobIds.Contains(scene.Id)))
             {
@@ -182,6 +168,20 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
                     activeVersion?.Id,
                     activeVersion?.Id,
                     null));
+                continue;
+            }
+
+            var selectedCompleted = versions.FirstOrDefault(x => x.IsSelected && x.Status.Equals("completed", StringComparison.OrdinalIgnoreCase));
+            if (selectedCompleted is not null)
+            {
+                eligible.Add(new VideoRenderEligibilityResult(
+                    scene.Id,
+                    scene.SceneIndex,
+                    VideoRenderEligibilityStatus.AlreadyCompleted,
+                    "RVIDEO_VIDEO_ALREADY_COMPLETED",
+                    $"Scene {scene.SceneIndex:00} đã có video hoàn tất.",
+                    imageVersion?.Id,
+                    selectedCompleted.Id));
                 continue;
             }
 
@@ -199,7 +199,8 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
 
     private static bool IsSceneVideoVersionActivelyRunning(SceneVideoVersionDto? version, bool hasActiveRenderJob)
         => hasActiveRenderJob
-           || (version is not null && !string.IsNullOrWhiteSpace(version.ProviderTaskId));
+           || (version is not null && (string.Equals(version.Status, "pending_reconciliation", StringComparison.OrdinalIgnoreCase)
+                                     || !string.IsNullOrWhiteSpace(version.ProviderTaskId)));
 
     private async Task<HashSet<long>> LoadActiveRenderJobIdsAsync(long projectId, IReadOnlyCollection<long> requestedSceneIds, CancellationToken ct)
     {
