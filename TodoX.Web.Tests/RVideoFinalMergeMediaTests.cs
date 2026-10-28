@@ -31,14 +31,14 @@ public sealed class RVideoFinalMergeMediaTests : IDisposable
         Assert.NotNull(FinalMergeMedia.ValidateTimeline([0, .04m, .08m], 2));
     }
 
-    private async Task<string> Fixture(string name, string codec = "libx264", string rate = "25", string timebase = "12800", bool audio = true, string size = "160x120")
+    private async Task<string> Fixture(string name, string codec = "libx264", string rate = "25", string timebase = "12800", bool audio = true, string size = "160x120", int seconds = 2)
     {
         var path = Path.Combine(_root, name + ".mp4");
-        var args = new List<string> { "-y", "-v", "error", "-f", "lavfi", "-i", $"testsrc2=size={size}:rate={rate}:duration=2" };
-        if (audio) args.AddRange(["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2"]);
+        var args = new List<string> { "-y", "-v", "error", "-f", "lavfi", "-i", $"testsrc2=size={size}:rate={rate}:duration={seconds}" };
+        if (audio) args.AddRange(["-f", "lavfi", "-i", $"sine=frequency=440:sample_rate=48000:duration={seconds}"]);
         args.AddRange(["-c:v", codec, "-pix_fmt", "yuv420p", "-video_track_timescale", timebase]);
         if (audio) args.AddRange(["-c:a", "aac"]);
-        args.AddRange(["-t", "2", path]);
+        args.AddRange(["-t", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture), path]);
         var result = await FinalMergeMedia.RunAsync(Ffmpeg, args, Timeout, default);
         Assert.True(result.ExitCode == 0, result.Log);
         return path;
@@ -163,6 +163,45 @@ public sealed class RVideoFinalMergeMediaTests : IDisposable
         Assert.Null(await FinalMergeMedia.ValidateAsync(Ffmpeg, repaired, 4, Timeout, default));
         Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, repaired, inputs, Timeout, default));
         Assert.True(File.Exists(frozen)); // The old final/source fixture was never overwritten.
+    }
+
+    [LocalFfmpegFact]
+    public async Task FourthSceneWithDifferentTimebaseIsNormalizedWithoutLosingMotion()
+    {
+        var normal = await Fixture("normal-timebase", timebase: "90000");
+        var fourth = await Fixture("fourth-timebase", timebase: "12288");
+        var selected = new[] { normal, normal, normal, fourth, normal };
+        var result = await Merge(selected);
+        Assert.Contains("incompatible_input_streams", result.Reasons);
+        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, result.Output,
+            selected.Select(p => new FinalMergeMedia.Input(p, 2)).ToArray(), Timeout, default));
+    }
+
+    [LocalFfmpegFact]
+    public async Task MovingSceneWithFrozenTailAndContinuousAudioTriggersRepair()
+    {
+        var source = await Fixture("moving-four-seconds", seconds: 4);
+        var frozen = Path.Combine(_root, "partial-freeze.mp4");
+        var result = await FinalMergeMedia.RunAsync(Ffmpeg,
+            ["-y", "-v", "error", "-i", source, "-vf", "trim=duration=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3", "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", frozen], Timeout, default);
+        Assert.True(result.ExitCode == 0, result.Log);
+        Assert.Null(await FinalMergeMedia.ValidateAsync(Ffmpeg, frozen, 4, Timeout, default));
+        var inputs = new[] { new FinalMergeMedia.Input(source, 4) };
+        var error = await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, frozen, inputs, Timeout, default);
+        Assert.NotNull(error);
+        Assert.Contains("scene_motion_lost:0", error);
+
+        var concat = Path.Combine(_root, "partial-freeze-concat.txt");
+        await File.WriteAllLinesAsync(concat, VideoRenderMergeHandler.BuildConcatLines([frozen]), new System.Text.UTF8Encoding(false));
+        var output = Path.Combine(_root, "repaired-partial-freeze.mp4");
+        var reasons = new List<string>();
+        await FinalMergeMedia.MergeAsync(Ffmpeg, _root, concat, output, inputs, 4, Timeout,
+            reason => { reasons.Add(reason); return Task.CompletedTask; }, default);
+        Assert.Contains(reasons, reason => reason.StartsWith("scene_motion_lost:0", StringComparison.Ordinal));
+        Assert.Null(await FinalMergeMedia.ValidateAsync(Ffmpeg, output, 4, Timeout, default));
+        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, output, inputs, Timeout, default));
+        // A pause already present in the selected source remains valid.
+        Assert.Null(await FinalMergeMedia.ValidateMotionAsync(Ffmpeg, frozen, [new(frozen, 4)], Timeout, default));
     }
 
     [LocalFfmpegFact]
