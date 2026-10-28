@@ -14,6 +14,8 @@ Verified baseline: code-history/20261019_VIDEO-RERENDER-RELEASE.md and the curre
 
 ## Changes
 
+- 2026-10-28 — TODOX-20261028-SCENE-VIDEO-QUEUE-BLOCKED-001: generation-aware claim quarantine uses transactional audit exclusion and narrow fence/savepoint recovery; validates no-head legacy identity without rewriting historical owners. 34 non-DB tests PASS; PostgreSQL tests compiled but NOT RUN per explicit user instruction. Candidate Release package exists; P0 acceptance pending integration and complete production-schema comparison. See `../TODOX-20261028-SCENE-VIDEO-QUEUE-BLOCKED-001.md`.
+
 1. 2026-10-22 — TODOX-20261022-SCENE05-P0-001: Tasks 1/2/3, selective main integration and operator package. See ../20261022_TODOX-20261022-SCENE05-P0-001.md. Main SHA and package evidence are reported after verification.
 2. 2026-10-22 — TODOX-20261022-SCENE05-RELEASE-002: scoped operator reconciliation SQL and audited terminal-failure submit-guard release. See ../20261022_TODOX-20261022-SCENE05-RELEASE-002.md. No production action; terminal evidence and operator approval are still required.
 

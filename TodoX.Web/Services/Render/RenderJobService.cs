@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Dapper;
 using Npgsql;
 using TodoX.Web.Data;
@@ -714,7 +714,22 @@ public sealed class RenderJobService : IRenderJobService
     private async Task<RenderJobDto?> ClaimNextInternal(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string>? jobTypes, CancellationToken ct)
         => await ClaimNextInternal(workerKey, lockFor, jobTypes, excludeJobTypes: null, ct);
 
+    // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER
+    // CHANGE_ID: TODOX-20261028-SCENE-VIDEO-QUEUE-BLOCKED-001
+    // A fenced UPDATE rolls back its claim, not the queue. Audit quarantine preserves immutable history.
     private async Task<RenderJobDto?> ClaimNextInternal(
+        string workerKey, TimeSpan lockFor, IReadOnlyCollection<string>? includeJobTypes,
+        IReadOnlyCollection<string>? excludeJobTypes, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var result = await ClaimNextCandidateAsync(workerKey, lockFor, includeJobTypes, excludeJobTypes, ct);
+            if (!result.Quarantined) return result.Job;
+        }
+    }
+
+    private async Task<(RenderJobDto? Job, bool Quarantined)> ClaimNextCandidateAsync(
         string workerKey,
         TimeSpan lockFor,
         IReadOnlyCollection<string>? includeJobTypes,
@@ -759,7 +774,8 @@ public sealed class RenderJobService : IRenderJobService
             parameters = new { };
         }
 
-        sql += " AND (job_type NOT IN ('render_scene_video','render_video_batch') OR video_render.scene_video_job_is_current(tenant_id,id))";
+        sql += " AND (job_type <> 'render_video_batch' OR video_render.scene_video_job_is_current(tenant_id,id))";
+        sql += " AND (job_type <> 'render_scene_video' OR NOT EXISTS (SELECT 1 FROM render.render_job_events q WHERE q.tenant_id=render_jobs.tenant_id AND q.job_id=render_jobs.id AND q.event_type='SCENE_VIDEO_QUEUE_QUARANTINED'))";
         sql += ResolveClaimOrderSql(includeJobTypes);
 
         var job = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(sql, parameters, tx);
@@ -772,7 +788,27 @@ public sealed class RenderJobService : IRenderJobService
                 includeJobTypes is null ? null : string.Join(",", includeJobTypes),
                 excludeJobTypes is null ? null : string.Join(",", excludeJobTypes));
             tx.Commit();
-            return null;
+            return (null, false);
+        }
+
+        if (job.JobType == RenderJobTypes.RenderSceneVideo)
+        {
+            // A concurrent SELECT may have taken its snapshot before the previous lane committed
+            // the audit event. Recheck after obtaining the job lock so quarantine is recorded once.
+            if (await conn.ExecuteScalarAsync<bool>(
+                "SELECT EXISTS(SELECT 1 FROM render.render_job_events WHERE tenant_id=@tenant AND job_id=@id AND event_type='SCENE_VIDEO_QUEUE_QUARANTINED');",
+                new { tenant = job.TenantId, id = job.Id }, tx))
+            {
+                tx.Commit();
+                return (null, true);
+            }
+            var reason = await GetSceneVideoQueueRejectionAsync(conn, tx, job);
+            if (reason is not null)
+            {
+                await QuarantineSceneVideoQueueCandidateAsync(conn, tx, job, workerKey, reason);
+                tx.Commit();
+                return (null, true);
+            }
         }
 
         var isCoreServiceRecoveryClaim =
@@ -790,7 +826,11 @@ public sealed class RenderJobService : IRenderJobService
             job.WorkerKey,
             isCoreServiceRecoveryClaim);
 
-        var claimedRows = await conn.ExecuteAsync(
+        await conn.ExecuteAsync("SAVEPOINT scene_video_claim;", transaction: tx);
+        int claimedRows;
+        try
+        {
+            claimedRows = await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
                SET status='preparing',
@@ -811,6 +851,15 @@ public sealed class RenderJobService : IRenderJobService
             """,
             new { id = job.Id, workerKey, lockSeconds = Math.Max(1, (int)lockFor.TotalSeconds) },
             tx);
+        }
+        catch (PostgresException ex) when (job.JobType == RenderJobTypes.RenderSceneVideo && IsSceneVideoQueueOwnershipFence(ex))
+        {
+            // Keep the candidate row lock (acquired before savepoint), undo attempt/lease mutations.
+            await conn.ExecuteAsync("ROLLBACK TO SAVEPOINT scene_video_claim;", transaction: tx);
+            await QuarantineSceneVideoQueueCandidateAsync(conn, tx, job, workerKey, "VIDEO_OPERATION_SUPERSEDED");
+            tx.Commit();
+            return (null, true);
+        }
 
         if (claimedRows == 0)
         {
@@ -822,7 +871,7 @@ public sealed class RenderJobService : IRenderJobService
                 job.AttemptCount,
                 workerKey);
             tx.Commit();
-            return null;
+            return (null, false);
         }
 
         tx.Commit();
@@ -839,7 +888,89 @@ public sealed class RenderJobService : IRenderJobService
             claimed?.Status,
             claimed?.AttemptCount,
             claimed?.StartedAt is not null);
-        return claimed;
+        return (claimed, false);
+    }
+
+    internal static bool IsSceneVideoQueueOwnershipFence(PostgresException exception)
+        => exception.SqlState == "55000"
+           && exception.MessageText.StartsWith("VIDEO_OPERATION_SUPERSEDED:", StringComparison.Ordinal);
+
+    private static Task<string?> GetSceneVideoQueueRejectionAsync(System.Data.IDbConnection conn,
+        System.Data.IDbTransaction tx, RenderJobDto job)
+        => conn.ExecuteScalarAsync<string?>(
+            """
+            SELECT CASE
+              WHEN NOT video_render.scene_video_job_is_current(j.tenant_id,j.id)
+                THEN 'VIDEO_OPERATION_NOT_CURRENT'
+              WHEN NOT EXISTS (
+                SELECT 1 FROM video_render.scene_video_operation_heads h
+                 WHERE h.tenant_id=j.tenant_id
+                   AND h.scene_id::text=COALESCE(j.input_json->>'sceneId',j.input_json->>'scene_id'))
+              THEN CASE
+                WHEN COALESCE(j.input_json->>'operationGeneration','0') NOT IN ('0','')
+                  THEN 'NO_OPERATION_HEAD_NONLEGACY_GENERATION'
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM video_render.video_project_scenes s
+                   WHERE s.tenant_id=j.tenant_id AND s.project_id::text=j.input_json->>'projectId'
+                     AND s.id::text=j.input_json->>'sceneId')
+                  OR NULLIF(btrim(j.input_json->>'logicalRequestId'),'') IS NULL
+                  THEN 'LEGACY_OPERATION_IDENTITY_INVALID'
+                WHEN EXISTS (
+                  SELECT 1 FROM video_render.scene_video_versions v
+                   WHERE v.tenant_id=j.tenant_id AND v.logical_request_id=j.input_json->>'logicalRequestId'
+                     AND (v.render_job_id IS DISTINCT FROM j.id
+                       OR v.project_id::text IS DISTINCT FROM j.input_json->>'projectId'
+                       OR v.scene_id::text IS DISTINCT FROM j.input_json->>'sceneId'))
+                  THEN 'LEGACY_VERSION_OWNERSHIP_INVALID'
+                WHEN COALESCE(j.input_json->>'providerPoll','false') <> 'true'
+                  AND (NULLIF(btrim(j.provider_task_id),'') IS NOT NULL
+                    OR NULLIF(btrim(j.provider_video_id_base),'') IS NOT NULL
+                    OR EXISTS (SELECT 1 FROM render.scene_video_submit_intents i
+                         WHERE i.tenant_id=j.tenant_id AND i.render_job_id=j.id)
+                    OR EXISTS (SELECT 1 FROM video_render.scene_video_versions v
+                         WHERE v.tenant_id=j.tenant_id AND v.logical_request_id=j.input_json->>'logicalRequestId'
+                           AND (NULLIF(btrim(v.provider_task_id),'') IS NOT NULL
+                             OR NULLIF(btrim(v.provider_video_id_base),'') IS NOT NULL
+                             OR v.status IN ('submitted','pending_reconciliation','completed'))))
+                  THEN 'LEGACY_SUBMIT_EVIDENCE_REQUIRES_REVIEW'
+                WHEN COALESCE(j.input_json->>'providerPoll','false') = 'true'
+                  AND NULLIF(btrim(j.provider_task_id),'') IS NULL
+                  AND NULLIF(btrim(j.provider_video_id_base),'') IS NULL
+                  THEN 'LEGACY_POLL_IDENTITY_REQUIRED'
+                ELSE NULL END
+              ELSE NULL END
+            FROM render.render_jobs j WHERE j.id=@id AND j.tenant_id=@tenant;
+            """, new { id = job.Id, tenant = job.TenantId }, tx);
+
+    private async Task QuarantineSceneVideoQueueCandidateAsync(System.Data.IDbConnection conn,
+        System.Data.IDbTransaction tx, RenderJobDto job, string workerKey, string reason)
+    {
+        // The generation trigger forbids even status changes on a historical owner. Store a durable
+        // queue exclusion in the existing audit table, never rewrite its job/version/provider outcome.
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO render.render_job_events(job_id,tenant_id,event_type,level,message,data_json,created_at)
+            VALUES (@id,@tenant,'SCENE_VIDEO_QUEUE_QUARANTINED','warning',
+              'Scene video queue candidate quarantined before dispatch; manual ownership reconciliation required.',
+              jsonb_build_object('reason',@reason::text,'workerKey',@workerKey::text,
+                'attemptCount',@attempt,'status',@status::text,
+                'projectId',@input::jsonb->>'projectId','sceneId',@input::jsonb->>'sceneId',
+                'logicalRequestId',@input::jsonb->>'logicalRequestId','operationGeneration',@input::jsonb->>'operationGeneration',
+                'providerTaskId',@task::text,'providerVideoIdBase',@video::text),now());
+            """, new
+            {
+                id = job.Id,
+                tenant = job.TenantId,
+                reason,
+                workerKey,
+                attempt = job.AttemptCount,
+                status = job.Status,
+                input = job.InputJson,
+                task = job.ProviderTaskId,
+                video = job.ProviderVideoIdBase
+            }, tx);
+        _logger.LogWarning("SCENE_VIDEO_QUEUE_QUARANTINED jobId={JobId} tenantId={TenantId} reason={Reason}; no dispatch or retry.",
+            job.Id, job.TenantId, reason);
     }
 
     internal static string ResolveClaimOrderSql(IReadOnlyCollection<string>? includeJobTypes)
