@@ -4,6 +4,7 @@ using System.Text.Encodings.Web;
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
 
@@ -199,6 +200,7 @@ public sealed class SceneVideoVersionDto
     public Guid? VoiceAudioVersionId { get; set; }
     public string? PosterUrl { get; set; }
     public string? ErrorMessage { get; set; }
+    public string? ErrorCode { get; set; }
     public DateTimeOffset? SubmittedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
@@ -321,6 +323,8 @@ public interface ISceneMediaVersioningService
     Task<SceneImageVersionDto?> GetSelectedImageVersionAsync(long sceneId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<bool> HasActiveImageVersionAsync(long sceneId, CancellationToken ct = default);
+    Task<Guid?> FindImageRenderJobAsync(Guid versionId, CancellationToken ct = default);
+    Task MarkImageEnqueueUnknownAsync(Guid versionId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectImageVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectImageVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
@@ -387,11 +391,13 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
+    private readonly IConfiguration _reconciliationConfiguration;
 
-    public SceneMediaVersioningService(TodoXConnectionFactory factory, TenantContext tenant)
+    public SceneMediaVersioningService(TodoXConnectionFactory factory, TenantContext tenant, IConfiguration reconciliationConfiguration)
     {
         _factory = factory;
         _tenant = tenant;
+        _reconciliationConfiguration = reconciliationConfiguration;
     }
 
     public Task<FinalVideoVersioningState> GetFinalVideoVersioningStateAsync(CancellationToken ct = default)
@@ -441,6 +447,18 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             tx.Commit();
             return existing;
         }
+
+        // RVID-UI-V2-SCENE-RERENDER-HISTORY / TODOX-20261014-RVIDEO-RERENDER-HARDENING-001:
+        // Check while holding the tenant/scene lock used for version numbering.
+        var active = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM video_render.scene_image_versions
+              WHERE project_id=@projectId AND scene_id=@sceneId AND tenant_id=@tenant
+                AND status IN ('queued','submitted','processing','pending_reconciliation'));
+            """,
+            new { request.ProjectId, request.SceneId, tenant = _tenant.TenantId }, tx);
+        if (active)
+            throw new InvalidOperationException("SCENE_IMAGE_ACTIVE");
 
         var versionNumber = await conn.ExecuteScalarAsync<int>(
             "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_image_versions WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
@@ -753,6 +771,55 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         return count > 0;
     }
 
+    // RVID-UI-V2-SCENE-RERENDER-HISTORY / TODOX-20261014-RVIDEO-RERENDER-HARDENING-001:
+    // The job INSERT commits before EnqueueAsync writes its event; event failure is not proof of rollback.
+    public async Task<Guid?> FindImageRenderJobAsync(Guid versionId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT j.id FROM render.render_jobs j
+            JOIN video_render.scene_image_versions v
+              ON v.id=@versionId AND v.tenant_id=@tenant
+            WHERE j.tenant_id=@tenant AND j.job_type='render_scene_image'
+              AND j.input_json->>'imageVersionId'=v.id::text
+            ORDER BY j.created_at DESC LIMIT 1;
+            """, new { versionId, tenant = _tenant.TenantId });
+    }
+
+    // RVID-UI-V2-SCENE-RERENDER-HISTORY / TODOX-20261014-RVIDEO-RERENDER-HARDENING-001:
+    // Retain the active slot for manual reconciliation; never replace a worker's progressed state.
+    public async Task MarkImageEnqueueUnknownAsync(Guid versionId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        // TODOX-20261015-RVIDEO-RECONCILIATION-IMPL-001: missing policy must fail closed;
+        // never strand a new UNKNOWN row outside the durable due scan.
+        var enabled = _reconciliationConfiguration.GetValue("ImageEnqueueReconciliation:Enabled", false);
+        var windowSeconds = _reconciliationConfiguration.GetValue<int>("ImageEnqueueReconciliation:DeadlineSeconds");
+        if (enabled && windowSeconds <= 0)
+            throw new InvalidOperationException("Image enqueue reconciliation deadline is not configured.");
+        if (enabled)
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.scene_image_versions
+                   SET status='pending_reconciliation', error_code='RENDER_JOB_ENQUEUE_UNKNOWN',
+                       error_message='Cần đối soát render job trước khi render lại.', updated_at=now(),
+                       enqueue_reconcile_after=now(),
+                       enqueue_reconcile_deadline=now() + @window,
+                       enqueue_reconcile_attempts=0
+                 WHERE id=@versionId AND tenant_id=@tenant AND status='queued';
+                """, new { versionId, tenant = _tenant.TenantId, window = TimeSpan.FromSeconds(windowSeconds) });
+        else
+            await conn.ExecuteAsync("""
+                UPDATE video_render.scene_image_versions
+                   SET status='pending_reconciliation', error_code='RENDER_JOB_ENQUEUE_UNKNOWN',
+                       error_message='Cần đối soát render job trước khi render lại.', updated_at=now()
+                 WHERE id=@versionId AND tenant_id=@tenant AND status='queued';
+                """, new { versionId, tenant = _tenant.TenantId });
+    }
+
     public async Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default)
     {
         await EnsureSceneAccessAsync(sceneId, user, ct);
@@ -821,6 +888,10 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
+        // Same scene-level advisory key/order as guarded video enqueue: advisory -> scene row -> version.
+        // Do not use the logical-request suffix: a newer attempt must serialize against any request.
+        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = RenderJobService.BuildSceneJobLockName(SceneVideoRenderHandler.JobTypeName, request.SceneId) }, tx);
         await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId, _tenant.TenantId);
         var existing = await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(
             SelectSceneVideoVersionSql + " WHERE logical_request_id=@logicalRequestId AND tenant_id=@tenant;",
@@ -909,9 +980,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
-        var version = await conn.QuerySingleAsync<SceneVideoVersionDto>(
-            SelectSceneVideoVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
-            new { versionId, tenant = _tenant.TenantId }, tx);
+        var version = await LockVideoVersionAsync(conn, tx, versionId, ct);
         if (IsTerminalUnsuccessfulVersionStatus(version.Status))
         {
             throw new InvalidOperationException("RVIDEO_STALE_SCENE_VIDEO_VERSION_TERMINAL");
@@ -1011,7 +1080,16 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
     public async Task FailSceneVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
     {
-        await UpdateVersionFailureAsync("video_render.scene_video_versions", versionId, errorCode, errorMessage, ct);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockVideoVersionAsync(conn, tx, versionId, ct);
+        await conn.ExecuteAsync("""
+            UPDATE video_render.scene_video_versions
+               SET status='failed', error_code=@errorCode, error_message=@errorMessage, updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """, new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage }, tx);
+        tx.Commit();
     }
 
     public async Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default)
@@ -1083,6 +1161,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockVideoVersionAsync(conn, tx, versionId, ct);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_video_versions
@@ -1110,7 +1190,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 providerCapabilityId,
                 providerTaskId,
                 providerVideoIdBase
-            });
+            }, tx);
+        tx.Commit();
     }
 
     public async Task<string?> GetSceneVideoProviderTaskIdAsync(Guid versionId, CancellationToken ct = default)
@@ -1136,6 +1217,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockVideoVersionAsync(conn, tx, versionId, ct);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_video_versions
@@ -1148,13 +1231,16 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
-            new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage, providerVideoIdBase });
+            new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage, providerVideoIdBase }, tx);
+        tx.Commit();
     }
 
     public async Task<bool> TryRebindSceneVideoVersionRenderJobAsync(Guid versionId, Guid expectedOldJobId, Guid newJobId, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockVideoVersionAsync(conn, tx, versionId, ct);
         var changed = await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_video_versions
@@ -1165,7 +1251,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                AND render_job_id=@expectedOldJobId
                AND provider_task_id IS NULL;
             """,
-            new { versionId, expectedOldJobId, newJobId, tenant = _tenant.TenantId });
+            new { versionId, expectedOldJobId, newJobId, tenant = _tenant.TenantId }, tx);
+        tx.Commit();
         return changed > 0;
     }
 
@@ -1173,6 +1260,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockVideoVersionAsync(conn, tx, versionId, ct);
         var changed = await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_video_versions
@@ -1182,7 +1271,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                AND tenant_id=@tenant
                AND provider_task_id IS NULL;
             """,
-            new { versionId, renderJobId, tenant = _tenant.TenantId });
+            new { versionId, renderJobId, tenant = _tenant.TenantId }, tx);
+        tx.Commit();
         return changed > 0;
     }
 
@@ -2334,6 +2424,27 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
            || user.Can("render.video.manage")
            || user.Can("ai.video.version.manage");
 
+    private async Task<SceneVideoVersionDto> LockVideoVersionAsync(
+        System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid versionId, CancellationToken ct)
+    {
+        // Resolve without a row lock: never wait for the scene advisory lock while holding a version lock.
+        var identity = await conn.QuerySingleAsync<(long ProjectId, long SceneId)>(
+            "SELECT project_id AS ProjectId, scene_id AS SceneId FROM video_render.scene_video_versions WHERE id=@versionId AND tenant_id=@tenant;",
+            new { versionId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = RenderJobService.BuildSceneJobLockName(SceneVideoRenderHandler.JobTypeName, identity.SceneId) }, tx);
+        await LockSceneAsync(conn, tx, identity.ProjectId, identity.SceneId, _tenant.TenantId);
+        var version = await conn.QuerySingleAsync<SceneVideoVersionDto>(
+            SelectSceneVideoVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
+            new { versionId, tenant = _tenant.TenantId }, tx);
+        if (version.ProjectId != identity.ProjectId || version.SceneId != identity.SceneId)
+        {
+            throw new InvalidOperationException("RVIDEO_STALE_SCENE_VIDEO_VERSION_IDENTITY");
+        }
+
+        return version;
+    }
+
     private async Task UpdateVersionFailureAsync(string tableName, Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -2392,7 +2503,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                charged_points AS ChargedPoints, refunded_points AS RefundedPoints, cost_source AS CostSource,
                render_config_json::text AS RenderConfigJson,
                voice_audio_version_id AS VoiceAudioVersionId,
-               poster_url AS PosterUrl, error_message AS ErrorMessage,
+               poster_url AS PosterUrl, error_code AS ErrorCode, error_message AS ErrorMessage,
                submitted_at AS SubmittedAt, created_at AS CreatedAt
           FROM video_render.scene_video_versions
         """;

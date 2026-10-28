@@ -6,6 +6,9 @@
 @inject IRVideoSceneCollectionAction SceneCollection
 @inject IRVideoSceneVideoModelOptionsService ModelOptions
 @inject IRVideoSceneAddDefaultResolver AddDefaults
+@inject IRVideoSceneImageRenderAction SceneImageRender
+@inject IRVideoSceneVideoRenderAction SceneVideoRender
+@inject ISceneMediaVersioningService SceneVersions
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @implements IDisposable
@@ -102,11 +105,18 @@ else{<span>Chưa có</span>}
 </span>
 <span @onclick:stopPropagation="true"><MudTextField T="string" Class="rv2-content-input" Value="@UserSceneText(s)" ValueChanged="@(v=>HandleContentChangedAsync(s,v))" Variant="Variant.Text" Lines="2" Placeholder="Nội dung scene..." FullWidth="true" Margin="Margin.Dense" /></span>
 <span @onclick:stopPropagation="true"><MudSelect T="string" Value="@ResolveModelKey(s)" ValueChanged="@(v=>HandleModelChangedAsync(s,v))" Dense="true" Style="min-width:140px">@foreach(var o in _opts){<MudSelectItem Value="@o.Key">@o.Label</MudSelectItem>}</MudSelect></span><span @onclick:stopPropagation="true"><MudSelect T="int" Value="@s.DurationSeconds" ValueChanged="@(v=>HandleDurationChangedAsync(s,v))" Dense="true" Style="min-width:80px">@foreach(var d in AllDurations){<MudSelectItem Value="@d">@d s</MudSelectItem>}</MudSelect></span>
-<span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@s.Status</MudChip></span>
+ <span><MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@s.Status</MudChip></span>
 <span @onclick:stopPropagation="true">
 <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
 <MudMenuItem OnClick="@(()=>HandleEditAsync(s))">Chỉnh prompt</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleSaveAsync(s))" Disabled="@_busy">Lưu</MudMenuItem>
+<MudDivider />
+<MudMenuItem OnClick="@(()=>HandleRerenderImageAsync(s))" Disabled="@(!CanRerenderImage(s))">Tạo lại ảnh</MudMenuItem>
+<MudMenuItem OnClick="@(()=>HandleRerenderVideoAsync(s))" Disabled="@(!CanRerenderVideo(s))">Tạo lại video</MudMenuItem>
+@if(IsUnresolvedSubmit(s)){<MudMenuItem Disabled="true">Thử lại task (chưa có ID task)</MudMenuItem>}
+<MudMenuItem OnClick="@(()=>OpenImageHistoryAsync(s))">Lịch sử ảnh</MudMenuItem>
+<MudMenuItem OnClick="@(()=>OpenVideoHistoryAsync(s))">Lịch sử video</MudMenuItem>
+<MudDivider />
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,-1))" Disabled="@(s.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleMoveAsync(s,1))" Disabled="@(s.SceneIndex>=JobView.Project.Scenes.Count || _busy)">Xuống</MudMenuItem>
 <MudMenuItem OnClick="@(()=>HandleDeleteAsync(s))" Disabled="@_busy">Xóa</MudMenuItem>
@@ -136,9 +146,16 @@ else if(!string.IsNullOrWhiteSpace(ActiveScene.SceneVideoUrl)){<button class="rv
   <MudText Typo="Typo.subtitle2">Nội dung scene @ActiveScene.SceneIndex</MudText>
   <MudTextField T="string" Value="@UserSceneText(ActiveScene)" ValueChanged="@(v=>HandleContentChangedAsync(ActiveScene,v))" Variant="Variant.Outlined" Lines="4" Placeholder="Nội dung scene..." FullWidth="true" Margin="Margin.Dense" />
 </div>
-<div class="d-flex gap-1 mt-2">
-<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))">Chỉnh</MudButton>
+<div class="d-flex gap-1 mt-2 flex-wrap">
+<MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleEditAsync(ActiveScene!))" Disabled="@_busy">Chỉnh</MudButton>
 <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(()=>HandleSaveAsync(ActiveScene!))" Disabled="@_busy">Lưu</MudButton>
+<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(()=>HandleRerenderImageAsync(ActiveScene!))" Disabled="@(!CanRerenderImage(ActiveScene!))">Tạo lại ảnh</MudButton>
+ <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(()=>HandleRerenderVideoAsync(ActiveScene!))" Disabled="@(!CanRerenderVideo(ActiveScene!))">Tạo lại video</MudButton>
+ @if(IsUnresolvedSubmit(ActiveScene!)){<MudText Typo="Typo.caption" Color="Color.Error">FAILED: Dịch vụ chưa khả dụng; chưa xác nhận được trạng thái task tại provider. Không có ID task để thử lại.</MudText><MudButton Disabled="true">Thử lại task</MudButton>}
+<MudMenu Icon="@Icons.Material.Filled.History" Size="Size.Small" Dense="true">
+<MudMenuItem OnClick="@(()=>OpenImageHistoryAsync(ActiveScene!))">Lịch sử ảnh</MudMenuItem>
+<MudMenuItem OnClick="@(()=>OpenVideoHistoryAsync(ActiveScene!))">Lịch sử video</MudMenuItem>
+</MudMenu>
 <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" /><MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" />
 </div>
 </div>}
@@ -158,6 +175,19 @@ bool _optsReady;
 Task<IReadOnlyList<SceneVideoModelOption>>? _optsTask; // in-flight options fetch (started off the render path)
 int _sceneVersion; // version guard for rapid scene switching
 readonly Dictionary<long,bool> _mediaErrors = new();
+// RVID-UI-V2-SCENE-RERENDER-HISTORY.1: cached active-version snapshots so the re-render buttons can
+// compare the working prompt against the active media baseline without re-querying on every render.
+readonly Dictionary<long,SceneImageVersionDto> _activeImageVersions = new();
+readonly Dictionary<long,SceneVideoVersionDto> _activeVideoVersions = new();
+readonly Dictionary<long,SceneVideoVersionDto> _latestVideoVersions = new();
+bool IsUnresolvedSubmit(VideoProjectSceneDto scene)
+  => _latestVideoVersions.TryGetValue(scene.Id, out var version)
+     && string.Equals(version.Status, "pending_reconciliation", StringComparison.OrdinalIgnoreCase)
+     && string.IsNullOrWhiteSpace(version.ProviderTaskId)
+     && string.IsNullOrWhiteSpace(version.ProviderVideoIdBase);
+readonly HashSet<long> _rerenderingImage = new();
+readonly HashSet<long> _rerenderingVideo = new();
+RVideoJobView? _versionsLoadedFor; // tracks which JobView the active-version cache was loaded for
 IReadOnlyList<int> AllDurations => _opts.SelectMany(x=>x.Durations).Distinct().OrderBy(x=>x).ToArray();
 
 protected override void OnParametersSet()
@@ -189,6 +219,14 @@ protected override async Task OnAfterRenderAsync(bool firstRender)
       StateHasChanged();
     }
     catch { /* options will remain empty; selects show no items but scene metadata is visible */ }
+  }
+  // RVID-UI-V2-SCENE-RERENDER-HISTORY.1: (re)load active media versions whenever the JobView
+  // reference changes (initial load + every reload after save/re-render/selection).
+  if(!ReferenceEquals(_versionsLoadedFor, JobView) && JobView is not null)
+  {
+    _versionsLoadedFor = JobView;
+    await RefreshActiveVersionsAsync();
+    StateHasChanged();
   }
 }
 
@@ -331,5 +369,265 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
  meta.Extra["video_duration"]=dur.ToString();
  await DoSaveAsync(scene, meta, dur);
 }
+// === RVID-UI-V2-SCENE-RERENDER-HISTORY.1: dirty-aware re-render + history + selection ===
+
+// Refresh the cached active media versions for all scenes so dirty comparisons use the real
+// active baseline (not the just-saved draft). Called after every load/reload of JobView.
+async Task RefreshActiveVersionsAsync()
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  _activeImageVersions.Clear(); _activeVideoVersions.Clear(); _latestVideoVersions.Clear();
+  foreach(var s in JobView.Project.Scenes)
+  {
+    try
+    {
+      var iv = await SceneVersions.GetSelectedImageVersionAsync(s.Id);
+      if(iv is not null) _activeImageVersions[s.Id] = iv;
+      var vv = await SceneVersions.GetSelectedVideoVersionAsync(s.Id);
+      if(vv is not null) _activeVideoVersions[s.Id] = vv;
+      var latest = await SceneVersions.ListSceneVideoVersionsAsync(s.Id, AuthState.CurrentUser);
+      var newest = latest.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
+      if(newest is not null) _latestVideoVersions[s.Id] = newest;
+    }
+    catch { /* versioning may be disabled; buttons simply stay hidden */ }
+  }
+}
+
+// Working image/video prompt for the scene, taken from the current ScenePromptMetadata.
+string WorkingImagePrompt(VideoProjectSceneDto s) => ScenePromptMetadata.FromScene(s).ImagePrompt ?? string.Empty;
+string WorkingVideoPrompt(VideoProjectSceneDto s) => ScenePromptMetadata.FromScene(s).MotionPrompt ?? string.Empty;
+
+// Baseline image prompt = the prompt snapshot used to create the ACTIVE image version.
+string? BaselineImagePrompt(VideoProjectSceneDto s)
+  => _activeImageVersions.TryGetValue(s.Id, out var v) ? v.ImagePromptSnapshot : null;
+// Baseline video prompt = the prompt snapshot used to create the ACTIVE video version.
+string? BaselineVideoPrompt(VideoProjectSceneDto s)
+  => _activeVideoVersions.TryGetValue(s.Id, out var v) ? v.VideoPromptSnapshot : null;
+
+// "Tạo lại ảnh" is enabled when there is no image yet (first generation) or when the working image
+// prompt differs from the active image version baseline. Undo back to baseline disables it again.
+bool CanRerenderImage(VideoProjectSceneDto s)
+{
+  if(_busy || _rerenderingImage.Contains(s.Id)) return false;
+  var hasImageBaseline = _activeImageVersions.TryGetValue(s.Id, out var iv);
+  return RVideoSceneRerenderDirtyPolicy.CanRerenderImage(WorkingImagePrompt(s), iv?.ImagePromptSnapshot, hasImageBaseline);
+}
+
+// "Tạo lại video" is enabled when the working video prompt differs from the active video baseline,
+// OR when the active image version changed since the active video was rendered (image→video
+// dependency), even if the video prompt itself did not change.
+bool CanRerenderVideo(VideoProjectSceneDto s)
+{
+  if(_busy || _rerenderingVideo.Contains(s.Id)) return false;
+  var hasVideoBaseline = _activeVideoVersions.TryGetValue(s.Id, out var vv);
+  var hasImageBaseline = _activeImageVersions.TryGetValue(s.Id, out var iv);
+  var hasAnyImageSource = hasImageBaseline || !string.IsNullOrWhiteSpace(s.StaticImageUrl);
+  return RVideoSceneRerenderDirtyPolicy.CanRerenderVideo(
+    WorkingVideoPrompt(s), vv?.VideoPromptSnapshot, hasVideoBaseline,
+    vv?.SourceImageVersionId, iv?.Id, hasAnyImageSource);
+}
+
+async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  var metadata = ScenePromptMetadata.FromScene(scene);
+  // Persist the working prompt as a draft BEFORE submitting (reuse the canonical draft save).
+  if(!await SaveDraftOnlyAsync(scene, metadata)) return;
+  var estimate = await SceneImageRender.EstimateAsync(BuildImageRequest(scene, metadata));
+  var imageMessage = $"Scene {scene.SceneIndex:00}\nSố ảnh: 1\nDự kiến: {estimate.ImageRate:0.##} điểm\nĐiểm hiện có: {estimate.AvailablePoints:0.##} điểm";
+  // Mirror the legacy "Render lại hình" confirmation: block when points are missing, otherwise ask to confirm.
+  if(estimate.MissingPoints > 0)
+  {
+    await DialogService.ShowMessageBoxAsync("Render lại hình",
+      imageMessage + $"\nThiếu: {estimate.MissingPoints:0.##} điểm\n\nKhông đủ điểm để thực hiện.", cancelText: "Đóng");
+    return;
+  }
+  var confirm = await DialogService.ShowMessageBoxAsync("Render lại hình",
+    imageMessage + $"\nCòn lại dự kiến: {estimate.RemainingPoints:0.##} điểm",
+    yesText: "Xác nhận render lại", cancelText: "Hủy");
+  if(confirm != true) return;
+  if(!await _gate.WaitAsync(0)) { Snackbar.Add("Đang xử lý, vui lòng đợi.", Severity.Info); return; }
+  _busy = true; _rerenderingImage.Add(scene.Id);
+  try
+  {
+    var fresh = ReloadedScene(scene);
+    var res = await SceneImageRender.EnqueueRerenderAsync(BuildImageRequest(fresh, ScenePromptMetadata.FromScene(fresh)), AuthState.CurrentUser);
+    if(!res.Success){ Snackbar.Add(res.ErrorMessage ?? "Không thể render lại ảnh.", Severity.Error); return; }
+    if(res.AlreadyActive){ Snackbar.Add("Scene này đang có phiên bản ảnh được xử lý.", Severity.Info); return; }
+    Snackbar.Add($"Đã gửi render lại ảnh cho scene {scene.SceneIndex}.", Severity.Success);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+  }
+  finally { _busy = false; _rerenderingImage.Remove(scene.Id); _gate.Release(); }
+}
+async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  var metadata = ScenePromptMetadata.FromScene(scene);
+  if(!await SaveDraftOnlyAsync(scene, metadata)) return;
+  var estimate = await SceneVideoRender.EstimateAsync(BuildVideoRequest(scene, metadata));
+  var videoMessage = $"Scene {scene.SceneIndex:00}\nThời lượng: {scene.DurationSeconds:0.##} giây\nDự kiến: {estimate.EstimatedPoints:0.##} điểm\nĐiểm hiện có: {estimate.AvailablePoints:0.##} điểm";
+  // Mirror the legacy "Render lại video" confirmation: block when points are missing, otherwise ask to confirm.
+  if(estimate.MissingPoints > 0)
+  {
+    await DialogService.ShowMessageBoxAsync("Render lại video",
+      videoMessage + $"\nThiếu: {estimate.MissingPoints:0.##} điểm\n\nKhông đủ điểm để thực hiện.", cancelText: "Đóng");
+    return;
+  }
+  var confirm = await DialogService.ShowMessageBoxAsync("Render lại video",
+    videoMessage + $"\nCòn lại dự kiến: {estimate.RemainingPoints:0.##} điểm"
+      + (IsUnresolvedSubmit(scene) ? "\n\nCảnh báo: task cũ có thể vẫn tồn tại tại provider dù chưa có ID task. Render lại có thể tạo video trùng và phát sinh chi phí. Bạn có chắc muốn tạo attempt mới?" : string.Empty),
+    yesText: "Xác nhận render lại", cancelText: "Hủy");
+  if(confirm != true) return;
+  if(!await _gate.WaitAsync(0)) { Snackbar.Add("Đang xử lý, vui lòng đợi.", Severity.Info); return; }
+  _busy = true; _rerenderingVideo.Add(scene.Id);
+  try
+  {
+    var fresh = ReloadedScene(scene);
+    var res = await SceneVideoRender.EnqueueRerenderAsync(BuildVideoRequest(fresh, ScenePromptMetadata.FromScene(fresh)), AuthState.CurrentUser);
+    if(!res.Success){ Snackbar.Add(res.ErrorMessage ?? "Không thể render lại video.", Severity.Error); return; }
+    if(res.AlreadyActive){ Snackbar.Add("Scene này đang có job render video khác đang chạy.", Severity.Info); return; }
+    Snackbar.Add($"Đã gửi render lại video cho scene {scene.SceneIndex}.", Severity.Success);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+  }
+  finally { _busy = false; _rerenderingVideo.Remove(scene.Id); _gate.Release(); }
+}
+
+// Draft-only save (no output/status change) — used before a re-render submission so the new prompt
+// is persisted without touching the active output baseline.
+async Task<bool> SaveDraftOnlyAsync(VideoProjectSceneDto scene, ScenePromptMetadata metadata)
+{
+  if(AuthState.CurrentUser is null || JobView is null) return false;
+  var pre = SceneDraftValidator.Validate(metadata, scene.DurationSeconds);
+  if(!pre.IsValid){ Snackbar.Add(pre.ErrorMessage ?? "Validation failed.", Severity.Error); return false; }
+  var req = new VideoProjectSaveSceneDraftRequest{ SceneId=scene.Id, Status=scene.Status, Title=scene.Title, SceneIndex=scene.SceneIndex, ScenePrompt=metadata.Serialize(), ImagePrompt=metadata.ImagePrompt, VideoPrompt=metadata.MotionPrompt, ImageUrl=scene.StaticImageUrl, ImagePath=scene.StaticImagePath, VideoUrl=scene.SceneVideoUrl, VideoPath=scene.SceneVideoPath, DurationSeconds=scene.DurationSeconds, ErrorMessage=scene.ErrorMessage };
+  var res = await SceneDraftSave.SaveAsync(req, AuthState.CurrentUser.UserId, metadata);
+  if(!res.Success){ Snackbar.Add(res.ErrorMessage ?? "Không thể lưu scene.", Severity.Error); return false; }
+  return true;
+}
+
+VideoProjectSceneDto ReloadedScene(VideoProjectSceneDto scene)
+  => JobView?.Project.Scenes.FirstOrDefault(x=>x.Id==scene.Id) ?? scene;
+
+string ProjectAspectRatio()
+{
+  try { return new TodoXVideoPromptParser().Parse(JobView?.Project.OriginalPrompt ?? string.Empty).Model.AspectRatio ?? "9:16"; }
+  catch { return "9:16"; }
+}
+
+RVideoSceneImageRenderRequest BuildImageRequest(VideoProjectSceneDto scene, ScenePromptMetadata metadata)
+  => new(JobView!.Project.Id, scene, metadata, ProjectAspectRatio(), JobView.CoreJob.ServiceId, JobView.CoreJob.JobId);
+
+RVideoSceneVideoRenderRequest BuildVideoRequest(VideoProjectSceneDto scene, ScenePromptMetadata metadata)
+  => new(JobView!.Project.Id, scene, metadata, JobView.CoreJob.ServiceId);
+// === Scene media history (image / video) with strict type + ownership separation ===
+
+async Task OpenImageHistoryAsync(VideoProjectSceneDto scene)
+{
+  if(AuthState.CurrentUser is null) return;
+  IReadOnlyList<SceneImageVersionDto> versions;
+  try { versions = await SceneVersions.ListImageVersionsAsync(scene.Id, AuthState.CurrentUser); }
+  catch { Snackbar.Add("Không tải được lịch sử ảnh.", Severity.Error); return; }
+  var items = versions.Select(v => new TodoX.Web.Components.Dialogs.MediaHistoryItem
+  {
+    Key = v.Id.ToString(),
+    VersionLabel = $"Ảnh v{v.VersionNumber}",
+    Title = $"Scene {scene.SceneIndex} · ảnh v{v.VersionNumber}",
+    Status = v.Status,
+    StatusColor = StatusColorFor(v.Status),
+    CreatedAt = v.CreatedAt,
+    IsSelected = v.IsSelected,
+    CanSelect = string.Equals(v.Status, "completed", StringComparison.OrdinalIgnoreCase),
+    IsVideo = false,
+    MediaUrl = v.PublicUrl,
+    Prompt = v.ImagePromptSnapshot
+  }).ToList();
+  var p = new DialogParameters{ ["Title"]="Lịch sử ảnh", ["Items"]=items };
+  var dlg = await DialogService.ShowAsync<TodoX.Web.Components.Dialogs.MediaHistoryDialog>("Lịch sử ảnh", p, new DialogOptions{ CloseButton=true, MaxWidth=MaxWidth.Medium, FullWidth=true });
+  var result = await dlg.Result;
+  if(result is null || result.Canceled || result.Data is not string key || !Guid.TryParse(key, out var versionId)) return;
+  await SelectImageVersionAsync(scene, versionId);
+}
+
+async Task OpenVideoHistoryAsync(VideoProjectSceneDto scene)
+{
+  if(AuthState.CurrentUser is null) return;
+  IReadOnlyList<SceneVideoVersionDto> versions;
+  try { versions = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser); }
+  catch { Snackbar.Add("Không tải được lịch sử video.", Severity.Error); return; }
+  var items = versions.Select(v => new TodoX.Web.Components.Dialogs.MediaHistoryItem
+  {
+    Key = v.Id.ToString(),
+    VersionLabel = $"Video v{v.VersionNumber}",
+    Title = $"Scene {scene.SceneIndex} · video v{v.VersionNumber}",
+    Status = v.Status,
+    StatusColor = StatusColorFor(v.Status),
+    CreatedAt = v.CreatedAt,
+    IsSelected = v.IsSelected,
+    CanSelect = string.Equals(v.Status, "completed", StringComparison.OrdinalIgnoreCase),
+    IsVideo = true,
+    MediaUrl = v.PublicUrl ?? v.PosterUrl,
+    Prompt = v.VideoPromptSnapshot
+  }).ToList();
+  var p = new DialogParameters{ ["Title"]="Lịch sử video", ["Items"]=items };
+  var dlg = await DialogService.ShowAsync<TodoX.Web.Components.Dialogs.MediaHistoryDialog>("Lịch sử video", p, new DialogOptions{ CloseButton=true, MaxWidth=MaxWidth.Medium, FullWidth=true });
+  var result = await dlg.Result;
+  if(result is null || result.Canceled || result.Data is not string key || !Guid.TryParse(key, out var versionId)) return;
+  await SelectVideoVersionAsync(scene, versionId);
+}
+
+async Task SelectImageVersionAsync(VideoProjectSceneDto scene, Guid versionId)
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  // If the working prompt differs from the active baseline, confirm before switching (avoid silently
+  // dropping unsaved draft edits).
+  if(CanRerenderImage(scene))
+  {
+    var keep = await DialogService.ShowMessageBoxAsync("Chọn phiên bản ảnh",
+      "Bạn đang có thay đổi prompt ảnh chưa render. Chọn phiên bản khác sẽ cập nhật baseline theo phiên bản đã chọn.",
+      yesText: "Tiếp tục", cancelText: "Hủy");
+    if(keep != true) return;
+  }
+  if(!await _gate.WaitAsync(0)) return;
+  _busy = true;
+  try
+  {
+    await SceneVersions.SelectImageVersionAsync(scene.Id, versionId, AuthState.CurrentUser);
+    Snackbar.Add("Đã chọn phiên bản ảnh đang dùng.", Severity.Success);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+  }
+  finally { _busy = false; _gate.Release(); }
+}
+
+async Task SelectVideoVersionAsync(VideoProjectSceneDto scene, Guid versionId)
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  if(CanRerenderVideo(scene))
+  {
+    var keep = await DialogService.ShowMessageBoxAsync("Chọn phiên bản video",
+      "Bạn đang có thay đổi prompt video chưa render. Chọn phiên bản khác sẽ cập nhật baseline theo phiên bản đã chọn.",
+      yesText: "Tiếp tục", cancelText: "Hủy");
+    if(keep != true) return;
+  }
+  if(!await _gate.WaitAsync(0)) return;
+  _busy = true;
+  try
+  {
+    await SceneVersions.SelectSceneVideoVersionAsync(scene.Id, versionId, AuthState.CurrentUser);
+    Snackbar.Add("Đã chọn phiên bản video đang dùng.", Severity.Success);
+    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+  }
+  finally { _busy = false; _gate.Release(); }
+}
+
+static Color StatusColorFor(string s)
+  => string.Equals(s,"completed",StringComparison.OrdinalIgnoreCase) ? Color.Success
+   : string.Equals(s,"failed",StringComparison.OrdinalIgnoreCase) ? Color.Error
+   : (_pendingFor(s) ? Color.Warning : Color.Default);
+static bool _pendingFor(string s)
+  => string.Equals(s,"queued",StringComparison.OrdinalIgnoreCase)
+  || string.Equals(s,"submitted",StringComparison.OrdinalIgnoreCase)
+  || string.Equals(s,"rendering",StringComparison.OrdinalIgnoreCase)
+  || string.Equals(s,"pending_reconciliation",StringComparison.OrdinalIgnoreCase);
+
 public void Dispose(){ _gate.Dispose(); }
 }

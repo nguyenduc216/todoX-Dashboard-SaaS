@@ -43,6 +43,7 @@ public static class RVideoMusicModes
 public sealed class RVideoJobSettingsDto
 {
     public long ProjectId { get; set; }
+    public bool CreativeMode { get; set; }
     public string ExecutionMode { get; set; } = RVideoExecutionModes.Manual;
     public string CurrentStage { get; set; } = RVideoStages.Info;
     public bool SkipCharacter { get; set; }
@@ -63,6 +64,8 @@ public sealed class RVideoJobSettingsDto
 
 public sealed class RVideoJobSettingsRequest
 {
+    // Null means an older/unrelated settings writer must preserve the existing mode.
+    public bool? CreativeMode { get; set; }
     public string ExecutionMode { get; set; } = RVideoExecutionModes.Manual;
     public bool SkipCharacter { get; set; }
     public bool UseReferenceImageForAllScenes { get; set; }

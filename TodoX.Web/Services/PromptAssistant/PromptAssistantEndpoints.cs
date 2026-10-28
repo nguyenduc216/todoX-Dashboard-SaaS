@@ -54,14 +54,14 @@ public static class PromptAssistantEndpoints
     internal static string BuildAgentInput(PromptAssistantGenerateRequest request)
     {
         var userInput = request.UserInput;
-        const string productionContract = "Every image_prompt and motion_prompt must contain complete, non-empty production instructions grounded in the source. Never return empty scenes, blank prompts, placeholders or a draft skeleton. Include concrete subject, action, location and camera direction in the prompts. Preserve the existing schema and fill its production fields with actual content.";
+        const string productionContract = "Every image_prompt and motion_prompt must contain complete, non-empty production instructions grounded in the user's constraints. Never return empty scenes, blank prompts, placeholders or a draft skeleton. Include concrete subject, action, location and camera direction in the prompts. Preserve the existing schema and fill its production fields with actual content.";
         if (request.CreativeMode)
         {
             var targetDuration = request.Duration!.Value;
             return $"""
                 CONTENT MODE: CREATIVE
                 {productionContract}
-                Treat the user's text as an idea or brief. You may create a hook, develop the content, add insight, conclusion, and a suitable call to action, and plan the scenes and narration.
+                Treat the user's text as a creative brief, not as narration to reproduce verbatim. You may create a hook and develop a complete fictional story with scenes, dialogue, camera direction and visual effects where appropriate. A call to action is optional unless the user or an applicable business template requires one. Do not ask for confirmation when the brief is sufficient to create a story. If the user explicitly requires verbatim narration, preserve that wording and do not invent additional spoken lines. Do not invent unverified factual claims from source material.
                 The user requests a target video duration of {targetDuration} seconds. Choose the scene count yourself; do not use a fixed scene count.
                 Keep every scene duration_seconds an integer from 4 through 8 inclusive. Get the total as close to the target as possible while prioritizing coherent content, semantic scene boundaries, and valid scene durations. Never create a scene outside that range. Set the root duration to the sum of scene durations.
 

@@ -316,7 +316,7 @@ else
 
                                         <MudStack Spacing="2">
 
-                                            <MudCheckBox T="bool" @bind-Value="_aiPromptCreativeMode" Color="Color.Warning" Label="TodoX sáng tạo nội dung" />
+                                            <MudCheckBox T="bool" @bind-Value="_aiPromptCreativeMode" @bind-Value:after="OnCreativeModeChanged" Color="Color.Warning" Label="TodoX sáng tạo nội dung" />
 
                                             <div class="prompt-input-toolbar">
 
@@ -1619,6 +1619,15 @@ else
     private int _aiCustomDuration = 12;
 
     private bool _aiPromptCreativeMode;
+
+    private bool _creativeModeDirty;
+
+    private long? _creativeModeProjectId;
+
+    private void OnCreativeModeChanged()
+    {
+        _creativeModeDirty = true;
+    }
 
     private string _characterPrompt = string.Empty;
 
@@ -4869,6 +4878,8 @@ else
         _aiPromptInput = string.Empty;
 
         _aiPromptCreativeMode = false;
+        _creativeModeDirty = false;
+        _creativeModeProjectId = null;
 
         _aiDuration = 8;
 
@@ -6827,6 +6838,10 @@ else
 
                 _resolutionDirty = false;
 
+                _creativeModeDirty = false;
+
+                _creativeModeProjectId = created.ProjectId;
+
                 await ReloadAsync();
 
                 if (showSuccessMessage) Snackbar.Add("Đã lưu RVIDEO job.", Severity.Success);
@@ -6897,6 +6912,9 @@ else
 
             await RVideoSettings.SaveAsync(_project.Id, settingsRequest);
 
+            if (_creativeModeProjectId == _project.Id && _aiPromptCreativeMode == settingsRequest.CreativeMode)
+                _creativeModeDirty = false;
+
             if (_jobId is Guid jobId)
 
             {
@@ -6966,6 +6984,8 @@ else
         => new()
 
         {
+
+            CreativeMode = _aiPromptCreativeMode,
 
             ExecutionMode = _executionMode,
 
@@ -7084,6 +7104,18 @@ else
         {
 
             var settings = await RVideoSettings.GetAsync(projectId);
+
+            if (_project?.Id != projectId)
+                return;
+
+            if (_creativeModeProjectId != projectId)
+            {
+                _creativeModeProjectId = projectId;
+                _creativeModeDirty = false;
+            }
+
+            if (!_creativeModeDirty)
+                _aiPromptCreativeMode = settings?.CreativeMode ?? false;
 
             _executionMode = RVideoRules.NormalizeExecutionMode(settings?.ExecutionMode);
 

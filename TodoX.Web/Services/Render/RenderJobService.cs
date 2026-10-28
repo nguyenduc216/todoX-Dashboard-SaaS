@@ -20,6 +20,8 @@ public interface IRenderJobService
 
     Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default);
     Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default);
+    Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueGuardedVideoRerenderAsync(RenderJobCreateModel model, long projectId, long sceneId, Guid? acknowledgedVersionId, Guid? acknowledgedRenderJobId, bool explicitRiskAcknowledgement, CancellationToken ct = default)
+        => throw new NotSupportedException("Guarded video rerender requires the canonical database implementation.");
 
     Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default);
     Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default);
@@ -34,6 +36,9 @@ public interface IRenderJobService
     Task<RenderJobDto?> ClaimNextByJobTypeAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> jobTypes, CancellationToken ct = default);
     Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default);
     Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default);
+    Task MarkSceneVideoClaimRenderingAsync(RenderJobDto claim, string workerKey, CancellationToken ct = default);
+    Task VerifySceneVideoSubmitClaimAsync(RenderJobDto claim, Guid versionId, string logicalRequestId, CancellationToken ct = default);
+    Task<bool> QuarantineRejectedSceneVideoClaimAsync(RenderJobDto claim, string workerKey, string reason, CancellationToken ct = default);
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
     Task<bool> ScheduleProviderPollAsync(
         Guid jobId,
@@ -346,6 +351,14 @@ public sealed class RenderJobService : IRenderJobService
     }
 
     public async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default)
+        => await EnqueueSceneCoreAsync(model, sceneId, logicalRequestId, null, ct);
+
+    public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueGuardedVideoRerenderAsync(RenderJobCreateModel model, long projectId, long sceneId, Guid? acknowledgedVersionId, Guid? acknowledgedRenderJobId, bool explicitRiskAcknowledgement, CancellationToken ct = default)
+        => EnqueueSceneCoreAsync(model, sceneId, null, new VideoRerenderGuard(projectId, acknowledgedVersionId, acknowledgedRenderJobId, explicitRiskAcknowledgement), ct);
+
+    private sealed record VideoRerenderGuard(long ProjectId, Guid? VersionId, Guid? JobId, bool RiskAcknowledged);
+
+    private async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueSceneCoreAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId, VideoRerenderGuard? guard, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(model.JobType))
         {
@@ -365,6 +378,40 @@ public sealed class RenderJobService : IRenderJobService
             "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
             new { lockName = BuildSceneJobLockName(jobType, sceneId, requestId) },
             tx);
+
+        if (guard is not null)
+        {
+            if (jobType != "render_video_batch")
+                throw new InvalidOperationException("Video rerender guard requires a video job.");
+
+            var authorizedScene = await conn.ExecuteScalarAsync<long?>(
+                """
+                SELECT id FROM video_render.video_project_scenes
+                 WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """, new { sceneId, projectId = guard.ProjectId, tenant = _tenant.TenantId }, tx);
+            if (authorizedScene is null)
+                throw new InvalidOperationException("RVIDEO_SCENE_REQUIRED: Scene is unavailable; refresh and confirm again.");
+
+            var latest = await conn.QuerySingleOrDefaultAsync<(Guid Id, string Status, Guid? RenderJobId)>(
+                """
+                SELECT id, status, render_job_id AS RenderJobId
+                  FROM video_render.scene_video_versions
+                 WHERE tenant_id=@tenant AND project_id=@projectId AND scene_id=@sceneId
+                 ORDER BY version_number DESC LIMIT 1;
+                """, new { sceneId, projectId = guard.ProjectId, tenant = _tenant.TenantId }, tx);
+
+            if (latest.Id == Guid.Empty && (guard.VersionId is not null || guard.JobId is not null))
+                throw new InvalidOperationException("RVIDEO_ACK_STALE: Video attempt changed; refresh and confirm again.");
+            if (latest.Id != Guid.Empty &&
+                (guard.VersionId != latest.Id || guard.JobId != latest.RenderJobId))
+                throw new InvalidOperationException("RVIDEO_ACK_STALE: Video attempt changed; refresh and confirm again.");
+
+            // Writer coverage for provider/job progress is not complete. Even an acknowledged
+            // UNKNOWN cannot safely be released until every progress writer shares this lock.
+            if (latest.Id != Guid.Empty && string.Equals(latest.Status, "pending_reconciliation", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("RVIDEO_SUBMIT_RECONCILIATION_PENDING: Prior submission requires reconciliation.");
+        }
 
         var active = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
             SelectJobSql +
@@ -773,7 +820,8 @@ public sealed class RenderJobService : IRenderJobService
     {
         var dbStatus = NormalizeStatus(status);
         using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
+        using var sceneTx = await BeginSceneVideoWriterAsync(conn, jobId, ct, allowPreDispatch: dbStatus == RenderJobStatuses.Rendering);
+        var updated = await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
                SET status=@status,
@@ -793,15 +841,108 @@ public sealed class RenderJobService : IRenderJobService
                    END,
                    cancelled_at = CASE WHEN @status='cancelled' THEN now() ELSE cancelled_at END,
                    updated_at=now()
-             WHERE id=@jobId;
+             WHERE id=@jobId
+               AND (@sceneVideo=false OR (tenant_id=@tenant AND job_type='render_scene_video'
+                    AND status IN ('queued','preparing','rendering','post_processing','pending_reconciliation')
+                    AND (@status <> 'rendering' OR status IN ('preparing','rendering'))));
             """,
-            new { jobId, status = dbStatus, output = output is null ? null : ToJson(output), errorCode, errorMessage });
+            new
+            {
+                jobId,
+                status = dbStatus,
+                output = output is null ? null : ToJson(output),
+                errorCode,
+                errorMessage,
+                sceneVideo = sceneTx is not null,
+                tenant = _tenant.TenantId
+            }, sceneTx);
+        if (sceneTx is not null && updated != 1)
+            throw new InvalidOperationException("RVIDEO_JOB_STATUS_REJECTED");
+        sceneTx?.Commit();
 
         var level = dbStatus == RenderJobStatuses.Failed ? "error"
             : dbStatus == RenderJobStatuses.Cancelled || dbStatus == RenderJobStatuses.PendingReconciliation ? "warning"
             : "info";
         await AddEventAsync(jobId, "JOB_STATUS_CHANGED", $"Render job status changed to {dbStatus}.",
             new { status = dbStatus, errorCode, errorMessage }, level, ct);
+    }
+
+    public async Task MarkSceneVideoClaimRenderingAsync(RenderJobDto claim, string workerKey, CancellationToken ct = default)
+    {
+        if (claim.JobType != RenderJobTypes.RenderSceneVideo || string.IsNullOrWhiteSpace(workerKey)
+            || claim.WorkerKey != workerKey || claim.AttemptCount <= 0)
+            throw new InvalidOperationException("RVIDEO_JOB_CALLER_OWNERSHIP_LOST");
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = await BeginSceneVideoWriterAsync(conn, claim.Id, ct, allowPreDispatch: true);
+        if (tx is null) throw new InvalidOperationException("RVIDEO_JOB_CALLER_OWNERSHIP_LOST");
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs SET status='rendering', updated_at=now()
+             WHERE id=@id AND tenant_id=@tenant AND job_type='render_scene_video'
+               AND status='preparing' AND worker_key=@workerKey AND lock_owner=@workerKey
+               AND attempt_count=@attempt AND lock_until > now();
+            """, new { id = claim.Id, tenant = _tenant.TenantId, workerKey, attempt = claim.AttemptCount }, tx);
+        if (changed != 1) throw new InvalidOperationException("RVIDEO_JOB_CALLER_OWNERSHIP_LOST");
+        tx.Commit();
+        await AddEventAsync(claim.Id, "JOB_STATUS_CHANGED", "Render job status changed to rendering.", new { status = RenderJobStatuses.Rendering }, ct: ct);
+    }
+
+    public async Task VerifySceneVideoSubmitClaimAsync(RenderJobDto claim, Guid versionId, string logicalRequestId, CancellationToken ct = default)
+    {
+        if (claim.JobType != RenderJobTypes.RenderSceneVideo || string.IsNullOrWhiteSpace(claim.WorkerKey)
+            || claim.AttemptCount <= 0 || versionId == Guid.Empty || string.IsNullOrWhiteSpace(logicalRequestId))
+            throw new InvalidOperationException("RVIDEO_JOB_CALLER_OWNERSHIP_LOST");
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = await BeginSceneVideoWriterAsync(conn, claim.Id, ct);
+        if (tx is null) throw new InvalidOperationException("RVIDEO_JOB_CALLER_OWNERSHIP_LOST");
+        var valid = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (SELECT 1 FROM render.render_jobs j
+              JOIN video_render.scene_video_versions v ON v.render_job_id=j.id
+             WHERE j.id=@id AND j.tenant_id=@tenant AND j.job_type='render_scene_video'
+               AND j.status='rendering' AND j.worker_key=@workerKey AND j.lock_owner=@workerKey
+               AND j.attempt_count=@attempt AND j.lock_until > now()
+               AND j.provider_task_id IS NULL AND j.provider_video_id_base IS NULL
+               AND v.id=@versionId AND v.tenant_id=j.tenant_id
+               AND v.project_id=(j.input_json->>'projectId')::bigint
+               AND v.scene_id=(j.input_json->>'sceneId')::bigint
+               AND v.logical_request_id=@logicalRequestId
+               AND v.logical_request_id <> ''
+               AND v.id=(SELECT id FROM video_render.scene_video_versions latest
+                         WHERE latest.tenant_id=j.tenant_id AND latest.scene_id=v.scene_id
+                           AND latest.project_id=v.project_id ORDER BY version_number DESC LIMIT 1));
+            """, new
+            {
+                id = claim.Id,
+                tenant = _tenant.TenantId,
+                workerKey = claim.WorkerKey,
+                attempt = claim.AttemptCount,
+                versionId,
+                logicalRequestId
+            }, tx);
+        if (!valid) throw new InvalidOperationException("RVIDEO_JOB_CALLER_OWNERSHIP_LOST");
+        tx.Commit();
+    }
+
+    public async Task<bool> QuarantineRejectedSceneVideoClaimAsync(RenderJobDto claim, string workerKey, string reason, CancellationToken ct = default)
+    {
+        if (claim.JobType != RenderJobTypes.RenderSceneVideo || string.IsNullOrWhiteSpace(workerKey)
+            || claim.WorkerKey != workerKey || claim.AttemptCount <= 0) return false;
+        using var conn = await _factory.OpenAsync(ct);
+        // Conditional UPDATE does not touch a newer attempt or another worker's lease.
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs SET status='pending_reconciliation',
+                   error_code=@reason, error_message='Scene video claim rejected; manual reconciliation required.',
+                   retry_after=NULL, lock_owner=NULL, lock_until=NULL, updated_at=now()
+             WHERE id=@id AND tenant_id=@tenant AND job_type='render_scene_video'
+               AND status='preparing' AND worker_key=@workerKey AND lock_owner=@workerKey
+               AND attempt_count=@attempt AND provider_task_id IS NULL AND provider_video_id_base IS NULL;
+            """, new { id = claim.Id, tenant = _tenant.TenantId, workerKey, attempt = claim.AttemptCount, reason });
+        if (changed == 1)
+            await AddEventAsync(claim.Id, "JOB_PENDING_RECONCILIATION", "Scene video claim rejected; manual reconciliation required.",
+                new { claim.AttemptCount, reason }, "warning", ct);
+        return changed == 1;
     }
 
     private static string NormalizeStatus(string status)
@@ -905,6 +1046,7 @@ public sealed class RenderJobService : IRenderJobService
         bool enforceProviderPollTimeout = false)
     {
         using var conn = await _factory.OpenAsync(ct);
+        using var sceneTx = await BeginSceneVideoWriterAsync(conn, jobId, ct);
         var delaySeconds = Math.Max(1, (int)delay.TotalSeconds);
         var changed = await conn.ExecuteAsync(
             """
@@ -926,6 +1068,7 @@ public sealed class RenderJobService : IRenderJobService
                    lock_until=NULL,
                    updated_at=now()
              WHERE id=@jobId
+               AND (@sceneVideo=false OR (tenant_id=@tenant AND job_type='render_scene_video' AND status <> 'failed'))
                AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
                AND (@enforceReconciliationLimit = false
                     OR COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) < @maxReconciliationRetries)
@@ -943,8 +1086,11 @@ public sealed class RenderJobService : IRenderJobService
                 maxReconciliationRetries = GetMaxProviderPolls(),
                 providerPollTimeoutMinutes = GetProviderPollTimeoutMinutes(),
                 enforceReconciliationLimit,
-                enforceProviderPollTimeout
-            });
+                enforceProviderPollTimeout,
+                sceneVideo = sceneTx is not null,
+                tenant = _tenant.TenantId
+            }, sceneTx);
+        sceneTx?.Commit();
 
         if (changed <= 0)
         {
@@ -968,6 +1114,7 @@ public sealed class RenderJobService : IRenderJobService
         CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
+        using var sceneTx = await BeginSceneVideoWriterAsync(conn, jobId, ct);
         var delaySeconds = Math.Max(1, (int)delay.TotalSeconds);
         var changed = await conn.ExecuteAsync(
             """
@@ -989,11 +1136,21 @@ public sealed class RenderJobService : IRenderJobService
                    lock_until=NULL,
                    updated_at=now()
              WHERE id=@jobId
+               AND (@sceneVideo=false OR (tenant_id=@tenant AND job_type='render_scene_video' AND status <> 'failed'))
                AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
                AND (retry_after IS NULL OR retry_after <= now())
                AND (lock_until IS NULL OR lock_until <= now());
             """,
-            new { jobId, delaySeconds, reasonCode, reasonMessage });
+            new
+            {
+                jobId,
+                delaySeconds,
+                reasonCode,
+                reasonMessage,
+                sceneVideo = sceneTx is not null,
+                tenant = _tenant.TenantId
+            }, sceneTx);
+        sceneTx?.Commit();
 
         if (changed <= 0)
         {
@@ -1008,18 +1165,148 @@ public sealed class RenderJobService : IRenderJobService
     }
 
 
+    private async Task<System.Data.IDbTransaction?> BeginSceneVideoWriterAsync(System.Data.IDbConnection conn, Guid jobId, CancellationToken ct, bool allowPreDispatch = false)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        // Identity lookup deliberately does not hold a job row lock while waiting for the scene lock.
+        var identity = await conn.QuerySingleOrDefaultAsync<(string JobType, bool TenantOwned, long? ProjectId, long? SceneId)>(
+            """
+            SELECT job_type AS JobType,
+                   tenant_id=@tenant AS TenantOwned,
+                   CASE WHEN input_json->>'projectId' ~ '^[0-9]+$' THEN (input_json->>'projectId')::bigint END AS ProjectId,
+                   CASE WHEN input_json->>'sceneId' ~ '^[0-9]+$' THEN (input_json->>'sceneId')::bigint END AS SceneId
+              FROM render.render_jobs WHERE id=@jobId;
+            """, new { jobId, tenant = _tenant.TenantId });
+        if (identity.JobType != RenderJobTypes.RenderSceneVideo)
+            return null;
+        if (!identity.TenantOwned)
+            throw new InvalidOperationException("RVIDEO_JOB_SCENE_IDENTITY_REQUIRED");
+        if (identity.ProjectId is null || identity.SceneId is null)
+            throw new InvalidOperationException("RVIDEO_JOB_SCENE_IDENTITY_REQUIRED");
+
+        var tx = conn.BeginTransaction();
+        try
+        {
+            await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+                new { lockName = BuildSceneJobLockName(identity.JobType, identity.SceneId.Value) }, tx);
+            var scene = await conn.ExecuteScalarAsync<long?>(
+                "SELECT id FROM video_render.video_project_scenes WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant FOR UPDATE;",
+                new { sceneId = identity.SceneId, projectId = identity.ProjectId, tenant = _tenant.TenantId }, tx);
+            if (scene is null)
+                throw new InvalidOperationException("RVIDEO_JOB_SCENE_IDENTITY_REQUIRED");
+
+            var owned = await conn.ExecuteScalarAsync<bool>(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM render.render_jobs j
+                    JOIN video_render.scene_video_versions v ON v.render_job_id=j.id
+                    WHERE j.id=@jobId AND j.tenant_id=@tenant AND j.job_type='render_scene_video'
+                      AND j.input_json->>'projectId'=@projectId AND j.input_json->>'sceneId'=@sceneId
+                      AND v.tenant_id=j.tenant_id AND v.project_id=@projectId::bigint
+                      AND v.scene_id=@sceneId::bigint
+                      AND v.logical_request_id=j.input_json->>'logicalRequestId'
+                      AND v.id=(SELECT id FROM video_render.scene_video_versions
+                                WHERE tenant_id=@tenant AND project_id=@projectId::bigint
+                                  AND scene_id=@sceneId::bigint ORDER BY version_number DESC LIMIT 1)
+                );
+                """, new
+                {
+                    jobId,
+                    tenant = _tenant.TenantId,
+                    projectId = identity.ProjectId.Value.ToString(),
+                    sceneId = identity.SceneId.Value.ToString()
+                }, tx);
+            if (!owned && allowPreDispatch)
+            {
+                owned = await conn.ExecuteScalarAsync<bool>(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM render.render_jobs j
+                        WHERE j.id=@jobId AND j.tenant_id=@tenant AND j.job_type='render_scene_video'
+                          AND j.status='preparing' AND j.lock_owner IS NOT NULL
+                          AND j.worker_key=j.lock_owner AND j.lock_until > now()
+                          AND j.provider_task_id IS NULL AND j.provider_video_id_base IS NULL
+                          AND j.attempt_count > 0 AND j.attempt_count <= j.max_attempts
+                          AND j.input_json->>'projectId'=@projectId
+                          AND j.input_json->>'sceneId'=@sceneId
+                          AND NULLIF(j.input_json->>'logicalRequestId', '') IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM video_render.scene_video_versions v
+                              WHERE v.tenant_id=@tenant AND v.project_id=@projectId::bigint
+                                AND v.scene_id=@sceneId::bigint)
+                          AND NOT EXISTS (
+                              SELECT 1 FROM render.render_jobs newer
+                              WHERE newer.tenant_id=@tenant AND newer.job_type='render_scene_video'
+                                AND newer.input_json->>'projectId'=@projectId
+                                AND newer.input_json->>'sceneId'=@sceneId
+                                AND newer.id <> j.id
+                                AND (newer.created_at, newer.id) > (j.created_at, j.id))
+                    );
+                    """, new
+                    {
+                        jobId,
+                        tenant = _tenant.TenantId,
+                        projectId = identity.ProjectId.Value.ToString(),
+                        sceneId = identity.SceneId.Value.ToString()
+                    }, tx);
+            }
+            if (!owned)
+                throw new InvalidOperationException("RVIDEO_JOB_VERSION_OWNERSHIP_REQUIRED");
+            return tx;
+        }
+        catch
+        {
+            tx.Dispose();
+            throw;
+        }
+    }
+
     public async Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default)
     {
+        await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var identity = await conn.QuerySingleOrDefaultAsync<(string JobType, long? ProjectId, long? SceneId)>(
+            """
+            SELECT job_type AS JobType,
+                   CASE WHEN input_json->>'projectId' ~ '^[0-9]+$' THEN (input_json->>'projectId')::bigint END AS ProjectId,
+                   CASE WHEN input_json->>'sceneId' ~ '^[0-9]+$' THEN (input_json->>'sceneId')::bigint END AS SceneId
+              FROM render.render_jobs WHERE id=@jobId AND tenant_id=@tenant;
+            """, new { jobId, tenant = _tenant.TenantId }, tx);
+        if (identity.JobType == "render_video_batch")
+        {
+            if (identity.ProjectId is null || identity.SceneId is null)
+                throw new InvalidOperationException("RVIDEO_JOB_SCENE_IDENTITY_REQUIRED");
+
+            await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+                new { lockName = BuildSceneJobLockName(identity.JobType, identity.SceneId.Value) }, tx);
+            var authorized = await conn.ExecuteScalarAsync<long?>(
+                "SELECT id FROM video_render.video_project_scenes WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant FOR UPDATE;",
+                new { sceneId = identity.SceneId, projectId = identity.ProjectId, tenant = _tenant.TenantId }, tx);
+            if (authorized is null)
+                throw new InvalidOperationException("RVIDEO_JOB_SCENE_IDENTITY_REQUIRED");
+        }
+
         await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
                SET provider_task_id=@providerTaskId,
                    provider_video_id_base=@providerVideoIdBase,
                    updated_at=now()
-             WHERE id=@jobId;
+             WHERE id=@jobId AND tenant_id=@tenant
+               AND (@sceneId IS NULL OR
+                    (job_type='render_video_batch' AND input_json->>'sceneId'=@sceneId AND input_json->>'projectId'=@projectId));
             """,
-            new { jobId, providerTaskId, providerVideoIdBase });
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                providerTaskId,
+                providerVideoIdBase,
+                sceneId = identity.JobType == "render_video_batch" ? identity.SceneId?.ToString() : null,
+                projectId = identity.JobType == "render_video_batch" ? identity.ProjectId?.ToString() : null
+            }, tx);
+        tx.Commit();
     }
 
     public async Task<bool> MarkRecoveredCompletedAsync(
@@ -1032,6 +1319,15 @@ public sealed class RenderJobService : IRenderJobService
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = BuildSceneJobLockName("render_scene_video", sceneId) }, tx);
+        var authorizedScene = await conn.ExecuteScalarAsync<long?>(
+            "SELECT id FROM video_render.video_project_scenes WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant FOR UPDATE;",
+            new { sceneId, projectId, tenant = _tenant.TenantId }, tx);
+        if (authorizedScene is null)
+            throw new InvalidOperationException("RVIDEO_JOB_SCENE_IDENTITY_REQUIRED");
+
         var changed = await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs j
@@ -1096,7 +1392,8 @@ public sealed class RenderJobService : IRenderJobService
                 sceneId = sceneId.ToString(),
                 sceneVideoVersionId,
                 logicalRequestId
-            });
+            }, tx);
+        tx.Commit();
 
         if (changed > 0)
         {

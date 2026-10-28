@@ -57,12 +57,12 @@ public sealed class RVideoJobSettingsRepository
                 (project_id, tenant_id, execution_mode, current_stage, skip_character, use_reference_image_for_all_scenes, character_mode,
                  selected_character_id, character_snapshot_json, voice_mode, voice_catalog_code,
                  voice_snapshot_json, default_tts_rate, music_catalog_code, music_snapshot_json, music_volume,
-                 created_at, updated_at)
+                 creative_mode, created_at, updated_at)
             VALUES
                 (@projectId, @tenant, @executionMode, 'INFO', @skipCharacter, @useReferenceImageForAllScenes, @characterMode,
                  @selectedCharacterId, CAST(@characterSnapshot AS jsonb), @voiceMode, @voiceCatalogCode,
                  CAST(@voiceSnapshot AS jsonb), @defaultTtsRate, @musicCatalogCode, CAST(@musicSnapshot AS jsonb), @musicVolume,
-                 now(), now())
+                  COALESCE(@CreativeMode, false), now(), now())
             ON CONFLICT (project_id) DO UPDATE SET
                 execution_mode=EXCLUDED.execution_mode,
                 skip_character=EXCLUDED.skip_character,
@@ -77,6 +77,7 @@ public sealed class RVideoJobSettingsRepository
                 music_catalog_code=EXCLUDED.music_catalog_code,
                 music_snapshot_json=EXCLUDED.music_snapshot_json,
                 music_volume=EXCLUDED.music_volume,
+                creative_mode=COALESCE(@CreativeMode, video_render.rvideo_job_settings.creative_mode),
                 updated_at=now()
             WHERE video_render.rvideo_job_settings.tenant_id = EXCLUDED.tenant_id
             RETURNING project_id;
@@ -97,7 +98,8 @@ public sealed class RVideoJobSettingsRepository
                 request.DefaultTtsRate,
                 request.MusicCatalogCode,
                 musicSnapshot = JsonSerializer.Serialize(request.MusicSnapshot ?? new { }, JsonOptions),
-                request.MusicVolume
+                request.MusicVolume,
+                request.CreativeMode
             });
 
         if (upsertedProjectId is null)
@@ -118,7 +120,7 @@ public sealed class RVideoJobSettingsRepository
     }
 
     private const string SelectSql = """
-        SELECT project_id AS ProjectId, execution_mode AS ExecutionMode, current_stage AS CurrentStage,
+        SELECT project_id AS ProjectId, creative_mode AS CreativeMode, execution_mode AS ExecutionMode, current_stage AS CurrentStage,
                skip_character AS SkipCharacter, use_reference_image_for_all_scenes AS UseReferenceImageForAllScenes,
                character_mode AS CharacterMode, selected_character_id AS SelectedCharacterId,
                character_snapshot_json::text AS CharacterSnapshotJson, voice_mode AS VoiceMode,
