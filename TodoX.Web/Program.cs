@@ -48,6 +48,8 @@ builder.Services.AddScoped<NavigationMenuRepository>();
 builder.Services.AddScoped<LandingContactLeadRepository>();
 builder.Services.AddScoped<LandingIndustrySolutionRepository>();
 builder.Services.AddScoped<LandingIndustryMediaService>();
+builder.Services.AddScoped<LandingIntroVideoRepository>();
+builder.Services.AddScoped<LandingIntroVideoMediaService>();
 builder.Services.AddSingleton<SharedMediaPathService>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddScoped<AuditRepository>();
