@@ -9,111 +9,140 @@
 <PageTitle>RVideo V2 — TodoX</PageTitle>
 
 <div class="rv2-shell">
-    @* RVID-UI-V2-PHASE3A.1: the redundant top job-heading block (title + edit/menu + id/service/status)
-       was removed so the V2 route no longer renders a duplicate job heading above the navigation.
-       The editable "Tiêu đề" field lives in the THÔNG TIN tab; the compact back affordance stays here. *@
-    <div class="rv2-header">
-        <div class="rv2-nav-row">
-            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="GoBackLegacy" aria-label="Quay lại" title="Quay lại" />
-            <MudTabs Class="rv2-tabs" Rounded="true" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_tabIndex">
-                <MudTabPanel Text="THÔNG TIN" />
-                <MudTabPanel Text="XEM TRƯỚC" />
-                <MudTabPanel Text="KẾT QUẢ" />
-            </MudTabs>
-        </div>
-        <MudHidden Breakpoint="Breakpoint.MdAndUp">
-            <div class="rv2-mobile-techbar">
-                <span>@AspectRatio | @Resolution | @TotalSeconds giây | @SceneCount scene</span>
+    <header class="rv2-header">
+        <div class="rv2-title-row">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="GoBackLegacy" aria-label="Quay lại giao diện cũ" title="Quay lại giao diện cũ" />
+            <div class="rv2-title">
+                <span class="rv2-title-text">@(_jobView?.Project.Title is { Length: > 0 } t ? t : "RVideo")</span>
+                @if (_jobView is not null)
+                {
+                    <span class="rv2-techline">@_aspectRatio · @_resolution · @TotalSeconds · @SceneCount scene</span>
+                }
             </div>
-        </MudHidden>
-    </div>
+        </div>
+        <MudTabs Class="rv2-tabs" Rounded="true" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="TabIndex">
+            <MudTabPanel Text="Thông tin" />
+            <MudTabPanel Text="Xem trước" />
+            <MudTabPanel Text="Kết quả" />
+        </MudTabs>
+        @* Thin, absolutely positioned bar: refreshes never shift the layout. *@
+        <div class="rv2-refresh-bar @(_refreshing ? "rv2-refresh-bar--on" : null)"></div>
+    </header>
 
-    <div class="rv2-body">
-        @if (_loading)
-        {
-            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
-        }
-        else if (!string.IsNullOrWhiteSpace(_loadWarning))
+    <main class="rv2-body">
+        @if (!string.IsNullOrWhiteSpace(_loadWarning))
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@_loadWarning</MudAlert>
         }
 
-        @if (_tabIndex == 0)
+        @* Tabs stay mounted after their first visit so switching never re-initializes or re-queries. *@
+        @if (_visitedTabs.Contains(0))
         {
-            <RVideoV2Info JobView="_jobView" JobId="JobId" />
+            <div class="rv2-tab-pane" hidden="@(_tabIndex != 0)"><RVideoV2Info JobView="_jobView" JobId="JobId" OnReloadRequested="ReloadAsync" /></div>
         }
-        else if (_tabIndex == 1)
+        @if (_visitedTabs.Contains(1))
         {
-            <RVideoV2Preview JobView="_jobView" OnReloadRequested="ReloadAsync" />
+            <div class="rv2-tab-pane" hidden="@(_tabIndex != 1)"><RVideoV2Preview JobView="_jobView" IsActive="@(_tabIndex == 1)" OnReloadRequested="ReloadAsync" /></div>
         }
-        else
+        @if (_visitedTabs.Contains(2))
         {
-            <RVideoV2Result JobView="_jobView" OnReloadRequested="ReloadAsync" />
+            <div class="rv2-tab-pane" hidden="@(_tabIndex != 2)"><RVideoV2Result JobView="_jobView" OnReloadRequested="ReloadAsync" /></div>
         }
-    </div>
-
-    <div class="rv2-footer-nav">
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="GoBackLegacy">Quay lại giao diện cũ</MudButton>
-    </div>
+    </main>
 </div>
 
 @code {
     [Parameter] public Guid? JobId { get; set; }
 
     private int _tabIndex;
-    private bool _loading;
+    private readonly HashSet<int> _visitedTabs = new() { 0 };
+    private bool _refreshing;
     private string? _loadWarning;
     private RVideoJobView? _jobView;
+    private Guid? _loadedJobId;
+    private Task? _reloadTask;
+    private bool _reloadPending;
+    private string _aspectRatio = "—";
+    private string _resolution = "—";
 
-    private string AspectRatio => ExtractAspectRatio() ?? "—";
-    private string Resolution => ExtractResolution() ?? "—";
-    private string? ExtractAspectRatio(){ if(_jobView is null) return null; try{ return new TodoXVideoPromptParser().Parse(_jobView.Project.OriginalPrompt).Model.AspectRatio;}catch{return null;}}
-    private string? ExtractResolution(){ if(_jobView is null) return null; try{ return new TodoXVideoPromptParser().Parse(_jobView.Project.OriginalPrompt).Model.Resolution;}catch{return null;}}
-    private string TotalSeconds => (_jobView?.Project.TotalSeconds ?? 0) == 0 ? "—" : _jobView!.Project.TotalSeconds.ToString();
+    private int TabIndex
+    {
+        get => _tabIndex;
+        set
+        {
+            if (value == _tabIndex) return;
+            _tabIndex = value;
+            // Returning to an already-mounted preview/result tab refreshes silently in the background.
+            if (!_visitedTabs.Add(value) && value != 0 && _jobView is not null) _ = ReloadAsync();
+        }
+    }
+
+    private string TotalSeconds => (_jobView?.Project.TotalSeconds ?? 0) == 0 ? "—" : $"{_jobView!.Project.TotalSeconds}s";
     private string SceneCount => (_jobView?.Project.Scenes.Count ?? 0).ToString();
 
     protected override async Task OnParametersSetAsync()
     {
-        if (JobId is null) return;
-        if (AuthState.CurrentUser is null) return;
+        if (JobId is null || AuthState.CurrentUser is null) return;
+        if (_loadedJobId == JobId && _jobView is not null) return;
+        _loadedJobId = JobId;
+        _jobView = null;
         await ReloadAsync();
     }
 
-    internal async Task ReloadAsync()
+    // Overlapping reload requests (poll + user action) collapse into at most one follow-up reload.
+    internal Task ReloadAsync()
+    {
+        if (_reloadTask is { IsCompleted: false })
+        {
+            _reloadPending = true;
+            return _reloadTask;
+        }
+        _reloadTask = ReloadLoopAsync();
+        return _reloadTask;
+    }
+
+    private async Task ReloadLoopAsync()
+    {
+        do
+        {
+            _reloadPending = false;
+            await LoadOnceAsync();
+        } while (_reloadPending);
+    }
+
+    private async Task LoadOnceAsync()
     {
         if (JobId is null || AuthState.CurrentUser is null) return;
-        _loading = true;
+        _refreshing = true;
         _loadWarning = null;
+        StateHasChanged();
         try
         {
-            _jobView = await RVideoJobs.GetByJobIdAsync(JobId.Value, AuthState.CurrentUser);
-            if (_jobView is null) _loadWarning = "Không tìm thấy job.";
+            var view = await RVideoJobs.GetByJobIdAsync(JobId.Value, AuthState.CurrentUser);
+            if (view is null) _loadWarning = "Không tìm thấy job.";
+            else
+            {
+                _jobView = view;
+                (_aspectRatio, _resolution) = ParseRenderSettings(view.Project.OriginalPrompt);
+            }
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "RVideo V2 load job failed {JobId}", JobId);
-            _loadWarning = "Không tải được job.";
+            // Keep the last good view on a transient refresh failure.
+            _loadWarning = _jobView is null ? "Không tải được job." : "Không làm mới được dữ liệu, đang hiển thị bản gần nhất.";
         }
-        finally { _loading = false; StateHasChanged(); }
+        finally { _refreshing = false; StateHasChanged(); }
     }
 
-    private async Task HandleTitleChanged(string title)
+    private static (string Aspect, string Resolution) ParseRenderSettings(string? prompt)
     {
-        if (JobId is null || AuthState.CurrentUser is null || _jobView is null) return;
-        var trimmed = title?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(trimmed)) return;
-        if (string.Equals(trimmed, _jobView.Project.Title, StringComparison.Ordinal)) return;
-        var req = RVideoJobUpdateHelper.BuildSafeUpdate(_jobView, titleOverride: trimmed);
-        await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
-        await ReloadAsync();
-    }
-
-    private async Task HandleAdvancedSaved(int totalSeconds, int sceneSeconds)
-    {
-        if (JobId is null || AuthState.CurrentUser is null || _jobView is null) return;
-        var req = RVideoJobUpdateHelper.BuildSafeUpdate(_jobView, totalSecondsOverride: totalSeconds, sceneSecondsOverride: sceneSeconds);
-        await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
-        await ReloadAsync();
+        try
+        {
+            var model = new TodoXVideoPromptParser().Parse(prompt ?? string.Empty).Model;
+            return (model.AspectRatio ?? "—", model.Resolution ?? "—");
+        }
+        catch { return ("—", "—"); }
     }
 
     private void GoBackLegacy()

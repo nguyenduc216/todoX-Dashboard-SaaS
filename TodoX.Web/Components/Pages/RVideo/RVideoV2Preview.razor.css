@@ -1,54 +1,92 @@
-.rv2-preview-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-.rv2-scene-table-head,.rv2-scene-row{display:grid;grid-template-columns:36px 90px 110px 1fr 150px 90px 110px 52px;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #333}
-.rv2-scene-content{font-size:.8rem;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
-.rv2-vid-play{position:relative;padding:0;border:0;background:#000;border-radius:6px;cursor:pointer;display:block}
-.rv2-vid-play .rv2-vid-thumb{display:block;width:100px;height:56px;object-fit:cover;border-radius:6px;background:#000;pointer-events:none}
-.rv2-play-badge{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;background:rgba(0,0,0,.25);border-radius:6px;pointer-events:none}
-.rv2-play-badge-lg .mud-icon-size-large{font-size:3rem}
-.rv2-mobile-play{position:relative;padding:0;border:0;background:#000;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center}
-.rv2-mobile-content{padding:8px 10px;border-top:1px solid #333}
-.rv2-content-input ::deep textarea{font-size:.8rem}
-.rv2-thumb{width:80px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer}
-.rv2-preview-summary{display:flex;gap:16px;padding:10px;font-size:.8rem;opacity:.7}
-.rv2-preview-mobile{display:none}
-.rv2-scene-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-.rv2-nav-dot{width:32px;height:32px;border-radius:50%;border:2px solid #444;background:#222;color:#fff;cursor:pointer;font-weight:600;transition:all .2s ease;display:flex;align-items:center;justify-content:center;position:relative}
-.rv2-nav-dot.rv2-status-video_ready{background:#2e7d32;border-color:#2e7d32}
-.rv2-nav-dot.rv2-status-failed{background:#c62828;border-color:#c62828}
-.rv2-nav-dot.rv2-status-video_rendering,.rv2-nav-dot.rv2-status-video_queued{background:#f9a825;border-color:#f9a825;color:#000}
-/* RVID-UI-V2-PREVIEW-LOAD.2: active scene ring must read clearly on mobile regardless of
-   status color. Higher specificity (.rv2-nav-dot.rv2-nav-active) beats .rv2-nav-dot.rv2-status-*
-   and pairs a bright yellow ring with an outline halo + gap + check badge so the active scene is
-   identifiable by shape, not just color. */
-.rv2-nav-dot.rv2-nav-active{border-color:#ffca28;border-width:3px;box-shadow:0 0 0 3px rgba(255,202,40,.35),0 0 10px 3px rgba(255,202,40,.55);transform:scale(1.22);background:rgba(255,202,40,.22);color:#fff}
-.rv2-nav-dot.rv2-nav-active::after{content:"\2713";position:absolute;right:-4px;bottom:-4px;width:14px;height:14px;border-radius:50%;background:#ffca28;color:#111;font-size:10px;line-height:14px;font-weight:700;text-align:center}
-.rv2-mobile-card{border:1px solid #333;border-radius:12px;overflow:hidden}
-.rv2-mobile-video{position:relative;background:#000;min-height:200px;display:flex;align-items:center;justify-content:center}
-.rv2-mobile-vid,.rv2-mobile-img{width:100%;max-height:52vh;object-fit:contain}
-.rv2-mobile-ref{position:absolute;right:8px;bottom:8px;width:64px;height:64px;border-radius:8px;overflow:hidden;border:2px solid #fff;cursor:pointer}
-.rv2-mobile-ref img{width:100%;height:100%;object-fit:cover}
-.rv2-mobile-meta{display:flex;gap:8px;align-items:center;padding:8px;flex-wrap:wrap}
-.rv2-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999}
-.rv2-lightbox img{max-width:90vw;max-height:90vh;object-fit:contain}
-.rv2-sheet-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9998}
-.rv2-sheet{position:fixed;left:0;right:0;bottom:0;background:#1e1e1e;border-radius:16px 16px 0 0;padding:16px;z-index:9999;max-height:60vh;overflow:auto}
-@media(max-width:700px){.rv2-preview-desktop{display:none}.rv2-preview-mobile{display:block}}
-@media(orientation:landscape) and (max-width:900px){.rv2-preview-mobile .rv2-mobile-vid{max-height:70vh}}
+/* RVideo V2 preview: one responsive tree. Mobile = scene strip + detail + sticky actions;
+   desktop (>=900px) = scene list column + detail column. */
+.rv2-preview { --rv2-line: var(--mud-palette-lines-default,#333); --rv2-card: var(--mud-palette-surface,#1b1b1b); --rv2-accent: var(--mud-palette-warning,#ffb300); }
 
-/* RVID-UI-V2-PREVIEW-LOAD.1: skeleton + lazy media + error/retry states */
-.rv2-scene-row{cursor:pointer}
-.rv2-scene-row--active{background:rgba(255,202,40,.06)}
-.rv2-skeleton-grid{display:flex;flex-direction:column;gap:10px;padding:8px}
-.rv2-skeleton-bar,.rv2-skeleton-row{background:linear-gradient(90deg,#2a2a2a 25%,#3a3a3a 37%,#2a2a2a 63%);background-size:400% 100%;animation:rv2-shimmer 1.4s ease infinite;border-radius:8px}
-.rv2-skeleton-bar{height:36px;max-width:220px}
-.rv2-skeleton-row{height:64px}
-@keyframes rv2-shimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
-.rv2-media-placeholder{width:100px;height:56px;border-radius:6px;background:#222;border:1px solid #333}
-.rv2-media-lg{width:100%;height:200px}
-.rv2-text-skeleton{height:32px;border-radius:6px;background:#222;border:1px solid #333}
-.rv2-select-skeleton{height:36px;border-radius:6px;background:#222;border:1px solid #333}
-.rv2-select-narrow{max-width:80px}
-.rv2-vid-lazy{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100px;height:56px;border-radius:6px;background:#151515;border:1px dashed #444;color:#888;font-size:.65rem;cursor:pointer}
-.rv2-vid-lazy-label{line-height:1}
-.rv2-media-error{display:flex;align-items:center;justify-content:center;gap:4px;width:100px;height:56px;border-radius:6px;background:#2a1515;border:1px solid #5a2020}
-.rv2-media-error-lg{flex-direction:column;width:100%;height:200px;gap:6px}
+.rv2-pv-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.rv2-pv-progress { font-size:.8rem; opacity:.75; }
+.rv2-pv-note { font-size:.75rem; opacity:.7; margin-bottom:8px; }
+.rv2-pv-muted { opacity:.5; font-weight:400; }
+
+.rv2-pv-layout { display:flex; flex-direction:column; gap:10px; }
+
+/* Scene list: horizontal strip on mobile. */
+.rv2-pv-list { display:flex; gap:8px; overflow-x:auto; scroll-snap-type:x proximity; padding-bottom:4px; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+.rv2-pv-card { flex:0 0 auto; width:76px; scroll-snap-align:start; display:flex; flex-direction:column; gap:4px; padding:4px; border:1px solid var(--rv2-line); border-radius:10px; background:var(--rv2-card); color:inherit; text-align:left; cursor:pointer; font:inherit; }
+.rv2-pv-card--active { border-color:var(--rv2-accent); box-shadow:0 0 0 1px var(--rv2-accent) inset; }
+.rv2-pv-card:focus-visible { outline:2px solid var(--rv2-accent); outline-offset:2px; }
+.rv2-pv-thumb { position:relative; display:flex; align-items:center; justify-content:center; width:100%; aspect-ratio:1; border-radius:7px; overflow:hidden; background:#111; opacity:.9; }
+.rv2-pv-thumb img { width:100%; height:100%; object-fit:cover; }
+.rv2-pv-thumb-badge { position:absolute; right:3px; bottom:3px; display:flex; border-radius:50%; padding:1px; background:rgba(0,0,0,.6); color:#fff; }
+.rv2-pv-card-body { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.rv2-pv-card-title { font-size:.72rem; font-weight:600; white-space:nowrap; }
+.rv2-pv-card-dur { font-weight:400; opacity:.55; }
+.rv2-pv-card-text { display:none; }
+.rv2-pv-card .rv2-pv-status { font-size:0; padding:0; width:8px; height:8px; border-radius:50%; }
+
+/* Status pill (detail) / dot (strip). */
+.rv2-pv-status { display:inline-flex; align-items:center; gap:4px; font-size:.7rem; line-height:1; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,.08); white-space:nowrap; }
+.rv2-pv-status--ok { background:rgba(46,125,50,.25); color:#81c784; }
+.rv2-pv-status--error { background:rgba(198,40,40,.25); color:#ef9a9a; }
+.rv2-pv-status--busy { background:rgba(255,179,0,.2); color:#ffd54f; }
+.rv2-pv-status--warn { background:rgba(239,108,0,.22); color:#ffb74d; }
+.rv2-pv-status--muted { opacity:.7; }
+.rv2-pv-card .rv2-pv-status--ok { background:#43a047; }
+.rv2-pv-card .rv2-pv-status--error { background:#e53935; }
+.rv2-pv-card .rv2-pv-status--busy { background:#ffb300; animation:rv2-pulse 1.2s ease-in-out infinite; }
+.rv2-pv-card .rv2-pv-status--warn { background:#fb8c00; }
+.rv2-pv-card .rv2-pv-status--muted { background:#666; }
+@keyframes rv2-pulse { 50% { opacity:.35; } }
+
+/* Detail. */
+.rv2-pv-detail { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.rv2-pv-detail-head { display:flex; align-items:center; gap:4px; min-width:0; }
+.rv2-pv-detail-title { font-weight:600; font-size:.95rem; white-space:nowrap; }
+.rv2-pv-media { position:relative; display:flex; align-items:center; justify-content:center; background:#000; border-radius:12px; overflow:hidden; aspect-ratio:16/9; max-height:56vh; }
+.rv2-pv-media video, .rv2-pv-media img { width:100%; height:100%; object-fit:contain; display:block; }
+.rv2-pv-media img { cursor:zoom-in; }
+.rv2-pv-media-empty { display:flex; flex-direction:column; align-items:center; gap:6px; font-size:.8rem; opacity:.65; padding:24px; }
+.rv2-pv-media-switch { position:absolute; top:8px; left:8px; display:flex; border-radius:999px; overflow:hidden; background:rgba(0,0,0,.6); }
+.rv2-pv-media-switch button { border:0; background:transparent; color:#fff; font:inherit; font-size:.72rem; padding:4px 10px; cursor:pointer; opacity:.7; }
+.rv2-pv-media-switch button.on { background:var(--rv2-accent); color:#111; opacity:1; font-weight:600; }
+.rv2-pv-settings { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.rv2-pv-actions { display:flex; gap:8px; }
+.rv2-pv-actions ::deep .mud-button-root { flex:1 1 0; min-height:42px; }
+
+/* Mobile: actions stay reachable in the thumb zone. */
+@media (max-width:899px) {
+  .rv2-pv-actions { position:fixed; left:0; right:0; bottom:0; z-index:30; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); background:var(--mud-palette-surface,#1a1a1a); border-top:1px solid var(--rv2-line); }
+}
+
+/* Desktop: list column + detail column. */
+@media (min-width:900px) {
+  .rv2-pv-layout { display:grid; grid-template-columns:minmax(260px,320px) 1fr; gap:16px; align-items:start; }
+  .rv2-pv-list { flex-direction:column; overflow-x:visible; overflow-y:auto; max-height:calc(100dvh - 190px); position:sticky; top:110px; padding-right:4px; }
+  .rv2-pv-card { width:auto; flex-direction:row; gap:10px; padding:6px; }
+  .rv2-pv-thumb { width:64px; flex:0 0 64px; }
+  .rv2-pv-card-title { font-size:.8rem; }
+  .rv2-pv-card-text { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:.75rem; opacity:.7; }
+  .rv2-pv-card .rv2-pv-status { font-size:.65rem; padding:3px 7px; width:auto; height:auto; align-self:flex-start; animation:none; }
+  .rv2-pv-card .rv2-pv-status--ok { background:rgba(46,125,50,.25); }
+  .rv2-pv-card .rv2-pv-status--error { background:rgba(198,40,40,.25); }
+  .rv2-pv-card .rv2-pv-status--busy { background:rgba(255,179,0,.2); }
+  .rv2-pv-card .rv2-pv-status--warn { background:rgba(239,108,0,.22); }
+  .rv2-pv-card .rv2-pv-status--muted { background:rgba(255,255,255,.06); }
+  .rv2-pv-media { max-height:60vh; }
+  .rv2-pv-actions { justify-content:flex-end; }
+  .rv2-pv-actions ::deep .mud-button-root { flex:0 0 auto; }
+}
+
+/* Skeletons. */
+.rv2-skel { border-radius:10px; background:linear-gradient(90deg,#222 25%,#2e2e2e 37%,#222 63%); background-size:400% 100%; animation:rv2-shimmer 1.4s ease infinite; }
+.rv2-skel-card { flex:0 0 76px; height:100px; }
+.rv2-skel-media { aspect-ratio:16/9; width:100%; }
+.rv2-skel-line { height:56px; }
+.rv2-skel-short { height:40px; width:60%; }
+.rv2-skel-field { height:40px; }
+@media (min-width:900px) { .rv2-skel-card { flex:0 0 auto; height:76px; } }
+@keyframes rv2-shimmer { 0% { background-position:100% 50%; } 100% { background-position:0 50%; } }
+
+.rv2-lightbox { position:fixed; inset:0; background:rgba(0,0,0,.88); display:flex; align-items:center; justify-content:center; z-index:1500; cursor:zoom-out; }
+.rv2-lightbox img { max-width:94vw; max-height:90vh; object-fit:contain; }
+.rv2-confirm { min-width:260px; }
+@media (prefers-reduced-motion:reduce) { .rv2-skel, .rv2-pv-card .rv2-pv-status--busy { animation:none; } }

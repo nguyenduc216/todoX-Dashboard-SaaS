@@ -21,4 +21,7 @@
    JS triggers it programmatically via .click() — no native file-input chrome ever renders. */
 .rv2-ref-file{position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none}
 .rv2-advanced{margin-top:16px}
-@media(max-width:900px){.rv2-info-grid{grid-template-columns:1fr}.rv2-ref-btn{min-width:40px;min-height:40px}}
+.rv2-info-cta{align-items:center}
+.rv2-info-side{border:1px solid var(--mud-palette-lines-default,#333);border-radius:12px;padding:12px}
+@media(max-width:900px){.rv2-info-grid{grid-template-columns:1fr;gap:12px}.rv2-ref-btn{min-width:40px;min-height:40px}.rv2-ref-grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}}
+@media(max-width:700px){.rv2-info-cta ::deep .rv2-info-primary{flex:1 1 100%;min-height:44px}}
