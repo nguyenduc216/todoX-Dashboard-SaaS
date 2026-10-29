@@ -41,7 +41,8 @@ public sealed class RVideoRecomposeCompatibilityTests
         var source = Read("Components/Pages/RenderVideoJobs.razor");
         var position = source.IndexOf("<RVideoRecomposeAction", StringComparison.Ordinal);
         Assert.True(position > source.IndexOf("<MudButton Size=\"Size.Small\" Color=\"Color.Primary\" Variant=\"Variant.Filled\" StartIcon=\"@Icons.Material.Filled.Download\"", StringComparison.Ordinal));
-        Assert.Contains("@key=\"_project.FinalVideoUrl\"", source);
+        // The legacy player shows the selected/latest final URL; keying on it recreates the player when it changes.
+        Assert.Contains("@key=\"DisplayedFinalVideoUrl\"", source);
         Assert.Contains("OnClick=\"EnqueueMergeAsync\"", source);
         Assert.DoesNotContain("CanClickFinalMerge", source[(position - 100)..(position + 150)]);
     }
