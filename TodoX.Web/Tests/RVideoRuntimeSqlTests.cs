@@ -307,6 +307,20 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void ManualRecomposeIsNotSkippedWhenFinalAlreadyMatchesSelection()
+    {
+        var handler = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+        var finalization = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
+
+        // The handler's "already current" short-circuit applies only to automatic merges.
+        Assert.Contains("if (!manual && _finalization is not null && await _finalization.IsCurrentFinalVideoAsync(projectId, ct)) return;", handler);
+        Assert.True(handler.IndexOf("bool manual;", StringComparison.Ordinal)
+            < handler.IndexOf("IsCurrentFinalVideoAsync(projectId, ct)) return;", StringComparison.Ordinal));
+        // Manual enqueue is not deduplicated against the completed merge of the same selection.
+        Assert.Contains("mergeSelectionKey = manual ? null : mergeSelectionKey", finalization);
+    }
+
+    [Fact]
     public void FinalMergeHasFastCopyAndNormalizedTranscodeFallbackCommands()
     {
         // Copy concat, validation and the normalized transcode fallback live in FinalMergeMedia (TODOX-20261027 final merge validation).

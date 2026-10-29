@@ -3225,9 +3225,11 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             return false;
         }
 
-        // A business error (even with countTasks=0) does not prove that no task was created.
-        // Keep the submit outcome ambiguous and prohibit a second provider submit.
-        if (IsKnownNoResourcesSubmit(exception)) return false;
+        // Product decision (2026-10-30): 79AI NOT_RESOURCES is a definitive rejection; fall back to the next model.
+        if (IsKnownNoResourcesSubmit(exception))
+        {
+            return true;
+        }
 
         if (IsDurationRejectedError(exception))
         {
@@ -3260,7 +3262,6 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
     private static bool IsDefinitelyNotSubmitted(Ai79TaskSubmitException exception)
     {
-        if (IsKnownNoResourcesSubmit(exception)) return false;
         if (exception.HttpStatusCode is not { } statusCode
             || (int)statusCode < 200
             || (int)statusCode >= 300

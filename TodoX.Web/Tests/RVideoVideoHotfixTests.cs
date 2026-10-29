@@ -676,8 +676,6 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    // Production contract since TODOX-20261028: NOT_RESOURCES (even countTasks=0) does not prove no task was
-    // created, so it is not a definitive rejection; classification/fallback naming is unchanged.
     public void RVideoNotResourcesWithZeroTasksIsAKnownSafeFallbackFailure()
     {
         var exception = new Ai79TaskSubmitException(
@@ -687,7 +685,7 @@ public sealed class RVideoVideoHotfixTests
             "provider_error",
             sanitizedRequestMetadataJson: """{"model":"veo_omni","mode":"flash"}""");
 
-        Assert.False(IsDefinitivelyRejectedSubmitForTest(exception));
+        Assert.True(IsDefinitivelyRejectedSubmitForTest(exception));
         Assert.Equal("KNOWN_NO_RESOURCES", ClassifyRVideoSubmitFailureForTest(exception));
         Assert.True(ShouldFallbackForTest("KNOWN_NO_RESOURCES"));
     }

@@ -44,12 +44,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         var projectId = TryReadLong(job.InputJson, "projectId") ?? TryReadLong(job.PromptJson, "projectId") ?? throw new InvalidOperationException("Thieu projectId trong job input.");
         // Capture before reading consumed inputs; later DB writes reject any intervening generation/selection change.
         var mergeSnapshot=await _repo.GetVideoMergeSnapshotAsync(projectId, ct);
-        using (var queued = JsonDocument.Parse(job.InputJson))
+        bool manual;
+        using (var queued = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
         {
+            manual = queued.RootElement.TryGetProperty("source", out var source)
+                && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual;
             if (queued.RootElement.TryGetProperty("mergeSnapshot", out var expected) && expected.ValueKind == JsonValueKind.String)
             {
                 RequireCurrentSnapshot(expected.GetString()!, mergeSnapshot);
-                if (_finalization is not null && await _finalization.IsCurrentFinalVideoAsync(projectId, ct)) return;
+                // Auto merges skip an already-current final; a manual recompose always re-runs the validated pipeline.
+                if (!manual && _finalization is not null && await _finalization.IsCurrentFinalVideoAsync(projectId, ct)) return;
             }
         }
         using var mergeScope = SceneVideoOperationScope.Merge(mergeSnapshot);
@@ -81,12 +85,6 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
         }
 
-        bool manual;
-        using (var input = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
-        {
-            manual = input.RootElement.TryGetProperty("source", out var source)
-                && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual;
-        }
         var versioningEnabled = await ResolveVersioningEnabledAsync(_versions, manual, ct);
 
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
