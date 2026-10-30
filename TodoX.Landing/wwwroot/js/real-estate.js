@@ -26,7 +26,6 @@
     play.hidden = next === 'playing';
     const label = next === 'ended' ? 'Phát lại video' : next === 'paused' ? 'Tiếp tục video' : 'Phát video';
     play.setAttribute('aria-label', label);
-    play.querySelector('span').textContent = label;
   };
   const syncSound = () => {
     sound.textContent = video.muted ? '🔇' : '🔊';
