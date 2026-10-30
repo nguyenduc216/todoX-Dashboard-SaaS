@@ -18,6 +18,10 @@ public interface IAdminJobMonitorService
         string kind,
         Guid jobId,
         CancellationToken ct = default);
+
+    Task<AdminJobMonitorFilterOptions> GetFilterOptionsAsync(
+        CurrentUserSession user,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -54,8 +58,8 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
                 kind = normalized.Kind,
                 status = normalized.Status,
                 search = normalized.Search is null ? null : $"%{normalized.Search}%",
-                service = normalized.Service is null ? null : $"%{normalized.Service}%",
-                user = normalized.User is null ? null : $"%{normalized.User}%",
+                service = normalized.Service,
+                userId = normalized.UserId,
                 fromUtc = normalized.FromUtc,
                 toUtc = normalized.ToUtc,
                 limit = normalized.PageSize,
@@ -120,6 +124,22 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
             Page = normalized.Page,
             PageSize = normalized.PageSize
         };
+    }
+
+    // Options come from the jobs the monitor lists, so every choice can return results.
+    public async Task<AdminJobMonitorFilterOptions> GetFilterOptionsAsync(
+        CurrentUserSession user,
+        CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var connection = await _factory.OpenAsync(ct);
+        var parameters = new { tenant = _tenant.TenantId };
+        var services = await connection.QueryAsync<string>(new CommandDefinition(
+            AdminJobMonitorSql.ServiceOptions, parameters, cancellationToken: ct));
+        var users = await connection.QueryAsync<AdminJobMonitorUserOption>(new CommandDefinition(
+            AdminJobMonitorSql.UserOptions, parameters, cancellationToken: ct));
+        return new AdminJobMonitorFilterOptions { Services = services.ToList(), Users = users.ToList() };
     }
 
     public async Task<IReadOnlyList<AdminJobMonitorScene>> GetScenesAsync(
@@ -263,7 +283,7 @@ public static class AdminJobMonitorRules
             Kind = string.IsNullOrWhiteSpace(query.Kind) ? null : query.Kind.Trim(),
             Status = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim(),
             Service = string.IsNullOrWhiteSpace(query.Service) ? null : query.Service.Trim(),
-            User = string.IsNullOrWhiteSpace(query.User) ? null : query.User.Trim(),
+            UserId = query.UserId,
             FromUtc = query.FromUtc,
             ToUtc = query.ToUtc
         };
@@ -329,17 +349,15 @@ public static class AdminJobMonitorRules
 
 public static class AdminJobMonitorSql
 {
-    // Unfinished jobs first, newest first inside each group. Failed and cancelled jobs are finished:
-    // nothing is running for them any more.
-    public const string JobsPage = """
+    private const string JobsCte = """
         WITH jobs AS (
             SELECT 'rvideo' AS kind,
                    j.id,
                    j.created_at,
                    COALESCE(
-                       NULLIF(NULLIF(j.input_json->>'title', ''), 'Prompt workspace'),
-                       NULLIF(NULLIF(p.title, ''), 'Prompt workspace'),
-                       NULLIF(left(p.original_prompt, 120), ''),
+                       NULLIF(NULLIF(regexp_replace(j.input_json->>'title', '^\s*[\[{].*$', '', 's'), ''), 'Prompt workspace'),
+                       NULLIF(NULLIF(regexp_replace(p.title, '^\s*[\[{].*$', '', 's'), ''), 'Prompt workspace'),
+                       NULLIF(left(regexp_replace(p.original_prompt, '^\s*[\[{].*$', '', 's'), 120), ''),
                        s.service_name,
                        '') AS title,
                    p.source_image_url AS thumbnail_url,
@@ -429,7 +447,33 @@ public static class AdminJobMonitorSql
                    END
               FROM dance_sell.dance_sell_jobs d
              WHERE d.tenant_id = @tenant
-        ),
+        )
+        """;
+
+    public const string ServiceOptions = JobsCte + """
+
+        SELECT DISTINCT service_name
+          FROM jobs
+         WHERE service_name <> ''
+         ORDER BY service_name;
+        """;
+
+    public const string UserOptions = JobsCte + """
+
+        SELECT u.id AS Id,
+               CASE
+                   WHEN COALESCE(u.email, '') = '' THEN COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, u.id::text)
+                   ELSE COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, '') || ' (' || u.email || ')'
+               END AS Label
+          FROM auth.app_users u
+         WHERE u.id IN (SELECT user_id FROM jobs)
+         ORDER BY Label;
+        """;
+
+    // Unfinished jobs first, newest first inside each group. Failed and cancelled jobs are finished:
+    // nothing is running for them any more.
+    public const string JobsPage = JobsCte + """
+        ,
         filtered AS (
             SELECT jobs.*,
                    COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, '') AS user_name,
@@ -439,12 +483,8 @@ public static class AdminJobMonitorSql
               LEFT JOIN auth.app_users u ON u.id = jobs.user_id
              WHERE (@kind::text IS NULL OR jobs.kind = @kind)
                AND (@status::text IS NULL OR jobs.status = @status)
-               AND (@service::text IS NULL OR jobs.service_name ILIKE @service)
-               AND (@user::text IS NULL
-                    OR COALESCE(u.full_name, '') ILIKE @user
-                    OR COALESCE(u.display_name, '') ILIKE @user
-                    OR COALESCE(u.username, '') ILIKE @user
-                    OR COALESCE(u.email, '') ILIKE @user)
+               AND (@service::text IS NULL OR jobs.service_name = @service)
+               AND (@userId::uuid IS NULL OR jobs.user_id = @userId)
                AND (@fromUtc::timestamptz IS NULL OR jobs.created_at >= @fromUtc)
                AND (@toUtc::timestamptz IS NULL OR jobs.created_at < @toUtc)
                AND (@search::text IS NULL

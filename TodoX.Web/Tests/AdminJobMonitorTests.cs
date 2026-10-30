@@ -208,13 +208,35 @@ public sealed class AdminJobMonitorTests
             Assert.Single((await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = "timelapse-" })).Items).Title);
         Assert.Equal(2, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Status = AdminJobMonitorStatuses.Draft })).TotalCount);
         Assert.Equal(7, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = "nguoidung@example" })).TotalCount);
-        Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Service = "dịch vụ rvideo" })).TotalCount);
-        Assert.Equal(7, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { User = "nguoidung@" })).TotalCount);
-        Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { User = "khong-ton-tai" })).TotalCount);
+        var options = await service.GetFilterOptionsAsync(admin);
+        Assert.Equal(["Dịch vụ RVideo", "Video nhảy quảng cáo thời trang", "Xây nhà"], options.Services.Order(StringComparer.Ordinal).ToArray());
+        var optionUser = Assert.Single(options.Users);
+        Assert.Equal("Người dùng (nguoidung@example.test)", optionUser.Label);
+        Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Service = "Dịch vụ RVideo" })).TotalCount);
+        Assert.Equal(1, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Service = "Xây nhà" })).TotalCount);
+        Assert.Equal(7, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { UserId = optionUser.Id })).TotalCount);
+        Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { UserId = Guid.NewGuid() })).TotalCount);
         var now = DateTime.UtcNow;
         // Jobs created 1h, 2h, 2h and 3h ago fall inside this window.
         Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { FromUtc = now.AddHours(-3.5), ToUtc = now.AddMinutes(-30) })).TotalCount);
         Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { ToUtc = now.AddHours(-30) })).TotalCount);
+
+        // Regression: some jobs store a JSON settings blob as title and prompt; it must not be shown as the job name.
+        var jsonJob = Guid.NewGuid();
+        await using (var connection = new NpgsqlConnection(settings.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO render.render_jobs(id, tenant_id, service_id, job_type, operation_type, status, input_json)
+                SELECT @jsonJob, @tenantId, id, 'core_service', 'rvideo', 'draft', jsonb_build_object('title', '{"aspect_ratio":"9:16"}')
+                  FROM catalog.services LIMIT 1;
+                INSERT INTO video_render.video_projects(tenant_id, core_job_id, title, original_prompt, status)
+                VALUES (@tenantId, @jsonJob, '{"aspect_ratio":"9:16"}', '{"aspect_ratio":"9:16"}', 'draft');
+                """,
+                new { jsonJob, tenantId });
+        }
+        Assert.Equal("Dịch vụ RVideo", Assert.Single((await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = jsonJob.ToString() })).Items).Title);
     }
 
     private static async Task SeedAsync(NpgsqlConnection connection, Guid tenant)

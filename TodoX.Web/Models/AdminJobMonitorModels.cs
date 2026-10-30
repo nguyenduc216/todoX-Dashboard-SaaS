@@ -26,9 +26,21 @@ public sealed class AdminJobMonitorQuery
     public string? Kind { get; set; }
     public string? Status { get; set; }
     public string? Service { get; set; }
-    public string? User { get; set; }
+    public Guid? UserId { get; set; }
     public DateTime? FromUtc { get; set; }
     public DateTime? ToUtc { get; set; }
+}
+
+public sealed class AdminJobMonitorFilterOptions
+{
+    public IReadOnlyList<string> Services { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<AdminJobMonitorUserOption> Users { get; init; } = Array.Empty<AdminJobMonitorUserOption>();
+}
+
+public sealed class AdminJobMonitorUserOption
+{
+    public Guid Id { get; init; }
+    public string Label { get; init; } = string.Empty;
 }
 
 public sealed class AdminJobMonitorPage

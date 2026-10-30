@@ -24,16 +24,26 @@ else
                 <h1>Giám sát job</h1>
                 <p>@_page.UnfinishedCount.ToString("N0") job chưa hoàn thành / @_page.TotalCount.ToString("N0") job phù hợp</p>
             </div>
-            <button type="button" class="monitor-button" disabled="@_loading" @onclick="RefreshAsync">Làm mới</button>
+            <button type="button" class="monitor-button" disabled="@_loading" @onclick="RefreshAllAsync">Làm mới</button>
         </header>
 
         <div class="monitor-filters">
             <input type="search" class="filter-search" placeholder="Tên job hoặc ID"
                    aria-label="Tìm theo tên job hoặc ID" @bind="_searchText" @bind:event="oninput" @onkeydown="HandleSearchKeyDown" />
-            <input type="search" placeholder="Tên dịch vụ"
-                   aria-label="Tên dịch vụ" @bind="_serviceText" @bind:event="oninput" @onkeydown="HandleSearchKeyDown" />
-            <input type="search" placeholder="Người thực hiện (tên, email)"
-                   aria-label="Người thực hiện" @bind="_userText" @bind:event="oninput" @onkeydown="HandleSearchKeyDown" />
+            <select aria-label="Tên dịch vụ" value="@_query.Service" @onchange="@(args => SetServiceAsync(args.Value?.ToString()))">
+                <option value="">Tất cả dịch vụ</option>
+                @foreach (var service in _options.Services)
+                {
+                    <option value="@service">@service</option>
+                }
+            </select>
+            <select aria-label="Người thực hiện" value="@_query.UserId" @onchange="@(args => SetUserAsync(args.Value?.ToString()))">
+                <option value="">Tất cả người thực hiện</option>
+                @foreach (var user in _options.Users)
+                {
+                    <option value="@user.Id">@user.Label</option>
+                }
+            </select>
             <select aria-label="Loại job" value="@_query.Kind" @onchange="@(args => SetKindAsync(args.Value?.ToString()))">
                 <option value="">Tất cả loại job</option>
                 <option value="@AdminJobMonitorKinds.RVideo">RVideo</option>
@@ -267,8 +277,7 @@ else
     private readonly Dictionary<Guid, IReadOnlyList<AdminJobMonitorScene>> _scenes = new();
     private AdminJobMonitorPage _page = new();
     private string _searchText = string.Empty;
-    private string _serviceText = string.Empty;
-    private string _userText = string.Empty;
+    private AdminJobMonitorFilterOptions _options = new();
     private DateOnly? _fromDate;
     private DateOnly? _toDate;
     private string? _error;
@@ -308,7 +317,21 @@ else
         }
 
         _loaded = true;
-        await LoadJobsAsync();
+        await Task.WhenAll(LoadJobsAsync(), LoadOptionsAsync());
+    }
+
+    private async Task LoadOptionsAsync()
+    {
+        try
+        {
+            _options = await Monitor.GetFilterOptionsAsync(AuthState.CurrentUser!);
+            if (!_disposed) StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            // The list stays usable without these two filters.
+            Logger.LogError(ex, "ADMIN_JOB_MONITOR_OPTIONS_FAILED");
+        }
     }
 
     private async Task LoadJobsAsync()
@@ -375,6 +398,8 @@ else
         if (_scenesLoadingJobId == job.Id) _scenesLoadingJobId = null;
     }
 
+    private Task RefreshAllAsync() => Task.WhenAll(RefreshAsync(), LoadOptionsAsync());
+
     private Task RefreshAsync()
     {
         _scenes.Clear();
@@ -396,6 +421,18 @@ else
         return ApplyFiltersAsync();
     }
 
+    private Task SetServiceAsync(string? service)
+    {
+        _query.Service = service;
+        return ApplyFiltersAsync();
+    }
+
+    private Task SetUserAsync(string? userId)
+    {
+        _query.UserId = Guid.TryParse(userId, out var id) ? id : null;
+        return ApplyFiltersAsync();
+    }
+
     private Task SetStatusAsync(string? status)
     {
         _query.Status = status;
@@ -410,8 +447,6 @@ else
     private Task ApplyFiltersAsync()
     {
         _query.Search = _searchText;
-        _query.Service = _serviceText;
-        _query.User = _userText;
         _query.FromUtc = _fromDate is { } from ? AdminJobMonitorRules.LocalDayStartUtc(from) : null;
         _query.ToUtc = _toDate is { } to ? AdminJobMonitorRules.LocalDayEndUtc(to) : null;
         return ChangePageAsync(1);
@@ -419,9 +454,10 @@ else
 
     private Task ClearFiltersAsync()
     {
-        _searchText = _serviceText = _userText = string.Empty;
+        _searchText = string.Empty;
         _fromDate = _toDate = null;
-        _query.Kind = _query.Status = null;
+        _query.Kind = _query.Status = _query.Service = null;
+        _query.UserId = null;
         return ApplyFiltersAsync();
     }
 
