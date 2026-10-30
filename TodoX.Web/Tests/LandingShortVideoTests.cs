@@ -123,6 +123,8 @@ public sealed class LandingShortVideoTests
         Assert.Contains("id=\"process\"", page);
         Assert.Equal(7, System.Text.RegularExpressions.Regex.Matches(page, "class=\"sv-step-no\"").Count);
         Assert.Contains("/js/short-video.js", page);
+        Assert.DoesNotContain("topics-title", page);
+        Assert.DoesNotContain("Video mẫu tham khảo", page, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
