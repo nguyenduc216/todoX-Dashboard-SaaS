@@ -50,7 +50,7 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
     public Task<string> UploadAsync(IBrowserFile file, bool video, CancellationToken ct = default)
         => UploadAsync(file, video, "intro", ct);
 
-    /// <param name="area">Landing media area: "intro" (homepage intro) or "short-video" (/video-ngan page).</param>
+    /// <param name="area">Landing media area: "intro" (homepage intro), "short-video" (/video-ngan page) or "video-samples" (/mau-video page).</param>
     public async Task<string> UploadAsync(IBrowserFile file, bool video, string area, CancellationToken ct = default)
     {
         LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);

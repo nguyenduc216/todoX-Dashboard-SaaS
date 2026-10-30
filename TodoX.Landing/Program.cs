@@ -25,6 +25,7 @@ builder.Services.AddScoped<LandingContactRepository>();
 builder.Services.AddScoped<IndustrySolutionRepository>();
 builder.Services.AddScoped<IntroVideoRepository>();
 builder.Services.AddScoped<ShortVideoRepository>();
+builder.Services.AddScoped<VideoSampleRepository>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddRateLimiter(options =>
 {
@@ -148,6 +149,9 @@ app.MapGet("/api/landing/intro-video", async (IntroVideoRepository repository, C
 app.MapGet("/api/landing/short-video", async (ShortVideoRepository repository, CancellationToken ct) =>
     Results.Ok(await repository.GetPublicAsync(ct)));
 
+app.MapGet("/api/landing/video-samples", async (VideoSampleRepository repository, CancellationToken ct) =>
+    Results.Ok(await repository.GetPublicAsync(ct)));
+
 app.MapPost("/api/contact-leads", async (
     HttpContext http,
     ContactLeadCreateRequest request,
@@ -212,5 +216,6 @@ app.MapPost("/api/contact-leads", async (
 // Serve the marketing deep link as its own document, including on refresh.
 app.MapGet("/bat-dong-san", () => Results.File(Path.Combine(app.Environment.WebRootPath, "bat-dong-san.html"), "text/html; charset=utf-8"));
 app.MapGet("/video-ngan", () => Results.File(Path.Combine(app.Environment.WebRootPath, "video-ngan.html"), "text/html; charset=utf-8"));
+app.MapGet("/mau-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "mau-video.html"), "text/html; charset=utf-8"));
 app.MapFallbackToFile("index.html");
 app.Run();
