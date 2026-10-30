@@ -1,0 +1,25 @@
+/* Homepage entry points for the /video-ngan page ("Video truyền thông"). */
+.industry-pill-short-video { background:linear-gradient(110deg,rgba(255,189,34,.34),rgba(8,9,11,.95) 78%); box-shadow:0 0 18px rgba(255,189,34,.18); }
+.industry-pill-short-video i { background:var(--gold); color:#16100a; }
+[data-short-video-entry][hidden] { display:none !important; }
+
+.short-video-teaser .sv-teaser { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:34px; align-items:center; padding:38px; border:1px solid var(--line); border-radius:var(--radius); }
+.short-video-teaser h2 { margin:14px 0 12px; font-size:clamp(26px,3vw,40px); line-height:1.18; }
+.short-video-teaser p { color:var(--muted); line-height:1.7; margin:0; }
+.sv-teaser-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:24px; }
+.sv-teaser-plans { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.sv-teaser-plan { display:flex; flex-direction:column; gap:6px; padding:20px 14px; border-radius:16px; border:1px solid var(--white-line); background:rgba(10,12,18,.85); text-align:center; transition:border-color .2s, transform .2s; }
+.sv-teaser-plan:hover { border-color:var(--gold); transform:translateY(-3px); }
+.sv-teaser-plan b { font-size:14px; text-transform:uppercase; letter-spacing:.04em; }
+.sv-teaser-plan strong { color:var(--gold); font-size:clamp(17px,1.6vw,22px); font-weight:800; }
+.sv-teaser-plan span { color:var(--muted); font-size:12px; }
+.sv-teaser-plan.is-featured { border:2px solid var(--gold); background:linear-gradient(170deg,rgba(255,189,34,.16),rgba(10,12,18,.9) 70%); box-shadow:0 0 30px rgba(255,189,34,.18); }
+
+@media (max-width:900px) {
+  .short-video-teaser .sv-teaser { grid-template-columns:1fr; padding:24px 18px; }
+}
+@media (max-width:520px) {
+  .sv-teaser-plans { grid-template-columns:1fr; }
+  .sv-teaser-plan { flex-direction:row; flex-wrap:wrap; justify-content:space-between; align-items:center; text-align:left; padding:14px 16px; }
+  .sv-teaser-plan span { width:100%; }
+}
