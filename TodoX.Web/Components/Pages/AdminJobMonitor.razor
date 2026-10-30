@@ -30,33 +30,10 @@ else
         <div class="monitor-filters">
             <input type="search" class="filter-search" placeholder="Tên job hoặc ID"
                    aria-label="Tìm theo tên job hoặc ID" @bind="_searchText" @bind:event="oninput" @onkeydown="HandleSearchKeyDown" />
-            <select aria-label="Tên dịch vụ" value="@_query.Service" @onchange="@(args => SetServiceAsync(args.Value?.ToString()))">
-                <option value="">Tất cả dịch vụ</option>
-                @foreach (var service in _options.Services)
-                {
-                    <option value="@service">@service</option>
-                }
-            </select>
-            <select aria-label="Người thực hiện" value="@_query.UserId" @onchange="@(args => SetUserAsync(args.Value?.ToString()))">
-                <option value="">Tất cả người thực hiện</option>
-                @foreach (var user in _options.Users)
-                {
-                    <option value="@user.Id">@user.Label</option>
-                }
-            </select>
-            <select aria-label="Loại job" value="@_query.Kind" @onchange="@(args => SetKindAsync(args.Value?.ToString()))">
-                <option value="">Tất cả loại job</option>
-                <option value="@AdminJobMonitorKinds.RVideo">RVideo</option>
-                <option value="@AdminJobMonitorKinds.RDance">RDance</option>
-                <option value="@AdminJobMonitorKinds.Timelapse">Timelapse</option>
-            </select>
-            <select aria-label="Trạng thái" value="@_query.Status" @onchange="@(args => SetStatusAsync(args.Value?.ToString()))">
-                <option value="">Tất cả trạng thái</option>
-                @foreach (var status in StatusOptions)
-                {
-                    <option value="@status">@AdminJobMonitorRules.StatusLabel(status)</option>
-                }
-            </select>
+            <JobMonitorFilterSelect Label="Dịch vụ" AllLabel="Tất cả dịch vụ" Options="@ServiceOptions" Value="@_query.Service" ValueChanged="SetServiceAsync" />
+            <JobMonitorFilterSelect Label="Người thực hiện" AllLabel="Tất cả người thực hiện" Options="@UserOptions" Value="@_query.UserId?.ToString()" ValueChanged="SetUserAsync" />
+            <JobMonitorFilterSelect Label="Loại job" AllLabel="Tất cả loại job" Options="@KindOptions" Value="@_query.Kind" ValueChanged="SetKindAsync" />
+            <JobMonitorFilterSelect Label="Trạng thái" AllLabel="Tất cả trạng thái" Options="@StatusOptions" Value="@_query.Status" ValueChanged="SetStatusAsync" />
             <label class="filter-date">
                 <span>Từ ngày</span>
                 <input type="date" @bind="_fromDate" @bind:after="ApplyFiltersAsync" />
@@ -266,16 +243,30 @@ else
 }
 
 @code {
-    private static readonly string[] StatusOptions =
-    [
-        AdminJobMonitorStatuses.Draft,
-        AdminJobMonitorStatuses.Queued,
-        AdminJobMonitorStatuses.Processing,
-        AdminJobMonitorStatuses.Paused,
-        AdminJobMonitorStatuses.Completed,
-        AdminJobMonitorStatuses.Failed,
-        AdminJobMonitorStatuses.Cancelled
-    ];
+    private static readonly AdminJobMonitorFilterOption[] KindOptions =
+        new[] { AdminJobMonitorKinds.RVideo, AdminJobMonitorKinds.RDance, AdminJobMonitorKinds.Timelapse }
+            .Select(kind => new AdminJobMonitorFilterOption(kind, AdminJobMonitorRules.KindLabel(kind)))
+            .ToArray();
+
+    private static readonly AdminJobMonitorFilterOption[] StatusOptions =
+        new[]
+        {
+            AdminJobMonitorStatuses.Draft,
+            AdminJobMonitorStatuses.Queued,
+            AdminJobMonitorStatuses.Processing,
+            AdminJobMonitorStatuses.Paused,
+            AdminJobMonitorStatuses.Completed,
+            AdminJobMonitorStatuses.Failed,
+            AdminJobMonitorStatuses.Cancelled
+        }
+        .Select(status => new AdminJobMonitorFilterOption(status, AdminJobMonitorRules.StatusLabel(status)))
+        .ToArray();
+
+    private IReadOnlyList<AdminJobMonitorFilterOption> ServiceOptions
+        => _options.Services.Select(service => new AdminJobMonitorFilterOption(service, service)).ToList();
+
+    private IReadOnlyList<AdminJobMonitorFilterOption> UserOptions
+        => _options.Users.Select(user => new AdminJobMonitorFilterOption(user.Id.ToString(), user.Label)).ToList();
 
     private readonly AdminJobMonitorQuery _query = new();
     private readonly Dictionary<Guid, IReadOnlyList<AdminJobMonitorScene>> _scenes = new();

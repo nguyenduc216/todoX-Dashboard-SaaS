@@ -67,8 +67,16 @@
     gap: 10px;
 }
 
-.monitor-filters input,
-.monitor-filters select {
+.monitor-filters ::deep .mud-input-control {
+    margin: 0;
+}
+
+.monitor-filters ::deep .mud-input-outlined {
+    background: #111a26;
+}
+
+.monitor-filters > input,
+.filter-date input {
     box-sizing: border-box;
     min-width: 0;
     height: 40px;

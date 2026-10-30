@@ -1,4 +1,6 @@
 using System.Data;
+using System.Globalization;
+using System.Text;
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
@@ -350,6 +352,29 @@ public static class AdminJobMonitorRules
             "cancelled" or "invalidated" => AdminJobMonitorStatuses.Cancelled,
             _ => AdminJobMonitorStatuses.Processing
         };
+
+    /// <summary>Every typed word must appear in the label, ignoring case and Vietnamese diacritics.</summary>
+    public static bool MatchesSearch(string label, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        var folded = FoldForSearch(label);
+        return FoldForSearch(text)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .All(word => folded.Contains(word, StringComparison.Ordinal));
+    }
+
+    private static string FoldForSearch(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(decomposed.Length);
+        foreach (var character in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+                builder.Append(character);
+        }
+
+        return builder.ToString().Replace('đ', 'd').Replace('Đ', 'd').ToLowerInvariant();
+    }
 
     public static string? JobRoute(string? kind, Guid jobId)
         => kind switch

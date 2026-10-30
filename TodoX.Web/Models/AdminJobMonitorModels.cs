@@ -31,6 +31,8 @@ public sealed class AdminJobMonitorQuery
     public DateTime? ToUtc { get; set; }
 }
 
+public sealed record AdminJobMonitorFilterOption(string Value, string Label);
+
 public sealed class AdminJobMonitorFilterOptions
 {
     public IReadOnlyList<string> Services { get; init; } = Array.Empty<string>();

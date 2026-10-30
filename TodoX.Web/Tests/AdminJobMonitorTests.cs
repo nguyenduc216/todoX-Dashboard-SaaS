@@ -161,6 +161,31 @@ public sealed class AdminJobMonitorTests
         Assert.DoesNotContain("SignInAsync", section);
     }
 
+    [Theory]
+    [InlineData("Cây Cỏ Biết Nói", "cay co", true)]
+    [InlineData("Cây Cỏ Biết Nói", "CỎ", true)]
+    [InlineData("Cây Cỏ Biết Nói", "biet cay", true)]
+    [InlineData("Đạo Lý Người Que", "dao ly", true)]
+    [InlineData("Trần Trọng Tuyên (todoexcellence@gmail.com)", "excellence", true)]
+    [InlineData("Cây Cỏ Biết Nói", "phong thuy", false)]
+    [InlineData("Cây Cỏ Biết Nói", "", true)]
+    [InlineData("Cây Cỏ Biết Nói", null, true)]
+    public void ListboxSearchIgnoresCaseAndDiacritics(string label, string? text, bool expected)
+        => Assert.Equal(expected, AdminJobMonitorRules.MatchesSearch(label, text));
+
+    [Fact]
+    public void EveryListboxHasLiveSearchAndShowsAllOptions()
+    {
+        var page = Page();
+        Assert.DoesNotContain("<select", page);
+        Assert.Equal(4, CountOf(page, "<JobMonitorFilterSelect "));
+        var select = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "Components", "Shared", "JobMonitorFilterSelect.razor"), Encoding.UTF8);
+        Assert.Contains("SearchFunc=\"SearchAsync\"", select);
+        // MudAutocomplete shows only 10 items unless this is lifted.
+        Assert.Contains("MaxItems=\"null\"", select);
+    }
+
     private static int CountOf(string text, string value)
         => (text.Length - text.Replace(value, string.Empty, StringComparison.Ordinal).Length) / value.Length;
 
