@@ -12,6 +12,7 @@
 @inject TodoX.Web.Services.Platform.ICoreJobApplicationService CoreJobs
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService ServiceCatalog
 @inject NavigationManager Navigation
+@inject ILogger<MyJobs> Logger
 
 <PageTitle>Jobs của tôi</PageTitle>
 
@@ -26,17 +27,23 @@
         </MudButton>
     </MudStack>
 
-    @if (!AuthState.IsInitialized)
-    {
-        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
-    }
-    else if (AuthState.CurrentUser is not { IsCustomer: true })
+    @if (AuthState.IsInitialized && AuthState.CurrentUser is not { IsCustomer: true })
     {
         <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập bằng tài khoản khách hàng.</MudAlert>
     }
-    else if (_loading)
+    else if (!_loaded)
     {
-        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        @* First paint is a lightweight skeleton; data loads after the interactive circuit starts (not during prerender). *@
+        <MudPaper Class="todox-card pa-3" rounded="true">
+            @for (var i = 0; i < 6; i++)
+            {
+                <MudSkeleton SkeletonType="SkeletonType.Text" Height="36px" Class="my-1" />
+            }
+        </MudPaper>
+    }
+    else if (!string.IsNullOrWhiteSpace(_error) && _jobs.Count == 0)
+    {
+        <MudAlert Severity="Severity.Error">@_error</MudAlert>
     }
     else if (_jobs.Count == 0)
     {
@@ -50,7 +57,11 @@
     }
     else
     {
-        <MudTable Items="_jobs" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@_error</MudAlert>
+        }
+        <MudTable Items="_jobs" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" Loading="_loading" LoadingProgressColor="Color.Warning">
             <HeaderContent>
                 <MudTh>Tiêu đề</MudTh>
                 <MudTh>Dịch vụ</MudTh>
@@ -70,91 +81,203 @@
                 </MudTd>
             </RowTemplate>
         </MudTable>
+        @if (_hasMore)
+        {
+            <MudStack Row="true" Justify="Justify.Center">
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="_loading" OnClick="LoadMoreAsync">
+                    @(_loading ? "Đang tải..." : "Tải thêm")
+                </MudButton>
+            </MudStack>
+        }
     }
 </MudStack>
 
 @code {
-    private IReadOnlyList<CustomerJobRow> _jobs = Array.Empty<CustomerJobRow>();
-    private bool _loading = true;
+    // Jobs load on demand: each source returns only the newest page, and "Tải thêm" widens the window.
+    internal const int PageSize = 20;
+    private const int CoreMaxPageSize = 100;
 
-    protected override async Task OnInitializedAsync()
+    private IReadOnlyList<CustomerJobRow> _jobs = Array.Empty<CustomerJobRow>();
+    private IReadOnlyDictionary<string, TodoX.Web.Services.Platform.CoreServiceView>? _catalog;
+    private readonly Dictionary<Guid, string> _dancePoints = new();
+    private int _take = PageSize;
+    private bool _loaded;
+    private bool _loading;
+    private bool _hasMore;
+    private string? _error;
+    private string? _userKey;
+    private int _loadVersion;
+    private bool _disposed;
+
+    protected override void OnInitialized() => AuthState.OnChange += HandleAuthChange;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        AuthState.OnChange += HandleAuthChange;
+        if (firstRender) await ReloadForCurrentUserAsync();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        AuthState.OnChange -= HandleAuthChange;
+    }
+
+    // Profile edits (name, avatar) also raise OnChange; only an identity switch reloads the list.
+    private void HandleAuthChange() => _ = InvokeAsync(ReloadForCurrentUserAsync);
+
+    private async Task ReloadForCurrentUserAsync()
+    {
+        if (!AuthState.IsInitialized) return;
+        var user = AuthState.CurrentUser;
+        var key = user is { IsCustomer: true } ? $"{user.UserId}:{user.CustomerId}" : null;
+        if (_loaded && key == _userKey) return;
+        _userKey = key;
+        _take = PageSize;
+        _dancePoints.Clear();
+        _jobs = Array.Empty<CustomerJobRow>();
+        _loaded = false;
         await LoadJobsAsync();
     }
 
-    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
-
-    private void HandleAuthChange() => _ = InvokeAsync(async () =>
+    private Task LoadMoreAsync()
     {
-        await LoadJobsAsync();
-        StateHasChanged();
-    });
+        if (_loading || !_hasMore) return Task.CompletedTask;
+        _take += PageSize;
+        return LoadJobsAsync();
+    }
 
     private async Task LoadJobsAsync()
     {
+        var version = ++_loadVersion;
         _loading = true;
-        _jobs = Array.Empty<CustomerJobRow>();
+        _error = null;
+        StateHasChanged();
 
-        if (AuthState.CurrentUser is { IsCustomer: true } currentUser)
+        try
         {
-            var timelapseTask = TimelapseJobs.ListOwnedAsync(currentUser);
-            var danceTask = DanceJobs.ListAsync(currentUser, 100);
-            var coreTask = CoreJobs.ListAsync(new TodoX.Web.Services.Platform.CoreRequestContext(
-                currentUser.CustomerId, currentUser.UserId, TodoX.Web.Services.Platform.CoreChannelCodes.Dashboard), new(1, 100));
-            var catalogTask = ServiceCatalog.ListAsync();
-            await Task.WhenAll(timelapseTask, danceTask, coreTask, catalogTask);
-            var catalog = catalogTask.Result.ToDictionary(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase);
-            var danceRows = await BuildDanceRowsAsync(danceTask.Result, CancellationToken.None);
+            if (AuthState.CurrentUser is { IsCustomer: true } currentUser)
+            {
+                var timelapseTask = TimelapseJobs.ListOwnedAsync(currentUser);
+                // One extra row per source tells whether an older page exists.
+                var danceTask = DanceJobs.ListAsync(currentUser, _take + 1);
+                var coreTask = ListCoreJobsAsync(currentUser, _take + 1);
+                var catalogTask = _catalog is null ? ServiceCatalog.ListAsync() : null;
+                await Task.WhenAll(new Task[] { timelapseTask, danceTask, coreTask, catalogTask ?? Task.CompletedTask });
+                if (version != _loadVersion || _disposed) return;
+                _catalog ??= catalogTask!.Result.ToDictionary(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase);
+                var catalog = _catalog;
 
-            var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
-                    x.Id,
-                    x.Snapshot.Title,
-                    "Video Timelapse AI",
-                    TimelapseStatusText.Parent(x.Workflow.ParentStatus),
-                    x.Workflow.CurrentStep,
-                    x.CreatedAt,
-                    x.Snapshot.SellPrice?.TotalPoints is decimal points ? $"{points:0.##}" : "—",
-                    $"/jobs/timelapse/{x.Id}"))
-                .Concat(danceRows)
-                .Concat(coreTask.Result.Items
-                    .Where(x => string.Equals(x.OperationType, TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
-                    .Select(x => new CustomerJobRow(
-                        x.JobId,
-                        ReadSnapshotString(x.Input, "title") ?? catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
-                        catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
-                        x.Status,
-                        x.CurrentStep ?? "info",
+                var dance = danceTask.Result;
+                var core = coreTask.Result;
+                // A source that returned a full window may hide older rows; only rows newer than every such
+                // source's oldest kept row are certain to be in the right order, so the list is cut there.
+                DateTime? frontier = null;
+                if (dance.Count > _take) frontier = Max(frontier, dance[_take - 1].CreatedAt);
+                if (core.Count > _take) frontier = Max(frontier, core[_take - 1].CreatedAt);
+
+                var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
+                        x.Id,
+                        x.Snapshot.Title,
+                        "Video Timelapse AI",
+                        TimelapseStatusText.Parent(x.Workflow.ParentStatus),
+                        x.Workflow.CurrentStep,
                         x.CreatedAt,
-                        x.PointCostEstimate > 0 ? $"{x.PointCostEstimate:0.##}" : "—",
-                        $"/jobs/rvideo/{x.JobId}")))
-                .OrderByDescending(x => x.CreatedAt)
-                .ToList();
+                        x.Snapshot.SellPrice?.TotalPoints is decimal points ? $"{points:0.##}" : "—",
+                        $"/jobs/timelapse/{x.Id}"))
+                    .Concat(BuildDanceRows(dance.Take(_take)))
+                    .Concat(core.Take(_take)
+                        .Where(x => string.Equals(x.OperationType, TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
+                        .Select(x => new CustomerJobRow(
+                            x.JobId,
+                            ReadSnapshotString(x.Input, "title") ?? catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
+                            catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
+                            x.Status,
+                            x.CurrentStep ?? "info",
+                            x.CreatedAt,
+                            x.PointCostEstimate > 0 ? $"{x.PointCostEstimate:0.##}" : "—",
+                            $"/jobs/rvideo/{x.JobId}")))
+                    .Where(x => frontier is null || x.CreatedAt >= frontier)
+                    .OrderByDescending(x => x.CreatedAt)
+                    .ToList();
 
-            _jobs = rows;
+                _jobs = rows;
+                _hasMore = frontier is not null;
+            }
+            else
+            {
+                _jobs = Array.Empty<CustomerJobRow>();
+                _hasMore = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (version != _loadVersion || _disposed) return;
+            Logger.LogWarning(ex, "My jobs list load failed");
+            _error = _jobs.Count == 0 ? "Không tải được danh sách job. Vui lòng thử lại." : "Không tải thêm được job, đang hiển thị danh sách hiện có.";
+        }
+        finally
+        {
+            if (version == _loadVersion && !_disposed)
+            {
+                _loading = false;
+                _loaded = true;
+                StateHasChanged();
+            }
         }
 
-        _loading = false;
-        await InvokeAsync(StateHasChanged);
+        if (version == _loadVersion && !_disposed) await FillDancePointsAsync(version);
     }
 
-    private async Task<IReadOnlyList<CustomerJobRow>> BuildDanceRowsAsync(IReadOnlyList<DanceSellJobDto> jobs, CancellationToken ct)
+    private async Task<IReadOnlyList<TodoX.Web.Services.Platform.CoreJobView>> ListCoreJobsAsync(CurrentUserSession user, int count)
     {
-        var rows = new List<CustomerJobRow>(jobs.Count);
-        foreach (var job in jobs)
+        var context = new TodoX.Web.Services.Platform.CoreRequestContext(
+            user.CustomerId, user.UserId, TodoX.Web.Services.Platform.CoreChannelCodes.Dashboard);
+        var pageSize = Math.Min(count, CoreMaxPageSize);
+        var items = new List<TodoX.Web.Services.Platform.CoreJobView>(count);
+        for (var page = 1; items.Count < count; page++)
         {
-            rows.Add(new CustomerJobRow(
-                job.Id,
-                job.Title ?? "Video nhảy quảng cáo thời trang",
-                "Video nhảy quảng cáo thời trang",
-                DanceSellCustomerStatusText.JobStatusLabel(job.Status),
-                DanceSellCustomerStatusText.StageLabel(job.CurrentStage),
-                job.CreatedAt,
-                await ResolveDancePointsLabelAsync(job, ct),
-                $"/jobs/rdance/{job.Id}"));
+            var result = await CoreJobs.ListAsync(context, new(page, pageSize));
+            items.AddRange(result.Items);
+            if (result.Items.Count < pageSize) break;
         }
 
-        return rows;
+        return items.Count > count ? items.GetRange(0, count) : items;
+    }
+
+    private static DateTime Max(DateTime? current, DateTime value) => current is { } c && c > value ? c : value;
+
+    // Dance rows render immediately; their charged points are resolved afterwards and cached per job.
+    private IEnumerable<CustomerJobRow> BuildDanceRows(IEnumerable<DanceSellJobDto> jobs)
+        => jobs.Select(job => new CustomerJobRow(
+            job.Id,
+            job.Title ?? "Video nhảy quảng cáo thời trang",
+            "Video nhảy quảng cáo thời trang",
+            DanceSellCustomerStatusText.JobStatusLabel(job.Status),
+            DanceSellCustomerStatusText.StageLabel(job.CurrentStage),
+            job.CreatedAt,
+            _dancePoints.GetValueOrDefault(job.Id, "…"),
+            $"/jobs/rdance/{job.Id}",
+            job));
+
+    private async Task FillDancePointsAsync(int version)
+    {
+        var pending = _jobs.Where(x => x.DanceJob is not null && !_dancePoints.ContainsKey(x.Id)).ToList();
+        if (pending.Count == 0) return;
+        using var gate = new SemaphoreSlim(4);
+        await Task.WhenAll(pending.Select(async row =>
+        {
+            await gate.WaitAsync();
+            try { _dancePoints[row.Id] = await ResolveDancePointsLabelAsync(row.DanceJob!, CancellationToken.None); }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "My jobs dance points lookup failed {JobId}", row.Id);
+                _dancePoints[row.Id] = "—";
+            }
+            finally { gate.Release(); }
+        }));
+        if (version != _loadVersion || _disposed) return;
+        _jobs = _jobs.Select(x => x.DanceJob is not null && _dancePoints.TryGetValue(x.Id, out var label) ? x with { PointsLabel = label } : x).ToList();
+        StateHasChanged();
     }
 
     private async Task<string> ResolveDancePointsLabelAsync(DanceSellJobDto job, CancellationToken ct)
@@ -179,5 +302,6 @@
         string StageLabel,
         DateTime CreatedAt,
         string PointsLabel,
-        string Route);
+        string Route,
+        DanceSellJobDto? DanceJob = null);
 }
