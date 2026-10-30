@@ -125,6 +125,26 @@ public sealed class LandingShortVideoTests
         Assert.Contains("/js/short-video.js", page);
     }
 
+    [Theory]
+    [InlineData("bat-dong-san.html", "real-estate.js")]
+    [InlineData("video-ngan.html", "short-video.js")]
+    public void DemoPlayButtonIsIconOnlyAndScriptDoesNotExpectLabel(string page, string script)
+    {
+        var root = Path.Combine(FindLandingRoot(), "wwwroot");
+        Assert.DoesNotContain("<span>Phát video</span>", File.ReadAllText(Path.Combine(root, page)));
+        var js = File.ReadAllText(Path.Combine(root, "js", script));
+        Assert.DoesNotContain("play.querySelector('span')", js);
+        Assert.Contains("play.setAttribute('aria-label', label)", js);
+    }
+
+    [Fact]
+    public void HomepagePlayButtonUsesGoldStyle()
+    {
+        var css = File.ReadAllText(Path.Combine(FindLandingRoot(), "wwwroot", "css", "landing.css"));
+        Assert.Contains("background:linear-gradient(135deg,var(--gold-2),var(--gold)); border:1px solid rgba(255,216,107,.85);", css);
+        Assert.DoesNotContain("background:rgba(255,255,255,.88); color:#111", css);
+    }
+
     private static string FindLandingRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
