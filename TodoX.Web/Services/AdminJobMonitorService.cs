@@ -1,4 +1,6 @@
 using System.Data;
+using System.Globalization;
+using System.Text;
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
@@ -14,6 +16,16 @@ public interface IAdminJobMonitorService
         CancellationToken ct = default);
 
     Task<IReadOnlyList<AdminJobMonitorScene>> GetScenesAsync(
+        CurrentUserSession user,
+        string kind,
+        Guid jobId,
+        CancellationToken ct = default);
+
+    Task<AdminJobMonitorFilterOptions> GetFilterOptionsAsync(
+        CurrentUserSession user,
+        CancellationToken ct = default);
+
+    Task<Guid?> GetJobOwnerAsync(
         CurrentUserSession user,
         string kind,
         Guid jobId,
@@ -54,6 +66,10 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
                 kind = normalized.Kind,
                 status = normalized.Status,
                 search = normalized.Search is null ? null : $"%{normalized.Search}%",
+                service = normalized.Service,
+                userId = normalized.UserId,
+                fromUtc = normalized.FromUtc,
+                toUtc = normalized.ToUtc,
                 limit = normalized.PageSize,
                 offset = (normalized.Page - 1) * normalized.PageSize
             },
@@ -116,6 +132,42 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
             Page = normalized.Page,
             PageSize = normalized.PageSize
         };
+    }
+
+    // Options come from the jobs the monitor lists, so every choice can return results.
+    public async Task<AdminJobMonitorFilterOptions> GetFilterOptionsAsync(
+        CurrentUserSession user,
+        CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var connection = await _factory.OpenAsync(ct);
+        var parameters = new { tenant = _tenant.TenantId };
+        var services = await connection.QueryAsync<string>(new CommandDefinition(
+            AdminJobMonitorSql.ServiceOptions, parameters, cancellationToken: ct));
+        var users = await connection.QueryAsync<AdminJobMonitorUserOption>(new CommandDefinition(
+            AdminJobMonitorSql.UserOptions, parameters, cancellationToken: ct));
+        return new AdminJobMonitorFilterOptions { Services = services.ToList(), Users = users.ToList() };
+    }
+
+    public async Task<Guid?> GetJobOwnerAsync(
+        CurrentUserSession user,
+        string kind,
+        Guid jobId,
+        CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        var sql = kind switch
+        {
+            AdminJobMonitorKinds.RVideo => AdminJobMonitorSql.RVideoOwner,
+            AdminJobMonitorKinds.Timelapse => AdminJobMonitorSql.TimelapseOwner,
+            AdminJobMonitorKinds.RDance => AdminJobMonitorSql.RDanceOwner,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown job kind.")
+        };
+        await _tenant.EnsureLoadedAsync(ct);
+        using var connection = await _factory.OpenAsync(ct);
+        return await connection.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(
+            sql, new { tenant = _tenant.TenantId, jobId }, cancellationToken: ct));
     }
 
     public async Task<IReadOnlyList<AdminJobMonitorScene>> GetScenesAsync(
@@ -257,8 +309,37 @@ public static class AdminJobMonitorRules
             PageSize = Math.Clamp(query.PageSize <= 0 ? DefaultPageSize : query.PageSize, 1, MaxPageSize),
             Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim(),
             Kind = string.IsNullOrWhiteSpace(query.Kind) ? null : query.Kind.Trim(),
-            Status = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim()
+            Status = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim(),
+            Service = string.IsNullOrWhiteSpace(query.Service) ? null : query.Service.Trim(),
+            UserId = query.UserId,
+            FromUtc = query.FromUtc,
+            ToUtc = query.ToUtc
         };
+    }
+
+    public static DateTime LocalDayStartUtc(DateOnly day, TimeZoneInfo? timeZone = null)
+        => TimeZoneInfo.ConvertTimeToUtc(day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified), timeZone ?? TimeZoneInfo.Local);
+
+    /// <summary>Exclusive end of the local day, so the whole "to" day is included.</summary>
+    public static DateTime LocalDayEndUtc(DateOnly day, TimeZoneInfo? timeZone = null)
+        => LocalDayStartUtc(day.AddDays(1), timeZone);
+
+    /// <summary>Page numbers to show around the current page; 0 marks a gap between numbers.</summary>
+    public static IReadOnlyList<int> PageWindow(int current, int total, int neighbours = 2)
+    {
+        if (total <= 1) return [1];
+        var pages = new List<int>();
+        var previous = 0;
+        for (var page = 1; page <= total; page++)
+        {
+            if (page != 1 && page != total && Math.Abs(page - current) > neighbours) continue;
+            if (page - previous == 2) pages.Add(previous + 1);
+            else if (page - previous > 2) pages.Add(0);
+            pages.Add(page);
+            previous = page;
+        }
+
+        return pages;
     }
 
     public static string NormalizeSceneStatus(string? rawStatus)
@@ -271,6 +352,40 @@ public static class AdminJobMonitorRules
             "cancelled" or "invalidated" => AdminJobMonitorStatuses.Cancelled,
             _ => AdminJobMonitorStatuses.Processing
         };
+
+    /// <summary>Every typed word must appear in the label, ignoring case and Vietnamese diacritics.</summary>
+    public static bool MatchesSearch(string label, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        var folded = FoldForSearch(label);
+        return FoldForSearch(text)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .All(word => folded.Contains(word, StringComparison.Ordinal));
+    }
+
+    private static string FoldForSearch(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(decomposed.Length);
+        foreach (var character in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+                builder.Append(character);
+        }
+
+        return builder.ToString().Replace('đ', 'd').Replace('Đ', 'd').ToLowerInvariant();
+    }
+
+    public static string? JobRoute(string? kind, Guid jobId)
+        => kind switch
+        {
+            AdminJobMonitorKinds.RVideo => $"/jobs/rvideo/{jobId}",
+            AdminJobMonitorKinds.RDance => $"/jobs/rdance/{jobId}",
+            AdminJobMonitorKinds.Timelapse => $"/jobs/timelapse/{jobId}",
+            _ => null
+        };
+
+    public static string OpenJobPath(string kind, Guid jobId) => $"/admin/job-monitor/open/{kind}/{jobId}";
 
     public static string StatusLabel(string? status)
         => status switch
@@ -296,17 +411,15 @@ public static class AdminJobMonitorRules
 
 public static class AdminJobMonitorSql
 {
-    // Unfinished jobs first, newest first inside each group. Failed and cancelled jobs are finished:
-    // nothing is running for them any more.
-    public const string JobsPage = """
+    private const string JobsCte = """
         WITH jobs AS (
             SELECT 'rvideo' AS kind,
                    j.id,
                    j.created_at,
                    COALESCE(
-                       NULLIF(NULLIF(j.input_json->>'title', ''), 'Prompt workspace'),
-                       NULLIF(NULLIF(p.title, ''), 'Prompt workspace'),
-                       NULLIF(left(p.original_prompt, 120), ''),
+                       NULLIF(NULLIF(regexp_replace(j.input_json->>'title', '^\s*[\[{].*$', '', 's'), ''), 'Prompt workspace'),
+                       NULLIF(NULLIF(regexp_replace(p.title, '^\s*[\[{].*$', '', 's'), ''), 'Prompt workspace'),
+                       NULLIF(left(regexp_replace(p.original_prompt, '^\s*[\[{].*$', '', 's'), 120), ''),
                        s.service_name,
                        '') AS title,
                    p.source_image_url AS thumbnail_url,
@@ -396,7 +509,33 @@ public static class AdminJobMonitorSql
                    END
               FROM dance_sell.dance_sell_jobs d
              WHERE d.tenant_id = @tenant
-        ),
+        )
+        """;
+
+    public const string ServiceOptions = JobsCte + """
+
+        SELECT DISTINCT service_name
+          FROM jobs
+         WHERE service_name <> ''
+         ORDER BY service_name;
+        """;
+
+    public const string UserOptions = JobsCte + """
+
+        SELECT u.id AS Id,
+               CASE
+                   WHEN COALESCE(u.email, '') = '' THEN COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, u.id::text)
+                   ELSE COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, '') || ' (' || u.email || ')'
+               END AS Label
+          FROM auth.app_users u
+         WHERE u.id IN (SELECT user_id FROM jobs)
+         ORDER BY Label;
+        """;
+
+    // Unfinished jobs first, newest first inside each group. Failed and cancelled jobs are finished:
+    // nothing is running for them any more.
+    public const string JobsPage = JobsCte + """
+        ,
         filtered AS (
             SELECT jobs.*,
                    COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, '') AS user_name,
@@ -406,6 +545,10 @@ public static class AdminJobMonitorSql
               LEFT JOIN auth.app_users u ON u.id = jobs.user_id
              WHERE (@kind::text IS NULL OR jobs.kind = @kind)
                AND (@status::text IS NULL OR jobs.status = @status)
+               AND (@service::text IS NULL OR jobs.service_name = @service)
+               AND (@userId::uuid IS NULL OR jobs.user_id = @userId)
+               AND (@fromUtc::timestamptz IS NULL OR jobs.created_at >= @fromUtc)
+               AND (@toUtc::timestamptz IS NULL OR jobs.created_at < @toUtc)
                AND (@search::text IS NULL
                     OR jobs.id::text ILIKE @search
                     OR jobs.title ILIKE @search
@@ -476,6 +619,21 @@ public static class AdminJobMonitorSql
          WHERE o.dance_sell_job_id = ANY(@ids)
            AND o.operation_type = @motion
          ORDER BY o.dance_sell_job_id, o.attempt_no DESC, o.created_at DESC;
+        """;
+
+    public const string RVideoOwner = """
+        SELECT user_id FROM render.render_jobs
+         WHERE tenant_id = @tenant AND id = @jobId AND job_type = 'core_service' AND lower(operation_type) = 'rvideo';
+        """;
+
+    public const string TimelapseOwner = """
+        SELECT user_id FROM render.render_jobs
+         WHERE tenant_id = @tenant AND id = @jobId AND job_type = 'timelapse';
+        """;
+
+    public const string RDanceOwner = """
+        SELECT user_id FROM dance_sell.dance_sell_jobs
+         WHERE tenant_id = @tenant AND id = @jobId;
         """;
 
     public const string RVideoScenes = """

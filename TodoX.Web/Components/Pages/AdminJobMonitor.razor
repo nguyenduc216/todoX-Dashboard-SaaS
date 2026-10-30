@@ -24,25 +24,28 @@ else
                 <h1>Giám sát job</h1>
                 <p>@_page.UnfinishedCount.ToString("N0") job chưa hoàn thành / @_page.TotalCount.ToString("N0") job phù hợp</p>
             </div>
-            <button type="button" class="monitor-button" disabled="@_loading" @onclick="RefreshAsync">Làm mới</button>
+            <button type="button" class="monitor-button" disabled="@_loading" @onclick="RefreshAllAsync">Làm mới</button>
         </header>
 
         <div class="monitor-filters">
-            <input type="search" placeholder="Tìm theo tên job, dịch vụ, người thực hiện hoặc ID, nhấn Enter để tìm"
-                   aria-label="Tìm kiếm job" @bind="_searchText" @bind:event="oninput" @onkeydown="HandleSearchKeyDown" />
-            <select aria-label="Loại job" value="@_query.Kind" @onchange="@(args => SetKindAsync(args.Value?.ToString()))">
-                <option value="">Tất cả loại job</option>
-                <option value="@AdminJobMonitorKinds.RVideo">RVideo</option>
-                <option value="@AdminJobMonitorKinds.RDance">RDance</option>
-                <option value="@AdminJobMonitorKinds.Timelapse">Timelapse</option>
-            </select>
-            <select aria-label="Trạng thái" value="@_query.Status" @onchange="@(args => SetStatusAsync(args.Value?.ToString()))">
-                <option value="">Tất cả trạng thái</option>
-                @foreach (var status in StatusOptions)
-                {
-                    <option value="@status">@AdminJobMonitorRules.StatusLabel(status)</option>
-                }
-            </select>
+            <input type="search" class="filter-search" placeholder="Tên job hoặc ID"
+                   aria-label="Tìm theo tên job hoặc ID" @bind="_searchText" @bind:event="oninput" @onkeydown="HandleSearchKeyDown" />
+            <JobMonitorFilterSelect Label="Dịch vụ" AllLabel="Tất cả dịch vụ" Options="@ServiceOptions" Value="@_query.Service" ValueChanged="SetServiceAsync" />
+            <JobMonitorFilterSelect Label="Người thực hiện" AllLabel="Tất cả người thực hiện" Options="@UserOptions" Value="@_query.UserId?.ToString()" ValueChanged="SetUserAsync" />
+            <JobMonitorFilterSelect Label="Loại job" AllLabel="Tất cả loại job" Options="@KindOptions" Value="@_query.Kind" ValueChanged="SetKindAsync" />
+            <JobMonitorFilterSelect Label="Trạng thái" AllLabel="Tất cả trạng thái" Options="@StatusOptions" Value="@_query.Status" ValueChanged="SetStatusAsync" />
+            <label class="filter-date">
+                <span>Từ ngày</span>
+                <input type="date" @bind="_fromDate" @bind:after="ApplyFiltersAsync" />
+            </label>
+            <label class="filter-date">
+                <span>Đến ngày</span>
+                <input type="date" @bind="_toDate" @bind:after="ApplyFiltersAsync" />
+            </label>
+            <div class="filter-actions">
+                <button type="button" class="monitor-button" disabled="@_loading" @onclick="ApplyFiltersAsync">Tìm kiếm</button>
+                <button type="button" class="monitor-button secondary" disabled="@_loading" @onclick="ClearFiltersAsync">Xóa lọc</button>
+            </div>
         </div>
 
         @if (_error is not null)
@@ -119,6 +122,10 @@ else
                         {
                             <tr @key="@($"{job.Id}-scenes")" class="scene-row">
                                 <td colspan="11">
+                                    <div class="scene-actions">
+                                        @* rel="opener" makes the browser copy this tab's session storage, so an admin without remember-me stays signed in there. *@
+                                        <a class="monitor-button small" href="@AdminJobMonitorRules.OpenJobPath(job.Kind, job.Id)" target="_blank" rel="opener">Mở job</a>
+                                    </div>
                                     @if (_scenesLoadingJobId == job.Id)
                                     {
                                         <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
@@ -200,11 +207,23 @@ else
             </table>
         </div>
 
-        <div class="monitor-pagination">
-            <button type="button" class="monitor-button small" disabled="@(_loading || _query.Page <= 1)" @onclick="@(() => ChangePageAsync(_query.Page - 1))">Trước</button>
-            <span>Trang @_query.Page / @Math.Max(1, _page.TotalPages)</span>
-            <button type="button" class="monitor-button small" disabled="@(_loading || _query.Page >= _page.TotalPages)" @onclick="@(() => ChangePageAsync(_query.Page + 1))">Sau</button>
-        </div>
+        <nav class="monitor-pagination" aria-label="Phân trang">
+            <span class="page-summary">Trang @_query.Page / @Math.Max(1, _page.TotalPages)</span>
+            <button type="button" class="page-button" disabled="@(_loading || _query.Page <= 1)" @onclick="@(() => ChangePageAsync(_query.Page - 1))">Trước</button>
+            @foreach (var number in AdminJobMonitorRules.PageWindow(_query.Page, _page.TotalPages))
+            {
+                if (number == 0)
+                {
+                    <span class="page-gap">…</span>
+                }
+                else
+                {
+                    <button type="button" class="page-button @(number == _query.Page ? "current" : null)" disabled="@_loading"
+                            aria-current="@(number == _query.Page ? "page" : null)" @onclick="@(() => ChangePageAsync(number))">@number</button>
+                }
+            }
+            <button type="button" class="page-button" disabled="@(_loading || _query.Page >= _page.TotalPages)" @onclick="@(() => ChangePageAsync(_query.Page + 1))">Sau</button>
+        </nav>
     </div>
 
     @if (_previewUrl is not null)
@@ -224,21 +243,38 @@ else
 }
 
 @code {
-    private static readonly string[] StatusOptions =
-    [
-        AdminJobMonitorStatuses.Draft,
-        AdminJobMonitorStatuses.Queued,
-        AdminJobMonitorStatuses.Processing,
-        AdminJobMonitorStatuses.Paused,
-        AdminJobMonitorStatuses.Completed,
-        AdminJobMonitorStatuses.Failed,
-        AdminJobMonitorStatuses.Cancelled
-    ];
+    private static readonly AdminJobMonitorFilterOption[] KindOptions =
+        new[] { AdminJobMonitorKinds.RVideo, AdminJobMonitorKinds.RDance, AdminJobMonitorKinds.Timelapse }
+            .Select(kind => new AdminJobMonitorFilterOption(kind, AdminJobMonitorRules.KindLabel(kind)))
+            .ToArray();
+
+    private static readonly AdminJobMonitorFilterOption[] StatusOptions =
+        new[]
+        {
+            AdminJobMonitorStatuses.Draft,
+            AdminJobMonitorStatuses.Queued,
+            AdminJobMonitorStatuses.Processing,
+            AdminJobMonitorStatuses.Paused,
+            AdminJobMonitorStatuses.Completed,
+            AdminJobMonitorStatuses.Failed,
+            AdminJobMonitorStatuses.Cancelled
+        }
+        .Select(status => new AdminJobMonitorFilterOption(status, AdminJobMonitorRules.StatusLabel(status)))
+        .ToArray();
+
+    private IReadOnlyList<AdminJobMonitorFilterOption> ServiceOptions
+        => _options.Services.Select(service => new AdminJobMonitorFilterOption(service, service)).ToList();
+
+    private IReadOnlyList<AdminJobMonitorFilterOption> UserOptions
+        => _options.Users.Select(user => new AdminJobMonitorFilterOption(user.Id.ToString(), user.Label)).ToList();
 
     private readonly AdminJobMonitorQuery _query = new();
     private readonly Dictionary<Guid, IReadOnlyList<AdminJobMonitorScene>> _scenes = new();
     private AdminJobMonitorPage _page = new();
     private string _searchText = string.Empty;
+    private AdminJobMonitorFilterOptions _options = new();
+    private DateOnly? _fromDate;
+    private DateOnly? _toDate;
     private string? _error;
     private string? _scenesError;
     private string? _previewUrl;
@@ -276,7 +312,21 @@ else
         }
 
         _loaded = true;
-        await LoadJobsAsync();
+        await Task.WhenAll(LoadJobsAsync(), LoadOptionsAsync());
+    }
+
+    private async Task LoadOptionsAsync()
+    {
+        try
+        {
+            _options = await Monitor.GetFilterOptionsAsync(AuthState.CurrentUser!);
+            if (!_disposed) StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            // The list stays usable without these two filters.
+            Logger.LogError(ex, "ADMIN_JOB_MONITOR_OPTIONS_FAILED");
+        }
     }
 
     private async Task LoadJobsAsync()
@@ -343,6 +393,8 @@ else
         if (_scenesLoadingJobId == job.Id) _scenesLoadingJobId = null;
     }
 
+    private Task RefreshAllAsync() => Task.WhenAll(RefreshAsync(), LoadOptionsAsync());
+
     private Task RefreshAsync()
     {
         _scenes.Clear();
@@ -361,20 +413,47 @@ else
     private Task SetKindAsync(string? kind)
     {
         _query.Kind = kind;
-        return ChangePageAsync(1);
+        return ApplyFiltersAsync();
+    }
+
+    private Task SetServiceAsync(string? service)
+    {
+        _query.Service = service;
+        return ApplyFiltersAsync();
+    }
+
+    private Task SetUserAsync(string? userId)
+    {
+        _query.UserId = Guid.TryParse(userId, out var id) ? id : null;
+        return ApplyFiltersAsync();
     }
 
     private Task SetStatusAsync(string? status)
     {
         _query.Status = status;
-        return ChangePageAsync(1);
+        return ApplyFiltersAsync();
     }
 
     private async Task HandleSearchKeyDown(KeyboardEventArgs args)
     {
-        if (args.Key != "Enter") return;
+        if (args.Key == "Enter") await ApplyFiltersAsync();
+    }
+
+    private Task ApplyFiltersAsync()
+    {
         _query.Search = _searchText;
-        await ChangePageAsync(1);
+        _query.FromUtc = _fromDate is { } from ? AdminJobMonitorRules.LocalDayStartUtc(from) : null;
+        _query.ToUtc = _toDate is { } to ? AdminJobMonitorRules.LocalDayEndUtc(to) : null;
+        return ChangePageAsync(1);
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _searchText = string.Empty;
+        _fromDate = _toDate = null;
+        _query.Kind = _query.Status = _query.Service = null;
+        _query.UserId = null;
+        return ApplyFiltersAsync();
     }
 
     private void ShowImage(string url)

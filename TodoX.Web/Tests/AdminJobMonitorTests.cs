@@ -62,6 +62,27 @@ public sealed class AdminJobMonitorTests
         Assert.Null(query.Status);
     }
 
+    [Theory]
+    [InlineData(1, 1, "1")]
+    [InlineData(1, 0, "1")]
+    [InlineData(1, 5, "1,2,3,4,5")]
+    [InlineData(1, 20, "1,2,3,0,20")]
+    [InlineData(10, 20, "1,0,8,9,10,11,12,0,20")]
+    [InlineData(20, 20, "1,0,18,19,20")]
+    [InlineData(4, 20, "1,2,3,4,5,6,0,20")]
+    [InlineData(5, 20, "1,2,3,4,5,6,7,0,20")]
+    public void PageWindowShowsNumbersAroundCurrentAndBothEnds(int current, int total, string expected)
+        => Assert.Equal(expected, string.Join(",", AdminJobMonitorRules.PageWindow(current, total)));
+
+    [Fact]
+    public void DateFiltersCoverTheWholeLocalDay()
+    {
+        var vietnam = TimeZoneInfo.CreateCustomTimeZone("VN", TimeSpan.FromHours(7), "VN", "VN");
+        var day = new DateOnly(2026, 10, 28);
+        Assert.Equal(new DateTime(2026, 10, 27, 17, 0, 0, DateTimeKind.Utc), AdminJobMonitorRules.LocalDayStartUtc(day, vietnam));
+        Assert.Equal(new DateTime(2026, 10, 28, 17, 0, 0, DateTimeKind.Utc), AdminJobMonitorRules.LocalDayEndUtc(day, vietnam));
+    }
+
     // Regression: render.render_jobs is mostly worker rows (merge, scene image/video/audio, dance attempts)
     // and the old monitor listed them all as customer jobs.
     [Fact]
@@ -99,6 +120,70 @@ public sealed class AdminJobMonitorTests
             Assert.Contains($">{column}</th>", page);
         foreach (var column in new[] { "Hình ảnh", "Video", "Trạng thái", "Credit", "Ngày tạo", "Ngày hoàn thành" })
             Assert.Contains($">{column}</th>", page);
+    }
+
+    [Theory]
+    [InlineData(AdminJobMonitorKinds.RVideo, "/jobs/rvideo/")]
+    [InlineData(AdminJobMonitorKinds.RDance, "/jobs/rdance/")]
+    [InlineData(AdminJobMonitorKinds.Timelapse, "/jobs/timelapse/")]
+    public void OpenJobUsesTheCustomerRouteOfEachKind(string kind, string prefix)
+    {
+        var id = Guid.NewGuid();
+        Assert.Equal(prefix + id, AdminJobMonitorRules.JobRoute(kind, id));
+        var open = AdminJobMonitorRules.OpenJobPath(kind, id);
+        Assert.True(NavigationAccessRules.IsAdminOnlyPath(open));
+        Assert.False(NavigationAccessRules.CanAccessPath(new CurrentUserSession { IsAuthenticated = true, Role = TodoXUserRole.CustomerOwner }, open));
+    }
+
+    [Fact]
+    public void OpenJobLinkOpensANewTabThatKeepsTheAdminSession()
+    {
+        var page = Page();
+        Assert.Contains("href=\"@AdminJobMonitorRules.OpenJobPath(job.Kind, job.Id)\" target=\"_blank\" rel=\"opener\"", page);
+        var open = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "Components", "Pages", "AdminJobMonitorOpen.razor"), Encoding.UTF8);
+        Assert.Contains("\"vào từ giám sát video\"", open);
+        Assert.Contains("Reason: {ImpersonationReason}", open);
+        Assert.Contains("AdminEndpointAuthorization.IsAdmin(current)", open);
+        Assert.True(open.IndexOf("Audit.LogAsync", StringComparison.Ordinal) < open.IndexOf("ImpersonateInThisTabAsync", StringComparison.Ordinal));
+        Assert.DoesNotContain("AuthState.ImpersonateAsync", open);
+    }
+
+    // Regression guard: tab-scoped impersonation must not remove the admin's remember-me marker.
+    [Fact]
+    public void TabImpersonationAndItsExitNeverTouchTheLocalMarker()
+    {
+        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "Services", "AuthStateService.cs"), Encoding.UTF8);
+        var section = source[source.IndexOf("public async Task<bool> ImpersonateInThisTabAsync", StringComparison.Ordinal)..
+                             source.IndexOf("/// Attempt to restore the session", StringComparison.Ordinal)];
+        Assert.DoesNotContain("_local", section);
+        Assert.DoesNotContain("SignInAsync", section);
+    }
+
+    [Theory]
+    [InlineData("Cây Cỏ Biết Nói", "cay co", true)]
+    [InlineData("Cây Cỏ Biết Nói", "CỎ", true)]
+    [InlineData("Cây Cỏ Biết Nói", "biet cay", true)]
+    [InlineData("Đạo Lý Người Que", "dao ly", true)]
+    [InlineData("Trần Trọng Tuyên (todoexcellence@gmail.com)", "excellence", true)]
+    [InlineData("Cây Cỏ Biết Nói", "phong thuy", false)]
+    [InlineData("Cây Cỏ Biết Nói", "", true)]
+    [InlineData("Cây Cỏ Biết Nói", null, true)]
+    public void ListboxSearchIgnoresCaseAndDiacritics(string label, string? text, bool expected)
+        => Assert.Equal(expected, AdminJobMonitorRules.MatchesSearch(label, text));
+
+    [Fact]
+    public void EveryListboxHasLiveSearchAndShowsAllOptions()
+    {
+        var page = Page();
+        Assert.DoesNotContain("<select", page);
+        Assert.Equal(4, CountOf(page, "<JobMonitorFilterSelect "));
+        var select = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "Components", "Shared", "JobMonitorFilterSelect.razor"), Encoding.UTF8);
+        Assert.Contains("SearchFunc=\"SearchAsync\"", select);
+        // MudAutocomplete shows only 10 items unless this is lifted.
+        Assert.Contains("MaxItems=\"null\"", select);
     }
 
     private static int CountOf(string text, string value)
@@ -187,6 +272,43 @@ public sealed class AdminJobMonitorTests
             Assert.Single((await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = "timelapse-" })).Items).Title);
         Assert.Equal(2, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Status = AdminJobMonitorStatuses.Draft })).TotalCount);
         Assert.Equal(7, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = "nguoidung@example" })).TotalCount);
+        var options = await service.GetFilterOptionsAsync(admin);
+        Assert.Equal(["Dịch vụ RVideo", "Video nhảy quảng cáo thời trang", "Xây nhà"], options.Services.Order(StringComparer.Ordinal).ToArray());
+        var optionUser = Assert.Single(options.Users);
+        Assert.Equal("Người dùng (nguoidung@example.test)", optionUser.Label);
+        Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Service = "Dịch vụ RVideo" })).TotalCount);
+        Assert.Equal(1, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Service = "Xây nhà" })).TotalCount);
+        Assert.Equal(7, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { UserId = optionUser.Id })).TotalCount);
+        Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { UserId = Guid.NewGuid() })).TotalCount);
+        var now = DateTime.UtcNow;
+        // Jobs created 1h, 2h, 2h and 3h ago fall inside this window.
+        Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { FromUtc = now.AddHours(-3.5), ToUtc = now.AddMinutes(-30) })).TotalCount);
+        Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { ToUtc = now.AddHours(-30) })).TotalCount);
+
+        Assert.Equal(optionUser.Id, await service.GetJobOwnerAsync(admin, running.Kind, running.Id));
+        Assert.Equal(optionUser.Id, await service.GetJobOwnerAsync(admin, timelapse.Kind, timelapse.Id));
+        Assert.Equal(optionUser.Id, await service.GetJobOwnerAsync(admin, dance.Kind, dance.Id));
+        Assert.Null(await service.GetJobOwnerAsync(admin, AdminJobMonitorKinds.Timelapse, running.Id));
+        Assert.Null(await service.GetJobOwnerAsync(admin, AdminJobMonitorKinds.RDance, Guid.NewGuid()));
+        var customer = new CurrentUserSession { IsAuthenticated = true, Role = TodoXUserRole.CustomerOwner };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetJobOwnerAsync(customer, dance.Kind, dance.Id));
+
+        // Regression: some jobs store a JSON settings blob as title and prompt; it must not be shown as the job name.
+        var jsonJob = Guid.NewGuid();
+        await using (var connection = new NpgsqlConnection(settings.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO render.render_jobs(id, tenant_id, service_id, job_type, operation_type, status, input_json)
+                SELECT @jsonJob, @tenantId, id, 'core_service', 'rvideo', 'draft', jsonb_build_object('title', '{"aspect_ratio":"9:16"}')
+                  FROM catalog.services LIMIT 1;
+                INSERT INTO video_render.video_projects(tenant_id, core_job_id, title, original_prompt, status)
+                VALUES (@tenantId, @jsonJob, '{"aspect_ratio":"9:16"}', '{"aspect_ratio":"9:16"}', 'draft');
+                """,
+                new { jsonJob, tenantId });
+        }
+        Assert.Equal("Dịch vụ RVideo", Assert.Single((await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = jsonJob.ToString() })).Items).Title);
     }
 
     private static async Task SeedAsync(NpgsqlConnection connection, Guid tenant)
