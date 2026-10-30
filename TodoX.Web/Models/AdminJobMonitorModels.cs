@@ -25,6 +25,10 @@ public sealed class AdminJobMonitorQuery
     public string? Search { get; set; }
     public string? Kind { get; set; }
     public string? Status { get; set; }
+    public string? Service { get; set; }
+    public string? User { get; set; }
+    public DateTime? FromUtc { get; set; }
+    public DateTime? ToUtc { get; set; }
 }
 
 public sealed class AdminJobMonitorPage

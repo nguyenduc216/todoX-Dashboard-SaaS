@@ -54,6 +54,10 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
                 kind = normalized.Kind,
                 status = normalized.Status,
                 search = normalized.Search is null ? null : $"%{normalized.Search}%",
+                service = normalized.Service is null ? null : $"%{normalized.Service}%",
+                user = normalized.User is null ? null : $"%{normalized.User}%",
+                fromUtc = normalized.FromUtc,
+                toUtc = normalized.ToUtc,
                 limit = normalized.PageSize,
                 offset = (normalized.Page - 1) * normalized.PageSize
             },
@@ -257,8 +261,37 @@ public static class AdminJobMonitorRules
             PageSize = Math.Clamp(query.PageSize <= 0 ? DefaultPageSize : query.PageSize, 1, MaxPageSize),
             Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim(),
             Kind = string.IsNullOrWhiteSpace(query.Kind) ? null : query.Kind.Trim(),
-            Status = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim()
+            Status = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim(),
+            Service = string.IsNullOrWhiteSpace(query.Service) ? null : query.Service.Trim(),
+            User = string.IsNullOrWhiteSpace(query.User) ? null : query.User.Trim(),
+            FromUtc = query.FromUtc,
+            ToUtc = query.ToUtc
         };
+    }
+
+    public static DateTime LocalDayStartUtc(DateOnly day, TimeZoneInfo? timeZone = null)
+        => TimeZoneInfo.ConvertTimeToUtc(day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified), timeZone ?? TimeZoneInfo.Local);
+
+    /// <summary>Exclusive end of the local day, so the whole "to" day is included.</summary>
+    public static DateTime LocalDayEndUtc(DateOnly day, TimeZoneInfo? timeZone = null)
+        => LocalDayStartUtc(day.AddDays(1), timeZone);
+
+    /// <summary>Page numbers to show around the current page; 0 marks a gap between numbers.</summary>
+    public static IReadOnlyList<int> PageWindow(int current, int total, int neighbours = 2)
+    {
+        if (total <= 1) return [1];
+        var pages = new List<int>();
+        var previous = 0;
+        for (var page = 1; page <= total; page++)
+        {
+            if (page != 1 && page != total && Math.Abs(page - current) > neighbours) continue;
+            if (page - previous == 2) pages.Add(previous + 1);
+            else if (page - previous > 2) pages.Add(0);
+            pages.Add(page);
+            previous = page;
+        }
+
+        return pages;
     }
 
     public static string NormalizeSceneStatus(string? rawStatus)
@@ -406,6 +439,14 @@ public static class AdminJobMonitorSql
               LEFT JOIN auth.app_users u ON u.id = jobs.user_id
              WHERE (@kind::text IS NULL OR jobs.kind = @kind)
                AND (@status::text IS NULL OR jobs.status = @status)
+               AND (@service::text IS NULL OR jobs.service_name ILIKE @service)
+               AND (@user::text IS NULL
+                    OR COALESCE(u.full_name, '') ILIKE @user
+                    OR COALESCE(u.display_name, '') ILIKE @user
+                    OR COALESCE(u.username, '') ILIKE @user
+                    OR COALESCE(u.email, '') ILIKE @user)
+               AND (@fromUtc::timestamptz IS NULL OR jobs.created_at >= @fromUtc)
+               AND (@toUtc::timestamptz IS NULL OR jobs.created_at < @toUtc)
                AND (@search::text IS NULL
                     OR jobs.id::text ILIKE @search
                     OR jobs.title ILIKE @search
