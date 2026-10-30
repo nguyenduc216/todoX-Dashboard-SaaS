@@ -90,3 +90,11 @@
 .rv2-lightbox img { max-width:94vw; max-height:90vh; object-fit:contain; }
 .rv2-confirm { min-width:260px; }
 @media (prefers-reduced-motion:reduce) { .rv2-skel, .rv2-pv-card .rv2-pv-status--busy { animation:none; } }
+.rv2-spin { display:inline-block; flex:0 0 auto; width:10px; height:10px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:rv2-spin .8s linear infinite; }
+.rv2-spin--lg { width:36px; height:36px; border-width:3px; color:var(--rv2-accent); }
+@keyframes rv2-spin { to { transform:rotate(360deg); } }
+.rv2-pv-card .rv2-pv-status .rv2-spin { display:none; }
+.rv2-pv-thumb-busy { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); color:var(--rv2-accent); }
+.rv2-pv-thumb-busy .rv2-spin { width:18px; height:18px; }
+.rv2-pv-media-busy { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; background:rgba(0,0,0,.45); color:#fff; font-size:.85rem; font-weight:600; text-shadow:0 1px 2px #000; pointer-events:none; }
+@media (prefers-reduced-motion:reduce) { .rv2-spin { animation-duration:2.4s; } }

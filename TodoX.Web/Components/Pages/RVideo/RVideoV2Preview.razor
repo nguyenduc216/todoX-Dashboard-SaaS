@@ -41,6 +41,7 @@ else
           <span class="rv2-pv-thumb">
             @if(!string.IsNullOrWhiteSpace(s.StaticImageUrl)){<img src="@s.StaticImageUrl" alt="" loading="lazy" decoding="async" />}
             else{<MudIcon Icon="@Icons.Material.Outlined.Image" Size="Size.Small" />}
+            @if(BusyLabel(s) is not null){<span class="rv2-pv-thumb-busy" aria-hidden="true"><span class="rv2-spin"></span></span>}
             @if(!string.IsNullOrWhiteSpace(s.SceneVideoUrl)){<span class="rv2-pv-thumb-badge"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" Style="font-size:14px" /></span>}
           </span>
           <span class="rv2-pv-card-body">
@@ -59,7 +60,7 @@ else
           <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" OnClick="PrevScene" Disabled="@IsFirst" aria-label="Scene trước" />
           <span class="rv2-pv-detail-title">Scene @a.SceneIndex.ToString("00") <span class="rv2-pv-muted">/ @scenes.Count.ToString("00")</span></span>
           <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" aria-label="Scene sau" />
-          <span class="rv2-pv-status rv2-pv-status--@StatusTone(a)">@VideoStatus(a)</span>
+          <span class="rv2-pv-status rv2-pv-status--@StatusTone(a)">@if(StatusTone(a)=="busy"){<span class="rv2-spin" aria-hidden="true"></span>}@VideoStatus(a)</span>
           <MudSpacer />
           <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" aria-label="Thao tác khác">
             <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(()=>HandleEditAsync(a))" Disabled="@_busy">Chỉnh prompt</MudMenuItem>
@@ -92,6 +93,11 @@ else
           else
           {
             <div class="rv2-pv-media-empty"><MudIcon Icon="@Icons.Material.Outlined.Image" /><span>Chưa có ảnh và video</span></div>
+          }
+          @* Non-interactive overlay: the previous video stays playable underneath while a new attempt runs. *@
+          @if(BusyLabel(a) is { } busyLabel)
+          {
+            <div class="rv2-pv-media-busy" role="status"><span class="rv2-spin rv2-spin--lg" aria-hidden="true"></span><span>@busyLabel</span></div>
           }
           @if(!string.IsNullOrWhiteSpace(a.SceneVideoUrl) && !string.IsNullOrWhiteSpace(a.StaticImageUrl))
           {
@@ -220,6 +226,7 @@ string VideoStatus(VideoProjectSceneDto scene)
   if(!_videoStates.TryGetValue(scene.Id, out var state)) return "Đang tải…";
   if(state.LatestJob?.Status == "pending_reconciliation") return "Chưa thể thử lại";
   if(state.HasActiveJob) return "Đang tạo video";
+  if(_activeImageScenes.Contains(scene.Id)) return "Đang tạo ảnh";
   if(state.SubmitBlockReason != SceneVideoSubmitBlockReason.None) return "Chưa thể thử lại";
   return RVideoUserText.Status(state.LatestJob?.Status ?? scene.Status);
 }
@@ -237,10 +244,14 @@ IReadOnlyList<int> DurationsFor(VideoProjectSceneDto scene)
 }
 IReadOnlyList<VideoProjectSceneDto> OrderedScenes => JobView?.Project.Scenes.OrderBy(x=>x.SceneIndex).ToList() ?? new List<VideoProjectSceneDto>();
 bool ShowVideo(VideoProjectSceneDto s) => !string.IsNullOrWhiteSpace(s.SceneVideoUrl) && !_showImage.Contains(s.Id);
+// Spinner label for a scene with work in flight; null when idle.
+string? BusyLabel(VideoProjectSceneDto scene) => StatusTone(scene) != "busy"
+    || (_videoStates.TryGetValue(scene.Id, out var rs) && rs.LatestJob?.Status == "pending_reconciliation") ? null
+  : _activeImageScenes.Contains(scene.Id) && !(_videoStates.TryGetValue(scene.Id, out var st) && st.HasActiveJob) ? "Đang tạo ảnh…" : "Đang tạo video…";
 string StatusTone(VideoProjectSceneDto scene)
 {
   if(!_videoStates.TryGetValue(scene.Id, out var state)) return "muted";
-  if(state.HasActiveJob) return "busy";
+  if(state.HasActiveJob || _activeImageScenes.Contains(scene.Id)) return "busy";
   if(state.LatestJob?.Status == "pending_reconciliation" || state.SubmitBlockReason != SceneVideoSubmitBlockReason.None) return "warn";
   return scene.Status switch { VideoSceneStatuses.VideoReady => "ok", VideoSceneStatuses.Failed => "error",
     VideoSceneStatuses.VideoRendering or VideoSceneStatuses.VideoQueued => "busy", _ => "muted" };

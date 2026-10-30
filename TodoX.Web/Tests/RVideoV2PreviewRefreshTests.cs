@@ -79,4 +79,26 @@ public sealed class RVideoV2PreviewRefreshTests
         // Controls stay disabled until the scene state is known.
         Assert.Equal(true, typeof(RVideoV2Preview).GetMethod("VideoBlocked", Private)!.Invoke(component, [new VideoProjectSceneDto { Id = 5 }]));
     }
+    [Fact]
+    public void BusyScenesShowSpinnerLabelAndIdleOrManualReviewScenesDoNot()
+    {
+        using var component = new RVideoV2Preview();
+        var states = (Dictionary<long, SceneVideoUiState>)typeof(RVideoV2Preview).GetField("_videoStates", Private)!.GetValue(component)!;
+        var images = (HashSet<long>)typeof(RVideoV2Preview).GetField("_activeImageScenes", Private)!.GetValue(component)!;
+        var busyLabel = typeof(RVideoV2Preview).GetMethod("BusyLabel", Private)!;
+        string? Label(long id) => (string?)busyLabel.Invoke(component, [new VideoProjectSceneDto { Id = id, Status = VideoSceneStatuses.ImageReady }]);
+        var idle = new SceneVideoUiState(null, null, null, SceneVideoSubmitBlockReason.None, HasActiveJob: false);
+
+        states[1] = idle with { LatestJob = new RenderJobDto { Id = Guid.NewGuid(), Status = "rendering" }, HasActiveJob = true };
+        states[2] = idle;
+        images.Add(2);
+        states[3] = idle;
+        states[4] = idle with { LatestJob = new RenderJobDto { Id = Guid.NewGuid(), Status = "pending_reconciliation" }, HasActiveJob = true };
+
+        Assert.Equal("Đang tạo video…", Label(1));
+        Assert.Equal("Đang tạo ảnh…", Label(2));
+        Assert.Null(Label(3));
+        Assert.Null(Label(4));    // waiting for manual review: no endless spinner
+        Assert.Null(Label(5));    // state not loaded yet
+    }
 }
