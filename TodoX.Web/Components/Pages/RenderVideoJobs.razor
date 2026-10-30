@@ -2627,6 +2627,7 @@ else
             await TimedBootstrapStepAsync("characters", LoadCharactersAsync);
             await TimedBootstrapStepAsync("audio_catalogs", LoadAudioCatalogsAsync);
             if (revision != _bootstrapRevision) return;
+            ApplyServiceJobDefaultsIfNeeded();
             await TimedBootstrapStepAsync("supplemental_project", () => FullLoadAsync(false));
             if (revision != _bootstrapRevision) return;
             _supplementalReady = true;
