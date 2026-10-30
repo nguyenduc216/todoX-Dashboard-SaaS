@@ -122,6 +122,45 @@ public sealed class AdminJobMonitorTests
             Assert.Contains($">{column}</th>", page);
     }
 
+    [Theory]
+    [InlineData(AdminJobMonitorKinds.RVideo, "/jobs/rvideo/")]
+    [InlineData(AdminJobMonitorKinds.RDance, "/jobs/rdance/")]
+    [InlineData(AdminJobMonitorKinds.Timelapse, "/jobs/timelapse/")]
+    public void OpenJobUsesTheCustomerRouteOfEachKind(string kind, string prefix)
+    {
+        var id = Guid.NewGuid();
+        Assert.Equal(prefix + id, AdminJobMonitorRules.JobRoute(kind, id));
+        var open = AdminJobMonitorRules.OpenJobPath(kind, id);
+        Assert.True(NavigationAccessRules.IsAdminOnlyPath(open));
+        Assert.False(NavigationAccessRules.CanAccessPath(new CurrentUserSession { IsAuthenticated = true, Role = TodoXUserRole.CustomerOwner }, open));
+    }
+
+    [Fact]
+    public void OpenJobLinkOpensANewTabThatKeepsTheAdminSession()
+    {
+        var page = Page();
+        Assert.Contains("href=\"@AdminJobMonitorRules.OpenJobPath(job.Kind, job.Id)\" target=\"_blank\" rel=\"opener\"", page);
+        var open = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "Components", "Pages", "AdminJobMonitorOpen.razor"), Encoding.UTF8);
+        Assert.Contains("\"vào từ giám sát video\"", open);
+        Assert.Contains("Reason: {ImpersonationReason}", open);
+        Assert.Contains("AdminEndpointAuthorization.IsAdmin(current)", open);
+        Assert.True(open.IndexOf("Audit.LogAsync", StringComparison.Ordinal) < open.IndexOf("ImpersonateInThisTabAsync", StringComparison.Ordinal));
+        Assert.DoesNotContain("AuthState.ImpersonateAsync", open);
+    }
+
+    // Regression guard: tab-scoped impersonation must not remove the admin's remember-me marker.
+    [Fact]
+    public void TabImpersonationAndItsExitNeverTouchTheLocalMarker()
+    {
+        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "Services", "AuthStateService.cs"), Encoding.UTF8);
+        var section = source[source.IndexOf("public async Task<bool> ImpersonateInThisTabAsync", StringComparison.Ordinal)..
+                             source.IndexOf("/// Attempt to restore the session", StringComparison.Ordinal)];
+        Assert.DoesNotContain("_local", section);
+        Assert.DoesNotContain("SignInAsync", section);
+    }
+
     private static int CountOf(string text, string value)
         => (text.Length - text.Replace(value, string.Empty, StringComparison.Ordinal).Length) / value.Length;
 
@@ -220,6 +259,14 @@ public sealed class AdminJobMonitorTests
         // Jobs created 1h, 2h, 2h and 3h ago fall inside this window.
         Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { FromUtc = now.AddHours(-3.5), ToUtc = now.AddMinutes(-30) })).TotalCount);
         Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { ToUtc = now.AddHours(-30) })).TotalCount);
+
+        Assert.Equal(optionUser.Id, await service.GetJobOwnerAsync(admin, running.Kind, running.Id));
+        Assert.Equal(optionUser.Id, await service.GetJobOwnerAsync(admin, timelapse.Kind, timelapse.Id));
+        Assert.Equal(optionUser.Id, await service.GetJobOwnerAsync(admin, dance.Kind, dance.Id));
+        Assert.Null(await service.GetJobOwnerAsync(admin, AdminJobMonitorKinds.Timelapse, running.Id));
+        Assert.Null(await service.GetJobOwnerAsync(admin, AdminJobMonitorKinds.RDance, Guid.NewGuid()));
+        var customer = new CurrentUserSession { IsAuthenticated = true, Role = TodoXUserRole.CustomerOwner };
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetJobOwnerAsync(customer, dance.Kind, dance.Id));
 
         // Regression: some jobs store a JSON settings blob as title and prompt; it must not be shown as the job name.
         var jsonJob = Guid.NewGuid();

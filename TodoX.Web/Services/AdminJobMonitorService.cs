@@ -22,6 +22,12 @@ public interface IAdminJobMonitorService
     Task<AdminJobMonitorFilterOptions> GetFilterOptionsAsync(
         CurrentUserSession user,
         CancellationToken ct = default);
+
+    Task<Guid?> GetJobOwnerAsync(
+        CurrentUserSession user,
+        string kind,
+        Guid jobId,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -140,6 +146,26 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
         var users = await connection.QueryAsync<AdminJobMonitorUserOption>(new CommandDefinition(
             AdminJobMonitorSql.UserOptions, parameters, cancellationToken: ct));
         return new AdminJobMonitorFilterOptions { Services = services.ToList(), Users = users.ToList() };
+    }
+
+    public async Task<Guid?> GetJobOwnerAsync(
+        CurrentUserSession user,
+        string kind,
+        Guid jobId,
+        CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        var sql = kind switch
+        {
+            AdminJobMonitorKinds.RVideo => AdminJobMonitorSql.RVideoOwner,
+            AdminJobMonitorKinds.Timelapse => AdminJobMonitorSql.TimelapseOwner,
+            AdminJobMonitorKinds.RDance => AdminJobMonitorSql.RDanceOwner,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown job kind.")
+        };
+        await _tenant.EnsureLoadedAsync(ct);
+        using var connection = await _factory.OpenAsync(ct);
+        return await connection.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(
+            sql, new { tenant = _tenant.TenantId, jobId }, cancellationToken: ct));
     }
 
     public async Task<IReadOnlyList<AdminJobMonitorScene>> GetScenesAsync(
@@ -324,6 +350,17 @@ public static class AdminJobMonitorRules
             "cancelled" or "invalidated" => AdminJobMonitorStatuses.Cancelled,
             _ => AdminJobMonitorStatuses.Processing
         };
+
+    public static string? JobRoute(string? kind, Guid jobId)
+        => kind switch
+        {
+            AdminJobMonitorKinds.RVideo => $"/jobs/rvideo/{jobId}",
+            AdminJobMonitorKinds.RDance => $"/jobs/rdance/{jobId}",
+            AdminJobMonitorKinds.Timelapse => $"/jobs/timelapse/{jobId}",
+            _ => null
+        };
+
+    public static string OpenJobPath(string kind, Guid jobId) => $"/admin/job-monitor/open/{kind}/{jobId}";
 
     public static string StatusLabel(string? status)
         => status switch
@@ -557,6 +594,21 @@ public static class AdminJobMonitorSql
          WHERE o.dance_sell_job_id = ANY(@ids)
            AND o.operation_type = @motion
          ORDER BY o.dance_sell_job_id, o.attempt_no DESC, o.created_at DESC;
+        """;
+
+    public const string RVideoOwner = """
+        SELECT user_id FROM render.render_jobs
+         WHERE tenant_id = @tenant AND id = @jobId AND job_type = 'core_service' AND lower(operation_type) = 'rvideo';
+        """;
+
+    public const string TimelapseOwner = """
+        SELECT user_id FROM render.render_jobs
+         WHERE tenant_id = @tenant AND id = @jobId AND job_type = 'timelapse';
+        """;
+
+    public const string RDanceOwner = """
+        SELECT user_id FROM dance_sell.dance_sell_jobs
+         WHERE tenant_id = @tenant AND id = @jobId;
         """;
 
     public const string RVideoScenes = """

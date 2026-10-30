@@ -39,6 +39,17 @@
     white-space: nowrap;
 }
 
+.monitor-button:is(a) {
+    display: inline-block;
+    text-decoration: none;
+}
+
+.scene-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+
 .monitor-button.small {
     padding: 4px 9px;
     font-size: .76rem;

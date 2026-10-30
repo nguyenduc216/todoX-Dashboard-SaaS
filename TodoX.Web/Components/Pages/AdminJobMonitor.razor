@@ -145,6 +145,10 @@ else
                         {
                             <tr @key="@($"{job.Id}-scenes")" class="scene-row">
                                 <td colspan="11">
+                                    <div class="scene-actions">
+                                        @* rel="opener" makes the browser copy this tab's session storage, so an admin without remember-me stays signed in there. *@
+                                        <a class="monitor-button small" href="@AdminJobMonitorRules.OpenJobPath(job.Kind, job.Id)" target="_blank" rel="opener">Mở job</a>
+                                    </div>
                                     @if (_scenesLoadingJobId == job.Id)
                                     {
                                         <MudProgressLinear Indeterminate="true" Color="Color.Warning" />

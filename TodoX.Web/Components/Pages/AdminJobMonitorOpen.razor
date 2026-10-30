@@ -1,0 +1,74 @@
+@page "/admin/job-monitor/open/{Kind}/{JobId:guid}"
+@using TodoX.Web.Models
+@inject IAdminJobMonitorService Monitor
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject AuditRepository Audit
+@inject NavigationManager Navigation
+@inject ILogger<AdminJobMonitorOpen> Logger
+
+<PageTitle>Đang mở job</PageTitle>
+
+@if (_error is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    <MudText Class="mt-3">Đang đăng nhập hộ và mở job...</MudText>
+}
+else
+{
+    <MudAlert Severity="Severity.Error">@_error</MudAlert>
+}
+
+@code {
+    private const string ImpersonationReason = "vào từ giám sát video";
+
+    [Parameter] public string Kind { get; set; } = string.Empty;
+    [Parameter] public Guid JobId { get; set; }
+
+    private string? _error;
+
+    // Routes renders pages only after the session is restored, so CurrentUser is final here.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _error = await OpenJobAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "ADMIN_JOB_MONITOR_OPEN_FAILED jobId={JobId} kind={Kind}", JobId, Kind);
+            _error = "Không mở được job. Vui lòng thử lại.";
+        }
+
+        if (_error is not null) StateHasChanged();
+    }
+
+    private async Task<string?> OpenJobAsync()
+    {
+        var current = AuthState.CurrentUser;
+        if (!AdminEndpointAuthorization.IsAdmin(current)) return "Bạn không có quyền đăng nhập hộ.";
+        if (current!.IsImpersonating) return "Tab này đang đăng nhập hộ. Hãy thoát trước khi mở job khác.";
+
+        var route = AdminJobMonitorRules.JobRoute(Kind, JobId);
+        if (route is null) return "Loại job không hợp lệ.";
+
+        var ownerId = await Monitor.GetJobOwnerAsync(current, Kind, JobId);
+        if (ownerId is null) return "Không tìm thấy người thực hiện của job này.";
+
+        if (ownerId != current.UserId)
+        {
+            var target = await Accounts.RehydrateSessionAsync(ownerId.Value);
+            if (target is null) return "Tài khoản khách không active hoặc không tồn tại.";
+
+            await Audit.LogAsync(current, "admin_job_monitor", "impersonate",
+                entityDisplay: target.Email,
+                message: $"Impersonate customer account {ownerId} to open {Kind} job {JobId}. Reason: {ImpersonationReason}");
+            if (!await AuthState.ImpersonateInThisTabAsync(target, current))
+                return "Không lưu được phiên đăng nhập hộ trong tab này.";
+        }
+
+        Navigation.NavigateTo(route, forceLoad: true, replace: true);
+        return null;
+    }
+}
