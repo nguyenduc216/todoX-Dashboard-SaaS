@@ -149,6 +149,20 @@ public sealed class AdminJobMonitorTests
         Assert.DoesNotContain("AuthState.ImpersonateAsync", open);
     }
 
+    [Theory]
+    [InlineData(TodoX.Web.Models.TodoXUserRole.CustomerOwner, true)]
+    [InlineData(TodoX.Web.Models.TodoXUserRole.CustomerUser, true)]
+    [InlineData(TodoX.Web.Models.TodoXUserRole.Admin, false)]
+    [InlineData(TodoX.Web.Models.TodoXUserRole.SystemOperator, false)]
+    public void OpenJobOnlyImpersonatesCustomerOwners(TodoX.Web.Models.TodoXUserRole role, bool allowed)
+    {
+        Assert.Equal(allowed, AdminJobMonitorRules.CanImpersonateOwner(new TodoX.Web.Models.CurrentUserSession { Role = role }));
+        var open = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "Components", "Pages", "AdminJobMonitorOpen.razor"), Encoding.UTF8);
+        var guard = open.IndexOf("AdminJobMonitorRules.CanImpersonateOwner(target)", StringComparison.Ordinal);
+        Assert.True(guard >= 0 && guard < open.IndexOf("Audit.LogAsync", StringComparison.Ordinal));
+    }
+
     // Regression guard: tab-scoped impersonation must not remove the admin's remember-me marker.
     [Fact]
     public void TabImpersonationAndItsExitNeverTouchTheLocalMarker()

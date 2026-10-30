@@ -387,6 +387,9 @@ public static class AdminJobMonitorRules
 
     public static string OpenJobPath(string kind, Guid jobId) => $"/admin/job-monitor/open/{kind}/{jobId}";
 
+    // Opening a job must never turn an operator into an internal account that owns one.
+    public static bool CanImpersonateOwner(CurrentUserSession owner) => owner.IsCustomer;
+
     public static string StatusLabel(string? status)
         => status switch
         {

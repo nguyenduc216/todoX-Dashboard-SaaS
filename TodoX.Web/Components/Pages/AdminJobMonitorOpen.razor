@@ -60,6 +60,7 @@ else
         {
             var target = await Accounts.RehydrateSessionAsync(ownerId.Value);
             if (target is null) return "Tài khoản khách không active hoặc không tồn tại.";
+            if (!AdminJobMonitorRules.CanImpersonateOwner(target)) return "Job này thuộc tài khoản nội bộ nên không đăng nhập hộ được.";
 
             await Audit.LogAsync(current, "admin_job_monitor", "impersonate",
                 entityDisplay: target.Email,
