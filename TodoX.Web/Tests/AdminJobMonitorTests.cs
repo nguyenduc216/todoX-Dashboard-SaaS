@@ -62,6 +62,27 @@ public sealed class AdminJobMonitorTests
         Assert.Null(query.Status);
     }
 
+    [Theory]
+    [InlineData(1, 1, "1")]
+    [InlineData(1, 0, "1")]
+    [InlineData(1, 5, "1,2,3,4,5")]
+    [InlineData(1, 20, "1,2,3,0,20")]
+    [InlineData(10, 20, "1,0,8,9,10,11,12,0,20")]
+    [InlineData(20, 20, "1,0,18,19,20")]
+    [InlineData(4, 20, "1,2,3,4,5,6,0,20")]
+    [InlineData(5, 20, "1,2,3,4,5,6,7,0,20")]
+    public void PageWindowShowsNumbersAroundCurrentAndBothEnds(int current, int total, string expected)
+        => Assert.Equal(expected, string.Join(",", AdminJobMonitorRules.PageWindow(current, total)));
+
+    [Fact]
+    public void DateFiltersCoverTheWholeLocalDay()
+    {
+        var vietnam = TimeZoneInfo.CreateCustomTimeZone("VN", TimeSpan.FromHours(7), "VN", "VN");
+        var day = new DateOnly(2026, 10, 28);
+        Assert.Equal(new DateTime(2026, 10, 27, 17, 0, 0, DateTimeKind.Utc), AdminJobMonitorRules.LocalDayStartUtc(day, vietnam));
+        Assert.Equal(new DateTime(2026, 10, 28, 17, 0, 0, DateTimeKind.Utc), AdminJobMonitorRules.LocalDayEndUtc(day, vietnam));
+    }
+
     // Regression: render.render_jobs is mostly worker rows (merge, scene image/video/audio, dance attempts)
     // and the old monitor listed them all as customer jobs.
     [Fact]
@@ -187,6 +208,13 @@ public sealed class AdminJobMonitorTests
             Assert.Single((await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = "timelapse-" })).Items).Title);
         Assert.Equal(2, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Status = AdminJobMonitorStatuses.Draft })).TotalCount);
         Assert.Equal(7, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Search = "nguoidung@example" })).TotalCount);
+        Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { Service = "dịch vụ rvideo" })).TotalCount);
+        Assert.Equal(7, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { User = "nguoidung@" })).TotalCount);
+        Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { User = "khong-ton-tai" })).TotalCount);
+        var now = DateTime.UtcNow;
+        // Jobs created 1h, 2h, 2h and 3h ago fall inside this window.
+        Assert.Equal(4, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { FromUtc = now.AddHours(-3.5), ToUtc = now.AddMinutes(-30) })).TotalCount);
+        Assert.Equal(0, (await service.GetJobsAsync(admin, new AdminJobMonitorQuery { ToUtc = now.AddHours(-30) })).TotalCount);
     }
 
     private static async Task SeedAsync(NpgsqlConnection connection, Guid tenant)
