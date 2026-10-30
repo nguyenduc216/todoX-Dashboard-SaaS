@@ -13,8 +13,9 @@ public sealed class LandingVideoSample
     public string AspectRatio { get; set; } = LandingVideoSampleRepository.Portrait;
     public string? VideoUrl { get; set; }
     public string? PosterUrl { get; set; }
-    public Guid? CategoryId { get; set; }
-    public string? CategoryName { get; set; }
+    // Null means "Dịch vụ khác".
+    public Guid? ServiceId { get; set; }
+    public string? ServiceName { get; set; }
 }
 
 public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, AuthStateService auth)
@@ -24,15 +25,17 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
     public const string Landscape = "16:9";
     public const int MaxTitleLength = 200;
     public const int MaxDescriptionLength = 2000;
+    public const string OtherServiceChoice = "other";
+    public const string OtherServiceName = "Dịch vụ khác";
 
     public async Task<IReadOnlyList<LandingVideoSample>> ListAsync(CancellationToken ct = default)
     {
         using var connection = await db.OpenAsync(ct);
         var rows = await connection.QueryAsync<LandingVideoSample>(new CommandDefinition("""
             select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
-                   s.video_url as VideoUrl, s.poster_url as PosterUrl, s.category_id as CategoryId, c.category_name as CategoryName
+                   s.video_url as VideoUrl, s.poster_url as PosterUrl, s.service_id as ServiceId, sv.service_name as ServiceName
             from landing.video_samples s
-            left join catalog.service_categories c on c.id = s.category_id
+            left join catalog.services sv on sv.id = s.service_id
             order by s.created_at desc
             """, cancellationToken: ct));
         return rows.ToList();
@@ -47,11 +50,11 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
         if (sample.Id == Guid.Empty) sample.Id = Guid.NewGuid();
         using var connection = await db.OpenAsync(ct);
         await connection.ExecuteAsync(new CommandDefinition("""
-            insert into landing.video_samples (id, title, description, aspect_ratio, video_url, poster_url, category_id, updated_by)
-            values (@Id, @Title, @Description, @AspectRatio, @VideoUrl, @PosterUrl, @CategoryId, @UpdatedBy)
+            insert into landing.video_samples (id, title, description, aspect_ratio, video_url, poster_url, service_id, updated_by)
+            values (@Id, @Title, @Description, @AspectRatio, @VideoUrl, @PosterUrl, @ServiceId, @UpdatedBy)
             on conflict (id) do update set title = excluded.title, description = excluded.description,
                 aspect_ratio = excluded.aspect_ratio, video_url = excluded.video_url, poster_url = excluded.poster_url,
-                category_id = excluded.category_id, updated_at = now(), updated_by = excluded.updated_by
+                service_id = excluded.service_id, updated_at = now(), updated_by = excluded.updated_by
             """, new
         {
             sample.Id,
@@ -60,7 +63,7 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
             sample.AspectRatio,
             sample.VideoUrl,
             sample.PosterUrl,
-            sample.CategoryId,
+            sample.ServiceId,
             UpdatedBy = updatedBy
         }, cancellationToken: ct));
     }
@@ -71,6 +74,14 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
         using var connection = await db.OpenAsync(ct);
         await connection.ExecuteAsync(new CommandDefinition(
             "delete from landing.video_samples where id = @id", new { id }, cancellationToken: ct));
+    }
+
+    /// <param name="choice">A service id, <see cref="OtherServiceChoice"/>, or blank when nothing was selected.</param>
+    public static void ApplyServiceChoice(LandingVideoSample sample, string? choice)
+    {
+        if (choice == OtherServiceChoice) sample.ServiceId = null;
+        else if (Guid.TryParse(choice, out var id) && id != Guid.Empty) sample.ServiceId = id;
+        else throw new ArgumentException("Cần chọn nhóm dịch vụ video.", nameof(choice));
     }
 
     public static void Normalize(LandingVideoSample sample)
@@ -87,7 +98,7 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
             throw new ArgumentException($"Thông tin nội dung tối đa {MaxDescriptionLength} ký tự.", nameof(sample));
         if (sample.AspectRatio is not (Portrait or Landscape))
             throw new ArgumentException("Kích thước video chỉ được chọn 9:16 hoặc 16:9.", nameof(sample));
-        if (sample.CategoryId is null || sample.CategoryId == Guid.Empty)
+        if (sample.ServiceId == Guid.Empty)
             throw new ArgumentException("Cần chọn nhóm dịch vụ video.", nameof(sample));
         if (string.IsNullOrWhiteSpace(sample.VideoUrl) || !IsMediaUrl(sample.VideoUrl, "videos"))
             throw new ArgumentException("Cần tải video lên.", nameof(sample));

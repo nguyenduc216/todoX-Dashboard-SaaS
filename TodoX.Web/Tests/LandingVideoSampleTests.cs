@@ -13,7 +13,7 @@ public sealed class LandingVideoSampleTests
     private static LandingVideoSample Valid() => new()
     {
         Title = "Mẫu video", Description = "Nội dung", AspectRatio = LandingVideoSampleRepository.Portrait,
-        VideoUrl = Video, PosterUrl = Poster, CategoryId = Guid.NewGuid()
+        VideoUrl = Video, PosterUrl = Poster, ServiceId = Guid.NewGuid()
     };
 
     [Theory]
@@ -64,15 +64,35 @@ public sealed class LandingVideoSampleTests
     }
 
     [Fact]
-    public void ServiceGroupIsRequired()
+    public void ServiceChoiceMapsToServiceOrOther()
     {
-        var missing = Valid();
-        missing.CategoryId = null;
-        Assert.Throws<ArgumentException>(() => LandingVideoSampleRepository.Validate(missing));
+        var sample = Valid();
+        var id = Guid.NewGuid();
+        LandingVideoSampleRepository.ApplyServiceChoice(sample, id.ToString());
+        Assert.Equal(id, sample.ServiceId);
+        LandingVideoSampleRepository.Validate(sample);
 
-        var empty = Valid();
-        empty.CategoryId = Guid.Empty;
-        Assert.Throws<ArgumentException>(() => LandingVideoSampleRepository.Validate(empty));
+        LandingVideoSampleRepository.ApplyServiceChoice(sample, LandingVideoSampleRepository.OtherServiceChoice);
+        Assert.Null(sample.ServiceId);
+        LandingVideoSampleRepository.Validate(sample);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void MissingServiceChoiceIsRejected(string? choice)
+        => Assert.Throws<ArgumentException>(() => LandingVideoSampleRepository.ApplyServiceChoice(Valid(), choice));
+
+    [Fact]
+    public void SampleVideoLimitIs500MbAndOtherLandingLimitsAreUnchanged()
+    {
+        var options = new SharedMediaOptions();
+        Assert.Equal(500L * 1024 * 1024, LandingIntroVideoMediaService.MaxBytes(options, LandingVideoSampleRepository.MediaArea, true));
+        Assert.Equal(options.IndustrySolutions.MaxThumbnailBytes, LandingIntroVideoMediaService.MaxBytes(options, LandingVideoSampleRepository.MediaArea, false));
+        Assert.Equal(200L * 1024 * 1024, LandingIntroVideoMediaService.MaxBytes(options, "intro", true));
+        Assert.Equal(200L * 1024 * 1024, LandingIntroVideoMediaService.MaxBytes(options, "short-video", true));
     }
 
     [Fact]
@@ -131,9 +151,14 @@ public sealed class LandingVideoSampleTests
 
         var page = File.ReadAllText(Path.Combine(web, "Components", "Pages", "Landing", "LandingVideoSamples.razor"));
         Assert.Contains("@page \"/landing/video-samples\"", page);
-        Assert.Contains("Nhóm dịch vụ video", page);
-        Assert.Contains("Ảnh đại diện", page);
-        Assert.Contains("Thông tin nội dung video", page);
+        Assert.Contains("ShowAsync<LandingVideoSampleDialog>", page);
+        Assert.DoesNotContain("InputFile", page);
+
+        var dialog = File.ReadAllText(Path.Combine(web, "Components", "Dialogs", "LandingVideoSampleDialog.razor"));
+        Assert.Contains("Nhóm dịch vụ video", dialog);
+        Assert.Contains("OtherServiceChoice", dialog);
+        Assert.Contains("Ảnh đại diện", dialog);
+        Assert.Contains("Thông tin nội dung video", dialog);
     }
 
     [Fact]
@@ -156,6 +181,8 @@ public sealed class LandingVideoSampleTests
 
         var page = File.ReadAllText(Path.Combine(www, "mau-video.html"));
         Assert.Contains("id=\"sampleFilters\"", page);
+        Assert.Contains("id=\"sampleEmpty\"", page);
+        Assert.Contains("id=\"sampleLead\" hidden", page);
         Assert.Contains("/js/video-samples.js", page);
 
         var script = File.ReadAllText(Path.Combine(www, "js", "video-samples.js"));
@@ -165,12 +192,16 @@ public sealed class LandingVideoSampleTests
     }
 
     [Fact]
-    public void ManualScriptCreatesTableConstrainedToSupportedRatios()
+    public void ManualScriptsCreateTableAndLinkItToServiceList()
     {
-        var sql = File.ReadAllText(Path.Combine(FindRoot(), "database", "manual", "todox_landing_video_samples.sql"));
+        var manual = Path.Combine(FindRoot(), "database", "manual");
+        var sql = File.ReadAllText(Path.Combine(manual, "todox_landing_video_samples.sql"));
         Assert.Contains("create table if not exists landing.video_samples", sql);
         Assert.Contains("aspect_ratio in ('9:16', '16:9')", sql);
-        Assert.Contains("references catalog.service_categories (id)", sql);
+
+        var service = File.ReadAllText(Path.Combine(manual, "todox_landing_video_samples_service.sql"));
+        Assert.Contains("service_id uuid references catalog.services (id) on delete set null", service);
+        Assert.Contains("alter column category_id drop not null", service);
     }
 
     private static string FindRoot()

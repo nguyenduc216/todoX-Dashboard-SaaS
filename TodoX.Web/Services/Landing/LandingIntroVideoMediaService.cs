@@ -54,8 +54,7 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
     public async Task<string> UploadAsync(IBrowserFile file, bool video, string area, CancellationToken ct = default)
     {
         LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
-        var settings = options.Value.IndustrySolutions;
-        var limit = video ? settings.MaxVideoBytes : settings.MaxThumbnailBytes;
+        var limit = MaxBytes(options.Value, area, video);
         var ext = Path.GetExtension(file.Name).ToLowerInvariant();
         ValidateUpload(file.Name, file.ContentType, file.Size, video, limit);
         var folder = video ? "videos" : "posters";
@@ -83,6 +82,11 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
             if (File.Exists(source)) File.Delete(source);
         }
     }
+
+    public static long MaxBytes(SharedMediaOptions options, string area, bool video)
+        => !video ? options.IndustrySolutions.MaxThumbnailBytes
+            : area == LandingVideoSampleRepository.MediaArea ? options.VideoSampleMaxVideoBytes
+            : options.IndustrySolutions.MaxVideoBytes;
 
     public static async Task CopyOriginalAsync(Stream input, string path, CancellationToken ct = default)
     {

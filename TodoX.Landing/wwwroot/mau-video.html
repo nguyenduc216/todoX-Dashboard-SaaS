@@ -17,7 +17,7 @@
   <link rel="icon" href="/img/favicon/favicon.ico">
   <link rel="stylesheet" href="/vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="/css/real-estate.css?v=3">
-  <link rel="stylesheet" href="/css/video-samples.css?v=1">
+  <link rel="stylesheet" href="/css/video-samples.css?v=2">
 </head>
 <body class="video-samples-page">
   <header class="site-header" id="header">
@@ -33,9 +33,15 @@
   <main class="section container vs-main">
     <span class="eyebrow">KHO MẪU VIDEO</span>
     <h1 id="samples-title">Mẫu video</h1>
-    <p>Chọn một nhóm dịch vụ để xem các mẫu video tương ứng.</p>
+    <p id="sampleLead" hidden>Chọn một nhóm dịch vụ để xem các mẫu video tương ứng.</p>
     <div class="vs-filters" id="sampleFilters" role="group" aria-label="Lọc theo nhóm dịch vụ video" hidden></div>
     <p class="vs-status" id="sampleStatus" role="status" aria-live="polite">Đang tải mẫu video...</p>
+    <div class="vs-empty" id="sampleEmpty" hidden>
+      <span class="vs-empty-icon" aria-hidden="true"><i class="fa-solid fa-clapperboard"></i></span>
+      <h2 id="sampleEmptyTitle">Những thước phim đầu tiên đang được chọn lọc</h2>
+      <p id="sampleEmptyText">TodoX đang hoàn thiện kho mẫu video để bạn tham khảo. Trong lúc chờ, hãy khám phá dịch vụ video của chúng tôi.</p>
+      <a class="button" href="/video-ngan">Xem dịch vụ video <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+    </div>
     <div class="vs-grid" id="sampleGrid"></div>
   </main>
   <dialog class="vs-player" id="samplePlayer" aria-labelledby="samplePlayerTitle">
@@ -44,6 +50,6 @@
     <p id="samplePlayerDescription"></p>
   </dialog>
   <footer><div class="container footer-grid"><div><a class="brand" href="/"><img src="/img/logo/todox-logo.png" alt="TodoX" width="46" height="46"><span>Todo<strong>X</strong><small>TODO EXCELLENCE</small></span></a><p>Nền tảng AI Video và ChatStaff giúp doanh nghiệp tạo nội dung bán hàng chuyên nghiệp và vận hành hiệu quả hơn.</p></div><div><h3>Về TodoX</h3><a href="/#about">Giới thiệu</a><a href="/#founder">Người sáng lập</a><a href="/#industries">Ngành nghề</a></div><div><h3>Giải pháp</h3><a href="/mau-video">Mẫu video</a><a href="/video-ngan">Video truyền thông</a><a href="/bat-dong-san">Video AI Bất động sản</a><a href="/#chatstaff">ChatStaff</a><a href="https://dashboard.todox.vn" rel="noopener">Đăng nhập Dashboard</a></div><div><h3>Liên hệ</h3><p>Nha Trang, Khánh Hòa<br>0366 699 961<br>hello@todox.vn</p></div></div><div class="container copyright">© 2026 TodoX.</div></footer>
-  <script src="/js/video-samples.js?v=1" defer></script>
+  <script src="/js/video-samples.js?v=2" defer></script>
 </body>
 </html>

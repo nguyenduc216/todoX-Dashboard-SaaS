@@ -1,0 +1,147 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.Extensions.Options
+@using System.Diagnostics
+@using TodoX.Web.Models.Catalog
+@using TodoX.Web.Services
+@using TodoX.Web.Services.Landing
+@using TodoX.Web.Services.SharedMedia
+@inject AuthStateService AuthState
+@inject LandingVideoSampleRepository Repository
+@inject LandingIntroVideoMediaService Media
+@inject SharedMediaPathService Paths
+@inject ISnackbar Snackbar
+@inject ILogger<LandingVideoSampleDialog> Logger
+@inject IOptions<SharedMediaOptions> MediaOptions
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_model.Id == Guid.Empty ? "Thêm video mẫu" : "Chỉnh sửa video mẫu")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
+            @if (!Paths.IsConfigured || !Paths.CanWrite()) { <MudAlert Severity="Severity.Warning">SharedMedia chưa sẵn sàng để upload.</MudAlert> }
+            <MudTextField T="string" Label="Tiêu đề video" @bind-Value="_model.Title" MaxLength="@LandingVideoSampleRepository.MaxTitleLength" />
+            <MudTextField T="string" Label="Thông tin nội dung video" @bind-Value="_model.Description" Lines="4" MaxLength="@LandingVideoSampleRepository.MaxDescriptionLength" />
+            <MudGrid>
+                <MudItem xs="12" sm="4">
+                    <MudSelect T="string" Label="Kích thước" @bind-Value="_model.AspectRatio">
+                        <MudSelectItem Value="@LandingVideoSampleRepository.Portrait">9:16 (dọc)</MudSelectItem>
+                        <MudSelectItem Value="@LandingVideoSampleRepository.Landscape">16:9 (ngang)</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <MudSelect T="string" Label="Nhóm dịch vụ video" @bind-Value="_serviceChoice">
+                        @foreach (var service in _services)
+                        {
+                            <MudSelectItem Value="@service.Id.ToString()">@service.ServiceName</MudSelectItem>
+                        }
+                        <MudSelectItem Value="@LandingVideoSampleRepository.OtherServiceChoice">@LandingVideoSampleRepository.OtherServiceName</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudStack Spacing="2">
+                        <MudText>Video MP4/WebM (tối đa @(LandingIntroVideoMediaService.MaxBytes(MediaOptions.Value, LandingVideoSampleRepository.MediaArea, true) / (1024 * 1024)) MB):</MudText>
+                        <InputFile OnChange="UploadVideoAsync" accept=".mp4,.webm,video/mp4,video/webm" disabled="@_busy" />
+                        @if (!string.IsNullOrWhiteSpace(_model.VideoUrl))
+                        {
+                            <video src="@_model.VideoUrl" poster="@_model.PosterUrl" controls playsinline preload="metadata" style="max-width:100%;max-height:300px"></video>
+                        }
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudStack Spacing="2">
+                        <MudText>Ảnh đại diện JPG/PNG/WebP:</MudText>
+                        <InputFile OnChange="UploadPosterAsync" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled="@_busy" />
+                        @if (!string.IsNullOrWhiteSpace(_model.PosterUrl)) { <img src="@_model.PosterUrl" alt="Ảnh đại diện" style="max-width:100%;max-height:300px" /> }
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+            @if (_busy) { <MudProgressLinear Indeterminate="true" /> }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="@_busy" OnClick="Cancel">Hủy</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" OnClick="SaveAsync">Lưu video mẫu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public LandingVideoSample? Source { get; set; }
+    [Parameter] public IReadOnlyList<ServiceDto> Services { get; set; } = [];
+
+    private LandingVideoSample _model = new();
+    private List<ServiceDto> _services = [];
+    private string? _serviceChoice;
+    private bool _busy;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        if (Source is not null)
+        {
+            _model = new LandingVideoSample
+            {
+                Id = Source.Id, Title = Source.Title, Description = Source.Description, AspectRatio = Source.AspectRatio,
+                VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, ServiceId = Source.ServiceId
+            };
+            _serviceChoice = Source.ServiceId?.ToString() ?? LandingVideoSampleRepository.OtherServiceChoice;
+        }
+
+        // Keep the current service selectable when editing a sample whose service has been paused.
+        _services = Services.Where(service => service.Status == TodoXServiceStatuses.Active || service.Id == Source?.ServiceId).ToList();
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private Task UploadVideoAsync(InputFileChangeEventArgs args) => UploadAsync(args, true);
+    private Task UploadPosterAsync(InputFileChangeEventArgs args) => UploadAsync(args, false);
+    private async Task UploadAsync(InputFileChangeEventArgs args, bool video)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var url = await Media.UploadAsync(args.File, video, LandingVideoSampleRepository.MediaArea);
+            if (video) _model.VideoUrl = url;
+            else _model.PosterUrl = url;
+            Snackbar.Add("Upload thành công. Nhấn Lưu video mẫu để áp dụng.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            var maxBytes = LandingIntroVideoMediaService.MaxBytes(MediaOptions.Value, LandingVideoSampleRepository.MediaArea, video);
+            var storageAvailable = Paths.IsConfigured && Paths.CanWrite();
+            var category = IntroUploadDiagnostics.Classify(ex, storageAvailable);
+            Logger.LogError(ex,
+                "Landing video sample upload failed. FileName={FileName} FileSize={FileSize} UploadType={UploadType} MaxBytes={MaxBytes} StorageAvailable={StorageAvailable} ExceptionType={ExceptionType} ErrorCategory={ErrorCategory} CorrelationId={CorrelationId}",
+                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, video ? "video" : "poster",
+                maxBytes, storageAvailable, ex.GetType().Name, category, Activity.Current?.Id);
+            _error = IntroUploadDiagnostics.Message(category, maxBytes);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy || AuthState.CurrentUser is null) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            LandingVideoSampleRepository.ApplyServiceChoice(_model, _serviceChoice);
+            await Repository.SaveAsync(_model, AuthState.CurrentUser.UserId.ToString());
+            Snackbar.Add("Đã lưu video mẫu.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (ArgumentException ex) { _error = ex.Message.Split(" (Parameter")[0]; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video sample save failed.");
+            _error = "Không thể lưu video mẫu. Kiểm tra database và script landing.video_samples.";
+        }
+        finally { _busy = false; }
+    }
+}

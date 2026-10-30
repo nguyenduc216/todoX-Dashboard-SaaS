@@ -88,12 +88,20 @@
     .then(catalog => {
       videos = (Array.isArray(catalog.videos) ? catalog.videos : []).filter(video => video && typeof video.title === 'string' && validMedia(video.videoUrl, 'videos') && validMedia(video.posterUrl, 'posters'));
       groups = (Array.isArray(catalog.groups) ? catalog.groups : []).filter(group => group && typeof group.code === 'string' && group.code && typeof group.name === 'string');
-      if (!videos.length) { status.textContent = 'Kho mẫu video đang được cập nhật. Vui lòng quay lại sau.'; return; }
       status.textContent = '';
-      filters.replaceChildren(filterButton('', 'Tất cả', videos.length), ...groups.map(group => filterButton(group.code, group.name, group.count)));
-      filters.hidden = false;
+      if (!videos.length) { document.getElementById('sampleEmpty').hidden = false; return; }
+      if (groups.length) {
+        filters.replaceChildren(filterButton('', 'Tất cả', videos.length), ...groups.map(group => filterButton(group.code, group.name, group.count)));
+        filters.hidden = false;
+        document.getElementById('sampleLead').hidden = false;
+      }
       current = groupFromUrl();
       render();
     })
-    .catch(() => { status.textContent = 'Chưa tải được mẫu video. Vui lòng thử lại sau.'; });
+    .catch(() => {
+      status.textContent = '';
+      document.getElementById('sampleEmptyTitle').textContent = 'Kho mẫu video tạm thời chưa sẵn sàng';
+      document.getElementById('sampleEmptyText').textContent = 'Bạn vui lòng quay lại sau ít phút, hoặc khám phá dịch vụ video của TodoX trong lúc chờ.';
+      document.getElementById('sampleEmpty').hidden = false;
+    });
 })();
