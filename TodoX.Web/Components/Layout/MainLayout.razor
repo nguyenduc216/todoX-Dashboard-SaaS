@@ -1077,6 +1077,16 @@
             });
         }
 
+        if (!existingCodes.Contains("landing_short_video"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(), GroupId = groupId, Code = "landing_short_video",
+                Title = "Video truyền thông", Href = "/landing/short-video", IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(), VisibilityPolicy = "always", MatchAll = false, SortOrder = 40
+            });
+        }
+
         return new NavigationMenuGroupDto
         {
             Id = groupId,

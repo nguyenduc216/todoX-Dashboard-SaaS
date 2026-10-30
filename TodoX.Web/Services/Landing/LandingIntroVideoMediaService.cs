@@ -47,7 +47,11 @@ public static class IntroUploadDiagnostics
 
 public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, IOptions<SharedMediaOptions> options, AuthStateService auth)
 {
-    public async Task<string> UploadAsync(IBrowserFile file, bool video, CancellationToken ct = default)
+    public Task<string> UploadAsync(IBrowserFile file, bool video, CancellationToken ct = default)
+        => UploadAsync(file, video, "intro", ct);
+
+    /// <param name="area">Landing media area: "intro" (homepage intro) or "short-video" (/video-ngan page).</param>
+    public async Task<string> UploadAsync(IBrowserFile file, bool video, string area, CancellationToken ct = default)
     {
         LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
         var settings = options.Value.IndustrySolutions;
@@ -55,8 +59,8 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         var ext = Path.GetExtension(file.Name).ToLowerInvariant();
         ValidateUpload(file.Name, file.ContentType, file.Size, video, limit);
         var folder = video ? "videos" : "posters";
-        var temp = paths.GetIntroPhysicalFolder("temp");
-        var destination = paths.GetIntroPhysicalFolder(folder);
+        var temp = paths.GetLandingMediaPhysicalFolder(area, "temp");
+        var destination = paths.GetLandingMediaPhysicalFolder(area, folder);
         Directory.CreateDirectory(temp);
         Directory.CreateDirectory(destination);
         var token = Guid.NewGuid().ToString("N");
@@ -72,7 +76,7 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
             if (!HasValidHeader(ext, header)) throw new IntroUploadException(IntroUploadError.InvalidFile, "Nội dung file không hợp lệ.");
             var filename = token + ext;
             File.Move(source, Path.Combine(destination, filename));
-            return paths.GetIntroPublicUrl(folder, filename);
+            return paths.GetLandingMediaPublicUrl(area, folder, filename);
         }
         finally
         {

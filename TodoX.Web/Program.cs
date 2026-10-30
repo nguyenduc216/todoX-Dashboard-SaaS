@@ -50,6 +50,7 @@ builder.Services.AddScoped<LandingIndustrySolutionRepository>();
 builder.Services.AddScoped<LandingIndustryMediaService>();
 builder.Services.AddScoped<LandingIntroVideoRepository>();
 builder.Services.AddScoped<LandingIntroVideoMediaService>();
+builder.Services.AddScoped<LandingShortVideoRepository>();
 builder.Services.AddSingleton<SharedMediaPathService>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddScoped<AuditRepository>();
