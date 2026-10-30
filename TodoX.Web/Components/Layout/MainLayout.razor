@@ -1087,6 +1087,16 @@
             });
         }
 
+        if (!existingCodes.Contains("landing_video_samples"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(), GroupId = groupId, Code = "landing_video_samples",
+                Title = "Kho mẫu video", Href = "/landing/video-samples", IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(), VisibilityPolicy = "always", MatchAll = false, SortOrder = 50
+            });
+        }
+
         return new NavigationMenuGroupDto
         {
             Id = groupId,
