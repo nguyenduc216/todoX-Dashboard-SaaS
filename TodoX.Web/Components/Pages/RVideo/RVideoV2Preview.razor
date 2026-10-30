@@ -124,7 +124,7 @@ else
 
         <div class="rv2-pv-actions">
           <MudButton Variant="Variant.Outlined" Size="Size.Medium" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="@(()=>HandleRerenderImageAsync(a))" Disabled="@ImageBlocked(a)">@(string.IsNullOrWhiteSpace(a.StaticImageUrl) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton>
-          <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Medium" StartIcon="@Icons.Material.Filled.Movie" OnClick="@(()=>HandleRerenderVideoAsync(a))" Disabled="@(NeedsExplicitOperation(a) ? _busy : VideoBlocked(a))">@(NeedsExplicitOperation(a) ? "Tạo lượt video mới" : "Render lại video")</MudButton>
+          <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Medium" StartIcon="@Icons.Material.Filled.Movie" OnClick="@(()=>HandleRerenderVideoAsync(a))" Disabled="@(NeedsExplicitOperation(a) ? _busy || VideoInFlight(a) : VideoBlocked(a))">@(VideoInFlight(a) ? "Đang tạo video…" : NeedsExplicitOperation(a) ? "Tạo lượt video mới" : "Render lại video")</MudButton>
           @* Hidden trigger: the primary video button routes to it when a new explicit operation is required. *@
           <RVideoSupersedeButton @ref="_supersedeButtons[a.Id]" ProjectId="@JobView.Project.Id" Scene="@a" ServiceId="@JobView.CoreJob.ServiceId" HideTrigger="true"
             Visible="@NeedsExplicitOperation(a)" Disabled="@_busy" CurrentJobId="@VideoState(a)?.LatestJob?.Id" Generation="@VideoState(a)?.Generation"
@@ -181,6 +181,9 @@ readonly Dictionary<long, RVideoSupersedeButton> _supersedeButtons = new();
 SceneVideoUiState? VideoState(VideoProjectSceneDto scene) => _videoStates.GetValueOrDefault(scene.Id);
 bool NeedsExplicitOperation(VideoProjectSceneDto scene) => VideoState(scene) is { } state
   && state.RequiresExplicitOperation;
+// A video attempt is still running: no new attempt until it finishes. Manual-review jobs stay replaceable.
+bool VideoInFlight(VideoProjectSceneDto scene) => VideoState(scene) is { HasActiveJob: true } state
+  && state.LatestJob?.Status != "pending_reconciliation";
 
 int _videoStateRevision;
 bool _pollRefresh;
@@ -431,6 +434,7 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
 }
 async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
 {
+ if(VideoInFlight(scene)) return;
  if(NeedsExplicitOperation(scene) && _supersedeButtons.TryGetValue(scene.Id,out var button))
  { await button.RunAsync(); return; }
 

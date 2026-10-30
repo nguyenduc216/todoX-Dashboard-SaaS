@@ -101,4 +101,26 @@ public sealed class RVideoV2PreviewRefreshTests
         Assert.Null(Label(4));    // waiting for manual review: no endless spinner
         Assert.Null(Label(5));    // state not loaded yet
     }
+    [Fact]
+    public void NewVideoAttemptIsLockedWhileAnAttemptIsRunningButNotForManualReview()
+    {
+        using var component = new RVideoV2Preview();
+        var states = (Dictionary<long, SceneVideoUiState>)typeof(RVideoV2Preview).GetField("_videoStates", Private)!.GetValue(component)!;
+        var inFlight = typeof(RVideoV2Preview).GetMethod("VideoInFlight", Private)!;
+        bool InFlight(long id) => (bool)inFlight.Invoke(component, [new VideoProjectSceneDto { Id = id }])!;
+        var idle = new SceneVideoUiState(null, null, null, SceneVideoSubmitBlockReason.None, HasActiveJob: false);
+        states[1] = idle with { LatestJob = new RenderJobDto { Id = Guid.NewGuid(), Status = "rendering" }, HasActiveJob = true };
+        states[2] = idle with { LatestJob = new RenderJobDto { Id = Guid.NewGuid(), Status = "pending_reconciliation" }, HasActiveJob = true };
+        states[3] = idle with { LatestJob = new RenderJobDto { Id = Guid.NewGuid(), Status = "completed" } };
+
+        Assert.True(InFlight(1));
+        Assert.False(InFlight(2));
+        Assert.False(InFlight(3));
+
+        var page = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Components", "Pages", "RVideo", "RVideoV2Preview.razor"));
+        Assert.Contains("Disabled=\"@(NeedsExplicitOperation(a) ? _busy || VideoInFlight(a) : VideoBlocked(a))\"", page);
+        var handler = page[page.IndexOf("async Task HandleRerenderVideoAsync(", StringComparison.Ordinal)..];
+        Assert.True(handler.IndexOf("if(VideoInFlight(scene)) return;", StringComparison.Ordinal)
+                    < handler.IndexOf("button.RunAsync()", StringComparison.Ordinal));
+    }
 }

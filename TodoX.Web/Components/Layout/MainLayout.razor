@@ -31,9 +31,19 @@
                        Variant="Variant.Outlined"
                        Color="Color.Warning"
                        StartIcon="@Icons.Material.Filled.SupervisedUserCircle"
+                       Class="todox-impersonate-full"
                        OnClick="StopImpersonation">
                 Đang đăng nhập hộ · Thoát
             </MudButton>
+            @* Compact icon on narrow screens; the label stays in the tooltip. *@
+            <MudTooltip Text="Đang đăng nhập hộ · Thoát" RootClass="todox-impersonate-icon">
+                <MudIconButton Icon="@Icons.Material.Filled.SupervisedUserCircle"
+                               Color="Color.Warning"
+                               Size="Size.Small"
+                               Variant="Variant.Outlined"
+                               aria-label="Đang đăng nhập hộ · Thoát"
+                               OnClick="StopImpersonation" />
+            </MudTooltip>
         }
 
         <MudMenu @bind-Open="_notifyOpen" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="todox-notify-menu">
