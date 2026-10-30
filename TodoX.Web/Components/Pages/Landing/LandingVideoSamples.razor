@@ -1,78 +1,34 @@
 @page "/landing/video-samples"
-@using Microsoft.AspNetCore.Components.Forms
-@using Microsoft.Extensions.Options
-@using System.Diagnostics
+@using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Models
 @using TodoX.Web.Models.Landing
 @using TodoX.Web.Services
 @using TodoX.Web.Services.Landing
-@using TodoX.Web.Services.SharedMedia
 @inject AuthStateService AuthState
 @inject AccountService Accounts
 @inject LandingVideoSampleRepository Repository
 @inject CatalogAdminRepository Catalog
-@inject LandingIntroVideoMediaService Media
-@inject SharedMediaPathService Paths
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject ILogger<LandingVideoSamples> Logger
-@inject IOptions<SharedMediaOptions> MediaOptions
 
 <PageTitle>Kho mẫu video - Landing</PageTitle>
 <MudStack Spacing="3">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap">
-        <MudText Typo="Typo.h4">Kho mẫu video</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Trang landing: /mau-video</MudText>
+        <MudStack Spacing="0">
+            <MudText Typo="Typo.h4">Kho mẫu video</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Trang landing: /mau-video</MudText>
+        </MudStack>
+        @if (_ready && CanView)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(!CanUpdate || _busy)" OnClick="AddAsync">Thêm video mẫu</MudButton>
+        }
     </MudStack>
     @if (!_ready) { <MudProgressLinear Indeterminate="true" /> }
     else if (!CanView) { <MudAlert Severity="Severity.Error">Bạn không có quyền xem cấu hình Landing Page.</MudAlert> }
     else
     {
         @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
-        @if (!Paths.IsConfigured || !Paths.CanWrite()) { <MudAlert Severity="Severity.Warning">SharedMedia chưa sẵn sàng để upload.</MudAlert> }
-
-        <MudPaper Class="pa-4">
-            <MudStack Spacing="3">
-                <MudText Typo="Typo.h6">@(_editing.Id == Guid.Empty ? "Thêm video mẫu" : "Chỉnh sửa video mẫu")</MudText>
-                <MudTextField T="string" Label="Tiêu đề video" @bind-Value="_editing.Title" MaxLength="@LandingVideoSampleRepository.MaxTitleLength" Disabled="@(!CanUpdate)" />
-                <MudTextField T="string" Label="Thông tin nội dung video" @bind-Value="_editing.Description" Lines="4" MaxLength="@LandingVideoSampleRepository.MaxDescriptionLength" Disabled="@(!CanUpdate)" />
-                <MudStack Row="true" Spacing="3" Wrap="Wrap.Wrap">
-                    <MudSelect T="string" Label="Kích thước" @bind-Value="_editing.AspectRatio" Disabled="@(!CanUpdate)" Style="min-width:180px">
-                        <MudSelectItem Value="@LandingVideoSampleRepository.Portrait">9:16 (dọc)</MudSelectItem>
-                        <MudSelectItem Value="@LandingVideoSampleRepository.Landscape">16:9 (ngang)</MudSelectItem>
-                    </MudSelect>
-                    <MudSelect T="Guid?" Label="Nhóm dịch vụ video" @bind-Value="_editing.CategoryId" Disabled="@(!CanUpdate)" Style="min-width:280px">
-                        @foreach (var category in _categories)
-                        {
-                            <MudSelectItem T="Guid?" Value="@category.Id">@category.CategoryName</MudSelectItem>
-                        }
-                    </MudSelect>
-                </MudStack>
-                <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
-                    <MudStack Spacing="2">
-                        <MudText>Video MP4/WebM (tối đa @(MediaOptions.Value.IndustrySolutions.MaxVideoBytes / (1024 * 1024)) MB):</MudText>
-                        <InputFile OnChange="UploadVideoAsync" accept=".mp4,.webm,video/mp4,video/webm" disabled="@(!CanUpdate || _busy)" />
-                        @if (!string.IsNullOrWhiteSpace(_editing.VideoUrl))
-                        {
-                            <video src="@_editing.VideoUrl" poster="@_editing.PosterUrl" controls playsinline preload="metadata" style="max-width:320px;max-height:360px"></video>
-                        }
-                    </MudStack>
-                    <MudStack Spacing="2">
-                        <MudText>Ảnh đại diện JPG/PNG/WebP:</MudText>
-                        <InputFile OnChange="UploadPosterAsync" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled="@(!CanUpdate || _busy)" />
-                        @if (!string.IsNullOrWhiteSpace(_editing.PosterUrl)) { <img src="@_editing.PosterUrl" alt="Ảnh đại diện" style="max-width:240px;max-height:360px" /> }
-                    </MudStack>
-                </MudStack>
-                @if (_busy) { <MudProgressLinear Indeterminate="true" /> }
-                <MudStack Row="true" Spacing="2">
-                    <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(!CanUpdate || _busy)" OnClick="SaveAsync">Lưu video mẫu</MudButton>
-                    @if (_editing.Id != Guid.Empty)
-                    {
-                        <MudButton Variant="Variant.Text" Disabled="@_busy" OnClick="ResetEditor">Hủy chỉnh sửa</MudButton>
-                    }
-                </MudStack>
-            </MudStack>
-        </MudPaper>
 
         <MudPaper Class="pa-4">
             <MudStack Spacing="3">
@@ -94,10 +50,10 @@
                         <RowTemplate>
                             <MudTd><img src="@context.PosterUrl" alt="" style="max-width:64px;max-height:64px;object-fit:cover" /></MudTd>
                             <MudTd>@context.Title</MudTd>
-                            <MudTd>@context.CategoryName</MudTd>
+                            <MudTd>@(context.ServiceName ?? LandingVideoSampleRepository.OtherServiceName)</MudTd>
                             <MudTd>@context.AspectRatio</MudTd>
                             <MudTd Style="text-align:right;white-space:nowrap">
-                                <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => Edit(context))">Sửa</MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => EditAsync(context))">Sửa</MudButton>
                                 <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => DeleteAsync(context))">Xóa</MudButton>
                             </MudTd>
                         </RowTemplate>
@@ -109,9 +65,8 @@
 </MudStack>
 
 @code {
-    private LandingVideoSample _editing = new();
     private List<LandingVideoSample> _samples = [];
-    private List<ServiceCategoryDto> _categories = [];
+    private IReadOnlyList<ServiceDto> _services = [];
     private bool _ready;
     private bool _busy;
     private string? _error;
@@ -125,7 +80,7 @@
         if (!CanView) return;
         try
         {
-            _categories = (await Catalog.GetCategoriesAsync()).Where(category => category.IsActive).ToList();
+            _services = await Catalog.GetServicesAsync();
             await ReloadAsync();
         }
         catch (Exception ex)
@@ -137,65 +92,29 @@
 
     private async Task ReloadAsync() => _samples = (await Repository.ListAsync()).ToList();
 
-    private void ResetEditor() => _editing = new();
+    private Task AddAsync() => OpenEditorAsync(null);
+    private Task EditAsync(LandingVideoSample sample) => OpenEditorAsync(sample);
 
-    private void Edit(LandingVideoSample sample)
-    {
-        _error = null;
-        _editing = new LandingVideoSample
-        {
-            Id = sample.Id, Title = sample.Title, Description = sample.Description, AspectRatio = sample.AspectRatio,
-            VideoUrl = sample.VideoUrl, PosterUrl = sample.PosterUrl, CategoryId = sample.CategoryId
-        };
-    }
-
-    private Task UploadVideoAsync(InputFileChangeEventArgs args) => UploadAsync(args, true);
-    private Task UploadPosterAsync(InputFileChangeEventArgs args) => UploadAsync(args, false);
-    private async Task UploadAsync(InputFileChangeEventArgs args, bool video)
+    private async Task OpenEditorAsync(LandingVideoSample? sample)
     {
         if (!CanUpdate || _busy) return;
-        _busy = true;
         _error = null;
-        try
+        var parameters = new DialogParameters<LandingVideoSampleDialog>
         {
-            var url = await Media.UploadAsync(args.File, video, LandingVideoSampleRepository.MediaArea);
-            if (video) _editing.VideoUrl = url;
-            else _editing.PosterUrl = url;
-            Snackbar.Add("Upload thành công. Nhấn Lưu video mẫu để áp dụng.", Severity.Success);
-        }
+            { x => x.Source, sample },
+            { x => x.Services, _services }
+        };
+        // An upload runs inside the dialog: only its own buttons may close it.
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false };
+        var dialog = await DialogService.ShowAsync<LandingVideoSampleDialog>(sample is null ? "Thêm video mẫu" : "Chỉnh sửa video mẫu", parameters, options);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled) return;
+        try { await ReloadAsync(); }
         catch (Exception ex)
         {
-            var maxBytes = video ? MediaOptions.Value.IndustrySolutions.MaxVideoBytes : MediaOptions.Value.IndustrySolutions.MaxThumbnailBytes;
-            var storageAvailable = Paths.IsConfigured && Paths.CanWrite();
-            var category = IntroUploadDiagnostics.Classify(ex, storageAvailable);
-            Logger.LogError(ex,
-                "Landing video sample upload failed. FileName={FileName} FileSize={FileSize} UploadType={UploadType} MaxBytes={MaxBytes} StorageAvailable={StorageAvailable} ExceptionType={ExceptionType} ErrorCategory={ErrorCategory} CorrelationId={CorrelationId}",
-                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, video ? "video" : "poster",
-                maxBytes, storageAvailable, ex.GetType().Name, category, Activity.Current?.Id);
-            _error = IntroUploadDiagnostics.Message(category, maxBytes);
+            Logger.LogError(ex, "Landing video samples reload failed.");
+            _error = "Không thể tải lại kho mẫu video. Vui lòng tải lại trang.";
         }
-        finally { _busy = false; }
-    }
-
-    private async Task SaveAsync()
-    {
-        if (!CanUpdate || _busy || AuthState.CurrentUser is null) return;
-        _busy = true;
-        _error = null;
-        try
-        {
-            await Repository.SaveAsync(_editing, AuthState.CurrentUser.UserId.ToString());
-            ResetEditor();
-            await ReloadAsync();
-            Snackbar.Add("Đã lưu video mẫu.", Severity.Success);
-        }
-        catch (ArgumentException ex) { _error = ex.Message.Split(" (Parameter")[0]; }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Landing video sample save failed.");
-            _error = "Không thể lưu video mẫu. Kiểm tra database và script landing.video_samples.";
-        }
-        finally { _busy = false; }
     }
 
     private async Task DeleteAsync(LandingVideoSample sample)
@@ -208,7 +127,6 @@
         try
         {
             await Repository.DeleteAsync(sample.Id);
-            if (_editing.Id == sample.Id) ResetEditor();
             await ReloadAsync();
             Snackbar.Add("Đã xóa video mẫu.", Severity.Success);
         }
