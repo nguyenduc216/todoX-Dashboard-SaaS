@@ -100,6 +100,7 @@
     private IReadOnlyList<CustomerJobRow> _jobs = Array.Empty<CustomerJobRow>();
     private IReadOnlyDictionary<string, TodoX.Web.Services.Platform.CoreServiceView>? _catalog;
     private readonly Dictionary<Guid, string> _dancePoints = new();
+    private readonly Dictionary<Guid, RVideoJobListSummary?> _rvideoSummaries = new();
     private int _take = PageSize;
     private bool _loaded;
     private bool _loading;
@@ -134,6 +135,7 @@
         _userKey = key;
         _take = PageSize;
         _dancePoints.Clear();
+        _rvideoSummaries.Clear();
         _jobs = Array.Empty<CustomerJobRow>();
         _loaded = false;
         await LoadJobsAsync();
@@ -187,15 +189,16 @@
                     .Concat(BuildDanceRows(dance.Take(_take)))
                     .Concat(core.Take(_take)
                         .Where(x => string.Equals(x.OperationType, TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
-                        .Select(x => new CustomerJobRow(
+                        .Select(x => BuildRVideoRow(new CustomerJobRow(
                             x.JobId,
                             ReadSnapshotString(x.Input, "title") ?? catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
                             catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
                             x.Status,
-                            x.CurrentStep ?? "info",
+                            RVideoStageLabel(null, x.Status, x.CurrentStep),
                             x.CreatedAt,
-                            x.PointCostEstimate > 0 ? $"{x.PointCostEstimate:0.##}" : "—",
-                            $"/jobs/rvideo/{x.JobId}")))
+                            "…",
+                            $"/jobs/rvideo/{x.JobId}",
+                            RVideoCore: x))))
                     .Where(x => frontier is null || x.CreatedAt >= frontier)
                     .OrderByDescending(x => x.CreatedAt)
                     .ToList();
@@ -225,7 +228,7 @@
             }
         }
 
-        if (version == _loadVersion && !_disposed) await FillDancePointsAsync(version);
+        if (version == _loadVersion && !_disposed) await Task.WhenAll(FillDancePointsAsync(version), FillRVideoSummariesAsync(version));
     }
 
     private async Task<IReadOnlyList<TodoX.Web.Services.Platform.CoreJobView>> ListCoreJobsAsync(CurrentUserSession user, int count)
@@ -280,6 +283,62 @@
         StateHasChanged();
     }
 
+    // RVideo charges per completed scene version, so the core job's own estimate is not the amount used;
+    // one batched read resolves project stage and charged points for the visible rows.
+    private CustomerJobRow BuildRVideoRow(CustomerJobRow row)
+        => _rvideoSummaries.TryGetValue(row.Id, out var summary)
+            ? row with
+            {
+                StageLabel = RVideoStageLabel(summary?.ProjectStatus, row.RVideoCore!.Status, row.RVideoCore.CurrentStep),
+                PointsLabel = summary is null ? "—" : $"{summary.ChargedPoints:0.##}"
+            }
+            : row;
+
+    private async Task FillRVideoSummariesAsync(int version)
+    {
+        var pending = _jobs.Where(x => x.RVideoCore is not null && !_rvideoSummaries.ContainsKey(x.Id)).Select(x => x.Id).ToList();
+        if (pending.Count == 0 || AuthState.CurrentUser is not { IsCustomer: true } user) return;
+        try
+        {
+            var summaries = await RVideoJobs.GetListSummariesAsync(pending, user);
+            foreach (var id in pending) _rvideoSummaries[id] = summaries.GetValueOrDefault(id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "My jobs RVideo summary lookup failed");
+            foreach (var id in pending) _rvideoSummaries[id] = null;
+        }
+        if (version != _loadVersion || _disposed) return;
+        _jobs = _jobs.Select(x => x.RVideoCore is not null ? BuildRVideoRow(x) : x).ToList();
+        StateHasChanged();
+    }
+
+    internal static string RVideoStageLabel(string? projectStatus, string? coreStatus, string? currentStep)
+        => projectStatus?.Trim().ToLowerInvariant() switch
+        {
+            VideoProjectStatuses.Draft => "Nháp",
+            VideoProjectStatuses.SceneReady => "Đã có kịch bản",
+            VideoProjectStatuses.Rendering => "Đang tạo ảnh/video",
+            VideoProjectStatuses.ReadyToMerge => "Chờ ghép video",
+            VideoProjectStatuses.Merging => "Đang ghép video",
+            VideoProjectStatuses.Completed => "Hoàn tất",
+            VideoProjectStatuses.Failed => "Thất bại",
+            _ => coreStatus?.Trim().ToLowerInvariant() switch
+            {
+                "completed" => "Hoàn tất",
+                "failed" => "Thất bại",
+                "cancelled" or "canceled" => "Đã hủy",
+                _ => currentStep?.Trim().ToUpperInvariant() switch
+                {
+                    RVideoStages.Scene => "Viết kịch bản",
+                    RVideoStages.Image => "Tạo ảnh",
+                    RVideoStages.Video => "Tạo video",
+                    RVideoStages.Result => "Ghép video",
+                    _ => "Nháp"
+                }
+            }
+        };
+
     private async Task<string> ResolveDancePointsLabelAsync(DanceSellJobDto job, CancellationToken ct)
     {
         var operation = await DanceOperations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
@@ -303,5 +362,6 @@
         DateTime CreatedAt,
         string PointsLabel,
         string Route,
-        DanceSellJobDto? DanceJob = null);
+        DanceSellJobDto? DanceJob = null,
+        TodoX.Web.Services.Platform.CoreJobView? RVideoCore = null);
 }
