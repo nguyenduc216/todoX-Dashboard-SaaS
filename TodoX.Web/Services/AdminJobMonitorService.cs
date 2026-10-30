@@ -1,10 +1,8 @@
 using System.Data;
-using System.Text;
-using System.Text.Json;
 using Dapper;
-using Npgsql;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Services.DanceSell;
 
 namespace TodoX.Web.Services;
 
@@ -15,63 +13,27 @@ public interface IAdminJobMonitorService
         AdminJobMonitorQuery? query = null,
         CancellationToken ct = default);
 
-    Task<AdminJobMonitorStats> GetStatsAsync(
+    Task<IReadOnlyList<AdminJobMonitorScene>> GetScenesAsync(
         CurrentUserSession user,
-        AdminJobMonitorQuery? query = null,
-        CancellationToken ct = default);
-
-    Task<AdminJobMonitorFilterOptions> GetFilterOptionsAsync(
-        CurrentUserSession user,
-        CancellationToken ct = default);
-
-    Task<AdminJobMonitorDetail?> GetDetailAsync(
-        CurrentUserSession user,
-        Guid jobId,
-        CancellationToken ct = default);
-
-    Task RecordImpersonationAuditAsync(
-        CurrentUserSession admin,
-        Guid targetCustomerUserId,
-        Guid? targetCustomerId,
+        string kind,
         Guid jobId,
         CancellationToken ct = default);
 }
 
+/// <summary>
+/// Read-only administrator view of customer jobs. A job is the unit the customer created:
+/// the RVideo core job, the Timelapse job or the RDance job. Worker rows in render.render_jobs
+/// (merge, scene image/video/audio, dance attempts) are never listed.
+/// </summary>
 public sealed class AdminJobMonitorService : IAdminJobMonitorService
 {
-    private static readonly string[] ProcessingStatuses =
-    [
-        "pending",
-        "queued",
-        "preparing",
-        "processing",
-        "rendering",
-        "post_processing",
-        "pending_reconciliation",
-        "submitted",
-        "polling",
-        "running",
-        "generating",
-        "generating_images",
-        "generating_videos",
-        "finalizing"
-    ];
-
-    private static readonly string[] CompletedStatuses = ["completed"];
-    private static readonly string[] FailedStatuses = ["failed", "timeout"];
-
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
-    private readonly AuditRepository _audit;
 
-    public AdminJobMonitorService(
-        TodoXConnectionFactory factory,
-        TenantContext tenant,
-        AuditRepository audit)
+    public AdminJobMonitorService(TodoXConnectionFactory factory, TenantContext tenant)
     {
         _factory = factory;
         _tenant = tenant;
-        _audit = audit;
     }
 
     public async Task<AdminJobMonitorPage> GetJobsAsync(
@@ -80,327 +42,148 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
         CancellationToken ct = default)
     {
         EnsureAdmin(user);
-        var normalized = NormalizeQuery(query);
+        var normalized = AdminJobMonitorRules.NormalizeQuery(query);
         await _tenant.EnsureLoadedAsync(ct);
-
         using var connection = await _factory.OpenAsync(ct);
-        var parameters = CreateParameters(normalized);
-        parameters.Add("tenant", _tenant.TenantId);
-        parameters.Add("limit", normalized.PageSize);
-        parameters.Add("offset", (normalized.Page - 1) * normalized.PageSize);
-        var where = BuildWhere(normalized, parameters);
 
-        var sql = $"""
-            SELECT count(*)::bigint AS Total,
-                   count(*) FILTER (WHERE lower(coalesce(r.status, '')) = ANY(@processingStatuses))::bigint AS Processing,
-                   count(*) FILTER (WHERE lower(coalesce(r.status, '')) = ANY(@completedStatuses))::bigint AS Completed,
-                   count(*) FILTER (WHERE lower(coalesce(r.status, '')) = ANY(@failedStatuses))::bigint AS Failed
-              FROM render.render_jobs r
-              LEFT JOIN catalog.services s ON s.id = r.service_id
-              LEFT JOIN auth.app_users u ON u.id = r.user_id AND u.tenant_id = r.tenant_id
-              LEFT JOIN crm.customers c ON c.id = r.customer_id AND c.tenant_id = r.tenant_id
-            {where};
+        var rows = (await connection.QueryAsync<JobRow>(new CommandDefinition(
+            AdminJobMonitorSql.JobsPage,
+            new
+            {
+                tenant = _tenant.TenantId,
+                kind = normalized.Kind,
+                status = normalized.Status,
+                search = normalized.Search is null ? null : $"%{normalized.Search}%",
+                limit = normalized.PageSize,
+                offset = (normalized.Page - 1) * normalized.PageSize
+            },
+            cancellationToken: ct))).ToList();
 
-            SELECT r.id AS Id,
-                   r.customer_id AS CustomerId,
-                   r.user_id AS UserId,
-                   COALESCE(NULLIF(c.company_name, ''), NULLIF(c.full_name, ''), '') AS CustomerName,
-                   COALESCE(c.email, '') AS CustomerEmail,
-                   COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, '') AS AccountName,
-                   COALESCE(u.email, '') AS AccountEmail,
-                   COALESCE(r.job_type, '') AS JobType,
-                   COALESCE(s.service_code, '') AS ServiceCode,
-                   COALESCE(s.service_name, '') AS ServiceName,
-                   COALESCE(r.status, '') AS Status,
-                   COALESCE(r.current_step, '') AS CurrentStage,
-                   COALESCE(r.progress_percent, 0) AS ProgressPercent,
-                   r.input_json::text AS InputJson,
-                   r.output_json::text AS OutputJson,
-                   r.point_cost_estimate AS EstimatedPoints,
-                   r.point_cost_charged AS ConsumedPoints,
-                   r.provider_code AS ProviderCode,
-                   r.model_code AS ModelCode,
-                   r.created_at AS CreatedAt,
-                   COALESCE(r.updated_at, r.created_at) AS UpdatedAt
-              FROM render.render_jobs r
-              LEFT JOIN catalog.services s ON s.id = r.service_id
-              LEFT JOIN auth.app_users u ON u.id = r.user_id AND u.tenant_id = r.tenant_id
-              LEFT JOIN crm.customers c ON c.id = r.customer_id AND c.tenant_id = r.tenant_id
-            {where}
-             ORDER BY {ResolveOrder(normalized.Sort)}
-             LIMIT @limit OFFSET @offset;
-            """;
+        var rvideoIds = IdsOfKind(rows, AdminJobMonitorKinds.RVideo);
+        var rvideo = rvideoIds.Length == 0
+            ? new Dictionary<Guid, RVideoTotalsRow>()
+            : (await connection.QueryAsync<RVideoTotalsRow>(new CommandDefinition(
+                AdminJobMonitorSql.RVideoTotals,
+                new { tenant = _tenant.TenantId, ids = rvideoIds },
+                cancellationToken: ct))).GroupBy(x => x.JobId).ToDictionary(x => x.Key, x => x.First());
 
-        using var result = await connection.QueryMultipleAsync(new CommandDefinition(
-            sql,
-            parameters,
-            cancellationToken: ct));
-        var statsRow = await result.ReadSingleAsync<StatsRow>();
-        var rows = (await result.ReadAsync<JobRow>()).ToList();
-        var danceOutputs = await TryGetDanceOutputsAsync(connection, rows.Select(row => row.Id), ct);
-        var items = rows.Select(row => MapSummary(
-            row,
-            danceOutputs.TryGetValue(row.Id, out var resultVideoUrl)
-                ? MergeDanceOutput(row.OutputJson, resultVideoUrl)
-                : null)).ToList();
+        var timelapseIds = IdsOfKind(rows, AdminJobMonitorKinds.Timelapse);
+        var timelapse = timelapseIds.Length == 0
+            ? new Dictionary<Guid, int>()
+            : (await connection.QueryAsync<TimelapseCountRow>(new CommandDefinition(
+                AdminJobMonitorSql.TimelapseSceneCounts,
+                new { tenant = _tenant.TenantId, ids = timelapseIds },
+                cancellationToken: ct))).ToDictionary(x => x.JobId, x => x.SceneCount);
+
+        var danceIds = IdsOfKind(rows, AdminJobMonitorKinds.RDance);
+        var dance = danceIds.Length == 0
+            ? new Dictionary<Guid, decimal>()
+            : await ReadDanceCreditsAsync(connection, danceIds, ct);
 
         return new AdminJobMonitorPage
         {
-            Items = items,
-            Stats = MapStats(statsRow),
-            Query = normalized,
-            TotalCount = statsRow.Total,
+            Items = rows.Select(row =>
+            {
+                var totals = rvideo.GetValueOrDefault(row.Id);
+                return new AdminJobMonitorJob
+                {
+                    Kind = row.Kind,
+                    Id = row.Id,
+                    Title = row.Title,
+                    ThumbnailUrl = NullIfBlank(row.ThumbnailUrl) ?? NullIfBlank(totals?.FirstImageUrl),
+                    ServiceName = row.ServiceName,
+                    UserName = row.UserName,
+                    UserEmail = row.UserEmail,
+                    CreatedAt = row.CreatedAt,
+                    Credits = row.Kind switch
+                    {
+                        AdminJobMonitorKinds.RVideo => totals?.Credits ?? 0m,
+                        AdminJobMonitorKinds.RDance => dance.GetValueOrDefault(row.Id),
+                        _ => row.ChargedPoints
+                    },
+                    Status = row.Status,
+                    SceneCount = row.Kind switch
+                    {
+                        AdminJobMonitorKinds.RVideo => totals?.SceneCount ?? 0,
+                        AdminJobMonitorKinds.RDance => 1,
+                        _ => timelapse.GetValueOrDefault(row.Id)
+                    },
+                    ResultVideoUrl = NullIfBlank(row.ResultVideoUrl)
+                };
+            }).ToList(),
+            TotalCount = rows.Count == 0 ? 0 : rows[0].TotalCount,
+            UnfinishedCount = rows.Count == 0 ? 0 : rows[0].UnfinishedCount,
             Page = normalized.Page,
             PageSize = normalized.PageSize
         };
     }
 
-    public async Task<AdminJobMonitorStats> GetStatsAsync(
+    public async Task<IReadOnlyList<AdminJobMonitorScene>> GetScenesAsync(
         CurrentUserSession user,
-        AdminJobMonitorQuery? query = null,
-        CancellationToken ct = default)
-    {
-        EnsureAdmin(user);
-        var normalized = NormalizeQuery(query);
-        await _tenant.EnsureLoadedAsync(ct);
-
-        using var connection = await _factory.OpenAsync(ct);
-        var parameters = CreateParameters(normalized);
-        parameters.Add("tenant", _tenant.TenantId);
-        var where = BuildWhere(normalized, parameters);
-        var row = await connection.QuerySingleAsync<StatsRow>(new CommandDefinition(
-            $"""
-            SELECT count(*)::bigint AS Total,
-                   count(*) FILTER (WHERE lower(coalesce(r.status, '')) = ANY(@processingStatuses))::bigint AS Processing,
-                   count(*) FILTER (WHERE lower(coalesce(r.status, '')) = ANY(@completedStatuses))::bigint AS Completed,
-                   count(*) FILTER (WHERE lower(coalesce(r.status, '')) = ANY(@failedStatuses))::bigint AS Failed
-              FROM render.render_jobs r
-              LEFT JOIN catalog.services s ON s.id = r.service_id
-              LEFT JOIN auth.app_users u ON u.id = r.user_id AND u.tenant_id = r.tenant_id
-              LEFT JOIN crm.customers c ON c.id = r.customer_id AND c.tenant_id = r.tenant_id
-            {where};
-            """,
-            parameters,
-            cancellationToken: ct));
-        return MapStats(row);
-    }
-
-    public async Task<AdminJobMonitorFilterOptions> GetFilterOptionsAsync(
-        CurrentUserSession user,
-        CancellationToken ct = default)
-    {
-        EnsureAdmin(user);
-        await _tenant.EnsureLoadedAsync(ct);
-        using var connection = await _factory.OpenAsync(ct);
-
-        var services = await connection.QueryAsync<AdminJobMonitorFilterOption>(new CommandDefinition(
-            """
-            SELECT DISTINCT COALESCE(NULLIF(s.service_code, ''), r.job_type) AS Value,
-                            COALESCE(NULLIF(s.service_name, ''), NULLIF(s.service_code, ''), r.job_type) AS Label
-              FROM render.render_jobs r
-              LEFT JOIN catalog.services s ON s.id = r.service_id
-             WHERE r.tenant_id = @tenant
-             ORDER BY Label, Value;
-            """,
-            new { tenant = _tenant.TenantId },
-            cancellationToken: ct));
-
-        var accounts = await connection.QueryAsync<AdminJobMonitorFilterOption>(new CommandDefinition(
-            """
-            SELECT u.id::text AS Value,
-                   COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, u.email, u.id::text) AS Label
-              FROM render.render_jobs r
-              JOIN auth.app_users u ON u.id = r.user_id AND u.tenant_id = r.tenant_id
-             WHERE r.tenant_id = @tenant
-             GROUP BY u.id, u.full_name, u.display_name, u.username, u.email
-             ORDER BY Label, Value;
-            """,
-            new { tenant = _tenant.TenantId },
-            cancellationToken: ct));
-
-        var statuses = new[]
-        {
-            new AdminJobMonitorFilterOption { Value = "pending", Label = "Pending" },
-            new AdminJobMonitorFilterOption { Value = "processing", Label = "Processing" },
-            new AdminJobMonitorFilterOption { Value = "completed", Label = "Completed" },
-            new AdminJobMonitorFilterOption { Value = "failed", Label = "Failed" }
-        };
-
-        return new AdminJobMonitorFilterOptions
-        {
-            Accounts = accounts.ToList(),
-            Services = services.ToList(),
-            Statuses = statuses
-        };
-    }
-
-    public async Task<AdminJobMonitorDetail?> GetDetailAsync(
-        CurrentUserSession user,
+        string kind,
         Guid jobId,
         CancellationToken ct = default)
     {
         EnsureAdmin(user);
         await _tenant.EnsureLoadedAsync(ct);
         using var connection = await _factory.OpenAsync(ct);
+        var parameters = new { tenant = _tenant.TenantId, jobId };
 
-        var row = await connection.QuerySingleOrDefaultAsync<JobDetailRow>(new CommandDefinition(
-            """
-            SELECT r.id AS Id,
-                   r.customer_id AS CustomerId,
-                   r.user_id AS UserId,
-                   COALESCE(NULLIF(c.company_name, ''), NULLIF(c.full_name, ''), '') AS CustomerName,
-                   COALESCE(c.email, '') AS CustomerEmail,
-                   COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, '') AS AccountName,
-                   COALESCE(u.email, '') AS AccountEmail,
-                   COALESCE(r.job_type, '') AS JobType,
-                   COALESCE(s.service_code, '') AS ServiceCode,
-                   COALESCE(s.service_name, '') AS ServiceName,
-                   COALESCE(r.status, '') AS Status,
-                   COALESCE(r.current_step, '') AS CurrentStage,
-                   COALESCE(r.progress_percent, 0) AS ProgressPercent,
-                   r.input_json::text AS InputJson,
-                   r.prompt_json::text AS PromptJson,
-                   r.reference_json::text AS ReferenceJson,
-                   COALESCE(r.options, '{}'::jsonb)::text AS OptionsJson,
-                   r.output_json::text AS OutputJson,
-                   r.error_code AS ErrorCode,
-                   r.error_message AS ErrorMessage,
-                   r.point_cost_estimate AS EstimatedPoints,
-                   r.point_cost_charged AS ConsumedPoints,
-                   COALESCE(r.point_status, '') AS PointStatus,
-                   r.provider_code AS ProviderCode,
-                   r.model_code AS ModelCode,
-                   r.retry_of_job_id AS RetryOfJobId,
-                   r.started_at AS StartedAt,
-                   r.completed_at AS CompletedAt,
-                   r.cancelled_at AS CancelledAt,
-                   r.created_at AS CreatedAt,
-                   COALESCE(r.updated_at, r.created_at) AS UpdatedAt
-              FROM render.render_jobs r
-              LEFT JOIN catalog.services s ON s.id = r.service_id
-              LEFT JOIN auth.app_users u ON u.id = r.user_id AND u.tenant_id = r.tenant_id
-              LEFT JOIN crm.customers c ON c.id = r.customer_id AND c.tenant_id = r.tenant_id
-             WHERE r.tenant_id = @tenant
-               AND r.id = @jobId
-             LIMIT 1;
-            """,
-            new { tenant = _tenant.TenantId, jobId },
-            cancellationToken: ct));
-        if (row is null)
+        if (kind == AdminJobMonitorKinds.RDance)
         {
-            return null;
+            var job = await connection.QuerySingleOrDefaultAsync<SceneRow>(new CommandDefinition(
+                AdminJobMonitorSql.RDanceScene, parameters, cancellationToken: ct));
+            if (job is null) return Array.Empty<AdminJobMonitorScene>();
+            var credits = await ReadDanceCreditsAsync(connection, [jobId], ct);
+            return [MapScene(job, credits.GetValueOrDefault(jobId))];
         }
 
-        var dance = await TryGetDanceSellAsync(connection, jobId, ct);
-        var outputJson = MergeDanceOutput(row.OutputJson, dance?.ResultVideoUrl);
-        var summary = MapSummary(row, outputJson);
-        var inputLinks = JsonUrlExtractor.Extract(row.InputJson)
-            .Concat(JsonUrlExtractor.Extract(row.ReferenceJson))
-            .Concat(ExtractDanceInputs(dance))
-            .DistinctBy(x => x.Url, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        var outputLinks = JsonUrlExtractor.Extract(outputJson)
-            .Concat(ExtractDanceOutputs(dance))
-            .DistinctBy(x => x.Url, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var events = (await connection.QueryAsync<JobEventRow>(new CommandDefinition(
-            """
-            SELECT e.id AS Id,
-                   e.event_type AS EventType,
-                   COALESCE(e.level, 'info') AS Level,
-                   e.message AS Message,
-                   COALESCE(e.data_json, '{}'::jsonb)::text AS DataJson,
-                   e.provider_code AS ProviderCode,
-                   e.model_code AS ModelCode,
-                   e.created_at AS CreatedAt
-              FROM render.render_job_events e
-             WHERE e.tenant_id = @tenant
-               AND e.job_id = @jobId
-             ORDER BY e.created_at, e.id;
-            """,
-            new { tenant = _tenant.TenantId, jobId },
-            cancellationToken: ct))).ToList();
-
-        return new AdminJobMonitorDetail
+        var sql = kind switch
         {
-            Overview = new AdminJobMonitorOverview
-            {
-                Summary = summary,
-                ErrorCode = row.ErrorCode ?? dance?.ErrorCode,
-                ErrorMessage = row.ErrorMessage ?? dance?.ErrorMessage,
-                AspectRatio = ReadFirstString(row.InputJson, "aspectRatio", "ratio")
-                    ?? ReadFirstString(row.OptionsJson, "aspectRatio", "ratio")
-                    ?? dance?.Ratio,
-                DurationSeconds = ReadFirstInt(row.InputJson, "durationSeconds", "duration")
-                    ?? ReadFirstInt(row.OptionsJson, "durationSeconds", "duration"),
-                StartedAt = row.StartedAt,
-                CompletedAt = row.CompletedAt,
-                CancelledAt = row.CancelledAt,
-                PointStatus = row.PointStatus,
-                RetryOfJobId = row.RetryOfJobId?.ToString()
-            },
-            Timeline = BuildTimeline(row, events),
-            InputOutput = new AdminJobMonitorInputOutput
-            {
-                InputJson = row.InputJson,
-                PromptJson = row.PromptJson,
-                ReferenceJson = row.ReferenceJson,
-                OptionsJson = row.OptionsJson,
-                OutputJson = outputJson,
-                InputLinks = inputLinks,
-                OutputLinks = outputLinks
-            },
-            Logs = events.Select(e => new AdminJobMonitorLogItem
-            {
-                Timestamp = e.CreatedAt,
-                Service = row.ServiceCode,
-                ProviderCode = e.ProviderCode ?? row.ProviderCode ?? dance?.ProviderCode,
-                ModelCode = e.ModelCode ?? row.ModelCode ?? dance?.ProviderModel,
-                EventType = e.EventType,
-                Level = e.Level,
-                Message = e.Message,
-                DataJson = e.DataJson
-            }).ToList()
+            AdminJobMonitorKinds.RVideo => AdminJobMonitorSql.RVideoScenes,
+            AdminJobMonitorKinds.Timelapse => AdminJobMonitorSql.TimelapseScenes,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown job kind.")
         };
+        var rows = await connection.QueryAsync<SceneRow>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        return rows.Select(row => MapScene(row, row.Credits)).ToList();
     }
 
-    public async Task RecordImpersonationAuditAsync(
-        CurrentUserSession admin,
-        Guid targetCustomerUserId,
-        Guid? targetCustomerId,
-        Guid jobId,
-        CancellationToken ct = default)
+    // Same rule the customer sees on My Jobs: points of the job's latest motion operation.
+    private static async Task<Dictionary<Guid, decimal>> ReadDanceCreditsAsync(
+        IDbConnection connection,
+        Guid[] ids,
+        CancellationToken ct)
     {
-        EnsureAdmin(admin);
-        ct.ThrowIfCancellationRequested();
-        await _tenant.EnsureLoadedAsync(ct);
-        using var connection = await _factory.OpenAsync(ct);
-        var target = await connection.QuerySingleOrDefaultAsync<ImpersonationTarget>(new CommandDefinition(
-            """
-            SELECT customer_id AS CustomerId,
-                   user_id AS UserId
-              FROM render.render_jobs
-             WHERE tenant_id = @tenant
-               AND id = @jobId
-             LIMIT 1;
-            """,
-            new { tenant = _tenant.TenantId, jobId },
+        var rows = await connection.QueryAsync<DanceOperationRow>(new CommandDefinition(
+            AdminJobMonitorSql.RDanceLatestMotionOperations,
+            new { ids, motion = DanceSellOperationTypes.MotionVideo },
             cancellationToken: ct));
-        if (target is null
-            || target.UserId != targetCustomerUserId
-            || target.CustomerId != targetCustomerId)
-        {
-            throw new InvalidOperationException("The impersonation target does not match the selected job.");
-        }
-
-        await _audit.LogAsync(
-            admin,
-            "admin_job_monitor",
-            "impersonate_job",
-            entityDisplay: jobId.ToString(),
-            message: $"TargetUserId={targetCustomerUserId}; TargetCustomerId={targetCustomerId?.ToString() ?? "unknown"}; JobId={jobId}.");
+        return rows.ToDictionary(
+            row => row.DanceSellJobId,
+            row => DanceSellPointDisplay.TryReadChargedPoints(new DanceSellProviderOperationDto
+            {
+                PricingSnapshotJson = row.PricingSnapshotJson,
+                TodoxPointsCharged = row.TodoxPointsCharged
+            }) ?? 0m);
     }
+
+    private static AdminJobMonitorScene MapScene(SceneRow row, decimal? credits)
+        => new()
+        {
+            ImageUrl = NullIfBlank(row.ImageUrl),
+            VideoUrl = NullIfBlank(row.VideoUrl),
+            Status = AdminJobMonitorRules.NormalizeSceneStatus(row.RawStatus),
+            ErrorMessage = NullIfBlank(row.ErrorMessage),
+            Credits = credits,
+            CreatedAt = row.CreatedAt,
+            CompletedAt = row.CompletedAt
+        };
+
+    private static Guid[] IdsOfKind(IEnumerable<JobRow> rows, string kind)
+        => rows.Where(row => row.Kind == kind).Select(row => row.Id).ToArray();
+
+    private static string? NullIfBlank(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static void EnsureAdmin(CurrentUserSession? user)
     {
@@ -410,586 +193,337 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
         }
     }
 
-    private static AdminJobMonitorQuery NormalizeQuery(AdminJobMonitorQuery? query)
+    private sealed class JobRow
+    {
+        public string Kind { get; init; } = string.Empty;
+        public Guid Id { get; init; }
+        public string Title { get; init; } = string.Empty;
+        public string? ThumbnailUrl { get; init; }
+        public string ServiceName { get; init; } = string.Empty;
+        public string UserName { get; init; } = string.Empty;
+        public string UserEmail { get; init; } = string.Empty;
+        public DateTime CreatedAt { get; init; }
+        public decimal ChargedPoints { get; init; }
+        public string Status { get; init; } = string.Empty;
+        public string? ResultVideoUrl { get; init; }
+        public long TotalCount { get; init; }
+        public long UnfinishedCount { get; init; }
+    }
+
+    private sealed class RVideoTotalsRow
+    {
+        public Guid JobId { get; init; }
+        public int SceneCount { get; init; }
+        public decimal Credits { get; init; }
+        public string? FirstImageUrl { get; init; }
+    }
+
+    private sealed class TimelapseCountRow
+    {
+        public Guid JobId { get; init; }
+        public int SceneCount { get; init; }
+    }
+
+    private sealed class DanceOperationRow
+    {
+        public Guid DanceSellJobId { get; init; }
+        public string? PricingSnapshotJson { get; init; }
+        public decimal? TodoxPointsCharged { get; init; }
+    }
+
+    private sealed class SceneRow
+    {
+        public string? ImageUrl { get; init; }
+        public string? VideoUrl { get; init; }
+        public string? RawStatus { get; init; }
+        public string? ErrorMessage { get; init; }
+        public decimal? Credits { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public DateTime? CompletedAt { get; init; }
+    }
+}
+
+public static class AdminJobMonitorRules
+{
+    public const int DefaultPageSize = 25;
+    public const int MaxPageSize = 100;
+
+    public static AdminJobMonitorQuery NormalizeQuery(AdminJobMonitorQuery? query)
     {
         query ??= new AdminJobMonitorQuery();
         return new AdminJobMonitorQuery
         {
             Page = Math.Clamp(query.Page, 1, 100_000),
-            PageSize = Math.Clamp(query.PageSize <= 0 ? 50 : query.PageSize, 1, 100),
-            Search = Normalize(query.Search),
-            Service = Normalize(query.Service),
-            Status = Normalize(query.Status),
-            Account = Normalize(query.Account),
-            FromUtc = query.FromUtc,
-            ToUtc = query.ToUtc,
-            Sort = Normalize(query.Sort) ?? "newest"
+            PageSize = Math.Clamp(query.PageSize <= 0 ? DefaultPageSize : query.PageSize, 1, MaxPageSize),
+            Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim(),
+            Kind = string.IsNullOrWhiteSpace(query.Kind) ? null : query.Kind.Trim(),
+            Status = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim()
         };
     }
 
-    private static DynamicParameters CreateParameters(AdminJobMonitorQuery query)
-    {
-        var parameters = new DynamicParameters();
-        parameters.Add("processingStatuses", ProcessingStatuses);
-        parameters.Add("completedStatuses", CompletedStatuses);
-        parameters.Add("failedStatuses", FailedStatuses);
-        return parameters;
-    }
-
-    private static string BuildWhere(AdminJobMonitorQuery query, DynamicParameters parameters)
-    {
-        var where = new StringBuilder(" WHERE r.tenant_id = @tenant");
-
-        if (!string.IsNullOrWhiteSpace(query.Search))
+    public static string NormalizeSceneStatus(string? rawStatus)
+        => (rawStatus?.Trim().ToLowerInvariant() ?? string.Empty) switch
         {
-            parameters.Add("search", $"%{query.Search}%");
-            where.Append("""
-                 AND (
-                     r.id::text ILIKE @search
-                     OR COALESCE(c.company_name, '') ILIKE @search
-                     OR COALESCE(c.full_name, '') ILIKE @search
-                     OR COALESCE(c.email, '') ILIKE @search
-                     OR COALESCE(u.username, '') ILIKE @search
-                     OR COALESCE(u.full_name, '') ILIKE @search
-                     OR COALESCE(u.email, '') ILIKE @search
-                     OR COALESCE(s.service_code, '') ILIKE @search
-                     OR COALESCE(s.service_name, '') ILIKE @search
-                 )
-                """);
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Service))
-        {
-            parameters.Add("service", query.Service);
-            where.Append("""
-                 AND (
-                     upper(COALESCE(s.service_code, '')) = upper(@service)
-                     OR upper(COALESCE(s.service_name, '')) = upper(@service)
-                     OR upper(COALESCE(r.job_type, '')) = upper(@service)
-                 )
-                """);
-        }
-
-        if (Guid.TryParse(query.Account, out var accountId))
-        {
-            parameters.Add("account", accountId);
-            where.Append(" AND r.user_id = @account");
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Status))
-        {
-            var statuses = ExpandStatusFilter(query.Status);
-            parameters.Add("statusFilter", statuses);
-            where.Append(" AND lower(COALESCE(r.status, '')) = ANY(@statusFilter)");
-        }
-
-        if (query.FromUtc is not null)
-        {
-            parameters.Add("fromUtc", query.FromUtc.Value);
-            where.Append(" AND r.created_at >= @fromUtc");
-        }
-
-        if (query.ToUtc is not null)
-        {
-            parameters.Add("toUtc", query.ToUtc.Value);
-            where.Append(" AND r.created_at < @toUtc");
-        }
-
-        return where.ToString();
-    }
-
-    private static string[] ExpandStatusFilter(string status)
-        => status.Trim().ToLowerInvariant() switch
-        {
-            "pending" => ["draft", "pending", "queued"],
-            "processing" => ProcessingStatuses,
-            "completed" => CompletedStatuses,
-            "failed" => FailedStatuses,
-            _ => [status.Trim().ToLowerInvariant()]
+            "draft" or "image_ready" => AdminJobMonitorStatuses.Draft,
+            "waiting" or "queued" or "video_queued" => AdminJobMonitorStatuses.Queued,
+            "completed" or "video_ready" => AdminJobMonitorStatuses.Completed,
+            "failed" or "timeout" => AdminJobMonitorStatuses.Failed,
+            "cancelled" or "invalidated" => AdminJobMonitorStatuses.Cancelled,
+            _ => AdminJobMonitorStatuses.Processing
         };
 
-    private static string ResolveOrder(string? sort)
-        => sort?.Trim().ToLowerInvariant() switch
+    public static string StatusLabel(string? status)
+        => status switch
         {
-            "oldest" => "r.created_at ASC, r.id ASC",
-            "updated" => "COALESCE(r.updated_at, r.created_at) DESC, r.id DESC",
-            _ => "r.created_at DESC, r.id DESC"
+            AdminJobMonitorStatuses.Draft => "Nháp",
+            AdminJobMonitorStatuses.Queued => "Đang chờ",
+            AdminJobMonitorStatuses.Paused => "Tạm dừng",
+            AdminJobMonitorStatuses.Completed => "Hoàn thành",
+            AdminJobMonitorStatuses.Failed => "Thất bại",
+            AdminJobMonitorStatuses.Cancelled => "Đã hủy",
+            _ => "Đang xử lý"
         };
 
-    private static AdminJobMonitorStats MapStats(StatsRow row)
-        => new()
+    public static string KindLabel(string? kind)
+        => kind switch
         {
-            Total = row.Total,
-            Processing = row.Processing,
-            Completed = row.Completed,
-            Failed = row.Failed
+            AdminJobMonitorKinds.RVideo => "RVideo",
+            AdminJobMonitorKinds.RDance => "RDance",
+            AdminJobMonitorKinds.Timelapse => "Timelapse",
+            _ => "-"
         };
+}
 
-    private static AdminJobMonitorJobSummary MapSummary(JobRow row, string? outputJson = null)
-    {
-        var outputLinks = JsonUrlExtractor.Extract(outputJson ?? row.OutputJson);
-        return new AdminJobMonitorJobSummary
-        {
-            Id = row.Id,
-            CustomerId = row.CustomerId,
-            UserId = row.UserId,
-            CustomerName = row.CustomerName,
-            CustomerEmail = row.CustomerEmail,
-            AccountName = row.AccountName,
-            AccountEmail = row.AccountEmail,
-            JobType = row.JobType,
-            ServiceCode = row.ServiceCode,
-            ServiceName = row.ServiceName,
-            Status = row.Status,
-            CurrentStage = row.CurrentStage,
-            ProgressPercent = Math.Clamp(row.ProgressPercent, 0, 100),
-            ThumbnailUrl = PickThumbnail(outputLinks),
-            VideoUrl = outputLinks.FirstOrDefault(x => x.Kind == "video")?.Url
-                ?? outputLinks.FirstOrDefault()?.Url,
-            CreatedAt = row.CreatedAt,
-            UpdatedAt = row.UpdatedAt,
-            EstimatedPoints = row.EstimatedPoints,
-            ConsumedPoints = row.ConsumedPoints,
-            ProviderCode = row.ProviderCode,
-            ModelCode = row.ModelCode,
-            DurationSeconds = ReadFirstInt(row.InputJson, "durationSeconds", "duration")
-                ?? ReadFirstInt(row.OptionsJson, "durationSeconds", "duration")
-        };
-    }
+public static class AdminJobMonitorSql
+{
+    // Unfinished jobs first, newest first inside each group. Failed and cancelled jobs are finished:
+    // nothing is running for them any more.
+    public const string JobsPage = """
+        WITH jobs AS (
+            SELECT 'rvideo' AS kind,
+                   j.id,
+                   j.created_at,
+                   COALESCE(
+                       NULLIF(NULLIF(j.input_json->>'title', ''), 'Prompt workspace'),
+                       NULLIF(NULLIF(p.title, ''), 'Prompt workspace'),
+                       NULLIF(left(p.original_prompt, 120), ''),
+                       s.service_name,
+                       '') AS title,
+                   p.source_image_url AS thumbnail_url,
+                   COALESCE(s.service_name, s.service_code, '') AS service_name,
+                   j.user_id,
+                   0::numeric AS charged_points,
+                   p.final_video_url AS result_video_url,
+                   CASE
+                       WHEN lower(COALESCE(p.status, '')) = 'completed' THEN 'completed'
+                       WHEN lower(COALESCE(p.status, '')) = 'failed' THEN 'failed'
+                       WHEN lower(j.status) = 'cancelled' THEN 'cancelled'
+                       WHEN lower(COALESCE(p.status, '')) IN ('rendering', 'ready_to_merge', 'merging') THEN 'processing'
+                       WHEN lower(j.status) IN ('failed', 'timeout') THEN 'failed'
+                       WHEN EXISTS (
+                           SELECT 1
+                             FROM video_render.video_project_scenes active
+                            WHERE active.project_id = p.id
+                              AND active.tenant_id = p.tenant_id
+                              AND active.status IN ('video_queued', 'video_rendering')
+                       ) THEN 'processing'
+                       WHEN lower(j.status) = 'completed' THEN 'completed'
+                       WHEN lower(j.status) = 'queued' THEN 'queued'
+                       WHEN lower(j.status) = 'paused' THEN 'paused'
+                       WHEN lower(j.status) = 'draft' THEN 'draft'
+                       ELSE 'processing'
+                   END AS status
+              FROM render.render_jobs j
+              LEFT JOIN catalog.services s ON s.id = j.service_id
+              LEFT JOIN video_render.video_projects p ON p.core_job_id = j.id AND p.tenant_id = j.tenant_id
+             WHERE j.tenant_id = @tenant
+               AND j.job_type = 'core_service'
+               AND lower(j.operation_type) = 'rvideo'
 
-    private static IReadOnlyList<AdminJobMonitorTimelineItem> BuildTimeline(
-        JobDetailRow job,
-        IReadOnlyList<JobEventRow> events)
-    {
-        var points = new List<AdminJobMonitorTimelineItem>
-        {
-            new()
-            {
-                Stage = "Created",
-                EventType = "JOB_CREATED",
-                Level = "info",
-                Status = "completed",
-                Timestamp = job.CreatedAt,
-                Message = "Job created.",
-                ProviderCode = job.ProviderCode,
-                ModelCode = job.ModelCode
-            }
-        };
+            UNION ALL
 
-        points.AddRange(events.Select(e => new AdminJobMonitorTimelineItem
-        {
-            Stage = ResolveStage(e.EventType, e.Message),
-            EventType = e.EventType,
-            Level = e.Level,
-            Status = ResolveEventStatus(e.Level, e.EventType),
-            Message = e.Message,
-            Timestamp = e.CreatedAt,
-            ProviderCode = e.ProviderCode ?? job.ProviderCode,
-            ModelCode = e.ModelCode ?? job.ModelCode
-        }));
+            SELECT 'timelapse',
+                   j.id,
+                   j.created_at,
+                   COALESCE(NULLIF(j.input_json->>'title', ''), NULLIF(j.input_json->>'serviceName', ''), s.service_name, 'Timelapse'),
+                   COALESCE(
+                       NULLIF(j.input_json#>>'{originalImage,publicUrl}', ''),
+                       (SELECT stage.public_url
+                          FROM timelapse.timelapse_image_stages stage
+                         WHERE stage.job_id = j.id AND stage.public_url IS NOT NULL
+                         ORDER BY stage.is_original DESC, stage.stage_index
+                         LIMIT 1)),
+                   COALESCE(NULLIF(j.input_json->>'serviceName', ''), s.service_name, NULLIF(j.input_json->>'serviceCode', ''), ''),
+                   j.user_id,
+                   j.point_cost_charged,
+                   (SELECT final.public_url
+                      FROM timelapse.timelapse_final_outputs final
+                     WHERE final.job_id = j.id AND final.status = 'COMPLETED'
+                     ORDER BY final.version DESC
+                     LIMIT 1),
+                   CASE
+                       WHEN lower(j.status) = 'completed' THEN 'completed'
+                       WHEN lower(j.status) IN ('failed', 'timeout') THEN 'failed'
+                       WHEN lower(j.status) = 'cancelled' THEN 'cancelled'
+                       WHEN lower(j.status) = 'paused' THEN 'paused'
+                       WHEN lower(j.status) = 'draft' THEN 'draft'
+                       WHEN lower(j.status) = 'queued' THEN 'queued'
+                       ELSE 'processing'
+                   END
+              FROM render.render_jobs j
+              LEFT JOIN catalog.services s ON s.id = j.service_id
+             WHERE j.tenant_id = @tenant
+               AND j.job_type = 'timelapse'
 
-        for (var index = 0; index < points.Count; index++)
-        {
-            var end = index + 1 < points.Count
-                ? points[index + 1].Timestamp
-                : job.CompletedAt ?? job.UpdatedAt;
-            points[index] = new AdminJobMonitorTimelineItem
-            {
-                Stage = points[index].Stage,
-                EventType = points[index].EventType,
-                Level = points[index].Level,
-                Status = points[index].Status,
-                Message = points[index].Message,
-                Timestamp = points[index].Timestamp,
-                Duration = end >= points[index].Timestamp ? end - points[index].Timestamp : null,
-                ProviderCode = points[index].ProviderCode,
-                ModelCode = points[index].ModelCode
-            };
-        }
+            UNION ALL
 
-        return points;
-    }
+            SELECT 'rdance',
+                   d.id,
+                   d.created_at,
+                   COALESCE(NULLIF(d.title, ''), NULLIF(left(d.prompt, 120), ''), 'Video nhảy quảng cáo thời trang'),
+                   COALESCE(NULLIF(d.prepared_reference_url, ''), NULLIF(d.character_image_url, '')),
+                   'Video nhảy quảng cáo thời trang',
+                   d.user_id,
+                   0::numeric,
+                   COALESCE(NULLIF(d.result_video_url, ''), NULLIF(d.result_url, '')),
+                   CASE
+                       WHEN lower(d.status) = 'completed' THEN 'completed'
+                       WHEN lower(d.status) IN ('failed', 'timeout') THEN 'failed'
+                       WHEN lower(d.status) = 'cancelled' THEN 'cancelled'
+                       WHEN lower(d.status) = 'draft' THEN 'draft'
+                       WHEN lower(d.status) = 'queued' THEN 'queued'
+                       ELSE 'processing'
+                   END
+              FROM dance_sell.dance_sell_jobs d
+             WHERE d.tenant_id = @tenant
+        ),
+        filtered AS (
+            SELECT jobs.*,
+                   COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, '') AS user_name,
+                   COALESCE(u.email, '') AS user_email,
+                   jobs.status NOT IN ('completed', 'failed', 'cancelled') AS unfinished
+              FROM jobs
+              LEFT JOIN auth.app_users u ON u.id = jobs.user_id
+             WHERE (@kind::text IS NULL OR jobs.kind = @kind)
+               AND (@status::text IS NULL OR jobs.status = @status)
+               AND (@search::text IS NULL
+                    OR jobs.id::text ILIKE @search
+                    OR jobs.title ILIKE @search
+                    OR jobs.service_name ILIKE @search
+                    OR COALESCE(u.full_name, '') ILIKE @search
+                    OR COALESCE(u.display_name, '') ILIKE @search
+                    OR COALESCE(u.username, '') ILIKE @search
+                    OR COALESCE(u.email, '') ILIKE @search)
+        )
+        SELECT kind AS Kind,
+               id AS Id,
+               title AS Title,
+               thumbnail_url AS ThumbnailUrl,
+               service_name AS ServiceName,
+               user_name AS UserName,
+               user_email AS UserEmail,
+               created_at AS CreatedAt,
+               charged_points AS ChargedPoints,
+               status AS Status,
+               result_video_url AS ResultVideoUrl,
+               count(*) OVER () AS TotalCount,
+               count(*) FILTER (WHERE unfinished) OVER () AS UnfinishedCount
+          FROM filtered
+         ORDER BY unfinished DESC, created_at DESC, id DESC
+         LIMIT @limit OFFSET @offset;
+        """;
 
-    private static string ResolveStage(string? eventType, string? message)
-    {
-        var value = $"{eventType} {message}".ToLowerInvariant();
-        if (value.Contains("voice") || value.Contains("audio")) return "Voice Processing";
-        if (value.Contains("render") || value.Contains("video")) return "Video Rendering";
-        if (value.Contains("image") || value.Contains("reference")) return "Image Generated";
-        if (value.Contains("output") || value.Contains("complete") || value.Contains("finish")) return "Final Output";
-        return string.IsNullOrWhiteSpace(eventType) ? "Processing" : eventType!;
-    }
+    // Credits: the points of completed image/video/audio versions, as on My Jobs. The core job's own
+    // point columns stay 0 because RVideo charges per scene version.
+    public const string RVideoTotals = """
+        SELECT p.core_job_id AS JobId,
+               (SELECT count(*)::int
+                  FROM video_render.video_project_scenes s
+                 WHERE s.project_id = p.id AND s.tenant_id = p.tenant_id) AS SceneCount,
+               (SELECT s.static_image_url
+                  FROM video_render.video_project_scenes s
+                 WHERE s.project_id = p.id AND s.tenant_id = p.tenant_id AND NULLIF(s.static_image_url, '') IS NOT NULL
+                 ORDER BY s.scene_index, s.id
+                 LIMIT 1) AS FirstImageUrl,
+               COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_image_versions v
+                          WHERE v.project_id = p.id AND v.tenant_id = p.tenant_id AND v.status = 'completed'), 0)
+             + COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_video_versions v
+                          WHERE v.project_id = p.id AND v.tenant_id = p.tenant_id AND v.status = 'completed'), 0)
+             + COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_audio_versions v
+                          WHERE v.project_id = p.id AND v.tenant_id = p.tenant_id AND v.status = 'completed'), 0) AS Credits
+          FROM video_render.video_projects p
+         WHERE p.tenant_id = @tenant
+           AND p.core_job_id = ANY(@ids);
+        """;
 
-    private static string ResolveEventStatus(string? level, string? eventType)
-        => string.Equals(level, "error", StringComparison.OrdinalIgnoreCase)
-            || (eventType?.Contains("fail", StringComparison.OrdinalIgnoreCase) ?? false)
-            ? "failed"
-            : "completed";
+    public const string TimelapseSceneCounts = """
+        SELECT j.id AS JobId,
+               COALESCE(
+                   NULLIF((SELECT count(*)::int FROM timelapse.timelapse_video_clips c WHERE c.job_id = j.id), 0),
+                   CASE WHEN j.input_json->>'sceneCount' ~ '^[0-9]+$' THEN (j.input_json->>'sceneCount')::int END,
+                   0) AS SceneCount
+          FROM render.render_jobs j
+         WHERE j.tenant_id = @tenant
+           AND j.id = ANY(@ids);
+        """;
 
-    private static string? PickThumbnail(IEnumerable<AdminJobMonitorMediaLink> links)
-    {
-        var list = links.ToList();
-        return list.FirstOrDefault(x => x.Source?.Contains("thumbnail", StringComparison.OrdinalIgnoreCase) == true)?.Url
-            ?? list.FirstOrDefault(x => x.Source?.Contains("poster", StringComparison.OrdinalIgnoreCase) == true)?.Url
-            ?? list.FirstOrDefault(x => x.Kind == "image")?.Url
-            ?? list.FirstOrDefault()?.Url;
-    }
+    public const string RDanceLatestMotionOperations = """
+        SELECT DISTINCT ON (o.dance_sell_job_id)
+               o.dance_sell_job_id AS DanceSellJobId,
+               o.pricing_snapshot_json::text AS PricingSnapshotJson,
+               o.todox_points_charged AS TodoxPointsCharged
+          FROM dance_sell.dance_sell_provider_operations o
+         WHERE o.dance_sell_job_id = ANY(@ids)
+           AND o.operation_type = @motion
+         ORDER BY o.dance_sell_job_id, o.attempt_no DESC, o.created_at DESC;
+        """;
 
-    private async Task<DanceSellRow?> TryGetDanceSellAsync(
-        IDbConnection connection,
-        Guid renderJobId,
-        CancellationToken ct)
-    {
-        try
-        {
-            return await connection.QuerySingleOrDefaultAsync<DanceSellRow>(new CommandDefinition(
-                """
-                SELECT id AS Id,
-                       status AS Status,
-                       current_stage AS CurrentStage,
-                       result_video_url AS ResultVideoUrl,
-                       character_image_url AS CharacterImageUrl,
-                       product_image_url AS ProductImageUrl,
-                       motion_video_url AS MotionVideoUrl,
-                       COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio,
-                       provider_code AS ProviderCode,
-                       provider_model AS ProviderModel,
-                       motion_provider_code AS MotionProviderCode,
-                       motion_provider_model AS MotionProviderModel,
-                       error_code AS ErrorCode,
-                       error_message AS ErrorMessage
-                  FROM dance_sell.dance_sell_jobs
-                 WHERE tenant_id = @tenant
-                   AND render_job_id = @renderJobId
-                 LIMIT 1;
-                """,
-                new { tenant = _tenant.TenantId, renderJobId },
-                cancellationToken: ct));
-        }
-        catch (PostgresException ex) when (
-            ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn)
-        {
-            return null;
-        }
-    }
+    public const string RVideoScenes = """
+        SELECT s.static_image_url AS ImageUrl,
+               s.scene_video_url AS VideoUrl,
+               s.status AS RawStatus,
+               s.error_message AS ErrorMessage,
+               COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_image_versions v
+                          WHERE v.scene_id = s.id AND v.tenant_id = s.tenant_id AND v.status = 'completed'), 0)
+             + COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_video_versions v
+                          WHERE v.scene_id = s.id AND v.tenant_id = s.tenant_id AND v.status = 'completed'), 0)
+             + COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_audio_versions v
+                          WHERE v.scene_id = s.id AND v.tenant_id = s.tenant_id AND v.status = 'completed'), 0) AS Credits,
+               s.created_at AS CreatedAt,
+               selected.completed_at AS CompletedAt
+          FROM video_render.video_projects p
+          JOIN video_render.video_project_scenes s ON s.project_id = p.id AND s.tenant_id = p.tenant_id
+          LEFT JOIN video_render.scene_video_versions selected ON selected.id = s.selected_video_version_id
+         WHERE p.tenant_id = @tenant
+           AND p.core_job_id = @jobId
+         ORDER BY s.scene_index, s.id;
+        """;
 
-    private async Task<IReadOnlyDictionary<Guid, string>> TryGetDanceOutputsAsync(
-        IDbConnection connection,
-        IEnumerable<Guid> renderJobIds,
-        CancellationToken ct)
-    {
-        var ids = renderJobIds.Distinct().ToArray();
-        if (ids.Length == 0) return new Dictionary<Guid, string>();
+    public const string TimelapseScenes = """
+        SELECT stage.public_url AS ImageUrl,
+               clip.public_url AS VideoUrl,
+               clip.status AS RawStatus,
+               clip.error_message AS ErrorMessage,
+               NULL::numeric AS Credits,
+               clip.created_at AS CreatedAt,
+               clip.completed_at AS CompletedAt
+          FROM timelapse.timelapse_video_clips clip
+          LEFT JOIN timelapse.timelapse_image_stages stage
+            ON stage.job_id = clip.job_id AND stage.progress_percent = clip.start_progress_percent
+         WHERE clip.tenant_id = @tenant
+           AND clip.job_id = @jobId
+         ORDER BY clip.clip_index;
+        """;
 
-        try
-        {
-            var rows = await connection.QueryAsync<DanceSellOutputRow>(new CommandDefinition(
-                """
-                SELECT render_job_id AS RenderJobId,
-                       result_video_url AS ResultVideoUrl
-                  FROM dance_sell.dance_sell_jobs
-                 WHERE tenant_id = @tenant
-                   AND render_job_id = ANY(@renderJobIds)
-                   AND result_video_url IS NOT NULL
-                   AND result_video_url <> '';
-                """,
-                new { tenant = _tenant.TenantId, renderJobIds = ids },
-                cancellationToken: ct));
-
-            return rows
-                .Where(row => IsHttpUrl(row.ResultVideoUrl))
-                .GroupBy(row => row.RenderJobId)
-                .ToDictionary(group => group.Key, group => group.First().ResultVideoUrl!);
-        }
-        catch (PostgresException ex) when (
-            ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn)
-        {
-            return new Dictionary<Guid, string>();
-        }
-    }
-
-    private static IEnumerable<AdminJobMonitorMediaLink> ExtractDanceInputs(DanceSellRow? dance)
-    {
-        if (dance is null) return Array.Empty<AdminJobMonitorMediaLink>();
-        return new[] { dance.CharacterImageUrl, dance.ProductImageUrl, dance.MotionVideoUrl }
-            .Where(IsHttpUrl)
-            .Select(url => new AdminJobMonitorMediaLink
-            {
-                Url = url!,
-                Kind = url!.Contains("video", StringComparison.OrdinalIgnoreCase) ? "video" : "image",
-                Source = "dance_sell"
-            });
-    }
-
-    private static IEnumerable<AdminJobMonitorMediaLink> ExtractDanceOutputs(DanceSellRow? dance)
-        => IsHttpUrl(dance?.ResultVideoUrl)
-            ? new[]
-            {
-                new AdminJobMonitorMediaLink
-                {
-                    Url = dance!.ResultVideoUrl!,
-                    Kind = "video",
-                    Source = "resultVideoUrl"
-                }
-            }
-            : Array.Empty<AdminJobMonitorMediaLink>();
-
-    private static string MergeDanceOutput(string outputJson, string? resultVideoUrl)
-    {
-        if (!IsHttpUrl(resultVideoUrl)) return outputJson;
-        var links = JsonUrlExtractor.Extract(outputJson).ToList();
-        return links.Any(x => string.Equals(x.Url, resultVideoUrl, StringComparison.OrdinalIgnoreCase))
-            ? outputJson
-            : JsonSerializer.Serialize(new
-            {
-                existing = ParseJsonOrString(outputJson),
-                resultVideoUrl
-            });
-    }
-
-    private static object ParseJsonOrString(string json)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
-            return document.RootElement.Clone();
-        }
-        catch (JsonException)
-        {
-            return json;
-        }
-    }
-
-    private static string? ReadFirstString(string json, params string[] names)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
-            foreach (var name in names)
-            {
-                var value = FindProperty(document.RootElement, name);
-                if (value?.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.Value.GetString()))
-                {
-                    return value.Value.GetString();
-                }
-            }
-        }
-        catch (JsonException)
-        {
-        }
-
-        return null;
-    }
-
-    private static int? ReadFirstInt(string json, params string[] names)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
-            foreach (var name in names)
-            {
-                var value = FindProperty(document.RootElement, name);
-                if (value?.ValueKind == JsonValueKind.Number && value.Value.TryGetInt32(out var number))
-                {
-                    return number;
-                }
-                if (value?.ValueKind == JsonValueKind.String
-                    && int.TryParse(value.Value.GetString(), out number))
-                {
-                    return number;
-                }
-            }
-        }
-        catch (JsonException)
-        {
-        }
-
-        return null;
-    }
-
-    private static JsonElement? FindProperty(JsonElement element, string name)
-    {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var property in element.EnumerateObject())
-            {
-                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
-                {
-                    return property.Value;
-                }
-
-                var nested = FindProperty(property.Value, name);
-                if (nested is not null) return nested;
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in element.EnumerateArray())
-            {
-                var nested = FindProperty(item, name);
-                if (nested is not null) return nested;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? Normalize(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static bool IsHttpUrl(string? value)
-        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
-           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
-
-    private sealed class StatsRow
-    {
-        public long Total { get; init; }
-        public long Processing { get; init; }
-        public long Completed { get; init; }
-        public long Failed { get; init; }
-    }
-
-    private sealed class ImpersonationTarget
-    {
-        public Guid? CustomerId { get; init; }
-        public Guid? UserId { get; init; }
-    }
-
-    private class JobRow
-    {
-        public Guid Id { get; init; }
-        public Guid? CustomerId { get; init; }
-        public Guid? UserId { get; init; }
-        public string CustomerName { get; init; } = string.Empty;
-        public string CustomerEmail { get; init; } = string.Empty;
-        public string AccountName { get; init; } = string.Empty;
-        public string AccountEmail { get; init; } = string.Empty;
-        public string JobType { get; init; } = string.Empty;
-        public string ServiceCode { get; init; } = string.Empty;
-        public string ServiceName { get; init; } = string.Empty;
-        public string Status { get; init; } = string.Empty;
-        public string CurrentStage { get; init; } = string.Empty;
-        public int ProgressPercent { get; init; }
-        public string InputJson { get; init; } = "{}";
-        public string OutputJson { get; init; } = "{}";
-        public string OptionsJson { get; init; } = "{}";
-        public decimal EstimatedPoints { get; init; }
-        public decimal ConsumedPoints { get; init; }
-        public string? ProviderCode { get; init; }
-        public string? ModelCode { get; init; }
-        public DateTime CreatedAt { get; init; }
-        public DateTime UpdatedAt { get; init; }
-    }
-
-    private sealed class JobDetailRow : JobRow
-    {
-        public string PromptJson { get; init; } = "{}";
-        public string ReferenceJson { get; init; } = "[]";
-        public string? ErrorCode { get; init; }
-        public string? ErrorMessage { get; init; }
-        public string PointStatus { get; init; } = string.Empty;
-        public Guid? RetryOfJobId { get; init; }
-        public DateTime? StartedAt { get; init; }
-        public DateTime? CompletedAt { get; init; }
-        public DateTime? CancelledAt { get; init; }
-    }
-
-    private sealed class JobEventRow
-    {
-        public Guid Id { get; init; }
-        public string EventType { get; init; } = string.Empty;
-        public string Level { get; init; } = "info";
-        public string? Message { get; init; }
-        public string DataJson { get; init; } = "{}";
-        public string? ProviderCode { get; init; }
-        public string? ModelCode { get; init; }
-        public DateTime CreatedAt { get; init; }
-    }
-
-    private sealed class DanceSellRow
-    {
-        public Guid Id { get; init; }
-        public string? Status { get; init; }
-        public string? CurrentStage { get; init; }
-        public string? ResultVideoUrl { get; init; }
-        public string? CharacterImageUrl { get; init; }
-        public string? ProductImageUrl { get; init; }
-        public string? MotionVideoUrl { get; init; }
-        public string? Ratio { get; init; }
-        public string? ProviderCode { get; init; }
-        public string? ProviderModel { get; init; }
-        public string? MotionProviderCode { get; init; }
-        public string? MotionProviderModel { get; init; }
-        public string? ErrorCode { get; init; }
-        public string? ErrorMessage { get; init; }
-    }
-
-    private sealed class DanceSellOutputRow
-    {
-        public Guid RenderJobId { get; init; }
-        public string? ResultVideoUrl { get; init; }
-    }
-
-    private static class JsonUrlExtractor
-    {
-        public static IReadOnlyList<AdminJobMonitorMediaLink> Extract(string? json)
-        {
-            if (string.IsNullOrWhiteSpace(json)) return Array.Empty<AdminJobMonitorMediaLink>();
-            try
-            {
-                using var document = JsonDocument.Parse(json);
-                var links = new List<AdminJobMonitorMediaLink>();
-                Visit(document.RootElement, null, links);
-                return links
-                    .GroupBy(x => x.Url, StringComparer.OrdinalIgnoreCase)
-                    .Select(x => x.First())
-                    .ToList();
-            }
-            catch (JsonException)
-            {
-                return Array.Empty<AdminJobMonitorMediaLink>();
-            }
-        }
-
-        private static void Visit(
-            JsonElement element,
-            string? source,
-            ICollection<AdminJobMonitorMediaLink> links)
-        {
-            switch (element.ValueKind)
-            {
-                case JsonValueKind.Object:
-                    foreach (var property in element.EnumerateObject())
-                    {
-                        Visit(property.Value, property.Name, links);
-                    }
-                    break;
-                case JsonValueKind.Array:
-                    foreach (var item in element.EnumerateArray())
-                    {
-                        Visit(item, source, links);
-                    }
-                    break;
-                case JsonValueKind.String:
-                    var value = element.GetString();
-                    if (!IsHttpUrl(value)) return;
-                    links.Add(new AdminJobMonitorMediaLink
-                    {
-                        Url = value!,
-                        Kind = Classify(source),
-                        Source = source
-                    });
-                    break;
-            }
-        }
-
-        private static string Classify(string? source)
-        {
-            var value = source?.ToLowerInvariant() ?? string.Empty;
-            if (value.Contains("audio") || value.Contains("sound")) return "audio";
-            if (value.Contains("video") || value.Contains("movie")) return "video";
-            if (value.Contains("image") || value.Contains("thumbnail") || value.Contains("poster") || value.Contains("photo")) return "image";
-            return "url";
-        }
-    }
+    public const string RDanceScene = """
+        SELECT COALESCE(NULLIF(d.prepared_reference_url, ''), NULLIF(d.character_image_url, '')) AS ImageUrl,
+               COALESCE(NULLIF(d.result_video_url, ''), NULLIF(d.result_url, '')) AS VideoUrl,
+               d.status AS RawStatus,
+               d.error_message AS ErrorMessage,
+               d.created_at AS CreatedAt,
+               d.completed_at AS CompletedAt
+          FROM dance_sell.dance_sell_jobs d
+         WHERE d.tenant_id = @tenant
+           AND d.id = @jobId;
+        """;
 }
