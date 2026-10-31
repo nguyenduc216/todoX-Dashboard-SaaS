@@ -31,6 +31,15 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    // A never-claimed job (alias j) the head does not own can never run, so it must not block forever.
+    public const string NeverSubmittedOrphanJobSql = """
+        j.status='queued' AND j.attempt_count=0
+        AND NOT video_render.scene_video_job_is_current(j.tenant_id,j.id)
+        AND NULLIF(j.provider_task_id,'') IS NULL AND NULLIF(j.provider_video_id_base,'') IS NULL
+        AND NOT EXISTS(SELECT 1 FROM render.scene_video_submit_intents i WHERE i.tenant_id=j.tenant_id AND i.render_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_versions v WHERE v.tenant_id=j.tenant_id AND v.render_job_id=j.id)
+        """;
+
     public static void Validate(SceneVideoSupersedeAcknowledgement a, CurrentUserSession actor)
     {
         ArgumentNullException.ThrowIfNull(a);
@@ -152,17 +161,12 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
                 AND project_id=@project AND scene_id=@scene AND status='completed' FOR SHARE);
             """, new { id = sourceId, tenant = tenant.TenantId, project = a.ProjectId, scene = a.SceneId }, tx);
         if (sourceId is not null && !source) throw new InvalidOperationException("Source image is not a completed version of this scene.");
-        var competing = await conn.ExecuteScalarAsync<bool>("""
+        var competing = await conn.ExecuteScalarAsync<bool>($"""
             SELECT EXISTS(SELECT 1 FROM render.render_jobs j WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
                 AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                 AND j.id<>@job AND COALESCE(j.input_json->>'sceneId',j.input_json->>'scene_id')=@scene
                 AND j.status NOT IN('completed','failed','cancelled')
-                -- A never-claimed job the head does not own can never run, so it must not block forever.
-                AND NOT (j.status='queued' AND j.attempt_count=0
-                    AND NOT video_render.scene_video_job_is_current(j.tenant_id,j.id)
-                    AND NULLIF(j.provider_task_id,'') IS NULL AND NULLIF(j.provider_video_id_base,'') IS NULL
-                    AND NOT EXISTS(SELECT 1 FROM render.scene_video_submit_intents i WHERE i.tenant_id=j.tenant_id AND i.render_job_id=j.id)
-                    AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_versions v WHERE v.tenant_id=j.tenant_id AND v.render_job_id=j.id)))
+                AND NOT ({NeverSubmittedOrphanJobSql}))
               OR EXISTS(SELECT 1 FROM video_render.scene_video_versions v WHERE v.tenant_id=@tenant AND v.scene_id=@sceneId
                 AND NOT video_render.scene_video_job_is_superseded(v.tenant_id,v.render_job_id)
                 AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_operation_transitions abandoned WHERE abandoned.new_version_id=v.id AND abandoned.tenant_id=v.tenant_id AND abandoned.transition_state='ABANDONED')
