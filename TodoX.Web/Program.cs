@@ -56,6 +56,8 @@ builder.Services.AddSingleton<SharedMediaPathService>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<IAdminJobMonitorService, AdminJobMonitorService>();
+builder.Services.AddScoped<TodoX.Web.Services.JobRepair.JobRepairRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.JobRepair.IJobRepairService, TodoX.Web.Services.JobRepair.JobRepairService>();
 builder.Services.AddSingleton<IRuntimeBuildInfoProvider, RuntimeBuildInfoProvider>();
 builder.Services.AddScoped<ISystemDiagnosticsService, SystemDiagnosticsService>();
 builder.Services.AddScoped<BillingRepository>();

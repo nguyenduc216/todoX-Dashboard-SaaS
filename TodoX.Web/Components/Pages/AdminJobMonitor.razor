@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Components.Web
 @using TodoX.Web.Models
 @inject IAdminJobMonitorService Monitor
+@inject IDialogService DialogService
 @inject AuthStateService AuthState
 @inject ILogger<AdminJobMonitor> Logger
 
@@ -123,6 +124,7 @@ else
                             <tr @key="@($"{job.Id}-scenes")" class="scene-row">
                                 <td colspan="11">
                                     <div class="scene-actions">
+                                        <button type="button" class="monitor-button small" @onclick="@(() => OpenRepairAsync(job))">Sửa lỗi</button>
                                         @* rel="opener" makes the browser copy this tab's session storage, so an admin without remember-me stays signed in there. *@
                                         <a class="monitor-button small" href="@AdminJobMonitorRules.OpenJobPath(job.Kind, job.Id)" target="_blank" rel="opener">Mở job</a>
                                     </div>
@@ -469,6 +471,22 @@ else
     }
 
     private void ClosePreview() => _previewUrl = null;
+
+    private async Task OpenRepairAsync(AdminJobMonitorJob job)
+    {
+        var parameters = new DialogParameters<TodoX.Web.Components.Dialogs.JobRepairDialog>
+        {
+            { x => x.Kind, job.Kind },
+            { x => x.JobId, job.Id },
+            { x => x.Title, job.Title }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false };
+        var dialog = await DialogService.ShowAsync<TodoX.Web.Components.Dialogs.JobRepairDialog>("Sửa lỗi", parameters, options);
+        await dialog.Result;
+        await LoadJobsAsync();
+        _scenes.Remove(job.Id);
+        _expandedJobId = null;
+    }
 
     private static string FormatTime(DateTime value) => value.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
     private static string FormatCredits(decimal value) => value.ToString("0.##");
