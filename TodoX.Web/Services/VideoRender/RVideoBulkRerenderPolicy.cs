@@ -13,6 +13,7 @@ public enum RVideoBulkRerenderSceneDecision
     Render,
     SkipCompleted,
     SkipInFlight,
+    SkipProviderPending,
     SkipMissingImage,
     SkipStateUnknown
 }
@@ -51,6 +52,8 @@ public static class RVideoBulkRerenderPolicy
         if (state is null) return RVideoBulkRerenderSceneDecision.SkipStateUnknown;
         var waitingForReconciliation = IsPendingReconciliation(state);
         if (state.HasActiveJob && !waitingForReconciliation) return RVideoBulkRerenderSceneDecision.SkipInFlight;
+        // The provider holds this task and the video may already exist: check it first instead of paying twice.
+        if (waitingForReconciliation && state.HasProviderIdentity) return RVideoBulkRerenderSceneDecision.SkipProviderPending;
         if (mode == RVideoBulkRerenderMode.IncompleteScenes && hasCompletedVideo && !waitingForReconciliation)
             return RVideoBulkRerenderSceneDecision.SkipCompleted;
         return hasImage ? RVideoBulkRerenderSceneDecision.Render : RVideoBulkRerenderSceneDecision.SkipMissingImage;

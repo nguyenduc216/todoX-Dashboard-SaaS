@@ -89,6 +89,30 @@ public sealed class JobRepairPlaybookTests
         Assert.Equal(JobRepairPlaybook.ManualReview, JobRepairPlaybook.Classify(snapshot).CaseCode);
     }
 
+    // Mirrors job cf498c5c: old manual review without any submit evidence.
+    [Fact]
+    public void ManualReviewWithoutSubmitEvidenceOffersNewOperationWithWarning()
+    {
+        var snapshot = Head("pending_reconciliation");
+        snapshot.HeadErrorCode = "SCENE_VIDEO_MANUAL_REVIEW_REQUIRED";
+        var finding = JobRepairPlaybook.Classify(snapshot);
+        Assert.Equal(JobRepairPlaybook.ManualReviewUnconfirmedSubmit, finding.CaseCode);
+        Assert.Equal(JobRepairAction.NewOperation, finding.Action);
+        Assert.Contains("Không trừ điểm của khách", finding.PointNote);
+        Assert.NotNull(finding.RiskNote);
+
+        snapshot.SubmitStates = "SUBMIT_IN_FLIGHT";
+        Assert.Equal(JobRepairPlaybook.ManualReview, JobRepairPlaybook.Classify(snapshot).CaseCode);
+    }
+
+    [Fact]
+    public void LiveOtherVersionBlocksRepairLikeALiveJob()
+    {
+        var snapshot = Head("failed");
+        snapshot.CompetingVersionCount = 1;
+        Assert.Equal(JobRepairPlaybook.BlockedByOtherJob, JobRepairPlaybook.Classify(snapshot).CaseCode);
+    }
+
     [Theory]
     [InlineData(5, false)]
     [InlineData(3000, true)]

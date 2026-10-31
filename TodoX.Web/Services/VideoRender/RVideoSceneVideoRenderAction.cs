@@ -290,6 +290,20 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
         {
             return RVideoSceneVideoRenderResult.Fail("RVIDEO_QUOTE_CHANGED", "Cấu hình video đã thay đổi. Vui lòng báo giá lại.");
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The UI only shows a general message: keep the real reason where an administrator can read it.
+            try
+            {
+                await _repo.AddProjectEventAsync(request.ProjectId, "RVIDEO_SUPERSEDE_FAILED", "error", ex.Message,
+                    new { sceneId = request.Scene.Id, exception = ex.GetType().Name, oldJobId = acknowledgement.OldJobId }, ct);
+            }
+            catch (Exception eventError)
+            {
+                _logger.LogWarning(eventError, "RVIDEO_SUPERSEDE_FAILED_EVENT_NOT_SAVED sceneId={SceneId}", request.Scene.Id);
+            }
+            throw;
+        }
     }
 
     // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002.

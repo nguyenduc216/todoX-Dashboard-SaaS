@@ -28,6 +28,7 @@ public sealed class JobRepairSceneSnapshot
     public int PreparedCount { get; set; }
     public int OrphanJobCount { get; set; }
     public int CompetingJobCount { get; set; }
+    public int CompetingVersionCount { get; set; }
 }
 
 /// <summary>A recognised scene state, what the button may do about it and what that does to points.</summary>
@@ -49,6 +50,7 @@ public static class JobRepairPlaybook
     public const string Running = "RUNNING";
     public const string NotStarted = "NOT_STARTED";
     public const string ManualReview = "MANUAL_REVIEW";
+    public const string ManualReviewUnconfirmedSubmit = "MANUAL_REVIEW_UNCONFIRMED_SUBMIT";
     public const string BlockedByOtherJob = "BLOCKED_BY_OTHER_JOB";
     public const string KnownTaskTimedOut = "KNOWN_TASK_POLL_TIMEOUT";
     public const string AmbiguousSubmit = "AMBIGUOUS_SUBMIT";
@@ -67,12 +69,18 @@ public static class JobRepairPlaybook
             return Info(NotStarted, "Scene chưa có lượt tạo video nào.");
         if (s.HeadJobStatus == "completed")
             return Info(Healthy, "Video của scene đã hoàn tất.");
-        if (s.HeadErrorCode == "SCENE_VIDEO_MANUAL_REVIEW_REQUIRED")
-            return Info(ManualReview, "Lượt gửi đang chờ kiểm tra thủ công. Nút Sửa lỗi không can thiệp.");
-        if (s.CompetingJobCount > 0)
-            return Info(BlockedByOtherJob, $"Còn {s.CompetingJobCount} job khác chưa kết thúc của scene này. Chưa thể tạo lượt mới an toàn.");
+        if (s.CompetingJobCount + s.CompetingVersionCount > 0)
+            return Info(BlockedByOtherJob, $"Còn {s.CompetingJobCount + s.CompetingVersionCount} lượt khác chưa kết thúc của scene này. Chưa thể tạo lượt mới an toàn.");
         if (!s.AckFound || s.PreparedCount > 0)
             return Info(Unknown, "Trạng thái này chưa có trong quy trình sửa lỗi.");
+
+        if (s.HeadErrorCode == "SCENE_VIDEO_MANUAL_REVIEW_REQUIRED")
+            return s.HeadHasProviderTask || s.HeadHasProviderVideoId || !string.IsNullOrEmpty(s.SubmitStates)
+                ? Info(ManualReview, "Lượt gửi đang chờ kiểm tra thủ công. Nút Sửa lỗi không can thiệp.")
+                : new(ManualReviewUnconfirmedSubmit,
+                    "Lượt gửi cũ chờ kiểm tra thủ công: không có mã tác vụ và không có bản ghi gửi nào. Có thể tạo lượt mới.",
+                    JobRepairAction.NewOperation, "Tạo lượt video mới", NewOperationPointNote,
+                    "Hệ thống từng đánh dấu không rõ kết quả gửi. Rất khó xảy ra, nhưng nếu provider đã nhận lượt cũ, TodoX có thể mất phí provider hai lần.");
 
         if (s.HeadJobStatus == "pending_reconciliation" && s.HeadHasProviderTask && s.HeadHasProviderVideoId
             && s.HeadVersionStatus == "pending_reconciliation" && s.SubmitStates == "CONFIRMED_PROVIDER_TASK")

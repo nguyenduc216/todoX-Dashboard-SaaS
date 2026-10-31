@@ -40,6 +40,17 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
         AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_versions v WHERE v.tenant_id=j.tenant_id AND v.render_job_id=j.id)
         """;
 
+    // A queued version (alias v) whose owner already ended, or that has none, can never progress either.
+    public const string NeverSubmittedOrphanVersionSql = """
+        v.status='queued'
+        AND NULLIF(v.provider_task_id,'') IS NULL AND NULLIF(v.provider_video_id_base,'') IS NULL
+        AND NOT EXISTS(SELECT 1 FROM render.scene_video_submit_intents i WHERE i.tenant_id=v.tenant_id
+            AND (i.render_job_id=v.render_job_id OR (i.scene_id=v.scene_id AND i.logical_request_id=v.logical_request_id)))
+        AND NOT EXISTS(SELECT 1 FROM render.render_jobs owner WHERE owner.tenant_id=v.tenant_id AND owner.id=v.render_job_id
+            AND (owner.status NOT IN('completed','failed','cancelled')
+                OR NULLIF(owner.provider_task_id,'') IS NOT NULL OR NULLIF(owner.provider_video_id_base,'') IS NOT NULL))
+        """;
+
     public static void Validate(SceneVideoSupersedeAcknowledgement a, CurrentUserSession actor)
     {
         ArgumentNullException.ThrowIfNull(a);
@@ -170,7 +181,8 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
               OR EXISTS(SELECT 1 FROM video_render.scene_video_versions v WHERE v.tenant_id=@tenant AND v.scene_id=@sceneId
                 AND NOT video_render.scene_video_job_is_superseded(v.tenant_id,v.render_job_id)
                 AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_operation_transitions abandoned WHERE abandoned.new_version_id=v.id AND abandoned.tenant_id=v.tenant_id AND abandoned.transition_state='ABANDONED')
-                AND v.id<>@version AND v.status NOT IN('completed','failed') AND v.render_job_id IS DISTINCT FROM @job);
+                AND v.id<>@version AND v.status NOT IN('completed','failed') AND v.render_job_id IS DISTINCT FROM @job
+                AND NOT ({NeverSubmittedOrphanVersionSql}));
             """, new { tenant = tenant.TenantId, job = a.OldJobId, version = a.OldVersionId,
                 scene = a.SceneId.ToString(), sceneId = a.SceneId }, tx);
         if (competing) throw new InvalidOperationException("Unacknowledged competing operation exists.");

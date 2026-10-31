@@ -52,13 +52,26 @@ public sealed partial class SceneVideoOperationDraftPostgresTests
                 INSERT INTO render.render_jobs(id,tenant_id,user_id,job_type,status,input_json,created_at)
                 VALUES(@orphan,@tenant,@actor,'render_scene_video','queued','{"projectId":1,"sceneId":898}',now());
                 """, new { tenant, actor, core, failedJob, orphan, timedOutJob, inFlightJob, v1 = Guid.NewGuid(), v2 = Guid.NewGuid(), v3 = Guid.NewGuid(), token1 = Guid.NewGuid(), token2 = Guid.NewGuid() });
+            // Job cf498c5c: no head row, a manual-review job with its version, and a queued version nothing can run.
+            var reviewJob = Guid.NewGuid();
+            await conn.ExecuteAsync("""
+                INSERT INTO video_render.video_project_scenes(id,project_id,tenant_id,status,scene_index) VALUES(778,1,@tenant,'video_queued',7);
+                INSERT INTO render.render_jobs(id,tenant_id,user_id,job_type,status,input_json,error_code,attempt_count,created_at,updated_at) VALUES
+                  (@reviewJob,@tenant,@actor,'render_scene_video','pending_reconciliation','{"projectId":1,"sceneId":778}','SCENE_VIDEO_MANUAL_REVIEW_REQUIRED',1,now(),now()-interval '10 days'),
+                  (@oldJob,@tenant,@actor,'render_scene_video','failed','{"projectId":1,"sceneId":778}',NULL,1,now()-interval '11 days',now()-interval '11 days');
+                INSERT INTO video_render.scene_video_versions(id,project_id,scene_id,tenant_id,version_number,logical_request_id,render_job_id,status) VALUES
+                  (@stray,1,778,@tenant,1,'l-stray',@oldJob,'queued'),(@review,1,778,@tenant,2,'l-review',@reviewJob,'pending_reconciliation');
+                """, new { tenant, actor, reviewJob, oldJob = Guid.NewGuid(), stray = Guid.NewGuid(), review = Guid.NewGuid() });
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             { ["ConnectionStrings:TodoXSaaS"] = cs, ["TodoX:TenantId"] = tenant.ToString() }).Build();
             var factory = new TodoXConnectionFactory(config);
             var repository = new JobRepairRepository(factory, new TenantContext(factory, config));
 
             var scenes = (await repository.GetSceneSnapshotsAsync(core)).ToDictionary(s => s.SceneId);
-            Assert.Equal(4, scenes.Count);
+            Assert.Equal(5, scenes.Count);
+            Assert.Equal(reviewJob, scenes[778].HeadJobId);
+            Assert.Equal((0, 0, true), (scenes[778].CompetingJobCount, scenes[778].CompetingVersionCount, scenes[778].AckFound));
+            Assert.Equal(JobRepairPlaybook.ManualReviewUnconfirmedSubmit, JobRepairPlaybook.Classify(scenes[778]).CaseCode);
             Assert.Equal((1, 0), (scenes[898].OrphanJobCount, scenes[898].CompetingJobCount));
             Assert.Equal(JobRepairPlaybook.FailedOperation, JobRepairPlaybook.Classify(scenes[898]).CaseCode);
             Assert.Equal(JobRepairPlaybook.KnownTaskTimedOut, JobRepairPlaybook.Classify(scenes[902]).CaseCode);

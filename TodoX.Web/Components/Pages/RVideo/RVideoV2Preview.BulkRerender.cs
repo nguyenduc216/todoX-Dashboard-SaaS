@@ -166,6 +166,7 @@ public partial class RVideoV2Preview
     private static string BulkRerenderSkipReason(RVideoBulkRerenderSceneDecision decision) => decision switch
     {
         RVideoBulkRerenderSceneDecision.SkipInFlight => "đang tạo video",
+        RVideoBulkRerenderSceneDecision.SkipProviderPending => "provider đang xử lý, cần kiểm tra lại kết quả",
         RVideoBulkRerenderSceneDecision.SkipMissingImage => "thiếu ảnh",
         _ => "chưa tải được trạng thái"
     };
