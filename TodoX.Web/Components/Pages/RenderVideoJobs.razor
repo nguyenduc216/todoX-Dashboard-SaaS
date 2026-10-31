@@ -849,6 +849,9 @@ else
                                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
 
                             </MudTooltip>
+                            <MudTooltip Text="Chọn scene cần tạo lại video và xem số điểm trước khi đồng ý">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Autorenew" OnClick="OpenBulkRerenderDialogAsync" Disabled="@(_busy || _bulkRerendering || _project is null || _project.Scenes.Count == 0)">Render job</MudButton>
+                            </MudTooltip>
 
                             <MudTooltip Text="Tạo video cho các scene đã có ảnh">
 

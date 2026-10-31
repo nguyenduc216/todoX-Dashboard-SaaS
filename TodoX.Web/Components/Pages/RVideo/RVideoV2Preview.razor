@@ -27,7 +27,10 @@ else
   var scenes = OrderedScenes;
   <div class="rv2-pv-toolbar">
     <span class="rv2-pv-progress"><strong>@scenes.Count(x=>x.Status==VideoSceneStatuses.VideoReady)/@scenes.Count</strong> scene xong · @JobView.Project.TotalSeconds s</span>
-    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="HandleAddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
+    <div class="d-flex gap-2">
+      <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="HandleAddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
+      <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Autorenew" OnClick="OpenBulkRerenderDialogAsync" Disabled="@(_busy || scenes.Count == 0)">Render job</MudButton>
+    </div>
   </div>
   @if(JobView.Settings?.UseReferenceImageForAllScenes == true)
   {
