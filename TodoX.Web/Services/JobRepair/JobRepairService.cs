@@ -124,7 +124,7 @@ public sealed class JobRepairService(
             report.Append($"scene {s.SceneIndex} id={s.SceneId} case={finding.CaseCode} sceneStatus={s.SceneStatus} generation={s.Generation} ")
                 .Append($"headJob={s.HeadJobId} jobStatus={s.HeadJobStatus} error={s.HeadErrorCode} versionStatus={s.HeadVersionStatus} ")
                 .Append($"providerTask={s.HeadHasProviderTask} providerVideoId={s.HeadHasProviderVideoId} submit={s.SubmitStates} ")
-                .Append($"lockActive={s.HeadLockActive} idleMinutes={s.HeadIdleMinutes} prepared={s.PreparedCount} orphans={s.OrphanJobCount} competing={s.CompetingJobCount}\n");
+                .Append($"lockActive={s.HeadLockActive} idleMinutes={s.HeadIdleMinutes} prepared={s.PreparedCount} orphans={s.OrphanJobCount} competing={s.CompetingJobCount} competingVersions={s.CompetingVersionCount}\n");
         }
         return report.ToString();
     }

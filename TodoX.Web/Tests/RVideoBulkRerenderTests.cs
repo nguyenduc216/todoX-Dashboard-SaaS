@@ -39,6 +39,16 @@ public sealed class RVideoBulkRerenderTests
         Assert.True(RVideoBulkRerenderPolicy.HasUnknownOutcome(state));
     }
 
+    [Theory]
+    [InlineData(RVideoBulkRerenderMode.AllScenes)]
+    [InlineData(RVideoBulkRerenderMode.IncompleteScenes)]
+    public void TaskTheProviderHoldsIsNotReplacedSoNobodyPaysTwice(RVideoBulkRerenderMode mode)
+    {
+        var state = Idle with { LatestJob = new RenderJobDto { Id = Guid.NewGuid(), Status = "pending_reconciliation", ProviderTaskId = "task" }, HasActiveJob = true };
+        Assert.Equal(RVideoBulkRerenderSceneDecision.SkipProviderPending,
+            RVideoBulkRerenderPolicy.Decide(mode, state, false, hasImage: true));
+    }
+
     [Fact]
     public void SceneWithoutImageOrLoadedStateIsSkipped()
     {
