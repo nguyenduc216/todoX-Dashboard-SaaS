@@ -1,3 +1,5 @@
+using TodoX.Web.Models;
+
 namespace TodoX.Web.Services.VideoRender;
 
 public enum RVideoBulkRerenderMode
@@ -61,6 +63,21 @@ public static class RVideoBulkRerenderPolicy
     public static bool HasUnknownOutcome(SceneVideoUiState state)
         => IsPendingReconciliation(state) || state.HasProviderIdentity
             || state.SubmitBlockReason != SceneVideoSubmitBlockReason.None;
+
+    // A scene short of points stays in the quote so the popup can show the shortage.
+    public static bool CanQuote(RVideoSceneVideoRenderEstimate estimate, bool forSupersede)
+        => estimate.EstimatedPoints > 0m && (estimate.CanStart || estimate.MissingPoints > 0m)
+            && (!forSupersede || estimate.OperationSettings is not null);
+
+    public static async Task<RVideoSceneVideoRenderResult> SubmitAsync(
+        IRVideoSceneVideoRenderAction action,
+        RVideoSceneVideoRenderRequest request,
+        CurrentUserSession user)
+    {
+        if (!request.ForSupersede) return await action.EnqueueRerenderAsync(request, user);
+        var acknowledgement = await action.GetSupersedeAcknowledgementAsync(request.ProjectId, request.Scene.Id, user, Guid.NewGuid());
+        return await action.SupersedeAsync(request, acknowledgement with { RiskAcknowledged = true }, user);
+    }
 
     private static bool IsPendingReconciliation(SceneVideoUiState state)
         => string.Equals(state.LatestJob?.Status, PendingReconciliation, StringComparison.OrdinalIgnoreCase)

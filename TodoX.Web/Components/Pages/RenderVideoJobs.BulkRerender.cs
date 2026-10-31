@@ -21,7 +21,7 @@ public partial class RenderVideoJobs
         {
             { x => x.LoadQuote, BuildBulkRerenderQuoteAsync }
         };
-        var dialog = await DialogService.ShowAsync<RVideoBulkRerenderDialog>("Render lại các job", parameters,
+        var dialog = await DialogService.ShowAsync<RVideoBulkRerenderDialog>("Render job", parameters,
             new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, BackdropClick = false });
         var result = await dialog.Result;
         if (result is { Canceled: false, Data: RVideoBulkRerenderQuote quote }) await RunBulkRerenderAsync(quote);
@@ -60,8 +60,7 @@ public partial class RenderVideoJobs
             var snapshot = System.Text.Json.JsonSerializer.Deserialize<VideoProjectSceneDto>(System.Text.Json.JsonSerializer.Serialize(request.Scene))!;
             request = request with { Scene = snapshot, Metadata = ScenePromptMetadata.FromScene(snapshot), ForSupersede = RVideoBulkRerenderPolicy.UsesNewOperation(state!) };
             var estimate = await BulkVideoRender.EstimateAsync(request);
-            if (estimate.EstimatedPoints <= 0m || (!estimate.CanStart && estimate.MissingPoints <= 0m)
-                || (request.ForSupersede && estimate.OperationSettings is null))
+            if (!RVideoBulkRerenderPolicy.CanQuote(estimate, request.ForSupersede))
             {
                 skipped.Add(new(scene.SceneIndex, "chưa báo giá được"));
                 continue;
@@ -90,7 +89,7 @@ public partial class RenderVideoJobs
                 try
                 {
                     var request = _bulkRerenderRequests[line.SceneId];
-                    var result = await SubmitBulkRerenderSceneAsync(request, user);
+                    var result = await RVideoBulkRerenderPolicy.SubmitAsync(BulkVideoRender, request, user);
                     if (!result.Success)
                     {
                         Logger.LogWarning("RVIDEO_BULK_RERENDER_REFUSED sceneId={SceneId} errorCode={ErrorCode}", line.SceneId, result.ErrorCode);
@@ -120,13 +119,6 @@ public partial class RenderVideoJobs
             Snackbar.Add($"Chưa tạo được lượt mới cho {string.Join(", ", failed.Select(x => $"scene {x:00}"))}. Hãy tải lại trạng thái rồi thử lại.", Severity.Warning);
         await StartPolling();
         await ReloadAsync();
-    }
-
-    private async Task<RVideoSceneVideoRenderResult> SubmitBulkRerenderSceneAsync(RVideoSceneVideoRenderRequest request, CurrentUserSession user)
-    {
-        if (!request.ForSupersede) return await BulkVideoRender.EnqueueRerenderAsync(request, user);
-        var acknowledgement = await BulkVideoRender.GetSupersedeAcknowledgementAsync(request.ProjectId, request.Scene.Id, user, Guid.NewGuid());
-        return await BulkVideoRender.SupersedeAsync(request, acknowledgement with { RiskAcknowledged = true }, user);
     }
 
     private bool HasBulkRerenderImage(VideoProjectSceneDto scene)
