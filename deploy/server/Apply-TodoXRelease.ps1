@@ -4,7 +4,8 @@
   invoked over SSH by Deploy-TodoXRemote.ps1. Never runs SQL.
 
   1. Verify the uploaded zip's SHA-256.
-  2. Stop the IIS app pool, back up the site folder.
+  2. Replace this target's previous backup (only the last version is kept), check free space, stop the IIS
+     app pool, back up the site folder (without keys, logs, uploads).
   3. Copy the new build in, keeping appsettings*.json, web.config and keys\ untouched.
   4. Start the pool and probe /system/version until it reports the expected commit.
   5. On any failure after step 2, restore the backup and start the pool again.
@@ -93,7 +94,30 @@ Expand-Archive -Path $Package -DestinationPath $staging -Force
 if (-not (Test-Path (Join-Path $staging $T.MainDll))) { throw "Package does not contain $($T.MainDll)" }
 
 $backup = Join-Path $Config.BackupRoot "$Target-$Stamp"
+$backupDirs = $PreserveDirs | ForEach-Object { Join-Path $Site $_ }
+
+# Only the last version is kept: drop this target's older backups first, then make sure the backup fits while
+# leaving room for everything else on that drive (the database lives on C: too).
+New-Item -ItemType Directory -Force -Path $Config.BackupRoot | Out-Null
+Get-ChildItem $Config.BackupRoot -Directory -Filter "$Target-*" | ForEach-Object {
+    Log "Removing previous backup $($_.Name)"
+    Remove-Item $_.FullName -Recurse -Force
+}
+$needed = (Get-ChildItem $Site -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $f = $_.FullName; -not ($backupDirs | Where-Object { $f.StartsWith($_ + '\', [StringComparison]::OrdinalIgnoreCase) }) } |
+    Measure-Object Length -Sum).Sum
+$drive = (Get-Item $Config.BackupRoot).PSDrive
+$free = (Get-PSDrive $drive.Name).Free
+$reserve = 5GB
+Log ('Backup needs {0:N1} GB; {1}: has {2:N1} GB free (keeps {3:N0} GB in reserve)' -f ($needed / 1GB), $drive.Name, ($free / 1GB), ($reserve / 1GB))
+if ($free - $needed -lt $reserve) {
+    Log "ERROR: not enough free space on $($drive.Name): for the backup. Nothing was changed."
+    Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+
 $stopped = $false
+$backupOk = $false
 try {
     Log "Stopping app pool '$Pool'"
     if ((Get-WebAppPoolState -Name $Pool).Value -ne 'Stopped') { Stop-WebAppPool -Name $Pool }
@@ -102,8 +126,9 @@ try {
 
     Log "Backup -> $backup"
     New-Item -ItemType Directory -Force -Path $backup | Out-Null
-    & robocopy $Site $backup /MIR /R:2 /W:2 /NFL /NDL /NP /XD (Join-Path $Site 'wwwroot\uploads') | Out-Null
+    & robocopy $Site $backup /MIR /R:2 /W:2 /NFL /NDL /NP /XD @backupDirs | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Backup failed with robocopy exit code $LASTEXITCODE" }
+    $backupOk = $true
 
     Log 'Copying new build'
     Copy-Release $staging $Site
@@ -131,14 +156,16 @@ try {
 catch {
     Log "ERROR: $($_.Exception.Message) -- rolling back"
     if (-not $stopped -and (Get-WebAppPoolState -Name $Pool).Value -ne 'Stopped') { Stop-WebAppPool -Name $Pool; Wait-PoolState 'Stopped' }
-    if (Test-Path $backup) { Copy-Release $backup $Site; Log 'Backup restored' }
+    if ($backupOk) { Copy-Release $backup $Site; Log 'Backup restored' }
+    else {
+        # The site was not touched yet; mirroring an incomplete backup over it would delete files.
+        Remove-Item $backup -Recurse -Force -ErrorAction SilentlyContinue
+        Log 'Backup incomplete: site left as it was'
+    }
     Start-WebAppPool -Name $Pool
     Log 'RESULT: ROLLED BACK'
     exit 1
 }
 finally {
     Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
-    # Keep the last 5 backups.
-    Get-ChildItem $Config.BackupRoot -Directory -Filter "$Target-*" | Sort-Object Name -Descending |
-        Select-Object -Skip 5 | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
