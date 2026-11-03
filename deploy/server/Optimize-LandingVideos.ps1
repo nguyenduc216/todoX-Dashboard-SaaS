@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   One-time, server-side: re-encode landing videos already uploaded (Kho mẫu video, intro, /video-ngan)
   into web-optimized MP4 so they stream smoothly from a modest uplink. Never runs SQL.
@@ -12,17 +12,23 @@
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File Optimize-LandingVideos.ps1 -WhatIf
   powershell -ExecutionPolicy Bypass -File Optimize-LandingVideos.ps1
+  powershell -ExecutionPolicy Bypass -File Optimize-LandingVideos.ps1 -Areas video-samples -Files a.mp4,b.mp4
 #>
 param(
     [string] $StorageRoot = 'D:\TodoXData\shared-media',
     [string] $Ffmpeg = 'ffmpeg',
     [string] $Ffprobe = 'ffprobe',
     [string[]] $Areas = @('video-samples', 'intro', 'short-video'),
+    # Optional: only these file names (e.g. 47a1...252247.mp4); default is every .mp4 in the areas.
+    [string[]] $Files,
     # List what would change without touching any file.
     [switch] $WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
+# 'powershell -File' passes "a.mp4,b.mp4" as one string; accept both forms.
+if ($Files) { $Files = @($Files | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+if ($Areas) { $Areas = @($Areas | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 $MaxShortSide = 720
 $SkipBelowBitsPerSecond = 3200000
 
@@ -63,7 +69,7 @@ foreach ($area in $Areas) {
     $folder = Join-Path $StorageRoot "landing\$area\videos"
     if (-not (Test-Path $folder)) { Log "[$area] no folder $folder, skipped"; continue }
 
-    foreach ($file in Get-ChildItem -Path $folder -Filter '*.mp4' -File) {
+    foreach ($file in Get-ChildItem -Path $folder -Filter '*.mp4' -File | Where-Object { -not $Files -or $Files -contains $_.Name }) {
         $path = $file.FullName
         $temp = $null
         try {
