@@ -43,6 +43,10 @@
                     <MudStack Spacing="2">
                         <MudText>Video MP4/WebM (tối đa @(LandingIntroVideoMediaService.MaxBytes(MediaOptions.Value, LandingVideoSampleRepository.MediaArea, true) / (1024 * 1024)) MB):</MudText>
                         <InputFile OnChange="UploadVideoAsync" accept=".mp4,.webm,video/mp4,video/webm" disabled="@_busy" />
+                        @if (_uploadingVideo)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">Đang tải lên và tối ưu video cho web (720p), có thể mất 1–2 phút...</MudText>
+                        }
                         @if (!string.IsNullOrWhiteSpace(_model.VideoUrl))
                         {
                             <video src="@_model.VideoUrl" poster="@_model.PosterUrl" controls playsinline preload="metadata" style="max-width:100%;max-height:300px"></video>
@@ -76,6 +80,7 @@
     private List<ServiceDto> _services = [];
     private string? _serviceChoice;
     private bool _busy;
+    private bool _uploadingVideo;
     private string? _error;
 
     protected override void OnInitialized()
@@ -102,6 +107,7 @@
     {
         if (_busy) return;
         _busy = true;
+        _uploadingVideo = video;
         _error = null;
         try
         {
@@ -121,7 +127,7 @@
                 maxBytes, storageAvailable, ex.GetType().Name, category, Activity.Current?.Id);
             _error = IntroUploadDiagnostics.Message(category, maxBytes);
         }
-        finally { _busy = false; }
+        finally { _busy = false; _uploadingVideo = false; }
     }
 
     private async Task SaveAsync()

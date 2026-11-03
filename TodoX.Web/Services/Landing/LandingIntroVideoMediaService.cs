@@ -64,6 +64,7 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         Directory.CreateDirectory(destination);
         var token = Guid.NewGuid().ToString("N");
         var source = Path.Combine(temp, token + ext);
+        string? optimized = null;
         try
         {
             await using (var input = file.OpenReadStream(limit))
@@ -73,6 +74,15 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
             var header = new byte[16];
             await using (var stream = File.OpenRead(source)) _ = await stream.ReadAsync(header, ct);
             if (!HasValidHeader(ext, header)) throw new IntroUploadException(IntroUploadError.InvalidFile, "Nội dung file không hợp lệ.");
+            var transcode = options.Value.IndustrySolutions.VideoTranscode;
+            if (video && transcode.Enabled)
+            {
+                // Camera/AI exports are often 1440p+ at ~15 Mbps, more than the landing server can stream smoothly.
+                optimized = Path.Combine(temp, token + ".web.mp4");
+                await LandingWebVideoTranscoder.TranscodeAsync(source, optimized, transcode, ct);
+                File.Move(optimized, Path.Combine(destination, token + ".mp4"));
+                return paths.GetLandingMediaPublicUrl(area, folder, token + ".mp4");
+            }
             var filename = token + ext;
             File.Move(source, Path.Combine(destination, filename));
             return paths.GetLandingMediaPublicUrl(area, folder, filename);
@@ -80,6 +90,7 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         finally
         {
             if (File.Exists(source)) File.Delete(source);
+            if (optimized is not null && File.Exists(optimized)) File.Delete(optimized);
         }
     }
 

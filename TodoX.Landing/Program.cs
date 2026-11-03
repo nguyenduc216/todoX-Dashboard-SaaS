@@ -95,7 +95,9 @@ if (!string.IsNullOrWhiteSpace(sharedMediaRoot))
         app.UseStaticFiles(new StaticFileOptions
         {
             FileProvider = new PhysicalFileProvider(physicalRoot),
-            RequestPath = "/" + (sharedMediaOptions.RequestPath ?? "/media").Trim('/')
+            RequestPath = "/" + (sharedMediaOptions.RequestPath ?? "/media").Trim('/'),
+            // Uploaded media gets a unique file name, so repeat views can come straight from the browser cache.
+            OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "public,max-age=604800"
         });
     }
     catch (Exception ex)

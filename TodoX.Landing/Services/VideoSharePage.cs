@@ -159,7 +159,7 @@ public static class VideoSharePage
               <main class="vp-main">
                 <section class="vp-player {{(landscape ? "is-landscape" : "is-portrait")}}">
                   <div class="vp-player__media">
-                    <video src="{{E(m.VideoUrl)}}" poster="{{E(image)}}" controls playsinline preload="metadata"></video>
+                    <video src="{{E(m.VideoUrl)}}" poster="{{E(image)}}" controls playsinline preload="auto"></video>
                   </div>
                   <div class="vp-player__content">
                     <span class="vp-eyebrow">{{E(m.Eyebrow)}}</span>
