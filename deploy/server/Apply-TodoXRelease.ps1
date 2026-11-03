@@ -31,7 +31,9 @@ $LogFile = Join-Path $Root "logs\apply-$Target-$Stamp.log"
 New-Item -ItemType Directory -Force -Path (Split-Path $LogFile) | Out-Null
 function Log([string] $m) {
     $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m
-    Write-Output $line
+    # Write-Host, not Write-Output: output inside functions such as Test-Health would otherwise become part of
+    # their return value and make a failed health check look truthy.
+    Write-Host $line
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
 }
 
