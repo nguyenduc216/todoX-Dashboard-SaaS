@@ -95,7 +95,11 @@ foreach ($area in $Areas) {
             $backupFolder = Join-Path $StorageRoot "landing\_original-videos\$area"
             New-Item -ItemType Directory -Force -Path $backupFolder | Out-Null
             $backup = Join-Path $backupFolder $file.Name
-            Move-Item -LiteralPath $path -Destination $backup -Force
+            # The site may be streaming the file right now; wait for the reader to finish instead of failing.
+            for ($try = 1; ; $try++) {
+                try { Move-Item -LiteralPath $path -Destination $backup -Force; break }
+                catch { if ($try -ge 20) { throw }; Start-Sleep -Seconds 3 }
+            }
             try { Move-Item -LiteralPath $temp -Destination $path }
             catch { Move-Item -LiteralPath $backup -Destination $path; throw }
             $new = Get-VideoInfo $path
