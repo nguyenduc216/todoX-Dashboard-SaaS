@@ -1,6 +1,6 @@
 # TodoX.EditVideoTool — kế hoạch xây dựng
 
-> Trạng thái: **Đã duyệt — đang làm P0** · Nhánh: `feature/todox-agent-20261103` · Ngày: 2026-11-03
+> Trạng thái: P0 ✅ · P1 ✅ (production) · P2 ✅ · P3 ✅ bản đầu (Remotion AutoEdit) · P4–P7 chưa làm · Nhánh: `feature/todox-agent-20261103` · Ngày: 2026-11-03
 
 ## 1. Mục tiêu
 

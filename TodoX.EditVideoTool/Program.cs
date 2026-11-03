@@ -77,6 +77,8 @@ static void AddAgentServices(IServiceCollection services)
         sp.GetRequiredService<IDeviceIdentity>(),
         sp.GetRequiredService<LicenseApiClient>()));
     services.AddSingleton<StatusService>();
+    services.AddSingleton<TodoX.EditVideoTool.Media.MediaProbe>();
+    services.AddSingleton<TodoX.EditVideoTool.Media.RemotionRenderer>();
 }
 
 static ServiceProvider BuildServices()
