@@ -34,6 +34,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# "-File script.ps1 -Target a,b" arrives as the single string "a,b".
+$Target = @($Target | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Registry = Get-Content (Join-Path $PSScriptRoot 'targets.json') -Raw | ConvertFrom-Json
 $LocalPath = Join-Path $PSScriptRoot 'remote.local.json'
