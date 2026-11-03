@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject TodoX.Web.Services.EditVideoTool.EditVideoLicenseService EditVideoLicenses
+@inject TodoX.Web.Services.EditVideoTool.EditVideoUsageService EditVideoUsage
 
 <PageTitle>Khách hàng</PageTitle>
 
@@ -19,6 +20,14 @@
             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Thêm khách hàng</MudButton>
         </IfCan>
     </MudStack>
+
+    @foreach (var alert in _editVideoAlerts)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" ContentAlignment="HorizontalAlignment.Left"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => ResolveAlert(alert.Id))">
+            TodoX EditVideo · @alert.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm") · @alert.Message (bấm × khi đã xử lý)
+        </MudAlert>
+    }
 
     <MudGrid>
         <MudItem xs="12" sm="6" md="3">
@@ -109,6 +118,7 @@
     private IReadOnlyList<CustomerProfile> _customers = new List<CustomerProfile>();
     private string _search = string.Empty;
     private IReadOnlyDictionary<Guid, (int Licenses, int Alerts)> _licenseSummary = new Dictionary<Guid, (int, int)>();
+    private IReadOnlyList<TodoX.Web.Services.EditVideoTool.EditVideoAlertRow> _editVideoAlerts = [];
 
     protected override async Task OnInitializedAsync() => await Reload();
 
@@ -123,11 +133,18 @@
         try
         {
             _licenseSummary = await EditVideoLicenses.GetCustomerSummaryAsync();
+            _editVideoAlerts = await EditVideoUsage.ListOpenAlertsAsync();
         }
         catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
         {
             // editvideo schema not installed yet; the license column stays empty.
         }
+    }
+
+    private async Task ResolveAlert(Guid id)
+    {
+        await EditVideoUsage.ResolveAlertAsync(id);
+        await ReloadLicenseSummary();
     }
 
     private async Task OpenLicenses(CustomerProfile customer)

@@ -1,6 +1,7 @@
 @using TodoX.Web.Models
 @using TodoX.Web.Services.EditVideoTool
 @inject EditVideoLicenseService Licenses
+@inject EditVideoUsageService Usage
 @inject AuthStateService AuthState
 @inject AuditRepository Audit
 @inject IDialogService DialogService
@@ -150,6 +151,29 @@
                         </NoRecordsContent>
                     </MudTable>
 
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Nhật ký sử dụng (mỗi lần khách dùng tool)</MudText>
+                    @if (_sessions.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption">Chưa có lần sử dụng nào.</MudText>
+                    }
+                    @foreach (var s in _sessions)
+                    {
+                        <div>
+                            <MudLink Typo="Typo.caption" Color="@(s.Status == "failed" || s.ErrorCount > 0 ? Color.Error : Color.Primary)" OnClick="@(() => ToggleSession(s.Id))">
+                                @s.StartedAt.ToLocalTime().ToString("dd/MM HH:mm") · @TodoX.Web.Components.Pages.MyEditVideo.ToolLabel(s.Tool) · @s.Status@(s.ErrorCount > 0 ? $" · {s.ErrorCount} lỗi" : "")@(s.DeviceName is null ? "" : $" · {s.DeviceName}")@(s.AppVersion is null ? "" : $" · v{s.AppVersion}")
+                            </MudLink>
+                            @if (_openSession == s.Id)
+                            {
+                                @foreach (var line in _sessionLogs)
+                                {
+                                    <MudText Typo="Typo.caption" Style="display:block; padding-left: 16px; font-family: monospace" Color="@(line.Level == "error" ? Color.Error : line.Level == "warn" ? Color.Warning : Color.Default)">
+                                        @line.CreatedAt.ToLocalTime().ToString("HH:mm:ss") @line.Level @line.Code @line.Message @line.Data
+                                    </MudText>
+                                }
+                            }
+                        </div>
+                    }
+
                     <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Nhật ký gần đây</MudText>
                     @foreach (var e in _events)
                     {
@@ -175,6 +199,9 @@
     private IReadOnlyList<EditVideoLicenseRow> _licenses = [];
     private IReadOnlyList<EditVideoDeviceRow> _devices = [];
     private IReadOnlyList<EditVideoEventRow> _events = [];
+    private IReadOnlyList<EditVideoSessionRow> _sessions = [];
+    private IReadOnlyList<EditVideoUsageLogRow> _sessionLogs = [];
+    private Guid? _openSession;
     private EditVideoLicenseRow? _selected;
     private bool _canManage;
     private bool _busy;
@@ -222,6 +249,20 @@
         _editMobile = license.MaxMobileDevices;
         _devices = await Licenses.ListDevicesAsync(license.Id);
         _events = await Licenses.ListEventsAsync(license.Id);
+        _sessions = await Usage.ListSessionsAsync(license.Id);
+        _openSession = null;
+    }
+
+    private async Task ToggleSession(Guid sessionId)
+    {
+        if (_openSession == sessionId)
+        {
+            _openSession = null;
+            return;
+        }
+
+        _sessionLogs = await Usage.ListLogsAsync(sessionId);
+        _openSession = sessionId;
     }
 
     private async Task Issue()

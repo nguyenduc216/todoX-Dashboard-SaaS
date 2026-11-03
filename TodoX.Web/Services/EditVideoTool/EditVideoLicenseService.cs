@@ -391,14 +391,22 @@ public sealed class EditVideoLicenseService
         return (true, "Đã cập nhật giới hạn thiết bị.");
     }
 
-    /// <summary>Frees a device slot from the dashboard (e.g. customer changed computer).</summary>
-    public async Task RevokeDeviceAsync(Guid deviceId, Guid? actorUserId, CancellationToken ct = default)
+    /// <summary>
+    /// Frees a device slot from the dashboard (e.g. customer changed computer). When <paramref name="onlyForCustomerId"/>
+    /// is set (customer self-service) the device must belong to that customer's license.
+    /// </summary>
+    public async Task RevokeDeviceAsync(Guid deviceId, Guid? actorUserId, CancellationToken ct = default, Guid? onlyForCustomerId = null)
     {
         var now = _clock.GetUtcNow();
         using var conn = await _factory.OpenAsync(ct);
         var licenseId = await conn.ExecuteScalarAsync<Guid?>(
-            "SELECT license_id FROM editvideo.devices WHERE id = @deviceId AND tenant_id = @tenantId;",
-            new { deviceId, tenantId = _tenant.TenantId });
+            """
+            SELECT d.license_id FROM editvideo.devices d
+              JOIN editvideo.licenses l ON l.id = d.license_id
+             WHERE d.id = @deviceId AND d.tenant_id = @tenantId
+               AND (@customerId::uuid IS NULL OR l.customer_id = @customerId);
+            """,
+            new { deviceId, tenantId = _tenant.TenantId, customerId = onlyForCustomerId });
         if (licenseId is null)
         {
             return;

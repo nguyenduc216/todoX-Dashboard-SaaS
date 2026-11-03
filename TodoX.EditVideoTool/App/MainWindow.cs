@@ -244,10 +244,10 @@ public sealed partial class MainWindow : Form
 
     private static Control UnsignedNotice()
     {
-        var box = new Panel { Width = 640, Height = 62, BackColor = ColorTranslator.FromHtml("#2A2210"), Margin = new Padding(0, 0, 0, 8) };
+        var box = new Panel { Width = 640, Height = 66, BackColor = ColorTranslator.FromHtml("#2A2210"), Margin = new Padding(0, 0, 0, 8) };
         var text = new LinkLabel
         {
-            Text = "Ứng dụng chưa đăng ký chữ ký số với Windows nên Windows có thể cảnh báo khi mở. Đây là phần mềm chính hãng TodoX. Cần hỗ trợ: todox.vn",
+            Text = "Ứng dụng chưa đăng ký chữ ký số với Windows nên Windows có thể cảnh báo khi mở. Đây là phần mềm chính hãng TodoX. Hỗ trợ: 0366 699 961 · hello@todox.vn · todox.vn",
             LinkColor = Yellow,
             ActiveLinkColor = Yellow,
             ForeColor = ColorTranslator.FromHtml("#F5DFA6"),
