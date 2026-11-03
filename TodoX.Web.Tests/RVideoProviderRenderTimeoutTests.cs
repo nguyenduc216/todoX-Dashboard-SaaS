@@ -235,6 +235,9 @@ public sealed class RVideoProviderRenderTimeoutTests
 
     private sealed class RecordingRenderJobService : IRenderJobService
     {
+        public Task MarkSceneVideoClaimRenderingAsync(RenderJobDto claim, string workerKey, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task VerifySceneVideoSubmitClaimAsync(RenderJobDto claim, Guid versionId, string logicalRequestId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> QuarantineRejectedSceneVideoClaimAsync(RenderJobDto claim, string workerKey, string reason, CancellationToken ct = default) => throw new NotSupportedException();
         public List<Guid> ScheduledJobIds { get; } = [];
         public bool EnforceReconciliationLimit { get; private set; }
         public bool EnforceProviderPollTimeout { get; private set; }

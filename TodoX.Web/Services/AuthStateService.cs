@@ -100,6 +100,31 @@ public sealed class AuthStateService
         return SignInAsync(target, rememberMe: false);
     }
 
+    /// <summary>
+    /// Impersonates in the current tab only: the marker goes to per-tab session storage and the
+    /// administrator's remember-me marker stays, so other admin tabs keep their session after a reload.
+    /// A fresh session marker wins over the older local one when this tab restores.
+    /// </summary>
+    public async Task<bool> ImpersonateInThisTabAsync(CurrentUserSession target, CurrentUserSession actor)
+    {
+        target.ImpersonatorUserId = actor.ImpersonatorUserId ?? actor.UserId;
+        target.ImpersonatorDisplayName = actor.ImpersonatorDisplayName ?? actor.DisplayName;
+        return await WriteTabSessionAsync(target);
+    }
+
+    private async Task<bool> WriteTabSessionAsync(CurrentUserSession user)
+    {
+        var written = await PersistSignInMarkerAsync(
+            _session.SetAsync(StorageKey, CreateMarker(user, rememberMe: false)), "session", "write", user.UserId);
+        if (written)
+        {
+            CurrentUser = user;
+            NotifyStateChanged();
+        }
+
+        return written;
+    }
+
     public async Task<bool> StopImpersonationAsync(Func<Guid, Task<CurrentUserSession?>> rehydrate)
     {
         var originalUserId = CurrentUser?.ImpersonatorUserId;
@@ -117,7 +142,8 @@ public sealed class AuthStateService
 
         original.ImpersonatorUserId = null;
         original.ImpersonatorDisplayName = null;
-        await SignInAsync(original, rememberMe: false);
+        // Session only: a local marker here can only be the administrator's own remember-me.
+        await WriteTabSessionAsync(original);
         return true;
     }
 

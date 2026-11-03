@@ -1,0 +1,49 @@
+@using TodoX.Web.Models
+
+<MudAutocomplete T="AdminJobMonitorFilterOption"
+                 Value="_selected"
+                 ValueChanged="OnSelectedAsync"
+                 SearchFunc="SearchAsync"
+                 ToStringFunc="@(option => option?.Label)"
+                 Label="@Label"
+                 Variant="Variant.Outlined"
+                 Margin="Margin.Dense"
+                 MaxItems="null"
+                 CoerceText="true"
+                 ResetValueOnEmptyText="true">
+    <NoItemsTemplate>
+        <MudText Class="pa-3">Không tìm thấy kết quả.</MudText>
+    </NoItemsTemplate>
+</MudAutocomplete>
+
+@code {
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string AllLabel { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<AdminJobMonitorFilterOption> Options { get; set; } = Array.Empty<AdminJobMonitorFilterOption>();
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    private AdminJobMonitorFilterOption _selected = new(string.Empty, string.Empty);
+
+    private AdminJobMonitorFilterOption AllOption => new(string.Empty, AllLabel);
+
+    protected override void OnParametersSet()
+        => _selected = string.IsNullOrEmpty(Value)
+            ? AllOption
+            : Options.FirstOrDefault(option => option.Value == Value) ?? new AdminJobMonitorFilterOption(Value, Value);
+
+    // Strict autocomplete passes an empty text when the box still shows the selected item, so opening lists everything.
+    private Task<IEnumerable<AdminJobMonitorFilterOption>> SearchAsync(string? text, CancellationToken cancellationToken)
+    {
+        var matches = Options.Where(option => AdminJobMonitorRules.MatchesSearch(option.Label, text));
+        return Task.FromResult(string.IsNullOrWhiteSpace(text) ? matches.Prepend(AllOption) : matches);
+    }
+
+    private async Task OnSelectedAsync(AdminJobMonitorFilterOption? option)
+    {
+        var value = string.IsNullOrEmpty(option?.Value) ? null : option.Value;
+        _selected = option ?? AllOption;
+        if (value != (string.IsNullOrEmpty(Value) ? null : Value))
+            await ValueChanged.InvokeAsync(value);
+    }
+}

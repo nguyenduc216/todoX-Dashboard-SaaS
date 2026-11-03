@@ -31,6 +31,26 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    // A never-claimed job (alias j) the head does not own can never run, so it must not block forever.
+    public const string NeverSubmittedOrphanJobSql = """
+        j.status='queued' AND j.attempt_count=0
+        AND NOT video_render.scene_video_job_is_current(j.tenant_id,j.id)
+        AND NULLIF(j.provider_task_id,'') IS NULL AND NULLIF(j.provider_video_id_base,'') IS NULL
+        AND NOT EXISTS(SELECT 1 FROM render.scene_video_submit_intents i WHERE i.tenant_id=j.tenant_id AND i.render_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_versions v WHERE v.tenant_id=j.tenant_id AND v.render_job_id=j.id)
+        """;
+
+    // A queued version (alias v) whose owner already ended, or that has none, can never progress either.
+    public const string NeverSubmittedOrphanVersionSql = """
+        v.status='queued'
+        AND NULLIF(v.provider_task_id,'') IS NULL AND NULLIF(v.provider_video_id_base,'') IS NULL
+        AND NOT EXISTS(SELECT 1 FROM render.scene_video_submit_intents i WHERE i.tenant_id=v.tenant_id
+            AND (i.render_job_id=v.render_job_id OR (i.scene_id=v.scene_id AND i.logical_request_id=v.logical_request_id)))
+        AND NOT EXISTS(SELECT 1 FROM render.render_jobs owner WHERE owner.tenant_id=v.tenant_id AND owner.id=v.render_job_id
+            AND (owner.status NOT IN('completed','failed','cancelled')
+                OR NULLIF(owner.provider_task_id,'') IS NOT NULL OR NULLIF(owner.provider_video_id_base,'') IS NOT NULL))
+        """;
+
     public static void Validate(SceneVideoSupersedeAcknowledgement a, CurrentUserSession actor)
     {
         ArgumentNullException.ThrowIfNull(a);
@@ -152,15 +172,17 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
                 AND project_id=@project AND scene_id=@scene AND status='completed' FOR SHARE);
             """, new { id = sourceId, tenant = tenant.TenantId, project = a.ProjectId, scene = a.SceneId }, tx);
         if (sourceId is not null && !source) throw new InvalidOperationException("Source image is not a completed version of this scene.");
-        var competing = await conn.ExecuteScalarAsync<bool>("""
+        var competing = await conn.ExecuteScalarAsync<bool>($"""
             SELECT EXISTS(SELECT 1 FROM render.render_jobs j WHERE j.tenant_id=@tenant AND j.job_type='render_scene_video'
                 AND NOT video_render.scene_video_job_is_superseded(j.tenant_id,j.id)
                 AND j.id<>@job AND COALESCE(j.input_json->>'sceneId',j.input_json->>'scene_id')=@scene
-                AND j.status NOT IN('completed','failed','cancelled'))
+                AND j.status NOT IN('completed','failed','cancelled')
+                AND NOT ({NeverSubmittedOrphanJobSql}))
               OR EXISTS(SELECT 1 FROM video_render.scene_video_versions v WHERE v.tenant_id=@tenant AND v.scene_id=@sceneId
                 AND NOT video_render.scene_video_job_is_superseded(v.tenant_id,v.render_job_id)
                 AND NOT EXISTS(SELECT 1 FROM video_render.scene_video_operation_transitions abandoned WHERE abandoned.new_version_id=v.id AND abandoned.tenant_id=v.tenant_id AND abandoned.transition_state='ABANDONED')
-                AND v.id<>@version AND v.status NOT IN('completed','failed') AND v.render_job_id IS DISTINCT FROM @job);
+                AND v.id<>@version AND v.status NOT IN('completed','failed') AND v.render_job_id IS DISTINCT FROM @job
+                AND NOT ({NeverSubmittedOrphanVersionSql}));
             """, new { tenant = tenant.TenantId, job = a.OldJobId, version = a.OldVersionId,
                 scene = a.SceneId.ToString(), sceneId = a.SceneId }, tx);
         if (competing) throw new InvalidOperationException("Unacknowledged competing operation exists.");
@@ -181,6 +203,29 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
         var transitionId = Guid.NewGuid();
         var jobId = Guid.NewGuid();
         var versionId = Guid.NewGuid();
+        // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002.
+        // Recheck one quoted scene/image under existing tenant/scene locks; no historical operation is updated.
+        if (input.ConfirmedOperationSettings is { } confirmed)
+        {
+            var saved = await conn.QuerySingleAsync<VideoProjectSceneDto>("""
+                SELECT scene_prompt AS ScenePrompt, image_prompt AS ImagePrompt, video_prompt AS VideoPrompt,
+                       duration_seconds AS DurationSeconds, voice_text AS VoiceText, voice_instruction AS VoiceInstruction,
+                       static_image_url AS StaticImageUrl, static_image_path AS StaticImagePath
+                FROM video_render.video_project_scenes WHERE id=@scene AND project_id=@project AND tenant_id=@tenant;
+                """, args, tx);
+            if (RVideoSceneVideoOperationSettings.CaptureSceneConfig(saved) != confirmed.SceneConfigJson)
+                throw new InvalidOperationException("RVIDEO_QUOTE_CHANGED");
+            if (!input.UseSharedReferenceImage)
+            {
+                var selected = await conn.QuerySingleOrDefaultAsync<Guid?>("""
+                    SELECT id FROM video_render.scene_image_versions
+                    WHERE scene_id=@scene AND project_id=@project AND tenant_id=@tenant AND is_selected=true LIMIT 1;
+                    """, args, tx);
+                if (selected != confirmed.SelectedImageVersionId)
+                    throw new InvalidOperationException("RVIDEO_QUOTE_CHANGED");
+            }
+        }
+
         var generation = checked(a.ExpectedGeneration + 1);
         var logical = $"scene-video-operation-{jobId:N}-scene-{a.SceneId}";
         input.ProjectId = a.ProjectId;
@@ -236,6 +281,9 @@ public sealed class SceneVideoOperationDraftService(TodoXConnectionFactory facto
     public static object PreparedRenderConfig(SceneVideoRenderWorkItemInput input,long generation,Guid transitionId)
         => new { operationGeneration=generation,transitionId,attemptIndex=0,provider=input.ProviderCode,
             capability=input.CapabilityCode,model=input.ModelName,mode=input.RequestedMode,
+            aspectRatio=input.AspectRatio,selectedSourceImageVersionId=input.SelectedSourceImageVersionId,
+            customerPointRate=input.CustomerPointRate,strictRequestedSettings=input.StrictRequestedSettings,
+            confirmedOperationSettings=input.ConfirmedOperationSettings,
             requestedModel=input.RequestedModelCode,requestedMode=input.RequestedMode,
             requestedDurationSeconds=input.DurationSeconds,providerDurationSeconds=input.DurationSeconds,
             requestedResolution=input.Resolution,providerResolution=input.Resolution.Trim().ToLowerInvariant() };

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -13,6 +12,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     public const string JobTypeName = RenderJobTypes.MergeProjectVideo;
     public string JobType => JobTypeName;
 
+    private readonly IRVideoProjectFinalizationService? _finalization;
     private readonly ILogger<VideoRenderMergeHandler> _logger;
     private readonly IOptionsMonitor<VideoRenderOptions> _options;
     private readonly VideoRenderRepository _repo;
@@ -24,8 +24,9 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     private readonly TodoX.Web.Services.Media.IMediaFileService _media;
     private readonly TodoX.Web.Services.TenantContext _tenant;
 
-    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, RVideoJobSettingsRepository settings, IRVideoJobService rvideoJobs, IConfiguration configuration, TodoX.Web.Services.Media.IMediaFileService media, TodoX.Web.Services.TenantContext tenant)
+    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, RVideoJobSettingsRepository settings, IRVideoJobService rvideoJobs, IConfiguration configuration, TodoX.Web.Services.Media.IMediaFileService media, TodoX.Web.Services.TenantContext tenant, IRVideoProjectFinalizationService? finalization = null)
     {
+        _finalization = finalization;
         _logger = logger;
         _options = options;
         _repo = repo;
@@ -43,8 +44,26 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         var projectId = TryReadLong(job.InputJson, "projectId") ?? TryReadLong(job.PromptJson, "projectId") ?? throw new InvalidOperationException("Thieu projectId trong job input.");
         // Capture before reading consumed inputs; later DB writes reject any intervening generation/selection change.
         var mergeSnapshot=await _repo.GetVideoMergeSnapshotAsync(projectId, ct);
+        bool manual;
+        using (var queued = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
+        {
+            manual = queued.RootElement.TryGetProperty("source", out var source)
+                && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual;
+            if (queued.RootElement.TryGetProperty("mergeSnapshot", out var expected) && expected.ValueKind == JsonValueKind.String)
+            {
+                RequireCurrentSnapshot(expected.GetString()!, mergeSnapshot);
+                // Auto merges skip an already-current final; a manual recompose always re-runs the validated pipeline.
+                if (!manual && _finalization is not null && await _finalization.IsCurrentFinalVideoAsync(projectId, ct)) return;
+            }
+        }
         using var mergeScope = SceneVideoOperationScope.Merge(mergeSnapshot);
         var project = await _repo.GetProjectAsync(projectId, ct) ?? throw new InvalidOperationException("Khong tim thay project video.");
+        using (var queued = JsonDocument.Parse(job.InputJson))
+        {
+            if (queued.RootElement.TryGetProperty("sceneOrder", out var order)
+                && !order.EnumerateArray().Select(x => x.GetInt64()).SequenceEqual(project.Scenes.OrderBy(s => s.SceneIndex).Select(s => s.Id)))
+                throw new RenderJobTerminalFailureException("RVIDEO_MERGE_INPUT_STALE: scene order changed.");
+        }
         if (!project.Scenes.Any())
         {
             throw new InvalidOperationException("Project khong co scene de merge.");
@@ -66,40 +85,37 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
         }
 
+        var versioningEnabled = await ResolveVersioningEnabledAsync(_versions, manual, ct);
+
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
         var mergeableScenes = project.Scenes
-            .Where(x => x.Status == VideoSceneStatuses.VideoReady)
             .OrderBy(x => x.SceneIndex)
             .ToList();
         if (mergeableScenes.Count == 0)
             throw new InvalidOperationException("Chua co scene video ready de merge.");
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
-        var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
         FinalVideoVersionDto? version = null;
+        var finalPublished = false;
         IReadOnlyList<MergeInput> mergeItems;
-        if (versioningEnabled)
-        {
-            version = await _versions.CreateQueuedFinalVideoVersionAsync(new FinalVideoVersionCreateRequest(
-                project.Id,
-                project.UserId,
-                project.CustomerId,
-                job.Id,
-                $"final-video-job-{job.Id:N}-project-{project.Id}",
-                CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = mergeableScenes.Count, failedSceneCount = project.Scenes.Count - mergeableScenes.Count, scenes = mergeableScenes.Select(x => new { x.Id, x.SceneIndex, x.SceneVideoPath }) },
-                TransitionConfigSnapshot: new { mode = "copy_concat" },
-                AudioConfigSnapshot: new { music = settings?.MusicSnapshotJson, musicVolume = settings?.MusicVolume },
-                SubtitleConfigSnapshot: new { }), ct);
-            mergeItems = await BuildCurrentMergeItemsAsync(mergeableScenes, ct);
-        }
-        else
-        {
-            mergeItems = await BuildCurrentMergeItemsAsync(mergeableScenes, ct);
-        }
-
-        ValidateConsumedSelection(mergeSnapshot,mergeItems.Select(i=>(i.SceneId,i.SceneVideoVersionId)));
         try
         {
+            if (versioningEnabled)
+            {
+                version = await _versions.CreateQueuedFinalVideoVersionAsync(new FinalVideoVersionCreateRequest(
+                    project.Id,
+                    project.UserId,
+                    project.CustomerId,
+                    job.Id,
+                    $"final-video-job-{job.Id:N}-attempt-{job.AttemptCount}-project-{project.Id}",
+                    CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = mergeableScenes.Count, scenes = mergeableScenes.Select(x => new { x.Id, x.SceneIndex, x.DurationSeconds }), previousFinal = new { project.FinalVideoUrl, project.FinalVideoPath } },
+                    TransitionConfigSnapshot: new { mode = "validated_copy_or_normalized_transcode" },
+                    AudioConfigSnapshot: new { music = settings.MusicSnapshotJson, musicVolume = settings.MusicVolume },
+                    SubtitleConfigSnapshot: new { }), ct);
+            }
+            mergeItems = await BuildCurrentMergeItemsAsync(mergeableScenes, ct, version);
+            ValidateConsumedSelection(mergeSnapshot, mergeItems.Select(i => (i.SceneId, i.SceneVideoVersionId)));
+
             var finalDir = version is null
                 ? Path.Combine(projectRoot, "final", job.Id.ToString("N"))
                 : Path.Combine(projectRoot, "final-videos", version.Id.ToString("N"), "output");
@@ -116,40 +132,17 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             var ffmpegPath = _options.CurrentValue.FfmpegPath;
             var timeout = TimeSpan.FromMinutes(Math.Max(1, _options.CurrentValue.MergeTimeoutMinutes));
             var timelineDurationSeconds = RVideoRules.CalculateMergedDuration(mergeableScenes);
-            var copyResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildCopyConcatArguments(concat, finalPath, timelineDurationSeconds), timeout, ct);
-            await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg-copy.log"), copyResult.ToLogText(), ct);
-            if (copyResult.ExitCode != 0)
-            {
-                await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_COPY_FAILED", "warning",
-                    "Fast copy concat failed; attempting normalized transcode fallback.",
-                    new
-                    {
-                        projectId = project.Id,
-                        finalVideoVersionId = version?.Id,
-                        exitCode = copyResult.ExitCode,
-                        stderrTail = SafeTail(copyResult.Stderr),
-                        inputs = mergeItems.Select(x => new { x.SceneId, x.SceneVideoVersionId }).ToArray()
-                    }, ct);
-
-                await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_TRANSCODE_FALLBACK_STARTED", "info",
-                    "Normalized final merge transcode fallback started.",
-                    new { projectId = project.Id, finalVideoVersionId = version?.Id, inputCount = mergeItems.Count }, ct);
-                var fallbackResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildTranscodeConcatArguments(concat, finalPath, timelineDurationSeconds), timeout, ct);
-                await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg-fallback.log"), fallbackResult.ToLogText(), ct);
-                if (fallbackResult.ExitCode != 0)
-                {
-                    throw new InvalidOperationException($"FFmpeg merge fallback failed. ExitCode={fallbackResult.ExitCode}. {SafeTail(fallbackResult.Stderr)}");
-                }
-
-                await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_TRANSCODE_FALLBACK_COMPLETED", "info",
-                    "Normalized final merge transcode fallback completed.",
-                    new { projectId = project.Id, finalVideoVersionId = version?.Id, inputCount = mergeItems.Count }, ct);
-            }
+            await FinalMergeMedia.MergeAsync(ffmpegPath, finalDir, concat, finalPath,
+                mergeItems.Select(x => new FinalMergeMedia.Input(x.VideoPath!, x.DurationSeconds)).ToArray(),
+                timelineDurationSeconds, timeout,
+                reason => _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_TRANSCODE_FALLBACK_STARTED", "warning",
+                    "Copy concat skipped or rejected by validation; normalizing each scene before transcode.",
+                    new { jobId = job.Id, finalVideoVersionId = version?.Id, reason }, ct), ct);
 
             if (TryResolveBackgroundMusic(settings, out var musicPath, out var musicVolume))
             {
                 var mixedPath = Path.Combine(finalDir, version is null ? "final-music.mp4" : "final-video-music.mp4");
-                var hasAudio = await HasAudioStreamAsync(ffmpegPath, finalPath, ct);
+                var hasAudio = await HasAudioStreamAsync(ffmpegPath, finalPath, timeout, ct);
                 var musicResult = await RunFfmpegAsync(
                     ffmpegPath,
                     finalDir,
@@ -166,6 +159,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 File.Copy(mixedPath, finalPath, true);
             }
 
+            var validationError = await FinalMergeMedia.ValidateAsync(ffmpegPath, finalPath, timelineDurationSeconds, timeout, ct);
+            if (validationError is null)
+                validationError = await FinalMergeMedia.ValidateMotionAsync(ffmpegPath, finalPath,
+                    mergeItems.Select(x => new FinalMergeMedia.Input(x.VideoPath!, x.DurationSeconds)).ToArray(), timeout, ct);
+            await File.WriteAllTextAsync(Path.Combine(finalDir, "final-validation.log"), validationError ?? "PASS", ct);
+            if (validationError is not null)
+                throw new InvalidOperationException("Final output rejected: " + validationError);
+            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_VALIDATED", "info", "Final video decode and timeline validation passed.",
+                new { jobId = job.Id, finalVideoVersionId = version?.Id, timelineDurationSeconds }, ct);
+
             var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
             var url = $"{_options.CurrentValue.PublicBase.TrimEnd('/')}/{relative}";
             if (version is not null)
@@ -176,13 +179,17 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                     PosterUrl: null,
                     DurationSeconds: RVideoRules.CalculateMergedDuration(mergeableScenes),
                     "video/mp4"), ct);
+                // Completion atomically selects this version and updates the project pointer.
+                finalPublished = true;
             }
 
             await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
+            finalPublished = true;
             await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Completed, ct);
             var finalDurationSeconds = RVideoRules.CalculateMergedDuration(mergeableScenes);
             await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new
             {
+                projectId = project.Id, mergeJobId = job.Id, finalVideoVersionId = version?.Id, mergeSnapshot,
                 finalPath,
                 url,
                 mergedSceneCount = mergeableScenes.Count,
@@ -191,8 +198,22 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 finalDurationSeconds
             }, ct);
         }
+        catch (RenderJobDeferredException ex)
+        {
+            // Selection moved after the version was queued: release it and let the job defer, not fail.
+            if (version is not null)
+            {
+                await _versions.FailFinalVideoVersionAsync(version.Id, ex.GetType().Name, ex.Message, ct);
+            }
+            throw;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (finalPublished)
+            {
+                _logger.LogWarning(ex, "Final merge {JobId} was published successfully; post-publication lifecycle/event update failed.", job.Id);
+                return;
+            }
             if (version is not null)
             {
                 await _versions.FailFinalVideoVersionAsync(version.Id, ex.GetType().Name, ex.Message, ct);
@@ -210,9 +231,15 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
 
             await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Failed, errorMessage: ex.Message, ct: ct);
             await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Failed, ct);
-            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_FAILED", "error", "Final video merge failed.", new { versionId = version?.Id, error = ex.Message }, ct);
+            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_FAILED", "error", "Final video merge failed.", new { projectId = project.Id, mergeJobId = job.Id, versionId = version?.Id, mergeSnapshot, error = ex.Message }, ct);
             throw;
         }
+    }
+
+    internal static void RequireCurrentSnapshot(string expected, string actual)
+    {
+        if (!JsonNode.DeepEquals(JsonNode.Parse(expected), JsonNode.Parse(actual)))
+            throw new RenderJobTerminalFailureException("RVIDEO_MERGE_INPUT_STALE: selections changed; lifecycle will enqueue the current snapshot.");
     }
 
     public static void ValidateConsumedSelection(string snapshot,IEnumerable<(long SceneId,Guid? VersionId)> inputs)
@@ -223,6 +250,15 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             if(!selected.TryGetProperty(item.SceneId.ToString(),out var expected)
                 || !string.Equals(expected.GetString(),item.VersionId?.ToString()??"",StringComparison.OrdinalIgnoreCase))
                 throw new RenderJobDeferredException("Merge input no longer matches the captured selected-video snapshot.");
+    }
+
+    internal static async Task<bool> ResolveVersioningEnabledAsync(ISceneMediaVersioningService versions, bool manual, CancellationToken ct)
+    {
+        if (!manual) return await versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
+        var state = await versions.GetFinalVideoVersioningStateAsync(ct);
+        if (!state.AllowsManualMerge) throw new InvalidOperationException(state.Reason);
+        // Keep the checked state for this attempt; disabled history uses the same validated pipeline.
+        return state.Ready;
     }
 
     private static void ValidateMergeInputs(IReadOnlyList<MergeInput> items)
@@ -342,7 +378,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         }).ToArray();
 
     internal static string BuildConcatLine(string videoPath)
-        => $"file '{Path.GetFullPath(videoPath).Replace('\\', '/').Replace("'", "''")}'";
+        => $"file '{Path.GetFullPath(videoPath).Replace('\\', '/').Replace("'", "'\\''")}'";
 
     private static async Task<FfmpegResult> RunFfmpegAsync(
         string ffmpegPath,
@@ -351,52 +387,12 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         TimeSpan timeout,
         CancellationToken ct)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffmpegPath,
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        foreach (var argument in arguments)
-        {
-            psi.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(timeout);
-        await process.WaitForExitAsync(timeoutCts.Token);
-        return new FfmpegResult(process.ExitCode, await stdoutTask, await stderrTask);
+        var result = await FinalMergeMedia.RunAsync(ffmpegPath, arguments, timeout, ct);
+        return new FfmpegResult(result.ExitCode, result.Output, result.Error);
     }
 
-    private static async Task<bool> HasAudioStreamAsync(string ffmpegPath, string inputPath, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffmpegPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add("-hide_banner");
-        psi.ArgumentList.Add("-i");
-        psi.ArgumentList.Add(inputPath);
-        psi.ArgumentList.Add("-f");
-        psi.ArgumentList.Add("null");
-        psi.ArgumentList.Add("-");
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        var error = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        return process.ExitCode == 0 && (error.Contains("Audio:", StringComparison.OrdinalIgnoreCase) || output.Contains("Audio:", StringComparison.OrdinalIgnoreCase));
-    }
+    private static async Task<bool> HasAudioStreamAsync(string ffmpegPath, string inputPath, TimeSpan timeout, CancellationToken ct)
+        => (await FinalMergeMedia.InspectAsync(ffmpegPath, inputPath, timeout, ct)).Audio;
 
     internal static string SafeTail(string? value, int maxChars = 2000)
     {
@@ -430,13 +426,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             : null;
     }
 
-    private async Task<IReadOnlyList<MergeInput>> BuildCurrentMergeItemsAsync(IReadOnlyList<VideoProjectSceneDto> scenes, CancellationToken ct)
+    private async Task<IReadOnlyList<MergeInput>> BuildCurrentMergeItemsAsync(IReadOnlyList<VideoProjectSceneDto> scenes, CancellationToken ct, FinalVideoVersionDto? finalVersion = null)
     {
         var items = new List<MergeInput>(scenes.Count);
+        var snapshot = finalVersion is null ? null : await _versions.ListFinalVideoVersionItemsAsync(finalVersion.Id, ct);
         foreach (var scene in scenes.OrderBy(x => x.SceneIndex))
         {
             var selectedVideo = await _versions.GetSelectedVideoVersionAsync(scene.Id, ct)
                 ?? throw new InvalidOperationException("Project is missing selected completed scene video versions.");
+            if (snapshot is not null && snapshot.Single(x => x.SceneId == scene.Id).SceneVideoVersionId != selectedVideo.Id)
+                throw new InvalidOperationException("Scene selection changed during composition snapshot. Retry merge.");
             var videoPath = await ResolveLocalMergeInputAsync(selectedVideo, scene.Id, ct);
             items.Add(new MergeInput(scene.Id, scene.SceneIndex, selectedVideo.Id, videoPath, scene.DurationSeconds));
         }

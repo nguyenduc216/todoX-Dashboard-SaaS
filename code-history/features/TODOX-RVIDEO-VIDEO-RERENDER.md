@@ -14,6 +14,8 @@ Verified baseline: code-history/20261019_VIDEO-RERENDER-RELEASE.md and the curre
 
 ## Changes
 
+- 2026-10-28 — TODOX-20261028-SCENE-VIDEO-QUEUE-BLOCKED-001: generation-aware claim quarantine uses transactional audit exclusion and narrow fence/savepoint recovery; validates no-head legacy identity without rewriting historical owners. 34 non-DB tests PASS; PostgreSQL tests compiled but NOT RUN per explicit user instruction. Candidate Release package exists; P0 acceptance pending integration and complete production-schema comparison. See `../TODOX-20261028-SCENE-VIDEO-QUEUE-BLOCKED-001.md`.
+
 1. 2026-10-22 — TODOX-20261022-SCENE05-P0-001: Tasks 1/2/3, selective main integration and operator package. See ../20261022_TODOX-20261022-SCENE05-P0-001.md. Main SHA and package evidence are reported after verification.
 2. 2026-10-22 — TODOX-20261022-SCENE05-RELEASE-002: scoped operator reconciliation SQL and audited terminal-failure submit-guard release. See ../20261022_TODOX-20261022-SCENE05-RELEASE-002.md. No production action; terminal evidence and operator approval are still required.
 
@@ -28,3 +30,15 @@ Verified baseline: code-history/20261019_VIDEO-RERENDER-RELEASE.md and the curre
 7. 2026-10-25 — TODOX-20261025-KNOWN-TASK-RECOVERY-001: fix the persistent poll scheduler's uncommitted transaction, bounded same-task recovery window/count and per-job poll/download mutex. Existing worker/completion flow restores successful outputs without Reserve/Submit or generation changes. PostgreSQL plus local Postman scenario covers all eight Project 196 tasks, Processing then SUCCESS, immutable IDs/intents and duplicate exclusion. Targeted 100 PASS; expanded suite retains the same eight baseline failures, no new failures. No migration. See ../20261025_TODOX-20261025-KNOWN-TASK-RECOVERY-001.md.
 
 8. 2026-10-25 — TODOX-20261025-IMAGE-RERENDER-FK-001: Legacy now shares V2's atomic image enqueue, never putting billing operationId into a job FK. Common ordering is persisted Draft job -> image version -> actual FK bind -> activation -> commit. Preserves selected history, billing identity/routing and tenant/scene active-slot locks. Project 195 real-FK/rollback/concurrency regression plus focused tests: 101 PASS, zero skipped. No migration or production change. See ../20261025_TODOX-20261025-IMAGE-RERENDER-FK-001.md.
+
+9. 2026-10-25 — TODOX-20261025-RVIDEO-SCENE-SETTINGS-001: grouped legacy scene menu, durable dirty model/duration settings, frozen consent request and exact explicit-operation model/mode/duration/resolution; canonical Supersede ownership and billing remain authoritative. 26 focused cases PASS; six existing source assertions independently reproduced on baseline. No migration. See ../20261025_TODOX-20261025-RVIDEO-SCENE-SETTINGS-001.md.
+
+10. 2026-10-25 — TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002: explicit post-save DTO handoff, immutable confirmed configuration/point-rate snapshot, canonical configured tier/rate, quote drift checks at consent/prepare/pre-submit, and all scene menu icons. Old tasks and zero-point pre-submit reservation semantics unchanged. 48 focused tests PASS; no production SQL/provider/browser acceptance or new migration. See ../20261025_TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002.md.
+
+11. 2026-10-25 — TODOX-20261025-RVIDEO-LIVE-REMERGE-003: immediate operation job state and old-playback overlay; single polling loop; post-job-completion merge trigger, completed-project lifecycle retry and snapshot/order merge admission deduplication. Existing readiness/fences/history/billing preserved. 55 focused tests PASS; no migration or live provider/IIS action. See ../20261025_TODOX-20261025-RVIDEO-LIVE-REMERGE-003.md.
+
+12. 2026-10-25 — TODOX-20261025-RVIDEO-VIEW-STATE-004: UI-only incremental polling preserving project/scene/draft identity, session tab/div-scroll persistence, kept-alive panels and explicit final-player source switch. 14 focused .NET tests and JS view-state checks PASS; no migration or backend change. See ../20261025_TODOX-20261025-RVIDEO-VIEW-STATE-004.md.
+
+13. 2026-10-25 — TODOX-20261025-RVIDEO-TAB-BOOTSTRAP-005: fix page CSS overriding MudBlazor 9.6 inactive-panel visibility, bootstrap skeleton/streaming/bounded waits, user-wins tab restore and layout-delayed scroll. 16 focused tests/JS checks PASS and real Chromium local MudTabs harness tab/F5/scroll PASS; full job/browser/provider E2E not run. No migration. See ../20261025_TODOX-20261025-RVIDEO-TAB-BOOTSTRAP-005.md.
+
+14. 2026-10-25 — TODOX-20261025-RVIDEO-LOADING-GAP-006: remove duplicate child initialization/full reload, reuse parent project, data-driven child skeleton and critical/deferred bootstrap with timings. 17 focused tests PASS; tab/scroll/player/backend unchanged, no migration. See ../20261025_TODOX-20261025-RVIDEO-LOADING-GAP-006.md.

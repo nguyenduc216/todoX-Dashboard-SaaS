@@ -1,0 +1,105 @@
+@using TodoX.Web.Services
+@using TodoX.Web.Services.JobRepair
+@inject AuthStateService AuthState
+@inject IJobRepairService Repair
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<JobRepairDialog> Logger
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Sửa lỗi: @Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (_busy) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" /> }
+            @if (_error is not null) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
+            @if (_diagnosis is { } diagnosis)
+            {
+                @if (diagnosis.Scenes.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">Loại job này chưa có trong quy trình sửa lỗi. Hãy sao chép báo cáo gửi bộ phận kỹ thuật.</MudAlert>
+                }
+                @foreach (var scene in diagnosis.Scenes)
+                {
+                    var finding = scene.Finding;
+                    <MudPaper Outlined="true" Class="pa-3">
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">Scene @scene.Snapshot.SceneIndex</MudText>
+                            <MudText Typo="Typo.body2">@finding.Summary</MudText>
+                            @if (finding.Action != JobRepairAction.None)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning"><b>Điểm:</b> @finding.PointNote</MudText>
+                                @if (finding.RiskNote is not null) { <MudText Typo="Typo.caption">@finding.RiskNote</MudText> }
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" Disabled="@_busy" Style="align-self:flex-start"
+                                           OnClick="@(() => ApplyAsync(scene))">@finding.ActionLabel</MudButton>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                }
+                @if (HasUnknown(diagnosis))
+                {
+                    <MudAlert Severity="Severity.Warning">Có trường hợp chưa từng gặp nên nút này không tự sửa. Sao chép báo cáo dưới đây và gửi cho bộ phận kỹ thuật. Sau khi xử lý, trường hợp đó sẽ được thêm vào quy trình.</MudAlert>
+                }
+                <MudTextField T="string" Label="Báo cáo kỹ thuật (đã lược bỏ thông tin khách hàng)" Value="@diagnosis.Report" ReadOnly="true" Lines="4" Variant="Variant.Outlined" />
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="@_busy" OnClick="LoadAsync">Kiểm tra lại</MudButton>
+        <MudButton Disabled="@_busy" OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string Kind { get; set; } = "";
+    [Parameter] public Guid JobId { get; set; }
+    [Parameter] public string Title { get; set; } = "";
+
+    private JobRepairDiagnosis? _diagnosis;
+    private bool _busy;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private static bool HasUnknown(JobRepairDiagnosis diagnosis)
+        => diagnosis.Scenes.Any(scene => scene.Finding.CaseCode == JobRepairPlaybook.Unknown);
+
+    private void Close() => MudDialog.Close();
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try { _diagnosis = await Repair.DiagnoseAsync(AuthState.CurrentUser!, Kind, JobId); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "ADMIN_JOB_REPAIR_DIAGNOSE_FAILED jobId={JobId}", JobId);
+            _error = "Không kiểm tra được job. Vui lòng thử lại.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ApplyAsync(JobRepairSceneDiagnosis scene)
+    {
+        var finding = scene.Finding;
+        var message = new MarkupString(System.Net.WebUtility.HtmlEncode(
+            $"{finding.Summary}\n\nĐiểm: {finding.PointNote}\n\n{finding.RiskNote}").Replace("\n", "<br />"));
+        var confirmed = await DialogService.ShowMessageBoxAsync($"Scene {scene.Snapshot.SceneIndex}: {finding.ActionLabel}", message, yesText: "Xác nhận", cancelText: "Hủy");
+        if (confirmed != true) return;
+        _busy = true;
+        try
+        {
+            var result = await Repair.ApplyAsync(AuthState.CurrentUser!, Kind, JobId, scene.Snapshot.SceneId, finding.CaseCode);
+            Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "ADMIN_JOB_REPAIR_APPLY_FAILED jobId={JobId} sceneId={SceneId}", JobId, scene.Snapshot.SceneId);
+            Snackbar.Add("Không sửa được scene này. Vui lòng thử lại.", Severity.Error);
+        }
+        await LoadAsync();
+    }
+}

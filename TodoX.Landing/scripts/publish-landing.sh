@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUTPUT="${1:-$ROOT/artifacts/publish/todox-landing}"
+OUTPUT="${1:-$ROOT/publish/todoX-landing}"
 PROJECT="$ROOT/TodoX.Landing/TodoX.Landing.csproj"
 
 rm -rf "$OUTPUT"

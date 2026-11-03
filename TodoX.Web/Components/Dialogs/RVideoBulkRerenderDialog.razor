@@ -1,0 +1,109 @@
+@using TodoX.Web.Services.VideoRender
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Render job</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudRadioGroup T="RVideoBulkRerenderMode" Value="_mode" ValueChanged="OnModeChangedAsync">
+                <MudRadio T="RVideoBulkRerenderMode" Value="RVideoBulkRerenderMode.AllScenes" Color="Color.Warning" Disabled="_loading">Render lại tất cả các scene</MudRadio>
+                <MudRadio T="RVideoBulkRerenderMode" Value="RVideoBulkRerenderMode.IncompleteScenes" Color="Color.Warning" Disabled="_loading">Render lại các scene chưa hoàn thành</MudRadio>
+            </MudRadioGroup>
+
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                <MudText Typo="Typo.body2">Đang tính số điểm...</MudText>
+            }
+            else if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+            else if (_quote is { } quote)
+            {
+                @if (quote.Scenes.Count > 0)
+                {
+                    <div>
+                        <MudText Typo="Typo.subtitle1">Dự kiến sử dụng: <b>@FormatPoints(quote.TotalPoints) điểm</b> cho @quote.Scenes.Count scene</MudText>
+                        <MudText Typo="Typo.body2">Hiện có: @FormatPoints(quote.AvailablePoints) điểm</MudText>
+                    </div>
+                    <MudText Typo="Typo.body2">@string.Join(" · ", quote.Scenes.Select(x => $"Scene {x.SceneIndex:00}: {FormatPoints(x.Points)} điểm"))</MudText>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">Không có scene nào cần render lại theo lựa chọn này.</MudAlert>
+                }
+                @if (quote.MissingPoints > 0m)
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true">Không đủ điểm. Thiếu @FormatPoints(quote.MissingPoints) điểm.</MudAlert>
+                }
+                @if (quote.UnknownOutcomeCount > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true">@quote.UnknownOutcomeCount scene có lượt trước chưa xác định kết quả. Tạo lượt mới có thể phát sinh thêm chi phí.</MudAlert>
+                }
+                @if (quote.HasExternalVoice)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">Số điểm trên chỉ tính phần video, chưa gồm giọng đọc tạo sau đó.</MudAlert>
+                }
+                @if (quote.Skipped.Count > 0)
+                {
+                    <MudText Typo="Typo.caption">Bỏ qua: @string.Join(" · ", quote.Skipped.Select(x => $"Scene {x.SceneIndex:00} ({x.Reason})"))</MudText>
+                }
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" Disabled="@(_loading || _quote?.CanConfirm != true)" OnClick="Submit">Đồng ý</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Func<RVideoBulkRerenderMode, Task<RVideoBulkRerenderQuote>> LoadQuote { get; set; } = default!;
+
+    private RVideoBulkRerenderMode _mode = RVideoBulkRerenderMode.IncompleteScenes;
+    private RVideoBulkRerenderQuote? _quote;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await ReloadQuoteAsync();
+    }
+
+    private async Task OnModeChangedAsync(RVideoBulkRerenderMode mode)
+    {
+        if (_loading || mode == _mode) return;
+        _mode = mode;
+        await ReloadQuoteAsync();
+    }
+
+    private async Task ReloadQuoteAsync()
+    {
+        _loading = true;
+        _quote = null;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _quote = await LoadQuote(_mode);
+        }
+        catch (Exception)
+        {
+            _error = "Không thể tính số điểm. Vui lòng thử lại.";
+        }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private void Submit()
+    {
+        if (_quote is { CanConfirm: true } quote) MudDialog.Close(DialogResult.Ok(quote));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private static string FormatPoints(decimal points) => points.ToString("0.##");
+}

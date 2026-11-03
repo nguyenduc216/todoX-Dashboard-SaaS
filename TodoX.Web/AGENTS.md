@@ -79,10 +79,11 @@ Before declaring completion:
 - After validation succeeds, you MUST follow the standardized mandatory chain before declaring complete: TEST/VERIFY -> BUILD -> PUBLISH TO DESIGNATED FOLDER -> COMMIT -> PUSH -> REPORT SHA.
 - TEST/VERIFY: run relevant tests per checklist (e.g. RVideoP3B2 and RVideoP3B1 both PASS).
 - BUILD: `dotnet build TodoX.Web/TodoX.Web.csproj -c Release` must be 0 errors.
-- PUBLISH TO DESIGNATED FOLDER: `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release -o artifacts/publish/todox-dashboard` and verify `artifacts/publish/todox-dashboard/TodoX.Web.dll` exists. Do not commit `artifacts/publish`.
+- PUBLISH TO DESIGNATED FOLDER: `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release -o publish/todoX-dashboard` and verify `publish/todoX-dashboard/TodoX.Web.dll` exists. Do not commit `publish/` or `artifacts/`.
 - COMMIT -> PUSH -> REPORT SHA per GITHUB PUSH POLICY below. Task is NOT complete if any step is skipped, commit is local-only, or artifact is unverified.
-- Default publish root: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish`.
-- For the dashboard application, publish to `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard` unless the user explicitly requests another subfolder.
+- Default publish root: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\publish`.
+- For the dashboard application, publish to `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\publish\todoX-dashboard` unless the user explicitly requests another subfolder.
+- Earlier builds under `artifacts\publish\` are kept as history/rollback; do not delete them.
 
 ## YEScale provider workflow
 

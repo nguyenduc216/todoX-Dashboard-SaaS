@@ -25,3 +25,7 @@
 .service-card .art{overflow:hidden}
 .service-card .art img{display:block;width:100%;height:100%;object-fit:cover}
 @media(max-width:700px){.service-card .art img{min-height:145px}}
+/* Play button: same gold icon-only style as the homepage and industry cards. */
+.demo-play{display:grid;place-items:center;gap:0;width:78px;height:78px;padding:0;border:1px solid #ffd86bd9;background:linear-gradient(135deg,#ffd86b,#ffbd22);color:#171109;box-shadow:0 0 0 12px #ffbd221f,0 12px 34px #ffbd2247;transition:transform .18s ease}
+.demo-play i{font-size:23px;color:inherit;margin-left:3px}
+.demo-play:hover{transform:translate(-50%,-50%) scale(1.06)}

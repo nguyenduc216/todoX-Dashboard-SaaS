@@ -133,10 +133,13 @@ public sealed class RVideoSceneImageRenderAction : IRVideoSceneImageRenderAction
 
     public async Task<RVideoSceneImageRenderResult> EnqueueRerenderAsync(RVideoSceneImageRenderRequest request, CurrentUserSession user, CancellationToken ct = default)
     {
-        if (user is null) return RVideoSceneImageRenderResult.Fail("RVIDEO_USER_REQUIRED", "Phiên đăng nhập không hợp lệ.");
+        if (user is null || !user.IsAuthenticated) return RVideoSceneImageRenderResult.Fail("RVIDEO_USER_REQUIRED", "Phiên đăng nhập không hợp lệ.");
         if (request.Scene is null) return RVideoSceneImageRenderResult.Fail("RVIDEO_SCENE_REQUIRED", "Không tìm thấy scene.");
 
-        var scene = request.Scene;
+        var authorizedProject = await _repo.GetProjectAsync(request.ProjectId, user, ct)
+            ?? throw new UnauthorizedAccessException();
+        var scene = authorizedProject.Scenes.FirstOrDefault(x => x.Id == request.Scene.Id)
+            ?? throw new UnauthorizedAccessException();
         var draft = request.Metadata ?? ScenePromptMetadata.FromScene(scene);
         if (string.IsNullOrWhiteSpace(draft.ImagePrompt))
             return RVideoSceneImageRenderResult.Fail("SCENE_IMAGE_PROMPT_EMPTY", "Cần nhập prompt ảnh trước khi render.");

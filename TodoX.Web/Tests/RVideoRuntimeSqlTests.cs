@@ -307,15 +307,30 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void ManualRecomposeIsNotSkippedWhenFinalAlreadyMatchesSelection()
+    {
+        var handler = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+        var finalization = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
+
+        // The handler's "already current" short-circuit applies only to automatic merges.
+        Assert.Contains("if (!manual && _finalization is not null && await _finalization.IsCurrentFinalVideoAsync(projectId, ct)) return;", handler);
+        Assert.True(handler.IndexOf("bool manual;", StringComparison.Ordinal)
+            < handler.IndexOf("IsCurrentFinalVideoAsync(projectId, ct)) return;", StringComparison.Ordinal));
+        // Manual enqueue is not deduplicated against the completed merge of the same selection.
+        Assert.Contains("mergeSelectionKey = manual ? null : mergeSelectionKey", finalization);
+    }
+
+    [Fact]
     public void FinalMergeHasFastCopyAndNormalizedTranscodeFallbackCommands()
     {
-        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+        // Copy concat, validation and the normalized transcode fallback live in FinalMergeMedia (TODOX-20261027 final merge validation).
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs")
+            + ReadRepoFile("Services", "VideoRender", "FinalMergeMedia.cs");
 
-        Assert.Contains("PROJECT_MERGE_COPY_FAILED", source);
+        Assert.Contains("FinalMergeMedia.MergeAsync", source);
+        Assert.Contains("FinalMergeMedia.ValidateAsync", source);
         Assert.Contains("PROJECT_MERGE_TRANSCODE_FALLBACK_STARTED", source);
-        Assert.Contains("PROJECT_MERGE_TRANSCODE_FALLBACK_COMPLETED", source);
-        Assert.Contains("ffmpeg-copy.log", source);
-        Assert.Contains("ffmpeg-fallback.log", source);
+        Assert.Contains("PROJECT_MERGE_VALIDATED", source);
         Assert.Contains("\"-c\", \"copy\"", source);
         Assert.Contains("\"-c:v\", \"libx264\"", source);
         Assert.Contains("\"-pix_fmt\", \"yuv420p\"", source);
@@ -337,9 +352,11 @@ public sealed class RVideoRuntimeSqlTests
 
         Assert.Equal("file 'H:/video scenes/scene-01.mp4'", lines[0]);
         Assert.Equal("file 'H:/video scenes/scene-02.mp4'", lines[1]);
-        Assert.Equal("file 'H:/O''Brien/scene-03.mp4'", lines[2]);
+        // FFmpeg concat demuxer escaping: close quote, escaped quote, reopen quote.
+        Assert.Equal(@"file 'H:/O'\''Brien/scene-03.mp4'", lines[2]);
         Assert.All(lines, line => Assert.StartsWith("file '", line, StringComparison.Ordinal));
-        Assert.All(lines, line => Assert.DoesNotContain(@"\", line, StringComparison.Ordinal));
+        // Path separators are normalized; the only backslash allowed is inside the quote escape.
+        Assert.All(lines, line => Assert.DoesNotContain(@"\", line.Replace(@"'\''", string.Empty), StringComparison.Ordinal));
 
         var concatPath = Path.Combine(Path.GetTempPath(), $"todox-concat-{Guid.NewGuid():N}.txt");
         try

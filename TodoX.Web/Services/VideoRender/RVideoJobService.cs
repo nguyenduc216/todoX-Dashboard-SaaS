@@ -17,6 +17,15 @@ public interface IRVideoJobService
     Task UpdateAsync(Guid jobId, RVideoJobUpdateRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<long?> ResolveProjectIdAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task SyncLifecycleAsync(long projectId, string stage, string projectStatus, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<Guid, RVideoJobListSummary>> GetListSummariesAsync(IReadOnlyCollection<Guid> jobIds, CurrentUserSession user, CancellationToken ct = default);
+}
+
+/// <summary>Read-only list projection: project status and points actually charged for completed scene versions.</summary>
+public sealed class RVideoJobListSummary
+{
+    public Guid JobId { get; init; }
+    public string ProjectStatus { get; init; } = string.Empty;
+    public decimal ChargedPoints { get; init; }
 }
 
 public sealed class RVideoJobUpdateRequest
@@ -361,6 +370,28 @@ public sealed class RVideoJobService : IRVideoJobService
     {
         var view = await GetByJobIdAsync(jobId, user, ct);
         return view?.Project.Id;
+    }
+
+    // One query for a page of list rows; the points sum matches GetProjectActualCustomerPointsConsumedAsync.
+    public async Task<IReadOnlyDictionary<Guid, RVideoJobListSummary>> GetListSummariesAsync(IReadOnlyCollection<Guid> jobIds, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureCustomer(user);
+        if (jobIds.Count == 0) return new Dictionary<Guid, RVideoJobListSummary>();
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<RVideoJobListSummary>(new CommandDefinition("""
+            SELECT p.core_job_id AS JobId, p.status AS ProjectStatus,
+                   COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_image_versions v
+                              WHERE v.project_id=p.id AND v.tenant_id=@tenant AND v.status='completed'), 0)
+                 + COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_video_versions v
+                              WHERE v.project_id=p.id AND v.tenant_id=@tenant AND v.status='completed'), 0)
+                 + COALESCE((SELECT SUM(v.charged_points) FROM video_render.scene_audio_versions v
+                              WHERE v.project_id=p.id AND v.tenant_id=@tenant AND v.status='completed'), 0) AS ChargedPoints
+              FROM video_render.video_projects p
+              JOIN render.render_jobs r ON r.id=p.core_job_id AND r.tenant_id=@tenant
+             WHERE p.tenant_id=@tenant AND p.core_job_id = ANY(@jobIds) AND r.customer_id=@customer AND r.job_type=@jobType;
+            """, new { jobIds = jobIds.ToArray(), tenant = _tenant.TenantId, customer = user.CustomerId, jobType = RenderJobTypes.CoreService }, cancellationToken: ct));
+        return rows.GroupBy(x => x.JobId).ToDictionary(g => g.Key, g => g.First());
     }
 
     public async Task UpdateAsync(Guid jobId, RVideoJobUpdateRequest request, CurrentUserSession user, CancellationToken ct = default)

@@ -30,15 +30,15 @@
           </MudTooltip>
         </MudStack>
       </div>
-      <MudTextField T="string" Value="_workingInput" ValueChanged="HandleWorkingInputChanged" Immediate="true" Variant="Variant.Outlined" Lines="8" Placeholder="Hãy mô tả video..." />
+      <MudTextField T="string" Value="_workingInput" ValueChanged="HandleWorkingInputChanged" Immediate="true" Variant="Variant.Outlined" Lines="6" Placeholder="Hãy mô tả video..." />
       <div class="rv2-info-cta">
-        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Disabled="@(!CanGenerate)" OnClick="HandleGenerateAsync">Tạo Prompt AI</MudButton>
-        <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="HandleReloadAsync" Disabled="@_generating">Làm mới</MudButton>
-        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="HandleHistoryAsync" Disabled="@_generating">Lịch sử</MudButton>
+        <MudButton Class="rv2-info-primary" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@(!CanGenerate)" OnClick="HandleGenerateAsync">Tạo Prompt AI</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="HandleReloadAsync" Disabled="@_generating">Làm mới</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.History" OnClick="HandleHistoryAsync" Disabled="@_generating">Lịch sử</MudButton>
       </div>
       @if (_generating) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" /> }
       @if (!string.IsNullOrWhiteSpace(_status)) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@_status</MudAlert> }
-      @if (JobView is null) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Chưa chọn job.</MudAlert> }
+      @if (JobView is null && JobId is null) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Chưa chọn job.</MudAlert> }
     </section>
     <section class="rv2-info-side">
       <div class="rv2-section-head mb-2">
@@ -102,10 +102,10 @@
   <MudExpansionPanels Elevation="0" Dense="true" Class="rv2-advanced">
     <MudExpansionPanel Text="Cài đặt nâng cao" Expanded="@_adv" ExpandedChanged="@(v=>_adv=v)">
       <MudGrid Class="mt-2">
-        <MudItem xs="12" sm="4"><MudNumericField T="int" Value="_advTotalSeconds" ValueChanged="@(async v=>await HandleAdvancedTotalSecondsChangedAsync(v))" Label="Tổng giây" Variant="Variant.Outlined" Min="1" Disabled="@_advSaving"/></MudItem>
-        <MudItem xs="12" sm="4"><MudNumericField T="int" Value="_advSceneSeconds" ValueChanged="@(async v=>await HandleAdvancedSceneSecondsChangedAsync(v))" Label="Giây/scene" Variant="Variant.Outlined" Min="1" Disabled="@_advSaving"/></MudItem>
-        <MudItem xs="12" sm="4"><MudSelect T="string" Value="_advAspect" ValueChanged="@(async v=>await HandleAdvancedAspectChangedAsync(v))" Label="Tỷ lệ" Variant="Variant.Outlined" Disabled="@_advSaving"><MudSelectItem Value="@("16:9")">16:9</MudSelectItem><MudSelectItem Value="@("9:16")">9:16</MudSelectItem></MudSelect></MudItem>
-        <MudItem xs="12" sm="4"><MudSelect T="string" Value="_advResolution" ValueChanged="@(async v=>await HandleAdvancedResolutionChangedAsync(v))" Label="Độ phân giải" Variant="Variant.Outlined" Disabled="@_advSaving"><MudSelectItem Value="@("720p")">720p</MudSelectItem><MudSelectItem Value="@("1080p")">1080p</MudSelectItem></MudSelect></MudItem>
+        <MudItem xs="6" sm="4"><MudNumericField T="int" Value="_advTotalSeconds" ValueChanged="@(async v=>await HandleAdvancedTotalSecondsChangedAsync(v))" Label="Tổng giây" Variant="Variant.Outlined" Min="1" Disabled="@_advSaving"/></MudItem>
+        <MudItem xs="6" sm="4"><MudNumericField T="int" Value="_advSceneSeconds" ValueChanged="@(async v=>await HandleAdvancedSceneSecondsChangedAsync(v))" Label="Giây/scene" Variant="Variant.Outlined" Min="1" Disabled="@_advSaving"/></MudItem>
+        <MudItem xs="6" sm="4"><MudSelect T="string" Value="_advAspect" ValueChanged="@(async v=>await HandleAdvancedAspectChangedAsync(v))" Label="Tỷ lệ" Variant="Variant.Outlined" Disabled="@_advSaving"><MudSelectItem Value="@("16:9")">16:9</MudSelectItem><MudSelectItem Value="@("9:16")">9:16</MudSelectItem></MudSelect></MudItem>
+        <MudItem xs="6" sm="4"><MudSelect T="string" Value="_advResolution" ValueChanged="@(async v=>await HandleAdvancedResolutionChangedAsync(v))" Label="Độ phân giải" Variant="Variant.Outlined" Disabled="@_advSaving"><MudSelectItem Value="@("720p")">720p</MudSelectItem><MudSelectItem Value="@("1080p")">1080p</MudSelectItem></MudSelect></MudItem>
         <MudItem xs="12" sm="4"><MudSwitch T="bool" Value="_advThinkScenes" ValueChanged="@(async v=>await HandleAdvancedThinkScenesChangedAsync(v))" Label="Tự tách scene (ThinkScenes)" Color="Color.Primary" Disabled="@_advSaving"/></MudItem>
         <MudItem xs="12" sm="4">
           <MudText Typo="Typo.caption" Class="rv2-adv-label">Chế độ xử lý</MudText>
@@ -171,9 +171,13 @@
     await _speech.InitializeAsync(); _speechSupported = _speech.IsSupported;
   }
   private long? _lastWorkingProjectId; private Guid? _lastWorkingActiveId;
+  private bool _catalogsLoaded;
+  // Catalogs are loaded once per component; refreshes of the job view do not re-query them.
   private async Task LoadCatalogsAsync(){
-    if(_voices.Count==0){ try{ _voices.AddRange(await Catalog.ListVoicesAsync(activeOnly:true)); }catch{} }
-    if(_music.Count==0){ try{ _music.AddRange(await Catalog.ListMusicAsync(activeOnly:true)); }catch{} }
+    if(_catalogsLoaded) return;
+    _catalogsLoaded = true;
+    try{ _voices.AddRange(await Catalog.ListVoicesAsync(activeOnly:true)); }catch{}
+    try{ _music.AddRange(await Catalog.ListMusicAsync(activeOnly:true)); }catch{}
   }
   private static string CharacterLabel(string mode)=> mode switch{
     RVideoCharacterModes.Upload=>"Upload ảnh",

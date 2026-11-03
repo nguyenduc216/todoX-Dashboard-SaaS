@@ -46,6 +46,33 @@ public sealed class SharedMediaPathService
         return CombineInsideRoot(root, _options.IndustrySolutions.RootSubfolder, subfolder);
     }
 
+    public string GetIntroPhysicalFolder(string subfolder)
+    {
+        if (subfolder is not ("videos" or "posters" or "temp")) throw new ArgumentException("Invalid media folder.");
+        return CombineInsideRoot(StorageRoot ?? throw new InvalidOperationException("SharedMedia storage unavailable."), "landing", "intro", subfolder);
+    }
+
+    public string GetIntroPublicUrl(string subfolder, string fileName)
+    {
+        if (subfolder is not ("videos" or "posters") || Path.GetFileName(fileName) != fileName)
+            throw new ArgumentException("Invalid media path.");
+        return $"{NormalizeRequestPath(_options.RequestPath)}/landing/intro/{subfolder}/{Uri.EscapeDataString(fileName)}";
+    }
+
+    public string GetLandingMediaPhysicalFolder(string area, string subfolder)
+    {
+        if (area is not ("intro" or "short-video" or "video-samples")) throw new ArgumentException("Invalid media area.");
+        if (subfolder is not ("videos" or "posters" or "temp")) throw new ArgumentException("Invalid media folder.");
+        return CombineInsideRoot(StorageRoot ?? throw new InvalidOperationException("SharedMedia storage unavailable."), "landing", area, subfolder);
+    }
+
+    public string GetLandingMediaPublicUrl(string area, string subfolder, string fileName)
+    {
+        if (area is not ("intro" or "short-video" or "video-samples") || subfolder is not ("videos" or "posters") || Path.GetFileName(fileName) != fileName)
+            throw new ArgumentException("Invalid media path.");
+        return $"{NormalizeRequestPath(_options.RequestPath)}/landing/{area}/{subfolder}/{Uri.EscapeDataString(fileName)}";
+    }
+
     public string GetIndustryPublicUrl(string subfolder, string fileName)
     {
         var requestPath = NormalizeRequestPath(_options.RequestPath);

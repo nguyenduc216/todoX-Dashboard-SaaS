@@ -1,0 +1,113 @@
+@page "/landing/intro-video"
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.Extensions.Options
+@using System.Diagnostics
+@using TodoX.Web.Models
+@using TodoX.Web.Models.Landing
+@using TodoX.Web.Services
+@using TodoX.Web.Services.Landing
+@using TodoX.Web.Services.SharedMedia
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject LandingIntroVideoRepository Repository
+@inject LandingIntroVideoMediaService Media
+@inject SharedMediaPathService Paths
+@inject ISnackbar Snackbar
+@inject ILogger<LandingIntroVideo> Logger
+@inject IOptions<SharedMediaOptions> MediaOptions
+
+<PageTitle>Video Intro Landing</PageTitle>
+<MudStack Spacing="3">
+    <MudText Typo="Typo.h4">Video Intro</MudText>
+    @if (!_ready) { <MudProgressLinear Indeterminate="true" /> }
+    else if (!CanView) { <MudAlert Severity="Severity.Error">Bạn không có quyền xem cấu hình Landing Page.</MudAlert> }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
+        @if (!Paths.IsConfigured || !Paths.CanWrite()) { <MudAlert Severity="Severity.Warning">SharedMedia chưa sẵn sàng để upload.</MudAlert> }
+        <MudPaper Class="pa-4">
+            <MudStack Spacing="3">
+                <MudSwitch T="bool" @bind-Value="_settings.IsEnabled" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Kích hoạt video" />
+                <MudSelect T="string" Label="Chế độ phát" @bind-Value="_settings.PlaybackMode" Disabled="@(!CanUpdate)">
+                    <MudSelectItem Value="@("AUTOPLAY_LOOP")">Tự phát và lặp</MudSelectItem>
+                    <MudSelectItem Value="@("CLICK_TO_PLAY")">Nhấn để phát</MudSelectItem>
+                    <MudSelectItem Value="@("AUTOPLAY_ONCE")">Tự phát một lần</MudSelectItem>
+                </MudSelect>
+                <MudSwitch T="bool" @bind-Value="_settings.MutedByDefault" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Tắt tiếng mặc định khi người xem nhấn Play" />
+                <MudText Typo="Typo.caption">Video tự phát ban đầu sẽ tắt tiếng theo hạn chế của trình duyệt. Người xem có thể bật tiếng bằng nút âm thanh khi hiển thị điều khiển.</MudText>
+                <MudSwitch T="bool" @bind-Value="_settings.ShowControls" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Hiển thị điều khiển" />
+                @if (!string.IsNullOrWhiteSpace(_settings.VideoUrl))
+                {
+                    <video src="@_settings.VideoUrl" poster="@_settings.PosterUrl" controls playsinline preload="metadata" style="max-width:220px;max-height:390px;width:100%;object-fit:cover"></video>
+                }
+                <MudText>Chọn video MP4/WebM đã hoàn thiện, dùng codec tương thích trình duyệt (tối đa 200 MB theo cấu hình SharedMedia). Video được lưu nguyên bản, không chuyển mã:</MudText>
+                <InputFile OnChange="UploadVideoAsync" accept=".mp4,.webm,video/mp4,video/webm" disabled="@(!CanUpdate || _busy)" />
+                @if (!string.IsNullOrWhiteSpace(_settings.PosterUrl)) { <img src="@_settings.PosterUrl" alt="Poster" style="max-width:160px" /> }
+                <MudText>Chọn poster JPG/PNG/WebP:</MudText>
+                <InputFile OnChange="UploadPosterAsync" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled="@(!CanUpdate || _busy)" />
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(!CanUpdate || _busy)" OnClick="SaveAsync">Lưu cấu hình</MudButton>
+            </MudStack>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private LandingIntroVideoSettings _settings = new();
+    private bool _ready;
+    private bool _busy;
+    private string? _error;
+    private bool CanView => AuthState.CurrentUser is not null && !AuthState.CurrentUser.IsCustomer && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingIndustryPermissions.View));
+    private bool CanUpdate => CanView && AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingIndustryPermissions.Update));
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        _ready = true;
+        if (!CanView) return;
+        try { _settings = await Repository.GetAsync(); }
+        catch { _error = "Không thể tải cấu hình. Kiểm tra database và migration landing.intro_video_settings."; }
+    }
+
+    private Task UploadVideoAsync(InputFileChangeEventArgs args) => UploadAsync(args, true);
+    private Task UploadPosterAsync(InputFileChangeEventArgs args) => UploadAsync(args, false);
+    private async Task UploadAsync(InputFileChangeEventArgs args, bool video)
+    {
+        if (!CanUpdate || _busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var url = await Media.UploadAsync(args.File, video);
+            if (video) _settings.VideoUrl = url;
+            else _settings.PosterUrl = url;
+            Snackbar.Add("Upload thành công. Nhấn Lưu cấu hình để kích hoạt.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            var maxBytes = video ? MediaOptions.Value.IndustrySolutions.MaxVideoBytes : MediaOptions.Value.IndustrySolutions.MaxThumbnailBytes;
+            var storageAvailable = Paths.IsConfigured && Paths.CanWrite();
+            var category = IntroUploadDiagnostics.Classify(ex, storageAvailable);
+            var correlationId = Activity.Current?.Id;
+            Logger.LogError(ex,
+                "Landing intro upload failed. FileName={FileName} FileSize={FileSize} UploadType={UploadType} MaxBytes={MaxBytes} StorageAvailable={StorageAvailable} ExceptionType={ExceptionType} ErrorCategory={ErrorCategory} CorrelationId={CorrelationId}",
+                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, video ? "video" : "poster",
+                maxBytes, storageAvailable, ex.GetType().Name, category, correlationId);
+            _error = IntroUploadDiagnostics.Message(category, maxBytes);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!CanUpdate || _busy || AuthState.CurrentUser is null) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Repository.SaveAsync(_settings, AuthState.CurrentUser.UserId.ToString());
+            Snackbar.Add("Đã lưu cấu hình Video Intro.", Severity.Success);
+        }
+        catch (Exception) { _error = "Không thể lưu cấu hình. Kiểm tra video và database."; }
+        finally { _busy = false; }
+    }
+}

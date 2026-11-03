@@ -26,7 +26,7 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     {
         var source = ReadRepoFile("Components", "Pages", "MyJobs.razor");
 
-        Assert.Contains("BuildDanceRowsAsync", source);
+        Assert.Contains("BuildDanceRows(", source);
         Assert.Contains("ResolveDancePointsLabelAsync", source);
         Assert.Contains("DanceOperations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo", source);
         Assert.Contains("DanceSellCustomerStatusText.JobStatusLabel(job.Status)", source);

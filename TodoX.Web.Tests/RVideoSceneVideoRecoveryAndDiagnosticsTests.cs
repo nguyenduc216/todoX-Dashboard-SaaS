@@ -15,6 +15,18 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
 {
     private static readonly BindingFlags NonPublicStatic = BindingFlags.NonPublic | BindingFlags.Static;
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("9")]
+    public void NoResourcesWithoutTaskIdRemainsAmbiguous(string countTasks)
+    {
+        var exception = new Ai79TaskSubmitException(
+            "NOT_RESOURCES", $$"""{"error":"NOT_RESOURCES","countTasks":"{{countTasks}}"}""",
+            HttpStatusCode.OK, "NOT_RESOURCES");
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("IsDefinitivelyRejectedSubmit", NonPublicStatic)!;
+        Assert.False((bool)method.Invoke(null, new object[] { exception })!);
+    }
+
     [Fact]
     public async Task RVideoSubmitContinuesWhenRequestDiagnosticCallbackFails()
     {

@@ -385,6 +385,7 @@ public interface ISceneMediaVersioningService
 {
     Task<SceneVideoUiState> GetSceneVideoUiStateAsync(long sceneId, CurrentUserSession user, CancellationToken ct = default);
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
+    Task<FinalVideoVersioningState> GetFinalVideoVersioningStateAsync(CancellationToken ct = default);
     Task<SceneImageVersionDto> CreateQueuedImageVersionAsync(SceneImageVersionCreateRequest request, CancellationToken ct = default);
     /// <summary>
     /// TODOX-20261015-RVIDEO-IMAGE-ATOMIC-ENQUEUE-001: creates the queued image version and its
@@ -482,6 +483,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         _tenant = tenant;
         _reconciliationConfiguration = reconciliationConfiguration;
     }
+
+    public Task<FinalVideoVersioningState> GetFinalVideoVersioningStateAsync(CancellationToken ct = default)
+        => FinalVideoVersioningState.ReadAsync(_factory, ct);
 
     public async Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default)
     {
@@ -661,9 +665,20 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         // Preserve other input fields and remove casing aliases so deserialization cannot restore Guid.Empty.
         var jobInput = JsonNode.Parse(jobDraft.InputJson) as JsonObject
             ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_INPUT_INVALID");
-        foreach (var key in jobInput.Select(x => x.Key)
-            .Where(key => key.Equals("imageVersionId", StringComparison.OrdinalIgnoreCase)).ToArray())
+        // Both historical PascalCase and Web/camelCase callers must persist one canonical key.
+        foreach (var key in jobInput.Select(x => x.Key).ToArray())
+        {
+            var canonical = JsonNamingPolicy.CamelCase.ConvertName(key);
+            if (canonical == key) continue;
+            if (jobInput.ContainsKey(canonical))
+                throw new InvalidOperationException("SCENE_IMAGE_JOB_INPUT_AMBIGUOUS");
+            var value = jobInput[key];
             jobInput.Remove(key);
+            jobInput[canonical] = value;
+        }
+        if (jobInput["projectId"]?.GetValue<long>() != request.ProjectId
+            || jobInput["sceneId"]?.GetValue<long>() != request.SceneId)
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_IDENTITY_MISMATCH");
         jobInput["imageVersionId"] = versionId;
         var inserted = await conn.ExecuteAsync(
             """
@@ -1087,7 +1102,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 """
                 UPDATE video_render.scene_image_versions
                    SET status='pending_reconciliation', error_code='RENDER_JOB_ENQUEUE_UNKNOWN',
-                       error_message='C???n ?????i so??t render job tr?????c khi render l???i.', updated_at=now(),
+                       error_message='Cần đối soát render job trước khi render lại.', updated_at=now(),
                        enqueue_reconcile_after=now(),
                        enqueue_reconcile_deadline=now() + @window,
                        enqueue_reconcile_attempts=0
@@ -1097,7 +1112,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             await conn.ExecuteAsync("""
                 UPDATE video_render.scene_image_versions
                    SET status='pending_reconciliation', error_code='RENDER_JOB_ENQUEUE_UNKNOWN',
-                       error_message='C???n ?????i so??t render job tr?????c khi render l???i.', updated_at=now()
+                       error_message='Cần đối soát render job trước khi render lại.', updated_at=now()
                  WHERE id=@versionId AND tenant_id=@tenant AND status='queued';
                 """, new { versionId, tenant = _tenant.TenantId });
     }
@@ -2226,8 +2241,10 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
         var selectedVideos = (await conn.QueryAsync<SelectedSceneVideoRow>(
             """
-            SELECT s.id AS SceneId, s.scene_index AS SceneIndex, s.selected_video_version_id AS SceneVideoVersionId
+            SELECT s.id AS SceneId, s.scene_index AS SceneIndex, v.id AS SceneVideoVersionId, s.duration_seconds AS DurationSeconds
               FROM video_render.video_project_scenes s
+              LEFT JOIN video_render.scene_video_versions v ON v.id=s.selected_video_version_id
+                AND v.scene_id=s.id AND v.project_id=s.project_id AND v.tenant_id=s.tenant_id AND v.status='completed'
              WHERE s.project_id=@projectId AND s.tenant_id=@tenant
              ORDER BY s.scene_index;
             """,
@@ -2278,9 +2295,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 INSERT INTO video_render.final_video_version_items
                     (final_video_version_id, scene_id, scene_video_version_id, item_order, config_json)
                 VALUES
-                    (@finalVersionId, @sceneId, @sceneVideoVersionId, @itemOrder, '{}'::jsonb);
+                    (@finalVersionId, @sceneId, @sceneVideoVersionId, @itemOrder, jsonb_build_object('durationSeconds', @durationSeconds));
                 """,
-                new { finalVersionId = id, item.SceneId, item.SceneVideoVersionId, itemOrder = item.SceneIndex }, tx);
+                new { finalVersionId = id, item.SceneId, item.SceneVideoVersionId, itemOrder = item.SceneIndex, durationSeconds = item.DurationSeconds }, tx);
         }
 
         tx.Commit();
@@ -2913,7 +2930,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         """
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId, version_number AS VersionNumber,
                logical_request_id AS LogicalRequestId, status AS Status, is_selected AS IsSelected, storage_key AS StorageKey,
-               public_url AS PublicUrl, source_file_path AS SourceFilePath, result_media_id AS ResultMediaId,
+               public_url AS PublicUrl, source_file_path AS SourceFilePath, result_media_id AS ResultMediaId, render_job_id AS RenderJobId,
                image_prompt_snapshot AS ImagePromptSnapshot, compiled_image_prompt_snapshot AS CompiledImagePromptSnapshot,
                video_prompt_snapshot AS VideoPromptSnapshot, provider_code AS ProviderCode,
                actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
@@ -3072,6 +3089,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         public long SceneId { get; init; }
         public int SceneIndex { get; init; }
         public Guid? SceneVideoVersionId { get; init; }
+        public int DurationSeconds { get; init; }
     }
 
     private sealed class SceneErrorDetailRow

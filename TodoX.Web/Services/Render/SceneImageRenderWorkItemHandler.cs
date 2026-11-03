@@ -61,6 +61,10 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         var version = (await _versions.ListImageVersionsAsync(input.SceneId, 0, 100, ct))
             .FirstOrDefault(x => x.Id == input.ImageVersionId)
             ?? throw new InvalidOperationException("Scene image version not found.");
+        if (version.ProjectId != input.ProjectId || version.SceneId != input.SceneId
+            || (input.BillingIntent == PointBillingIntent.UserRerender && version.RenderJobId != job.Id))
+            throw new InvalidOperationException("SCENE_IMAGE_JOB_IDENTITY_MISMATCH");
+        if (string.Equals(version.Status, "completed", StringComparison.OrdinalIgnoreCase)) return;
         await _rvideoJobs.SyncLifecycleAsync(input.ProjectId, RVideoStages.Image, VideoProjectStatuses.Rendering, ct);
         var taskId = await _versions.GetSceneImageProviderTaskIdAsync(version.Id, ct);
         if (!string.IsNullOrWhiteSpace(input.RequestedModel))
@@ -196,7 +200,9 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 new { jobId = job.Id, sceneId = input.SceneId, imageVersionId = input.ImageVersionId,
                     provider = outcome.ProviderCode, model = outcome.ModelName }, ct);
 
-            await _autoChain.TryEnqueueSceneVideoAsync(input.ProjectId, input.SceneId, "SCENE_IMAGE_READY", ct);
+            // Explicit image rerenders finish at image selection; initial rendering retains its chain.
+            if (input.BillingIntent != PointBillingIntent.UserRerender)
+                await _autoChain.TryEnqueueSceneVideoAsync(input.ProjectId, input.SceneId, "SCENE_IMAGE_READY", ct);
         }
         catch (Ai79TaskPollException ex)
         {
@@ -237,8 +243,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var logicalRequestId = $"{input.LogicalRequestId}-fallback-{nextModel.AttemptIndex}";
-        var version = await _versions.CreateQueuedImageVersionAsync(new SceneImageVersionCreateRequest(
-            input.ProjectId, input.SceneId, input.UserId, input.CustomerId, input.ParentJobId, logicalRequestId,
+        var versionRequest = new SceneImageVersionCreateRequest(
+            input.ProjectId, input.SceneId, input.UserId, input.CustomerId, null, logicalRequestId,
             scene.ImagePrompt, input.Prompt, scene.VideoPrompt, null,
             new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds,
                 scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt },
@@ -247,21 +253,12 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
             new { capability = input.CapabilityCode, aspectRatio = input.AspectRatio,
                 outputFormat = "png", source = "scene_image_model_fallback",
                 model = nextModel.Model, nextModel.Mode, nextModel.Resolution,
-                modelAttemptIndex = nextModel.AttemptIndex }), ct);
+                modelAttemptIndex = nextModel.AttemptIndex });
 
-        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
-            title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
-            videoPrompt: scene.VideoPrompt, ct: ct);
-
-        var child = await _jobs.EnqueueAsync(new RenderJobCreateModel
-        {
-            JobType = JobTypeName,
-            UserId = input.UserId,
-            CustomerId = input.CustomerId,
-            Input = new SceneImageRenderWorkItemInput
+        var childInput = new SceneImageRenderWorkItemInput
             {
                 ParentJobId = input.ParentJobId,
-                ImageVersionId = version.Id,
+                ImageVersionId = Guid.Empty,
                 ProjectId = input.ProjectId,
                 SceneId = input.SceneId,
                 SceneIndex = input.SceneIndex,
@@ -284,20 +281,18 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 SkipCustomerCharge = input.SkipCustomerCharge,
                 BillingIntent = input.BillingIntent,
                 BillingReferenceId = input.BillingReferenceId
-            },
-            Prompt = new { projectId = input.ProjectId, sceneId = input.SceneId, fallbackFromJobId = job.Id },
-            References = Array.Empty<object>(),
-            LogCode = input.ParentJobId.ToString("N"),
-            ProviderCode = SceneImageBatchRenderHandler.RoutingProviderCode,
-            ModelCode = SceneImageBatchRenderHandler.RoutingModelCode,
-            MaxAttempts = 100,
-            PointCostEstimate = 0,
-            PointStatus = RenderPointStatuses.NotRequired
-        }, ct);
+            };
+        var queued = await _versions.CreateQueuedImageVersionWithJobAsync(versionRequest,
+            new SceneImageJobDraft(JobTypeName, input.UserId, input.CustomerId, input.ProjectId,
+                input.ParentJobId.ToString("N"), "Scene image fallback", null, null, 100,
+                JsonSerializer.Serialize(childInput, JsonOptions),
+                JsonSerializer.Serialize(new { projectId = input.ProjectId, sceneId = input.SceneId, fallbackFromJobId = job.Id }),
+                "[]"), ct);
+        var version = queued.Version ?? throw new InvalidOperationException("SCENE_IMAGE_JOB_ENQUEUE_UNKNOWN");
 
         await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_MODEL_FALLBACK_QUEUED", "warning",
             $"Scene {input.SceneIndex} image fallback queued.",
-            new { jobId = job.Id, childJobId = child.Id, sceneId = input.SceneId,
+            new { jobId = job.Id, childJobId = queued.RenderJobId, sceneId = input.SceneId,
                 failedImageVersionId = input.ImageVersionId, imageVersionId = version.Id,
                 model = nextModel.Model, modelAttemptIndex = nextModel.AttemptIndex }, ct);
     }

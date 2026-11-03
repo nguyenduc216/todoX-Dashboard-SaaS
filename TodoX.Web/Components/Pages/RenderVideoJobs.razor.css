@@ -193,8 +193,8 @@
     overflow: hidden;
 }
 
-.render-project-dialog-body ::deep .mud-tabs-panels > div,
-.render-project-dialog-body ::deep .render-tab-panel {
+/* MudBlazor 9.6 keeps inactive panels mounted with display:none. Never override their visibility. */
+.render-project-dialog-body ::deep .mud-tabs-panels > .mud-tab-panel.mud-tab-panel-active:not(.mud-tab-panel-hidden) {
     flex: 1 1 auto;
     height: 100%;
     min-height: 0;

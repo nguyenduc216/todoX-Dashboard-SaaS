@@ -21,7 +21,7 @@ Mở `http://localhost:5172`. Health check: `http://localhost:5172/health`.
 Output mặc định:
 
 ```text
-artifacts/publish/todox-landing/
+publish/todoX-landing/
 ```
 
 Có thể chỉ định thư mục deploy:

@@ -1,0 +1,5 @@
+# Landing Intro Video original upload
+
+- Changed only the Intro Video media service and its Dashboard wording/tests. Videos and posters are copied unchanged to a unique temporary name and moved into SharedMedia after header validation; Intro Video never invokes FFmpeg. Industry Solutions transcoding configuration and implementation are untouched.
+- MP4/WebM extension, MIME, size and container signature are checked. These checks do **not** prove codec/browser compatibility; operators must supply browser-compatible encodings and verify playback on target browsers. The configured video is not deleted on upload failure. A failed settings save leaves persisted configuration unchanged, though a successfully uploaded new file may remain unreferenced.
+- Feature xUnit suite: 26/26 pass, including SHA-256 copy equivalence, simulated copy failure, permissions and validation. This tests the copy routine rather than an actual Blazor upload. PostgreSQL write/read, deployed public URL reachability, browser playback and visual checks are NOT RUN in this environment. The earlier full Web regression run had 19 RVideo failures unrelated to Intro Video; not resolved here.

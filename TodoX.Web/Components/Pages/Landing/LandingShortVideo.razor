@@ -1,0 +1,200 @@
+@page "/landing/short-video"
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.Extensions.Options
+@using System.Diagnostics
+@using System.Globalization
+@using TodoX.Web.Models
+@using TodoX.Web.Models.Landing
+@using TodoX.Web.Services
+@using TodoX.Web.Services.Landing
+@using TodoX.Web.Services.SharedMedia
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject LandingShortVideoRepository Repository
+@inject LandingIntroVideoMediaService Media
+@inject SharedMediaPathService Paths
+@inject ISnackbar Snackbar
+@inject ILogger<LandingShortVideo> Logger
+@inject IOptions<SharedMediaOptions> MediaOptions
+
+<PageTitle>Video truyền thông - Landing</PageTitle>
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap">
+        <MudText Typo="Typo.h4">Video truyền thông</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Trang landing: /video-ngan</MudText>
+    </MudStack>
+    @if (!_ready) { <MudProgressLinear Indeterminate="true" /> }
+    else if (!CanView) { <MudAlert Severity="Severity.Error">Bạn không có quyền xem cấu hình Landing Page.</MudAlert> }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
+        @if (!Paths.IsConfigured || !Paths.CanWrite()) { <MudAlert Severity="Severity.Warning">SharedMedia chưa sẵn sàng để upload.</MudAlert> }
+
+        <MudPaper Class="pa-4">
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.h6">Hiển thị trên Landing</MudText>
+                <MudSwitch T="bool" @bind-Value="_settings.ShowOnLanding" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Hiển thị mục &quot;Video truyền thông&quot; trên trang chủ (nút ngành nghề và khối giới thiệu)" />
+                <MudText Typo="Typo.caption">Trang /video-ngan luôn truy cập được bằng đường dẫn trực tiếp.</MudText>
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="pa-4">
+            <MudStack Spacing="3">
+                <MudText Typo="Typo.h6">Video intro của trang /video-ngan</MudText>
+                <MudSwitch T="bool" @bind-Value="_settings.IntroEnabled" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Kích hoạt video intro" />
+                <MudSelect T="string" Label="Chế độ phát" @bind-Value="_settings.PlaybackMode" Disabled="@(!CanUpdate)">
+                    <MudSelectItem Value="@("CLICK_TO_PLAY")">Nhấn để phát</MudSelectItem>
+                    <MudSelectItem Value="@("AUTOPLAY_LOOP")">Tự phát và lặp</MudSelectItem>
+                    <MudSelectItem Value="@("AUTOPLAY_ONCE")">Tự phát một lần</MudSelectItem>
+                </MudSelect>
+                <MudSwitch T="bool" @bind-Value="_settings.MutedByDefault" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Tắt tiếng mặc định khi người xem nhấn Play" />
+                <MudSwitch T="bool" @bind-Value="_settings.ShowControls" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Hiển thị nút âm thanh" />
+                @if (!string.IsNullOrWhiteSpace(_settings.VideoUrl))
+                {
+                    <video src="@_settings.VideoUrl" poster="@_settings.PosterUrl" controls playsinline preload="metadata" style="max-width:220px;max-height:390px;width:100%;object-fit:cover"></video>
+                }
+                <MudText>Chọn video MP4/WebM tỷ lệ 9:16 đã hoàn thiện (tối đa @(MediaOptions.Value.IndustrySolutions.MaxVideoBytes / (1024 * 1024)) MB). Video được lưu nguyên bản, không chuyển mã:</MudText>
+                <InputFile OnChange="UploadVideoAsync" accept=".mp4,.webm,video/mp4,video/webm" disabled="@(!CanUpdate || _busy)" />
+                @if (!string.IsNullOrWhiteSpace(_settings.PosterUrl)) { <img src="@_settings.PosterUrl" alt="Poster" style="max-width:160px" /> }
+                <MudText>Chọn poster JPG/PNG/WebP:</MudText>
+                <InputFile OnChange="UploadPosterAsync" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled="@(!CanUpdate || _busy)" />
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="pa-4">
+            <MudStack Spacing="3">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap">
+                    <MudText Typo="Typo.h6">Bảng giá dịch vụ video hàng ngày</MudText>
+                    <MudStack Row="true" Spacing="1">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@(!CanUpdate || _packages.Count >= LandingShortVideoRepository.MaxPackages)" OnClick="AddPackage">Thêm gói</MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(!CanUpdate)" OnClick="ResetPackages">Khôi phục mặc định</MudButton>
+                    </MudStack>
+                </MudStack>
+                <MudGrid>
+                    @foreach (var package in _packages)
+                    {
+                        var current = package;
+                        <MudItem xs="12" md="6" lg="4">
+                            <MudPaper Outlined="true" Class="pa-3">
+                                <MudStack Spacing="2">
+                                    <MudTextField T="string" Label="Tên gói" @bind-Value="current.Name" MaxLength="60" Disabled="@(!CanUpdate)" />
+                                    <MudTextField T="string" Label="Mô tả ngắn" @bind-Value="current.Subtitle" MaxLength="80" Disabled="@(!CanUpdate)" />
+                                    <MudNumericField T="long" Label="Giá (VNĐ)" @bind-Value="current.Price" Min="0" Step="100000" Disabled="@(!CanUpdate)" HelperText="@FormatPrice(current.Price)" />
+                                    <MudStack Row="true" Spacing="2">
+                                        <MudNumericField T="int" Label="Số video" @bind-Value="current.VideoCount" Min="1" Disabled="@(!CanUpdate)" />
+                                        <MudNumericField T="int" Label="Video tặng" @bind-Value="current.BonusVideos" Min="0" Disabled="@(!CanUpdate)" />
+                                    </MudStack>
+                                    <MudText Typo="Typo.caption">Tổng @(current.VideoCount + current.BonusVideos) video</MudText>
+                                    <MudTextField T="string" Label="Lợi ích (mỗi dòng một ý, tối đa 6)" @bind-Value="current.FeaturesText" Lines="4" Disabled="@(!CanUpdate)" />
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                        <MudSwitch T="bool" @bind-Value="current.Featured" Color="Color.Warning" Disabled="@(!CanUpdate)" Label="Gói nên mua" />
+                                        <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" Disabled="@(!CanUpdate || _packages.Count <= 1)" OnClick="@(() => _packages.Remove(current))">Xóa gói</MudButton>
+                                    </MudStack>
+                                </MudStack>
+                            </MudPaper>
+                        </MudItem>
+                    }
+                </MudGrid>
+            </MudStack>
+        </MudPaper>
+
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(!CanUpdate || _busy)" OnClick="SaveAsync" Style="align-self:flex-start">Lưu cấu hình</MudButton>
+    }
+</MudStack>
+
+@code {
+    private sealed class PackageEditor
+    {
+        public string Name { get; set; } = "";
+        public string Subtitle { get; set; } = "";
+        public long Price { get; set; }
+        public int VideoCount { get; set; } = 1;
+        public int BonusVideos { get; set; }
+        public string FeaturesText { get; set; } = "";
+        public bool Featured { get; set; }
+
+        public static PackageEditor From(LandingShortVideoPackage p) => new()
+        {
+            Name = p.Name, Subtitle = p.Subtitle, Price = p.Price, VideoCount = p.VideoCount,
+            BonusVideos = p.BonusVideos, FeaturesText = string.Join('\n', p.Features), Featured = p.Featured
+        };
+
+        public LandingShortVideoPackage ToPackage() => new()
+        {
+            Name = Name, Subtitle = Subtitle, Price = Price, VideoCount = VideoCount, BonusVideos = BonusVideos, Featured = Featured,
+            Features = (FeaturesText ?? "").Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0).ToList()
+        };
+    }
+
+    private LandingShortVideoSettings _settings = new();
+    private List<PackageEditor> _packages = [];
+    private bool _ready;
+    private bool _busy;
+    private string? _error;
+    private bool CanView => AuthState.CurrentUser is not null && !AuthState.CurrentUser.IsCustomer && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingIndustryPermissions.View));
+    private bool CanUpdate => CanView && LandingIntroVideoWriteAccess.CanWrite(AuthState.CurrentUser);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        _ready = true;
+        if (!CanView) return;
+        try { _settings = await Repository.GetAsync(); }
+        catch { _error = "Không thể tải cấu hình. Kiểm tra database và script landing.short_video_settings."; }
+        _packages = _settings.Packages.Select(PackageEditor.From).ToList();
+    }
+
+    private static string FormatPrice(long price) => price.ToString("N0", CultureInfo.GetCultureInfo("vi-VN")) + "đ";
+
+    private void AddPackage() => _packages.Add(new PackageEditor { Name = "Gói mới", VideoCount = 10 });
+
+    private void ResetPackages() => _packages = LandingShortVideoRepository.DefaultPackages().Select(PackageEditor.From).ToList();
+
+    private Task UploadVideoAsync(InputFileChangeEventArgs args) => UploadAsync(args, true);
+    private Task UploadPosterAsync(InputFileChangeEventArgs args) => UploadAsync(args, false);
+    private async Task UploadAsync(InputFileChangeEventArgs args, bool video)
+    {
+        if (!CanUpdate || _busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var url = await Media.UploadAsync(args.File, video, "short-video");
+            if (video) _settings.VideoUrl = url;
+            else _settings.PosterUrl = url;
+            Snackbar.Add("Upload thành công. Nhấn Lưu cấu hình để áp dụng.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            var maxBytes = video ? MediaOptions.Value.IndustrySolutions.MaxVideoBytes : MediaOptions.Value.IndustrySolutions.MaxThumbnailBytes;
+            var storageAvailable = Paths.IsConfigured && Paths.CanWrite();
+            var category = IntroUploadDiagnostics.Classify(ex, storageAvailable);
+            Logger.LogError(ex,
+                "Landing short-video upload failed. FileName={FileName} FileSize={FileSize} UploadType={UploadType} MaxBytes={MaxBytes} StorageAvailable={StorageAvailable} ExceptionType={ExceptionType} ErrorCategory={ErrorCategory} CorrelationId={CorrelationId}",
+                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, video ? "video" : "poster",
+                maxBytes, storageAvailable, ex.GetType().Name, category, Activity.Current?.Id);
+            _error = IntroUploadDiagnostics.Message(category, maxBytes);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!CanUpdate || _busy || AuthState.CurrentUser is null) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            _settings.Packages = _packages.Select(p => p.ToPackage()).ToList();
+            await Repository.SaveAsync(_settings, AuthState.CurrentUser.UserId.ToString());
+            Snackbar.Add("Đã lưu cấu hình Video truyền thông.", Severity.Success);
+        }
+        catch (ArgumentException ex) { _error = ex.Message.Split(" (Parameter")[0]; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing short-video settings save failed.");
+            _error = "Không thể lưu cấu hình. Kiểm tra database và script landing.short_video_settings.";
+        }
+        finally { _busy = false; }
+    }
+}

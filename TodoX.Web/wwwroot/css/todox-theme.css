@@ -1707,3 +1707,18 @@ h4 {
         grid-template-columns: 1fr;
     }
 }
+
+/* Impersonation exit: full label on wide screens, icon only on phones. */
+.todox-impersonate-icon {
+    display: none !important;
+}
+
+@media (max-width: 768px) {
+    .todox-impersonate-full {
+        display: none !important;
+    }
+
+    .todox-impersonate-icon {
+        display: inline-flex !important;
+    }
+}

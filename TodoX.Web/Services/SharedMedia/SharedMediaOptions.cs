@@ -7,6 +7,7 @@ public sealed class SharedMediaOptions
     public string? StorageRoot { get; set; }
     public string RequestPath { get; set; } = "/media";
     public IndustrySolutionMediaOptions IndustrySolutions { get; set; } = new();
+    public long VideoSampleMaxVideoBytes { get; set; } = 500L * 1024 * 1024;
 }
 
 public sealed class IndustrySolutionMediaOptions

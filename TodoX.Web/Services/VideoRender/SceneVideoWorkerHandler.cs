@@ -64,6 +64,8 @@ public sealed class SceneVideoRenderWorkItemInput
     public string? RequestedMode { get; set; }
     public int? RequestedDurationSeconds { get; set; }
     public bool ManualOverride { get; set; }
+    public bool StrictRequestedSettings { get; set; }
+    public RVideoSceneVideoOperationSettings? ConfirmedOperationSettings { get; set; }
 }
 
 public enum VideoSceneImageInputMode
@@ -164,6 +166,12 @@ public static class RVideoSharedBaseImagePromptGuard
 
 public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 {
+    internal static async Task<T> SubmitWithVerifiedClaimAsync<T>(Func<Task> verify, Func<Task<T>> submit)
+    {
+        await verify();
+        return await submit();
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int DefaultMaxReconciliationRetries = 3;
     private const string KnownNoResourcesFailureClassification = "KNOWN_NO_RESOURCES";
@@ -171,6 +179,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
     private const string DurationRejectedFailureClassification = "PROVIDER_DURATION_REJECTED";
     private const string PollResourceUnavailableNoProgressFailureClassification = "POLL_RESOURCE_UNAVAILABLE_NO_PROGRESS";
 
+    private readonly IPointPricingService? _pointPricing;
     private readonly VideoRenderRepository _repo;
     private readonly SceneVideoSubmitCoordinator _submitCoordinator;
     private readonly ISceneMediaVersioningService _versions;
@@ -210,8 +219,10 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         IRVideoSceneMediaFinalizerService finalizer,
         IRVideoSceneVideoCompletionService completion,
         IOptionsMonitor<VideoRenderOptions> options,
-        ILogger<SceneVideoWorkerHandler> logger)
+        ILogger<SceneVideoWorkerHandler> logger,
+        IPointPricingService? pointPricing = null)
     {
+        _pointPricing = pointPricing;
         _repo = repo;
         _submitCoordinator = submitCoordinator;
         _versions = versions;
@@ -728,6 +739,17 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             AiImageBillingReservation reservation;
             if (string.IsNullOrWhiteSpace(taskId))
             {
+                // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-PRICING-SNAPSHOT-002.
+                // Only newly quoted operations revalidate price; known tasks/old jobs keep their historical billing.
+                if (input.ConfirmedOperationSettings is { } quote)
+                {
+                    if (!await quote.IsPriceCurrentAsync(_pointPricing, ct))
+                    {
+                        await FailAsync(project.Id, scene, version.Id, "RVIDEO_QUOTE_CHANGED",
+                            "Giá video đã thay đổi. Vui lòng báo giá lại và xác nhận lượt video mới.", ct);
+                        throw new RenderJobTerminalFailureException("RVIDEO_QUOTE_CHANGED");
+                    }
+                }
                 // Provider reconciliation still needs a durable record, but customer points are
                 // charged only after TodoX has accepted the final provider result.
                 var billingCost = _billing.BuildConfiguredCost(0, 1);
@@ -887,6 +909,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId
                         }, ct);
+                    // Verify this worker still holds the job lease before creating any submit intent.
+                    await _jobs.VerifySceneVideoSubmitClaimAsync(job, version.Id, attemptLogicalRequestId, ct);
                     // A rejected claim (guard/duplicate intent) is decided entirely before any provider HTTP
                     // request. It must not be reported as an ambiguous in-flight submit: no request was sent,
                     // so no reconciliation is warranted and no manual review flag is set.
@@ -1254,7 +1278,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     await _submitCoordinator.MarkAmbiguousAsync(submitToken.Value, CancellationToken.None);
                     throw;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException
+                    && ex is not InvalidOperationException { Message: "RVIDEO_JOB_CALLER_OWNERSHIP_LOST" })
                 {
                     if (submitToken is not null)
                     {
@@ -2436,7 +2461,9 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 continue;
             }
 
-            var providerDuration = ResolveProviderDuration(input.DurationSeconds, supportedDurations);
+            var providerDuration = input.StrictRequestedSettings
+                ? (supportedDurations.Contains(input.DurationSeconds) ? (int?)input.DurationSeconds : null)
+                : ResolveProviderDuration(input.DurationSeconds, supportedDurations);
             if (providerDuration is not int duration)
             {
                 diagnostics.Add(new FallbackCandidateDiagnostic(
@@ -2455,6 +2482,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             }
 
             var providerResolution = ResolveProviderResolution(input.Resolution, model.SupportedResolutions);
+            if (input.StrictRequestedSettings && !string.Equals(providerResolution, requestedResolution, StringComparison.OrdinalIgnoreCase))
+                continue;
             AddResolvedCandidate(resolved, candidateKeys, policy, duration, providerResolution);
             diagnostics.Add(new FallbackCandidateDiagnostic(
                 policy.AttemptIndex,
@@ -2497,6 +2526,8 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 string.IsNullOrWhiteSpace(requestedMode) ? null : requestedMode);
         }
 
+        // Explicit new operations must fail rather than silently switch the confirmed model/mode.
+        if (input.StrictRequestedSettings) return new[] { selected };
         return new[] { selected }
             .Concat(policies.Where(policy => !IsSamePolicy(policy, selected)))
             .ToList();
@@ -3194,6 +3225,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
             return false;
         }
 
+        // Product decision (2026-10-30): 79AI NOT_RESOURCES is a definitive rejection; fall back to the next model.
         if (IsKnownNoResourcesSubmit(exception))
         {
             return true;

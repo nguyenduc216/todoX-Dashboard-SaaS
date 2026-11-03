@@ -1,0 +1,140 @@
+@page "/landing/video-samples"
+@using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Models
+@using TodoX.Web.Models.Landing
+@using TodoX.Web.Services
+@using TodoX.Web.Services.Landing
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject LandingVideoSampleRepository Repository
+@inject CatalogAdminRepository Catalog
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<LandingVideoSamples> Logger
+
+<PageTitle>Kho mẫu video - Landing</PageTitle>
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap">
+        <MudStack Spacing="0">
+            <MudText Typo="Typo.h4">Kho mẫu video</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Trang landing: /mau-video</MudText>
+        </MudStack>
+        @if (_ready && CanView)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(!CanUpdate || _busy)" OnClick="AddAsync">Thêm video mẫu</MudButton>
+        }
+    </MudStack>
+    @if (!_ready) { <MudProgressLinear Indeterminate="true" /> }
+    else if (!CanView) { <MudAlert Severity="Severity.Error">Bạn không có quyền xem cấu hình Landing Page.</MudAlert> }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
+
+        <MudPaper Class="pa-4">
+            <MudStack Spacing="3">
+                <MudText Typo="Typo.h6">Video trong kho (@_samples.Count)</MudText>
+                @if (_samples.Count == 0)
+                {
+                    <MudText Typo="Typo.body2">Chưa có video mẫu nào.</MudText>
+                }
+                else
+                {
+                    <MudTable T="LandingVideoSample" Items="_samples" Dense="true" Hover="true" Elevation="0">
+                        <HeaderContent>
+                            <MudTh>Ảnh</MudTh>
+                            <MudTh>Tiêu đề</MudTh>
+                            <MudTh>Nhóm dịch vụ</MudTh>
+                            <MudTh>Kích thước</MudTh>
+                            <MudTh></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd><img src="@context.PosterUrl" alt="" style="max-width:64px;max-height:64px;object-fit:cover" /></MudTd>
+                            <MudTd>@context.Title</MudTd>
+                            <MudTd>@(context.ServiceName ?? LandingVideoSampleRepository.OtherServiceName)</MudTd>
+                            <MudTd>@context.AspectRatio</MudTd>
+                            <MudTd Style="text-align:right;white-space:nowrap">
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => EditAsync(context))">Sửa</MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => DeleteAsync(context))">Xóa</MudButton>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudStack>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private List<LandingVideoSample> _samples = [];
+    private IReadOnlyList<ServiceDto> _services = [];
+    private bool _ready;
+    private bool _busy;
+    private string? _error;
+    private bool CanView => AuthState.CurrentUser is not null && !AuthState.CurrentUser.IsCustomer && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingIndustryPermissions.View));
+    private bool CanUpdate => CanView && LandingIntroVideoWriteAccess.CanWrite(AuthState.CurrentUser);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        _ready = true;
+        if (!CanView) return;
+        try
+        {
+            _services = await Catalog.GetServicesAsync();
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video samples load failed.");
+            _error = "Không thể tải kho mẫu video. Kiểm tra database và script landing.video_samples.";
+        }
+    }
+
+    private async Task ReloadAsync() => _samples = (await Repository.ListAsync()).ToList();
+
+    private Task AddAsync() => OpenEditorAsync(null);
+    private Task EditAsync(LandingVideoSample sample) => OpenEditorAsync(sample);
+
+    private async Task OpenEditorAsync(LandingVideoSample? sample)
+    {
+        if (!CanUpdate || _busy) return;
+        _error = null;
+        var parameters = new DialogParameters<LandingVideoSampleDialog>
+        {
+            { x => x.Source, sample },
+            { x => x.Services, _services }
+        };
+        // An upload runs inside the dialog: only its own buttons may close it.
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false };
+        var dialog = await DialogService.ShowAsync<LandingVideoSampleDialog>(sample is null ? "Thêm video mẫu" : "Chỉnh sửa video mẫu", parameters, options);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled) return;
+        try { await ReloadAsync(); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video samples reload failed.");
+            _error = "Không thể tải lại kho mẫu video. Vui lòng tải lại trang.";
+        }
+    }
+
+    private async Task DeleteAsync(LandingVideoSample sample)
+    {
+        if (!CanUpdate || _busy) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync("Xóa video mẫu", $"Xóa \"{sample.Title}\" khỏi kho mẫu video?", yesText: "Xóa", cancelText: "Hủy");
+        if (confirmed != true) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Repository.DeleteAsync(sample.Id);
+            await ReloadAsync();
+            Snackbar.Add("Đã xóa video mẫu.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video sample delete failed.");
+            _error = "Không thể xóa video mẫu. Vui lòng thử lại.";
+        }
+        finally { _busy = false; }
+    }
+}

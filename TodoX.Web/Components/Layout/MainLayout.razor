@@ -31,9 +31,19 @@
                        Variant="Variant.Outlined"
                        Color="Color.Warning"
                        StartIcon="@Icons.Material.Filled.SupervisedUserCircle"
+                       Class="todox-impersonate-full"
                        OnClick="StopImpersonation">
                 Đang đăng nhập hộ · Thoát
             </MudButton>
+            @* Compact icon on narrow screens; the label stays in the tooltip. *@
+            <MudTooltip Text="Đang đăng nhập hộ · Thoát" RootClass="todox-impersonate-icon">
+                <MudIconButton Icon="@Icons.Material.Filled.SupervisedUserCircle"
+                               Color="Color.Warning"
+                               Size="Size.Small"
+                               Variant="Variant.Outlined"
+                               aria-label="Đang đăng nhập hộ · Thoát"
+                               OnClick="StopImpersonation" />
+            </MudTooltip>
         }
 
         <MudMenu @bind-Open="_notifyOpen" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="todox-notify-menu">
@@ -595,10 +605,7 @@
             list.Add(BuildAiAssetsGroup());
         }
 
-        if (!existingCodes.Contains("landing_contacts") || !existingCodes.Contains("landing_industries"))
-        {
-            list.Add(BuildLandingPageGroup(existingCodes));
-        }
+        LandingPageMenuMerge.Merge(list, BuildLandingPageGroup(existingCodes));
 
         if (!existingCodes.Contains("customer_create_video") || !existingCodes.Contains("customer_jobs"))
         {
@@ -1057,6 +1064,36 @@
                 VisibilityPolicy = "always",
                 MatchAll = false,
                 SortOrder = 20
+            });
+        }
+
+        if (!existingCodes.Contains("landing_intro_video"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(), GroupId = groupId, Code = "landing_intro_video",
+                Title = "Video Intro", Href = "/landing/intro-video", IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(), VisibilityPolicy = "always", MatchAll = false, SortOrder = 30
+            });
+        }
+
+        if (!existingCodes.Contains("landing_short_video"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(), GroupId = groupId, Code = "landing_short_video",
+                Title = "Video truyền thông", Href = "/landing/short-video", IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(), VisibilityPolicy = "always", MatchAll = false, SortOrder = 40
+            });
+        }
+
+        if (!existingCodes.Contains("landing_video_samples"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(), GroupId = groupId, Code = "landing_video_samples",
+                Title = "Kho mẫu video", Href = "/landing/video-samples", IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(), VisibilityPolicy = "always", MatchAll = false, SortOrder = 50
             });
         }
 
