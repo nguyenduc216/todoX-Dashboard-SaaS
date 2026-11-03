@@ -56,6 +56,7 @@ public sealed class MediaProbe
 
         var psi = new ProcessStartInfo(ffprobe.Path!)
         {
+            RedirectStandardInput = true, // never inherit the MCP stdio channel
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -67,6 +68,7 @@ public sealed class MediaProbe
         }
 
         using var proc = Process.Start(psi)!;
+        proc.StandardInput.Close();
         var stdout = await proc.StandardOutput.ReadToEndAsync(ct);
         var stderr = await proc.StandardError.ReadToEndAsync(ct);
         await proc.WaitForExitAsync(ct);

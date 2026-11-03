@@ -111,13 +111,16 @@ public sealed class ClipNormalizer
             throw new InvalidOperationException("Chưa cài FFmpeg. Chạy lại bộ cài TodoX EditVideo.");
         }
 
-        var psi = new ProcessStartInfo(ffmpeg.Path!) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        // stdin must never be inherited: in MCP mode it is the assistant's channel, and ffmpeg reads stdin by default.
+        var psi = new ProcessStartInfo(ffmpeg.Path!) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        psi.ArgumentList.Add("-nostdin");
         foreach (var a in args)
         {
             psi.ArgumentList.Add(a);
         }
 
         using var proc = Process.Start(psi)!;
+        proc.StandardInput.Close();
         using var reg = ct.Register(() => { try { proc.Kill(true); } catch (InvalidOperationException) { } });
         var stdout = proc.StandardOutput.ReadToEndAsync(ct);
         var stderr = proc.StandardError.ReadToEndAsync(ct);

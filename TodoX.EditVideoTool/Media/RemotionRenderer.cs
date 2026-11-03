@@ -67,6 +67,7 @@ public sealed class RemotionRenderer
         var psi = new ProcessStartInfo(node.Path!)
         {
             WorkingDirectory = dir,
+            RedirectStandardInput = true, // never inherit the MCP stdio channel
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -82,6 +83,7 @@ public sealed class RemotionRenderer
         try
         {
             using var proc = Process.Start(psi)!;
+            proc.StandardInput.Close();
             using var reg = ct.Register(() => { try { proc.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } });
             var stderrTask = Task.Run(async () =>
             {

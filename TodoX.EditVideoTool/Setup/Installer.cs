@@ -138,10 +138,11 @@ public sealed class Installer
         }
 
         status.Report("Đang tải trình duyệt dựng hình (~150 MB, chỉ một lần)...");
-        var psi = new ProcessStartInfo(node.Path!) { WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var psi = new ProcessStartInfo(node.Path!) { WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         psi.ArgumentList.Add(Path.Combine(dir, "render.mjs"));
         psi.ArgumentList.Add("--ensure-browser");
         using var p = Process.Start(psi)!;
+        p.StandardInput.Close();
         _ = p.StandardError.ReadToEndAsync(ct);
         var lastPct = -10;
         while (await p.StandardOutput.ReadLineAsync(ct) is { } line)
