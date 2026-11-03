@@ -9,14 +9,14 @@ public sealed record ReleaseFile(string Name, string Kind, string? Component, st
 
 public static class ComponentNames
 {
-    /// <summary>Customer-facing name of each installable component.</summary>
+    /// <summary>Customer-facing name of each installable component; the real tool names are never shown.</summary>
     public static string Of(string? component) => component switch
     {
-        "node" => "Node.js",
-        "ffmpeg" => "FFmpeg (xử lý video)",
-        "remotion" => "Bộ dựng video Remotion",
-        "whisper" => "Công cụ nghe lại lời thoại (Whisper)",
-        _ => component ?? "thành phần"
+        "node" => "Bộ chạy nền TodoX",
+        "ffmpeg" or "ffprobe" => "Bộ ghép & xử lý video",
+        "remotion" => "Bộ hiệu ứng & dựng hình",
+        "whisper" => "Bộ nghe lại lời thoại",
+        _ => "thành phần TodoX"
     };
 }
 
@@ -65,7 +65,7 @@ public sealed class ComponentInstaller
                 if (p - last >= 10)
                 {
                     last = p;
-                    status?.Report($"  Tải {file.Name}: {p:0}%");
+                    status?.Report($"  Tải {(file.Kind == "app" ? "TodoX EditVideo" : ComponentNames.Of(file.Component))}: {p:0}%");
                 }
             }), ct);
         }
@@ -73,7 +73,7 @@ public sealed class ComponentInstaller
         if (!Sha256Matches(target, file.Sha256))
         {
             File.Delete(target);
-            throw new InvalidOperationException($"File {file.Name} tải về bị lỗi (sai checksum). Thử lại.");
+            throw new InvalidOperationException($"{(file.Kind == "app" ? "TodoX EditVideo" : ComponentNames.Of(file.Component))} tải về bị lỗi (sai checksum). Thử lại.");
         }
 
         return target;
@@ -90,7 +90,7 @@ public sealed class ComponentInstaller
             Directory.Delete(staging, recursive: true);
         }
 
-        status?.Report($"  Giải nén {file.Component}...");
+        status?.Report($"  Giải nén {ComponentNames.Of(file.Component)}...");
         ZipFile.ExtractToDirectory(zip, staging);
         await File.WriteAllTextAsync(Path.Combine(staging, ".todox-version"), file.Version ?? file.Sha256, ct);
 

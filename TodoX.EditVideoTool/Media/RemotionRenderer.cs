@@ -50,10 +50,10 @@ public sealed class RemotionRenderer
         var node = _components.Locate("node");
         if (!node.Installed)
         {
-            throw new InvalidOperationException("Chưa cài Node.js cho TodoX. Chạy lại bộ cài.");
+            throw new InvalidOperationException("Chưa cài bộ chạy nền TodoX. Chạy lại bộ cài.");
         }
 
-        var dir = RemotionDir ?? throw new InvalidOperationException("Chưa cài bộ mẫu Remotion của TodoX. Chạy lại bộ cài.");
+        var dir = RemotionDir ?? throw new InvalidOperationException("Chưa cài bộ hiệu ứng & dựng hình TodoX. Chạy lại bộ cài.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
 
         var jobFile = Path.Combine(Path.GetTempPath(), $"todox-render-{Guid.NewGuid():N}.json");

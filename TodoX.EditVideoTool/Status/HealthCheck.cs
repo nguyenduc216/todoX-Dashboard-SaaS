@@ -3,6 +3,7 @@ using TodoX.EditVideoTool.Components;
 using TodoX.EditVideoTool.Licensing;
 using TodoX.EditVideoTool.Media;
 using TodoX.EditVideoTool.Server;
+using TodoX.EditVideoTool.Setup;
 
 namespace TodoX.EditVideoTool.Status;
 
@@ -51,21 +52,21 @@ public sealed class HealthCheck
     {
         var items = new List<HealthItem>();
 
-        foreach (var (id, name) in new[] { ("ffmpeg", "FFmpeg"), ("ffprobe", "FFprobe"), ("node", "Node.js") })
+        foreach (var (id, name) in new[] { ("ffmpeg", "Bộ ghép & xử lý video"), ("ffprobe", "Bộ đọc thông tin video"), ("node", ComponentNames.Of("node")) })
         {
             var c = _components.Locate(id);
-            items.Add(new HealthItem(id, name, c.Installed, c.Installed ? $"{c.Path} ({c.Source})" : "chưa cài", c.Installed ? null : "Chạy lại bộ cài TodoX EditVideo."));
+            items.Add(new HealthItem(id, name, c.Installed, c.Installed ? "sẵn sàng" : "chưa cài", c.Installed ? null : "Chạy lại bộ cài TodoX EditVideo."));
         }
 
         var remotionDir = _remotion.RemotionDir;
-        items.Add(new HealthItem("remotion", "Bộ dựng Remotion", remotionDir is not null,
-            remotionDir ?? "chưa cài", remotionDir is null ? "Chạy lại bộ cài TodoX EditVideo." : null));
+        items.Add(new HealthItem("remotion", ComponentNames.Of("remotion"), remotionDir is not null,
+            remotionDir is not null ? "sẵn sàng" : "chưa cài", remotionDir is null ? "Chạy lại bộ cài TodoX EditVideo." : null));
         var browser = remotionDir is not null && RemotionRenderer.HasRenderBrowser(remotionDir);
         items.Add(new HealthItem("browser", "Trình duyệt dựng hình", browser,
             browser ? "sẵn sàng" : "chưa tải (sẽ tự tải ~150 MB ở lần dựng đầu)", null));
 
-        items.Add(new HealthItem("whisper", "Nghe lại lời thoại (Whisper)", _transcriber.IsAvailable,
-            _transcriber.IsAvailable ? Path.GetFileName(_transcriber.ModelPath!) : "chưa cài (tự tải khi cập nhật)", null));
+        items.Add(new HealthItem("whisper", ComponentNames.Of("whisper"), _transcriber.IsAvailable,
+            _transcriber.IsAvailable ? "sẵn sàng" : "chưa cài (tự tải khi cập nhật)", null));
 
         status?.Invoke("Đang kết nối máy chủ TodoX...");
         var reachable = await _connectivity.EnsureConnectedAsync(serverAttempts, status, ct);

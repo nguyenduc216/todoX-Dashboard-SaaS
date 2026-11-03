@@ -108,7 +108,7 @@ public sealed class ClipNormalizer
         var ffmpeg = _components.Locate("ffmpeg");
         if (!ffmpeg.Installed)
         {
-            throw new InvalidOperationException("Chưa cài FFmpeg. Chạy lại bộ cài TodoX EditVideo.");
+            throw new InvalidOperationException("Chưa cài bộ ghép & xử lý video. Chạy lại bộ cài TodoX EditVideo.");
         }
 
         // stdin must never be inherited: in MCP mode it is the assistant's channel, and ffmpeg reads stdin by default.
@@ -128,7 +128,7 @@ public sealed class ClipNormalizer
         if (proc.ExitCode != 0)
         {
             var err = (await stderr).Trim();
-            throw new InvalidOperationException("FFmpeg lỗi: " + (err.Length > 400 ? err[^400..] : err));
+            throw new InvalidOperationException("Bộ xử lý video báo lỗi: " + (err.Length > 400 ? err[^400..] : err));
         }
 
         return captureOutput ? await stdout : string.Empty;

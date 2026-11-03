@@ -48,7 +48,7 @@ public sealed class Transcriber
         var model = ModelPath;
         if (!cli.Installed || model is null)
         {
-            throw new InvalidOperationException("Chưa cài công cụ nghe lời thoại (Whisper). Mở TodoX EditVideo → Kiểm tra cập nhật.");
+            throw new InvalidOperationException("Chưa cài bộ nghe lại lời thoại. Mở TodoX EditVideo → Kiểm tra cập nhật.");
         }
 
         var work = Path.Combine(Path.GetTempPath(), $"todox-whisper-{Guid.NewGuid():N}");
@@ -56,7 +56,7 @@ public sealed class Transcriber
         try
         {
             var wav = Path.Combine(work, "audio.wav");
-            await RunAsync(_components.Locate("ffmpeg").Path ?? throw new InvalidOperationException("Chưa cài FFmpeg."),
+            await RunAsync(_components.Locate("ffmpeg").Path ?? throw new InvalidOperationException("Chưa cài bộ ghép & xử lý video."),
                 ["-nostdin", "-v", "error", "-y", "-i", mediaPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav], ct);
 
             var outBase = Path.Combine(work, "out");

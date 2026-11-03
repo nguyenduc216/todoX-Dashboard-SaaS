@@ -63,11 +63,11 @@ public sealed class Installer
         {
             if (_components.InstalledVersion(file.Component!) == (file.Version ?? file.Sha256))
             {
-                status.Report($"{ComponentNames.Of(file.Component)}: đã có bản {file.Version}");
+                status.Report($"{ComponentNames.Of(file.Component)}: đã có bản mới nhất");
                 continue;
             }
 
-            status.Report($"Đang cài {ComponentNames.Of(file.Component)} {file.Version} ({file.Size / 1048576.0:0} MB)...");
+            status.Report($"Đang cài {ComponentNames.Of(file.Component)} ({file.Size / 1048576.0:0} MB)...");
             await _components.InstallComponentAsync(file, status, ct);
         }
 

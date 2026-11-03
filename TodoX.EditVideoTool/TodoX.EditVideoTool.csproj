@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>todox-editvideo</AssemblyName>
     <RootNamespace>TodoX.EditVideoTool</RootNamespace>
-    <Version>0.5.1</Version>
+    <Version>0.5.2</Version>
     <Product>TodoX EditVideo</Product>
     <Company>TodoX</Company>
     <!-- Required by the LibraryImport source generator (volume serial P/Invoke). -->

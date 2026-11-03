@@ -36,7 +36,7 @@ public sealed class Updater
 
         foreach (var missing in manifest.Components.Where(f => _components.InstalledVersion(f.Component!) is null))
         {
-            status?.Report($"Cài thêm thành phần mới: {ComponentNames.Of(missing.Component)} {missing.Version}");
+            status?.Report($"Cài thêm thành phần mới: {ComponentNames.Of(missing.Component)}");
             await _components.InstallComponentAsync(missing, status, ct);
         }
 
@@ -60,7 +60,7 @@ public sealed class Updater
 
         foreach (var file in manifest.Components.Where(f => _components.InstalledVersion(f.Component!) != (f.Version ?? f.Sha256)))
         {
-            status.Report($"Cập nhật {ComponentNames.Of(file.Component)} → {file.Version}");
+            status.Report($"Cập nhật {ComponentNames.Of(file.Component)}");
             await _components.InstallComponentAsync(file, status, ct);
         }
 

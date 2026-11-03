@@ -51,7 +51,7 @@ public sealed class MediaProbe
         var ffprobe = _components.Locate("ffprobe");
         if (!ffprobe.Installed)
         {
-            throw new InvalidOperationException("Chưa cài ffprobe. Chạy lại bộ cài TodoX EditVideoTool.");
+            throw new InvalidOperationException("Chưa cài bộ đọc thông tin video. Chạy lại bộ cài TodoX EditVideo.");
         }
 
         var psi = new ProcessStartInfo(ffprobe.Path!)
