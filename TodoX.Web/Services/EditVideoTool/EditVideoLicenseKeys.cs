@@ -5,40 +5,44 @@ using System.Text.RegularExpressions;
 namespace TodoX.Web.Services.EditVideoTool;
 
 /// <summary>
-/// License keys look like TDXV-ABCDE-FGHJK-MNPQR-STVWX (Crockford base32, no I/L/O/U).
+/// New keys are long tokens: <c>tdxv_</c> + 48 lowercase base32 characters (240 random bits), meant to be
+/// copied rather than typed. Keys issued earlier in the short form TDXV-ABCDE-FGHJK-MNPQR-STVWX stay valid.
 /// Only the SHA-256 of the normalized key is stored; the full key is shown once at issue time.
 /// </summary>
 public static partial class EditVideoLicenseKeys
 {
     private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     private const string Prefix = "TDXV";
+    private const string TokenPrefix = "tdxv_";
+    private const int TokenLength = 48;
 
     public static string Generate()
     {
-        var groups = new string[4];
-        for (var g = 0; g < groups.Length; g++)
+        var chars = new char[TokenLength];
+        for (var i = 0; i < chars.Length; i++)
         {
-            var chars = new char[5];
-            for (var i = 0; i < chars.Length; i++)
-            {
-                chars[i] = Alphabet[RandomNumberGenerator.GetInt32(Alphabet.Length)];
-            }
-
-            groups[g] = new string(chars);
+            chars[i] = char.ToLowerInvariant(Alphabet[RandomNumberGenerator.GetInt32(Alphabet.Length)]);
         }
 
-        return $"{Prefix}-{string.Join('-', groups)}";
+        return TokenPrefix + new string(chars);
     }
 
     /// <summary>
-    /// Uppercases, drops spaces/dashes and maps look-alike characters (O→0, I/L→1) so hand-typed keys
-    /// still match, then re-inserts the canonical dashes. Returns null when the shape is wrong.
+    /// Token keys: trimmed and lowercased. Legacy short keys: uppercased, spaces/dashes dropped, look-alike
+    /// characters mapped (O→0, I/L→1) and canonical dashes re-inserted. Returns null when the shape is wrong.
     /// </summary>
     public static string? Normalize(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
         {
             return null;
+        }
+
+        var trimmed = raw.Trim();
+        if (trimmed.StartsWith(TokenPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var token = trimmed.ToLowerInvariant();
+            return TokenPattern().IsMatch(token) ? token : null;
         }
 
         var compact = new StringBuilder(raw.Length);
@@ -72,14 +76,18 @@ public static partial class EditVideoLicenseKeys
     public static string Hash(string normalizedKey) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedKey))).ToLowerInvariant();
 
-    /// <summary>Displayable prefix, e.g. "TDXV-ABCDE".</summary>
-    public static string DisplayPrefix(string normalizedKey) => normalizedKey[..10];
+    /// <summary>Displayable prefix, e.g. "tdxv_3k9qm2" or "TDXV-ABCDE".</summary>
+    public static string DisplayPrefix(string normalizedKey) =>
+        normalizedKey.StartsWith(TokenPrefix, StringComparison.Ordinal) ? normalizedKey[..11] : normalizedKey[..10];
 
     public static bool IsValidDeviceHash(string? value) =>
         !string.IsNullOrWhiteSpace(value) && DeviceHashPattern().IsMatch(value);
 
     [GeneratedRegex("^TDXV(-[0-9A-HJKMNP-TV-Z]{5}){4}$")]
     private static partial Regex KeyPattern();
+
+    [GeneratedRegex("^tdxv_[0-9a-hjkmnp-tv-z]{48}$")]
+    private static partial Regex TokenPattern();
 
     [GeneratedRegex("^[0-9a-f]{64}$")]
     private static partial Regex DeviceHashPattern();

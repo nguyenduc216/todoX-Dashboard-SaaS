@@ -297,6 +297,10 @@ builder.Services.AddHttpClient<ReupVideoCacheService>(client => client.Timeout =
 builder.Services.Configure<EditVideoToolOptions>(builder.Configuration.GetSection(EditVideoToolOptions.SectionName));
 builder.Services.AddSingleton<EditVideoLicenseSigner>();
 builder.Services.AddScoped<EditVideoLicenseService>();
+builder.Services.AddScoped<EditVideoUsageService>();
+builder.Services.AddScoped<EditVideoPlanService>();
+builder.Services.AddScoped<EditVideoVoiceService>();
+builder.Services.AddSingleton<EditVideoReleaseService>();
 builder.Services.AddScoped<ReupCampaignRepository>();
 builder.Services.AddScoped<ReupLogService>();
 builder.Services.AddSingleton<ReupStorageService>();

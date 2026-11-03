@@ -410,6 +410,14 @@ public sealed class EditVideoLicenseService
 
     public string? PublicKeyPem => _signer.IsAvailable ? _signer.PublicKeyPem : null;
 
+    /// <summary>Device authentication shared by every device-facing endpoint (plan, voice, logs ...).</summary>
+    public async Task<EditVideoResult<(EditVideoLicenseRow License, EditVideoDeviceRow Device)>> AuthenticateDeviceAsync(
+        string? accessToken, string? deviceHash, string? ip, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        return await AuthenticateAsync(conn, accessToken, deviceHash, ip, _clock.GetUtcNow());
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private async Task<EditVideoResult<(EditVideoLicenseRow License, EditVideoDeviceRow Device)>> AuthenticateAsync(

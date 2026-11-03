@@ -30,14 +30,53 @@ public sealed class EditVideoLicenseTests
     };
 
     [Fact]
-    public void Generated_key_normalizes_to_itself_and_hash_is_stable()
+    public void Generated_key_is_a_long_token_that_normalizes_to_itself()
     {
         var key = EditVideoLicenseKeys.Generate();
 
-        Assert.Matches("^TDXV(-[0-9A-Z]{5}){4}$", key);
+        Assert.Matches("^tdxv_[0-9a-z]{48}$", key);
         Assert.Equal(key, EditVideoLicenseKeys.Normalize(key));
+        Assert.Equal(key, EditVideoLicenseKeys.Normalize("  " + key.ToUpperInvariant() + " "));
         Assert.Equal(EditVideoLicenseKeys.Hash(key), EditVideoLicenseKeys.Hash(EditVideoLicenseKeys.Normalize(key)!));
-        Assert.Equal(key[..10], EditVideoLicenseKeys.DisplayPrefix(key));
+        Assert.Equal(key[..11], EditVideoLicenseKeys.DisplayPrefix(key));
+        Assert.NotEqual(key, EditVideoLicenseKeys.Generate());
+        Assert.Null(EditVideoLicenseKeys.Normalize("tdxv_short"));
+        Assert.Null(EditVideoLicenseKeys.Normalize("tdxv_" + new string('u', 48)));
+    }
+
+    [Fact]
+    public void Legacy_short_keys_still_work()
+    {
+        Assert.Equal("TDXV-GP1DJ-M5YV6-BG9E6-GTSQG", EditVideoLicenseKeys.Normalize("tdxv gp1dj m5yv6 bg9e6 gtsqg"));
+        Assert.Equal("TDXV-GP1DJ", EditVideoLicenseKeys.DisplayPrefix("TDXV-GP1DJ-M5YV6-BG9E6-GTSQG"));
+    }
+
+    [Theory]
+    [InlineData(402, null, null, true)]
+    [InlineData(400, "INSUFFICIENT_BALANCE", null, true)]
+    [InlineData(400, null, "Tài khoản không đủ số dư", true)]
+    [InlineData(400, "QUOTA_EXCEEDED", null, true)]
+    [InlineData(400, "INVALID_VOICE", "voice not found", false)]
+    [InlineData(500, null, "internal error", false)]
+    public void Vbee_out_of_credit_is_recognised(int http, string? code, string? message, bool expected) =>
+        Assert.Equal(expected, EditVideoVoiceService.LooksLikeProviderOutOfCredit((System.Net.HttpStatusCode)http, code, message));
+
+    [Fact]
+    public void Plan_service_signs_plans_and_rejects_bad_input()
+    {
+        using var signer = new EditVideoLicenseSigner(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        var service = new EditVideoPlanService(signer);
+
+        var ok = service.Create(new TodoX.EditVideo.Planning.PlanRequest([new("c0", 12, 1920, 1080, true, true)], Title: "Hi"));
+        Assert.True(ok.Ok);
+        Assert.NotNull(signer.Verify(ok.Value!.Document)); // signature checks out
+        var parts = ok.Value.Document.Split('.');
+        Assert.Equal(2, parts.Length);
+        Assert.Contains("\"c0\"", System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(parts[0].Replace('-', '+').Replace('_', '/').PadRight(parts[0].Length + (4 - parts[0].Length % 4) % 4, '='))));
+
+        Assert.False(service.Create(null).Ok);
+        Assert.False(service.Create(new TodoX.EditVideo.Planning.PlanRequest([])).Ok);
+        Assert.False(service.Create(new TodoX.EditVideo.Planning.PlanRequest([new("x", 0.2, 10, 10, true, false)])).Ok);
     }
 
     [Fact]
@@ -134,6 +173,8 @@ public sealed class EditVideoLicenseTests
     [InlineData(EditVideoErrorCodes.InvalidLicense, 404)]
     [InlineData(EditVideoErrorCodes.LicenseExpired, 403)]
     [InlineData(EditVideoErrorCodes.SigningUnavailable, 503)]
+    [InlineData("insufficient_points", 402)]
+    [InlineData("voice_service_unavailable", 503)]
     public void Error_codes_map_to_http_status(string code, int status) =>
         Assert.Equal(status, EditVideoEndpoints.StatusFor(code));
 }

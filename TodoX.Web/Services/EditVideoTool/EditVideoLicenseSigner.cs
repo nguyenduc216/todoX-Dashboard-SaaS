@@ -19,6 +19,9 @@ public sealed class EditVideoToolOptions
 
     /// <summary>How long the local tool keeps working offline before it must heartbeat again.</summary>
     public int OfflineGraceDays { get; set; } = 7;
+
+    /// <summary>Folder with manifest.json, the installer and component zips; kept outside the site folder.</summary>
+    public string DownloadsRoot { get; set; } = "C:/TodoXDeploy/downloads/editvideo";
 }
 
 /// <summary>
@@ -91,14 +94,16 @@ public sealed class EditVideoLicenseSigner : IDisposable
     public string PublicKeyPem => _key?.ExportSubjectPublicKeyInfoPem()
         ?? throw new InvalidOperationException(_unavailableReason ?? "Signing key unavailable.");
 
-    public string Sign(EditVideoLicensePayload payload)
+    public string Sign(EditVideoLicensePayload payload) => SignDocument(JsonSerializer.SerializeToUtf8Bytes(payload, PayloadJson));
+
+    /// <summary>Signs arbitrary bytes (e.g. an edit plan) in the same "body.signature" format the exe verifies.</summary>
+    public string SignDocument(byte[] body)
     {
         if (_key is null)
         {
             throw new InvalidOperationException(_unavailableReason ?? "Signing key unavailable.");
         }
 
-        var body = JsonSerializer.SerializeToUtf8Bytes(payload, PayloadJson);
         var signature = _key.SignData(body, HashAlgorithmName.SHA256);
         return $"{Base64Url(body)}.{Base64Url(signature)}";
     }

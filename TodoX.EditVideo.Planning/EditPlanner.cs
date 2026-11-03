@@ -1,55 +1,10 @@
 using System.Text.RegularExpressions;
 
-namespace TodoX.EditVideoTool.Media;
-
-/// <summary>What the assistant asks for; everything else is decided by the planner.</summary>
-public sealed record AutoEditRequest(
-    IReadOnlyList<MediaInfo> Clips,
-    string Aspect = "9:16",
-    double TargetSeconds = 30,
-    string? Title = null,
-    string? Subtitle = null,
-    string? Script = null,
-    string? OutroText = null,
-    string? MusicPath = null,
-    string? VoiceoverPath = null,
-    double? VoiceoverSeconds = null,
-    string AccentColor = "#2449C9");
-
-// Mirrors TodoX.EditVideoTool.Templates/src/types.ts (serialized camelCase).
-public sealed record PlanClip(string Src, double From, double Duration, bool KeepAudio);
-public sealed record PlanCaption(string Text, double Start, double End);
-public sealed record PlanIntro(string Title, string Subtitle, double Seconds);
-public sealed record PlanOutro(string Text, double Seconds);
-public sealed record PlanAudio(string Src, double Volume);
-
-public sealed record AutoEditPlan(
-    int Width,
-    int Height,
-    int Fps,
-    IReadOnlyList<PlanClip> Clips,
-    double TransitionSeconds,
-    PlanIntro? Intro,
-    PlanOutro? Outro,
-    IReadOnlyList<PlanCaption> Captions,
-    PlanAudio? Voiceover,
-    PlanAudio? Music,
-    string AccentColor)
-{
-    public double TotalSeconds
-    {
-        get
-        {
-            var scenes = (Intro is null ? 0 : 1) + Clips.Count + (Outro is null ? 0 : 1);
-            var sum = (Intro?.Seconds ?? 0) + Clips.Sum(c => c.Duration) + (Outro?.Seconds ?? 0);
-            return Math.Round(sum - Math.Max(0, scenes - 1) * TransitionSeconds, 3);
-        }
-    }
-}
+namespace TodoX.EditVideo.Planning;
 
 /// <summary>
 /// Turns raw clips + a short brief into an edit decision list. This is TodoX's editing know-how and lives in
-/// compiled code on purpose: the assistant only sees the inputs and the finished video.
+/// server code on purpose: the customer's tool only sends clip metadata and receives the finished plan.
 /// </summary>
 public static partial class EditPlanner
 {
@@ -68,7 +23,7 @@ public static partial class EditPlanner
         _ => (1080, 1920)
     };
 
-    public static AutoEditPlan Plan(AutoEditRequest req)
+    public static AutoEditPlan Plan(PlanRequest req)
     {
         var usable = req.Clips.Where(c => c.HasVideo && c.DurationSeconds >= 1.0).ToList();
         if (usable.Count == 0)
@@ -102,23 +57,25 @@ public static partial class EditPlanner
         var clipBudget = BudgetFor(usable.Count);
         var lengths = Allocate(usable.Select(c => c.DurationSeconds).ToList(), Math.Max(clipBudget, usable.Count * MinClipSeconds));
 
-        var hasBedAudio = req.MusicPath is not null || req.VoiceoverPath is not null;
+        var hasBedAudio = req.HasMusic || req.HasVoiceover;
         var clips = usable.Select((c, i) =>
         {
             var len = lengths[i];
             // Skip the shaky first moments; centre the cut slightly early in the shot.
             var from = Math.Max(0, Math.Min(c.DurationSeconds - len, (c.DurationSeconds - len) * 0.4));
-            return new PlanClip(c.Path, Math.Round(from, 3), Math.Round(len, 3), KeepAudio: !hasBedAudio && c.HasAudio);
+            return new PlanClip(c.Id, Math.Round(from, 3), Math.Round(len, 3), KeepAudio: !hasBedAudio && c.HasAudio);
         }).ToList();
 
-        var plan = new AutoEditPlan(width, height, Fps, clips, Transition, intro, outro, [], null, null, req.AccentColor);
+        var style = StyleCatalog.Resolve(req.StyleId);
+        var accent = IsHexColor(req.AccentColor) ? req.AccentColor!.Trim() : style.Accent;
+        var plan = new AutoEditPlan(width, height, Fps, clips, Transition, intro, outro, [], null, null, accent, style);
         var captions = BuildCaptions(req.Script, intro is null ? 0 : intro.Seconds - Transition, plan.TotalSeconds - (outro is null ? 0 : outro.Seconds - Transition));
 
         return plan with
         {
             Captions = captions,
-            Voiceover = req.VoiceoverPath is null ? null : new PlanAudio(req.VoiceoverPath, 1.0),
-            Music = req.MusicPath is null ? null : new PlanAudio(req.MusicPath, 0.6)
+            Voiceover = req.HasVoiceover ? new PlanAudio("voiceover", 1.0) : null,
+            Music = req.HasMusic ? new PlanAudio("music", 0.6) : null
         };
     }
 
@@ -205,6 +162,11 @@ public static partial class EditPlanner
 
         return result;
     }
+
+    private static bool IsHexColor(string? v) => v is not null && HexColor().IsMatch(v.Trim());
+
+    [GeneratedRegex("^#[0-9A-Fa-f]{6}$")]
+    private static partial Regex HexColor();
 
     [GeneratedRegex(@"(?<=[\.!\?…;])\s+|\r?\n+")]
     private static partial Regex SentenceSplit();

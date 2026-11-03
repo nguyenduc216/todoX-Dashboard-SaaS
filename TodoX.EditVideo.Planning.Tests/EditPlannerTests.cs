@@ -1,16 +1,16 @@
-using TodoX.EditVideoTool.Media;
+using TodoX.EditVideo.Planning;
 
-namespace TodoX.EditVideoTool.Tests;
+namespace TodoX.EditVideo.Planning.Tests;
 
 public sealed class EditPlannerTests
 {
-    private static MediaInfo Clip(string name, double seconds, bool audio = true) =>
-        new($@"C:\clips\{name}.mp4", seconds, 1920, 1080, 30, HasVideo: true, HasAudio: audio);
+    private static ClipInput Clip(string name, double seconds, bool audio = true) =>
+        new(name, seconds, 1920, 1080, HasVideo: true, HasAudio: audio);
 
     [Fact]
     public void Plan_hits_the_target_length_including_intro_outro_and_transitions()
     {
-        var plan = EditPlanner.Plan(new AutoEditRequest(
+        var plan = EditPlanner.Plan(new PlanRequest(
             [Clip("a", 20), Clip("b", 20), Clip("c", 20), Clip("d", 20)],
             TargetSeconds: 25, Title: "Căn hộ A2", OutroText: "Gọi ngay"));
 
@@ -23,7 +23,7 @@ public sealed class EditPlannerTests
     [Fact]
     public void Short_clips_are_used_whole_and_long_ones_take_the_rest()
     {
-        var plan = EditPlanner.Plan(new AutoEditRequest([Clip("short", 2), Clip("long", 60)], TargetSeconds: 8));
+        var plan = EditPlanner.Plan(new PlanRequest([Clip("short", 2), Clip("long", 60)], TargetSeconds: 8));
 
         Assert.Equal(2, plan.Clips[0].Duration, 2);
         Assert.Equal(6.5, plan.Clips[1].Duration, 2);
@@ -36,22 +36,22 @@ public sealed class EditPlannerTests
     {
         var clips = Enumerable.Range(0, 30).Select(i => Clip($"c{i:00}", 10)).ToList();
 
-        var plan = EditPlanner.Plan(new AutoEditRequest(clips, TargetSeconds: 10));
+        var plan = EditPlanner.Plan(new PlanRequest(clips, TargetSeconds: 10));
 
         Assert.True(plan.Clips.Count < 30);
-        Assert.Equal(clips[0].Path, plan.Clips[0].Src);
-        Assert.Equal(clips[^1].Path, plan.Clips[^1].Src);
+        Assert.Equal(clips[0].Id, plan.Clips[0].Src);
+        Assert.Equal(clips[^1].Id, plan.Clips[^1].Src);
         Assert.All(plan.Clips, c => Assert.True(c.Duration >= EditPlanner.MinClipSeconds - 0.01));
     }
 
     [Fact]
     public void Clip_audio_is_kept_only_without_music_or_voiceover()
     {
-        var plain = EditPlanner.Plan(new AutoEditRequest([Clip("a", 10), Clip("silent", 10, audio: false)]));
+        var plain = EditPlanner.Plan(new PlanRequest([Clip("a", 10), Clip("silent", 10, audio: false)]));
         Assert.True(plain.Clips[0].KeepAudio);
         Assert.False(plain.Clips[1].KeepAudio);
 
-        var withVoice = EditPlanner.Plan(new AutoEditRequest([Clip("a", 10)], VoiceoverPath: @"C:\v.mp3", VoiceoverSeconds: 12));
+        var withVoice = EditPlanner.Plan(new PlanRequest([Clip("a", 10)], HasVoiceover: true, VoiceoverSeconds: 12));
         Assert.False(withVoice.Clips[0].KeepAudio);
         Assert.NotNull(withVoice.Voiceover);
         Assert.True(withVoice.TotalSeconds >= 12);
@@ -60,8 +60,8 @@ public sealed class EditPlannerTests
     [Fact]
     public void Long_voiceover_with_little_footage_replays_clips_instead_of_cutting_the_voice()
     {
-        var plan = EditPlanner.Plan(new AutoEditRequest(
-            [Clip("a", 3), Clip("b", 4)], TargetSeconds: 10, VoiceoverPath: @"C:\v.mp3", VoiceoverSeconds: 20));
+        var plan = EditPlanner.Plan(new PlanRequest(
+            [Clip("a", 3), Clip("b", 4)], TargetSeconds: 10, HasVoiceover: true, VoiceoverSeconds: 20));
 
         Assert.True(plan.TotalSeconds >= 20, $"total {plan.TotalSeconds}");
         Assert.True(plan.Clips.Count > 2);
@@ -77,7 +77,7 @@ public sealed class EditPlannerTests
     [Fact]
     public void No_usable_clips_is_a_clear_error()
     {
-        var ex = Assert.Throws<ArgumentException>(() => EditPlanner.Plan(new AutoEditRequest([Clip("tiny", 0.4)])));
+        var ex = Assert.Throws<ArgumentException>(() => EditPlanner.Plan(new PlanRequest([Clip("tiny", 0.4)])));
         Assert.Contains("clip", ex.Message);
     }
 
@@ -100,28 +100,23 @@ public sealed class EditPlannerTests
     }
 
     [Fact]
-    public void Probe_parses_ffprobe_json_including_rotation()
+    public void Style_defaults_to_todox_brand_and_accent_override_must_be_hex()
     {
-        const string json = """
-            {"streams":[{"codec_type":"video","width":1920,"height":1080,"avg_frame_rate":"30000/1001",
-              "side_data_list":[{"rotation":-90}]},{"codec_type":"audio"}],
-             "format":{"duration":"12.345"}}
-            """;
+        var plan = EditPlanner.Plan(new PlanRequest([Clip("a", 10)]));
+        Assert.Equal("todox", plan.Style.Id);
+        Assert.Equal("#FFBE2E", plan.AccentColor);
 
-        var info = MediaProbe.Parse(@"C:\x.mp4", json);
-
-        Assert.Equal(12.345, info.DurationSeconds, 3);
-        Assert.Equal((1080, 1920), (info.Width, info.Height));
-        Assert.Equal(29.97, info.Fps, 2);
-        Assert.True(info.HasVideo && info.HasAudio);
+        Assert.Equal("#123456", EditPlanner.Plan(new PlanRequest([Clip("a", 10)], StyleId: "clean", AccentColor: "#123456")).AccentColor);
+        Assert.Equal("#FFFFFF", EditPlanner.Plan(new PlanRequest([Clip("a", 10)], StyleId: "clean", AccentColor: "red;}")).AccentColor);
+        Assert.Equal("todox", StyleCatalog.Resolve("nope").Id);
     }
 
     [Fact]
-    public void Render_events_are_parsed_and_noise_ignored()
+    public void Media_sources_are_ids_never_paths()
     {
-        Assert.Equal(42, RemotionRenderer.ParseEvent("""{"type":"progress","percent":42}""")!.Percent);
-        Assert.Equal("boom", RemotionRenderer.ParseEvent("""{"type":"error","message":"boom"}""")!.Message);
-        Assert.Null(RemotionRenderer.ParseEvent("Downloading Chrome..."));
-        Assert.Null(RemotionRenderer.ParseEvent("{not json"));
+        var plan = EditPlanner.Plan(new PlanRequest([Clip("c0", 10)], HasMusic: true, HasVoiceover: true, VoiceoverSeconds: 8));
+        Assert.Equal("c0", plan.Clips[0].Src);
+        Assert.Equal("music", plan.Music!.Src);
+        Assert.Equal("voiceover", plan.Voiceover!.Src);
     }
 }
