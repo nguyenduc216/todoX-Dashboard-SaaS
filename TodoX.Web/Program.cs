@@ -8,6 +8,7 @@ using TodoX.Web.Services.Reup;
 using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.DanceSell;
+using TodoX.Web.Services.EditVideoTool;
 using TodoX.Web.Services.Landing;
 using TodoX.Web.Services.SharedMedia;
 using TodoX.Web.Services.SystemDiagnostics;
@@ -286,6 +287,9 @@ builder.Services.AddHttpClient<TikwmVideoResolver>(client => client.Timeout = Ti
 builder.Services.AddHttpClient<FacebookPageTokenChecker>(client => client.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddHttpClient<FacebookPageVideoPublisher>(client => client.Timeout = TimeSpan.FromMinutes(10));
 builder.Services.AddHttpClient<ReupVideoCacheService>(client => client.Timeout = TimeSpan.FromMinutes(10));
+builder.Services.Configure<EditVideoToolOptions>(builder.Configuration.GetSection(EditVideoToolOptions.SectionName));
+builder.Services.AddSingleton<EditVideoLicenseSigner>();
+builder.Services.AddScoped<EditVideoLicenseService>();
 builder.Services.AddScoped<ReupCampaignRepository>();
 builder.Services.AddScoped<ReupLogService>();
 builder.Services.AddSingleton<ReupStorageService>();
@@ -528,6 +532,7 @@ app.MapAiStudioCatalogEndpoints();
 app.MapRVideoEndpoints();
 app.MapPromptAssistantEndpoints();
 app.MapSceneAudioEndpoints();
+app.MapEditVideoEndpoints();
 
 app.MapGet("/system/version", (IConfiguration configuration, IRuntimeBuildInfoProvider buildInfoProvider) =>
 {

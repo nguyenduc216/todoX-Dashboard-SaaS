@@ -1,0 +1,352 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.EditVideoTool
+@inject EditVideoLicenseService Licenses
+@inject AuthStateService AuthState
+@inject AuditRepository Audit
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">License TodoX EditVideoTool — @CustomerName</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (_canManage)
+            {
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Cấp license mới</MudText>
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="3">
+                            <MudTextField T="string" Label="Gói" @bind-Value="_planCode" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="6" sm="2">
+                            <MudNumericField T="int" Label="Máy tính" @bind-Value="_maxDesktop" Min="0" Max="50" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="6" sm="2">
+                            <MudNumericField T="int" Label="Điện thoại" @bind-Value="_maxMobile" Min="0" Max="50" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="3">
+                            <MudDatePicker Label="Hết hạn (bỏ trống = vĩnh viễn)" @bind-Date="_expiresAt" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                        </MudItem>
+                        <MudItem xs="12" sm="2" Class="d-flex align-center">
+                            <MudButton Class="todox-primary-btn" FullWidth="true" Disabled="_busy" OnClick="Issue">Cấp license</MudButton>
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudTextField T="string" Label="Ghi chú" @bind-Value="_note" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                    </MudGrid>
+                    @if (_issuedKey is not null)
+                    {
+                        <MudAlert Severity="Severity.Success" Class="mt-2">
+                            License key (chỉ hiển thị một lần, hãy gửi cho khách ngay):
+                            <MudTextField T="string" Value="_issuedKey" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-1" Style="font-family:monospace" />
+                        </MudAlert>
+                    }
+                </MudPaper>
+            }
+
+            <MudTable Items="_licenses" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table"
+                      OnRowClick="@((TableRowClickEventArgs<EditVideoLicenseRow> e) => Select(e.Item))" T="EditVideoLicenseRow">
+                <HeaderContent>
+                    <MudTh>Key</MudTh>
+                    <MudTh>Gói</MudTh>
+                    <MudTh>Máy tính</MudTh>
+                    <MudTh>Điện thoại</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Hết hạn</MudTh>
+                    <MudTh>Cảnh báo</MudTh>
+                    <MudTh Style="text-align:right">Thao tác</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Key" Style="font-family:monospace">@context.KeyPrefix-…</MudTd>
+                    <MudTd DataLabel="Gói">@context.PlanCode</MudTd>
+                    <MudTd DataLabel="Máy tính">@context.ActiveDesktopDevices / @context.MaxDesktopDevices</MudTd>
+                    <MudTd DataLabel="Điện thoại">@context.ActiveMobileDevices / @context.MaxMobileDevices</MudTd>
+                    <MudTd DataLabel="Trạng thái">
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusLabel(context.Status)</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Hết hạn">@(context.ExpiresAt?.ToLocalTime().ToString("dd/MM/yyyy") ?? "Vĩnh viễn")</MudTd>
+                    <MudTd DataLabel="Cảnh báo">
+                        @if (context.LimitExceededLast30Days > 0)
+                        {
+                            <MudTooltip Text="Số lần có thiết bị khác cố kích hoạt khi đã hết slot (30 ngày gần nhất)">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Icon="@Icons.Material.Filled.Warning">@context.LimitExceededLast30Days lần vượt máy</MudChip>
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption">—</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Thao tác" Style="text-align:right">
+                        <MudIconButton Icon="@Icons.Material.Filled.Devices" Size="Size.Small" Title="Thiết bị" OnClick="@(() => Select(context))" />
+                        @if (_canManage && context.Status != EditVideoLicenseStatuses.Revoked)
+                        {
+                            @if (context.Status == EditVideoLicenseStatuses.Active)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.PauseCircle" Color="Color.Warning" Size="Size.Small" Title="Tạm khóa" OnClick="@(() => SetStatus(context, EditVideoLicenseStatuses.Suspended))" />
+                            }
+                            else
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.PlayCircle" Color="Color.Success" Size="Size.Small" Title="Mở lại" OnClick="@(() => SetStatus(context, EditVideoLicenseStatuses.Active))" />
+                            }
+                            <MudIconButton Icon="@Icons.Material.Filled.Block" Color="Color.Error" Size="Size.Small" Title="Thu hồi vĩnh viễn" OnClick="@(() => SetStatus(context, EditVideoLicenseStatuses.Revoked))" />
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Class="pa-4 todox-page-subtitle">Khách hàng chưa có license nào.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+
+            @if (_selected is not null)
+            {
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                        <MudText Typo="Typo.subtitle2">Thiết bị của @_selected.KeyPrefix-…</MudText>
+                        @if (_canManage && _selected.Status != EditVideoLicenseStatuses.Revoked)
+                        {
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                <MudNumericField T="int" Label="Máy tính" @bind-Value="_editDesktop" Min="0" Max="50" Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:110px" />
+                                <MudNumericField T="int" Label="Điện thoại" @bind-Value="_editMobile" Min="0" Max="50" Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:110px" />
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_busy" OnClick="SaveLimits">Lưu giới hạn</MudButton>
+                            </MudStack>
+                        }
+                    </MudStack>
+
+                    <MudTable Items="_devices" Dense="true" Breakpoint="Breakpoint.Sm" Class="todox-table mt-2">
+                        <HeaderContent>
+                            <MudTh>Loại</MudTh>
+                            <MudTh>Tên máy</MudTh>
+                            <MudTh>Hệ điều hành</MudTh>
+                            <MudTh>Phiên bản</MudTh>
+                            <MudTh>Online lần cuối</MudTh>
+                            <MudTh>IP</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                            <MudTh></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Loại">
+                                <MudIcon Icon="@(context.DeviceKind == EditVideoDeviceKinds.Mobile ? Icons.Material.Filled.PhoneAndroid : Icons.Material.Filled.Computer)" Size="Size.Small" />
+                            </MudTd>
+                            <MudTd DataLabel="Tên máy">@(context.DeviceName ?? "—")</MudTd>
+                            <MudTd DataLabel="Hệ điều hành">@(context.Os ?? "—")</MudTd>
+                            <MudTd DataLabel="Phiên bản">@(context.AppVersion ?? "—")</MudTd>
+                            <MudTd DataLabel="Online lần cuối">@context.LastSeenAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                            <MudTd DataLabel="IP">@(context.LastIp ?? "—")</MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@(context.Status == EditVideoDeviceStatuses.Active ? Color.Success : Color.Default)">@DeviceStatusLabel(context)</MudChip>
+                            </MudTd>
+                            <MudTd Style="text-align:right">
+                                @if (_canManage && context.Status == EditVideoDeviceStatuses.Active)
+                                {
+                                    <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" OnClick="@(() => RevokeDevice(context))">Gỡ máy</MudButton>
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent>
+                            <MudText Class="pa-2 todox-page-subtitle">Chưa có thiết bị nào kích hoạt.</MudText>
+                        </NoRecordsContent>
+                    </MudTable>
+
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Nhật ký gần đây</MudText>
+                    @foreach (var e in _events)
+                    {
+                        <MudText Typo="Typo.caption" Style="display:block" Color="@(e.EventType is EditVideoEventTypes.LimitExceeded or EditVideoEventTypes.DeviceMismatch ? Color.Error : Color.Default)">
+                            @e.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm") · @EventLabel(e.EventType)@(e.Ip is null ? "" : $" · {e.Ip}")@(e.Detail is null ? "" : $" · {e.Detail}")
+                        </MudText>
+                    }
+                </MudPaper>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public Guid CustomerId { get; set; }
+    [Parameter] public string CustomerName { get; set; } = string.Empty;
+
+    private IReadOnlyList<EditVideoLicenseRow> _licenses = [];
+    private IReadOnlyList<EditVideoDeviceRow> _devices = [];
+    private IReadOnlyList<EditVideoEventRow> _events = [];
+    private EditVideoLicenseRow? _selected;
+    private bool _canManage;
+    private bool _busy;
+
+    private string _planCode = "standard";
+    private int _maxDesktop = 1;
+    private int _maxMobile = 1;
+    private DateTime? _expiresAt;
+    private string? _note;
+    private string? _issuedKey;
+    private int _editDesktop;
+    private int _editMobile;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = AuthState.CurrentUser;
+        _canManage = user?.IsAuthenticated == true && !user.IsCustomer;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        try
+        {
+            _licenses = await Licenses.ListForCustomerAsync(CustomerId);
+            if (_selected is not null)
+            {
+                var again = _licenses.FirstOrDefault(l => l.Id == _selected.Id);
+                if (again is not null)
+                {
+                    await Select(again);
+                }
+            }
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
+        {
+            Snackbar.Add("Chưa cài bảng license (chạy database/manual/editvideo-tool/20261103_editvideo_licensing.sql).", Severity.Warning);
+        }
+    }
+
+    private async Task Select(EditVideoLicenseRow license)
+    {
+        _selected = license;
+        _editDesktop = license.MaxDesktopDevices;
+        _editMobile = license.MaxMobileDevices;
+        _devices = await Licenses.ListDevicesAsync(license.Id);
+        _events = await Licenses.ListEventsAsync(license.Id);
+    }
+
+    private async Task Issue()
+    {
+        _busy = true;
+        try
+        {
+            var expires = _expiresAt is { } d ? new DateTimeOffset(d.Date.AddDays(1).AddSeconds(-1), TimeZoneInfo.Local.GetUtcOffset(d)) : (DateTimeOffset?)null;
+            var issued = await Licenses.IssueAsync(
+                new EditVideoIssueLicenseRequest(CustomerId, _planCode, _maxDesktop, _maxMobile, expires, _note),
+                AuthState.CurrentUser?.UserId);
+            _issuedKey = issued.LicenseKey;
+            await Audit.LogAsync(AuthState.CurrentUser, "editvideo_licenses", "create", entityDisplay: $"{CustomerName} {issued.KeyPrefix}");
+            Snackbar.Add("Đã cấp license.", Severity.Success);
+            await Reload();
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            Snackbar.Add("Giới hạn thiết bị phải từ 0–50 và cho phép ít nhất 1 thiết bị.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetStatus(EditVideoLicenseRow license, string status)
+    {
+        if (status == EditVideoLicenseStatuses.Revoked)
+        {
+            var confirm = await DialogService.ShowMessageBoxAsync(
+                "Thu hồi license",
+                $"Thu hồi vĩnh viễn {license.KeyPrefix}-…? Mọi thiết bị đang dùng sẽ bị ngắt và key không dùng lại được.",
+                yesText: "Thu hồi", cancelText: "Hủy");
+            if (confirm != true)
+            {
+                return;
+            }
+        }
+
+        await Licenses.SetStatusAsync(license.Id, status, AuthState.CurrentUser?.UserId);
+        await Audit.LogAsync(AuthState.CurrentUser, "editvideo_licenses", status, entityDisplay: $"{CustomerName} {license.KeyPrefix}");
+        Snackbar.Add($"Đã chuyển license sang: {StatusLabel(status)}.", Severity.Success);
+        await Reload();
+    }
+
+    private async Task SaveLimits()
+    {
+        if (_selected is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var (ok, message) = await Licenses.SetLimitsAsync(_selected.Id, _editDesktop, _editMobile, AuthState.CurrentUser?.UserId);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+            if (ok)
+            {
+                await Reload();
+            }
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            Snackbar.Add("Giới hạn thiết bị phải từ 0–50 và cho phép ít nhất 1 thiết bị.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RevokeDevice(EditVideoDeviceRow device)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Gỡ thiết bị",
+            $"Gỡ \"{device.DeviceName ?? "thiết bị"}\" khỏi license? Máy này sẽ ngừng dùng được và slot được trả lại.",
+            yesText: "Gỡ máy", cancelText: "Hủy");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        await Licenses.RevokeDeviceAsync(device.Id, AuthState.CurrentUser?.UserId);
+        Snackbar.Add("Đã gỡ thiết bị.", Severity.Success);
+        await Reload();
+    }
+
+    private void Close() => MudDialog.Close();
+
+    private static Color StatusColor(string status) => status switch
+    {
+        EditVideoLicenseStatuses.Active => Color.Success,
+        EditVideoLicenseStatuses.Suspended => Color.Warning,
+        _ => Color.Error
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        EditVideoLicenseStatuses.Active => "Hoạt động",
+        EditVideoLicenseStatuses.Suspended => "Tạm khóa",
+        EditVideoLicenseStatuses.Revoked => "Đã thu hồi",
+        _ => status
+    };
+
+    private static string DeviceStatusLabel(EditVideoDeviceRow device) => device.Status switch
+    {
+        EditVideoDeviceStatuses.Active => "Đang dùng",
+        EditVideoDeviceStatuses.Released => "Khách tự gỡ",
+        EditVideoDeviceStatuses.Revoked => device.ReleasedReason == "license_revoked" ? "Thu hồi theo license" : "Admin gỡ",
+        _ => device.Status
+    };
+
+    private static string EventLabel(string type) => type switch
+    {
+        EditVideoEventTypes.Issued => "Cấp license",
+        EditVideoEventTypes.Activated => "Kích hoạt máy mới",
+        EditVideoEventTypes.Reactivated => "Kích hoạt lại",
+        EditVideoEventTypes.Released => "Máy tự gỡ",
+        EditVideoEventTypes.RevokedDevice => "Admin gỡ máy",
+        EditVideoEventTypes.LimitExceeded => "⚠ Vượt số máy — bị từ chối",
+        EditVideoEventTypes.DeviceMismatch => "⚠ Token dùng trên máy khác",
+        EditVideoEventTypes.StatusChanged => "Đổi trạng thái",
+        EditVideoEventTypes.LimitsChanged => "Đổi giới hạn",
+        _ => type
+    };
+}

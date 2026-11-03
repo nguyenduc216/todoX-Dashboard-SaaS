@@ -5,6 +5,7 @@
 @inject AuthStateService AuthState
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject TodoX.Web.Services.EditVideoTool.EditVideoLicenseService EditVideoLicenses
 
 <PageTitle>Khách hàng</PageTitle>
 
@@ -60,6 +61,7 @@
                 <MudTh>Số điện thoại</MudTh>
                 <MudTh>Trạng thái</MudTh>
                 <MudTh>Ngày tạo</MudTh>
+                <MudTh>License</MudTh>
                 <MudTh Style="text-align:right">Thao tác</MudTh>
             </HeaderContent>
             <RowTemplate>
@@ -72,7 +74,18 @@
                     <MudChip T="string" Size="Size.Small" Color="@TodoXLabels.StatusColor(context.Status)">@TodoXLabels.Status(context.Status)</MudChip>
                 </MudTd>
                 <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
+                <MudTd DataLabel="License">
+                    @if (_licenseSummary.TryGetValue(context.Id, out var lic))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@(lic.Alerts > 0 ? Color.Error : Color.Info)"
+                                 Icon="@(lic.Alerts > 0 ? Icons.Material.Filled.Warning : Icons.Material.Filled.VpnKey)"
+                                 OnClick="@(() => OpenLicenses(context))">
+                            @lic.Licenses@(lic.Alerts > 0 ? $" · {lic.Alerts} vượt máy" : "")
+                        </MudChip>
+                    }
+                </MudTd>
                 <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.VpnKey" Size="Size.Small" Title="License EditVideoTool" OnClick="@(() => OpenLicenses(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
                     @if (context.Status == TodoXAccountStatus.Locked)
                     {
@@ -95,10 +108,40 @@
 @code {
     private IReadOnlyList<CustomerProfile> _customers = new List<CustomerProfile>();
     private string _search = string.Empty;
+    private IReadOnlyDictionary<Guid, (int Licenses, int Alerts)> _licenseSummary = new Dictionary<Guid, (int, int)>();
 
     protected override async Task OnInitializedAsync() => await Reload();
 
-    private async Task Reload() => _customers = await Accounts.GetCustomersAsync();
+    private async Task Reload()
+    {
+        _customers = await Accounts.GetCustomersAsync();
+        await ReloadLicenseSummary();
+    }
+
+    private async Task ReloadLicenseSummary()
+    {
+        try
+        {
+            _licenseSummary = await EditVideoLicenses.GetCustomerSummaryAsync();
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
+        {
+            // editvideo schema not installed yet; the license column stays empty.
+        }
+    }
+
+    private async Task OpenLicenses(CustomerProfile customer)
+    {
+        var parameters = new DialogParameters<CustomerLicensesDialog>
+        {
+            { x => x.CustomerId, customer.Id },
+            { x => x.CustomerName, customer.CompanyName }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<CustomerLicensesDialog>("License", parameters, options);
+        await dialog.Result;
+        await ReloadLicenseSummary();
+    }
 
     private IEnumerable<CustomerProfile> Filtered
     {
