@@ -6,6 +6,7 @@
   const titleEl = document.getElementById('industryModalTitle');
   const descriptionEl = document.getElementById('industryModalDescription');
   const notesEl = document.getElementById('industryModalNotes');
+  const shareEl = document.getElementById('industryModalShare');
   if (!wrapper || !modal || !videoEl || !titleEl || !descriptionEl || !notesEl) return;
 
   let industries = [];
@@ -101,6 +102,12 @@
     titleEl.textContent = item.title || industry.title || '';
     descriptionEl.textContent = item.description || item.shortDescription || industry.description || industry.shortDescription || '';
     renderNotes(item);
+
+    if (shareEl) {
+      shareEl.hidden = !item.sharePath;
+      shareEl.dataset.shareUrl = item.sharePath || '';
+      shareEl.dataset.shareTitle = item.title || industry.title || '';
+    }
 
     if (item.thumbnailUrl) videoEl.poster = item.thumbnailUrl;
     else if (industry.thumbnailUrl) videoEl.poster = industry.thumbnailUrl;

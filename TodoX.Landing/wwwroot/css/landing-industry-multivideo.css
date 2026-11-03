@@ -257,3 +257,10 @@
     margin-top:0!important;
   }
 }
+
+.industry-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.industry-modal__share[hidden] { display: none; }

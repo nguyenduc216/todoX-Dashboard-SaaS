@@ -34,7 +34,8 @@ public sealed class IndustrySolutionRepository
                     format_note as FormatNote,
                     goal_note as GoalNote,
                     capability_note as CapabilityNote,
-                    display_order as DisplayOrder
+                    display_order as DisplayOrder,
+                    created_at as CreatedAt
                 from landing.industry_solutions
                 where is_active = true
                   and deleted_at is null
@@ -52,7 +53,7 @@ public sealed class IndustrySolutionRepository
                 cancellationToken: ct));
 
             if (!videoTableReady)
-                return industries;
+                return WithShareLinks(industries);
 
             const string videoSql = """
                 select
@@ -68,7 +69,8 @@ public sealed class IndustrySolutionRepository
                     goal_note as GoalNote,
                     capability_note as CapabilityNote,
                     display_order as DisplayOrder,
-                    is_primary as IsPrimary
+                    is_primary as IsPrimary,
+                    created_at as CreatedAt
                 from landing.industry_solution_videos
                 where is_active = true
                   and deleted_at is null
@@ -102,7 +104,7 @@ public sealed class IndustrySolutionRepository
                     : primary.AspectRatio;
             }
 
-            return industries;
+            return WithShareLinks(industries);
         }
         catch (LandingSchemaUnavailableException ex)
         {
@@ -119,6 +121,44 @@ public sealed class IndustrySolutionRepository
             _logger.LogError(ex, "Unable to load public landing industry solutions.");
             return Array.Empty<IndustrySolution>();
         }
+    }
+
+    public async Task<(IndustrySolutionVideo Video, IndustrySolution Industry)?> FindVideoBySlugAsync(
+        string slug, CancellationToken ct = default) =>
+        VideoSlug.Find(await ListPublicAsync(ct), slug);
+
+    private static List<IndustrySolution> WithShareLinks(List<IndustrySolution> industries)
+    {
+        // Industries uploaded before multi-video support only carry a top-level video;
+        // expose it as a single clip so it gets a share page like the others.
+        foreach (var industry in industries)
+        {
+            if (industry.Videos.Count > 0 || string.IsNullOrWhiteSpace(industry.VideoUrl))
+                continue;
+
+            industry.Videos = new[]
+            {
+                new IndustrySolutionVideo
+                {
+                    Id = industry.Id,
+                    IndustrySolutionId = industry.Id,
+                    Title = industry.Title,
+                    ShortDescription = industry.ShortDescription,
+                    Description = industry.Description,
+                    ThumbnailUrl = industry.ThumbnailUrl,
+                    VideoUrl = industry.VideoUrl,
+                    AspectRatio = industry.AspectRatio,
+                    FormatNote = industry.FormatNote,
+                    GoalNote = industry.GoalNote,
+                    CapabilityNote = industry.CapabilityNote,
+                    IsPrimary = true,
+                    CreatedAt = industry.CreatedAt
+                }
+            };
+        }
+
+        VideoSlug.Assign(industries);
+        return industries;
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken ct = default)

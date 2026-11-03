@@ -205,6 +205,27 @@ app.MapPost("/api/contact-leads", async (
     }
 }).RequireRateLimiting("contact-leads");
 
+// Readable share link per sample video, server-rendered so Facebook/Zalo/Messenger previews
+// show its title, description and thumbnail instead of a bare .mp4 URL.
+app.MapGet("/video/{slug}", async (
+    string slug,
+    HttpContext http,
+    IndustrySolutionRepository repository,
+    IConfiguration configuration,
+    CancellationToken ct) =>
+{
+    var match = await repository.FindVideoBySlugAsync(slug, ct);
+    if (match is not { } found || string.IsNullOrWhiteSpace(found.Video.VideoUrl))
+        return Results.Redirect("/#industries");
+
+    if (!string.Equals(slug, found.Video.Slug, StringComparison.Ordinal))
+        return Results.Redirect(found.Video.SharePath, permanent: true);
+
+    http.Response.Headers.CacheControl = "public,max-age=300";
+    var baseUrl = VideoSharePage.ResolveBaseUrl(http.Request, configuration);
+    return Results.Content(VideoSharePage.Render(found.Video, found.Industry, baseUrl), "text/html; charset=utf-8");
+});
+
 // Serve the marketing deep link as its own document, including on refresh.
 app.MapGet("/bat-dong-san", () => Results.File(Path.Combine(app.Environment.WebRootPath, "bat-dong-san.html"), "text/html; charset=utf-8"));
 app.MapFallbackToFile("index.html");
