@@ -60,6 +60,13 @@ const serve = (files) =>
   });
 
 const main = async () => {
+  if (process.argv[2] === '--ensure-browser') {
+    // Installer pre-fetch so the first edit does not wait for a ~150 MB download.
+    await ensureBrowser({ onBrowserDownload: () => ({ onProgress: ({ percent }) => emit({ type: 'browser_download', percent }) }) });
+    emit({ type: 'done' });
+    return;
+  }
+
   const job = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
   const files = [];
   const mapped = mapMedia(job.props, files);
@@ -69,7 +76,15 @@ const main = async () => {
 
   try {
     emit({ type: 'stage', stage: 'browser' });
-    await ensureBrowser({ onBrowserDownload: () => ({ onProgress: ({ percent }) => emit({ type: 'browser_download', percent }) }) });
+    let lastDl = -1;
+    await ensureBrowser({
+      onBrowserDownload: () => ({
+        onProgress: ({ percent }) => {
+          const p = Math.floor(percent * 100);
+          if (p !== lastDl) { lastDl = p; emit({ type: 'browser_download', percent }); }
+        },
+      }),
+    });
 
     emit({ type: 'stage', stage: 'compose' });
     const composition = await selectComposition({ serveUrl: job.bundle, id: 'AutoEdit', inputProps });

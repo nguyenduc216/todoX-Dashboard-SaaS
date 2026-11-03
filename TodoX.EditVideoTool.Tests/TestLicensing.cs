@@ -27,11 +27,9 @@ internal sealed class TestSigner : IDisposable
 
     public LicenseVerifier Verifier => new(_key.ExportSubjectPublicKeyInfoPem());
 
-    public string Sign(LicensePayload payload)
-    {
-        var body = JsonSerializer.SerializeToUtf8Bytes(payload, Json);
-        return $"{B64(body)}.{B64(_key.SignData(body, HashAlgorithmName.SHA256))}";
-    }
+    public string Sign(LicensePayload payload) => SignRaw(JsonSerializer.SerializeToUtf8Bytes(payload, Json));
+
+    public string SignRaw(byte[] body) => $"{B64(body)}.{B64(_key.SignData(body, HashAlgorithmName.SHA256))}";
 
     public void Dispose() => _key.Dispose();
 

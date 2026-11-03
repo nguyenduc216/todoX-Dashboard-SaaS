@@ -5,7 +5,7 @@ using TodoX.EditVideoTool.Components;
 
 namespace TodoX.EditVideoTool.Media;
 
-public sealed record MediaInfo(string Path, double DurationSeconds, int Width, int Height, double Fps, bool HasVideo, bool HasAudio);
+public sealed record MediaInfo(string Path, double DurationSeconds, int Width, int Height, double Fps, bool HasVideo, bool HasAudio, string? VideoCodec = null, int Rotation = 0);
 
 /// <summary>Reads clip metadata with ffprobe. Nothing leaves the machine.</summary>
 public sealed class MediaProbe
@@ -88,9 +88,10 @@ public sealed class MediaProbe
             double.TryParse(d.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out duration);
         }
 
-        int width = 0, height = 0;
+        int width = 0, height = 0, rotation = 0;
         double fps = 0;
         bool hasVideo = false, hasAudio = false;
+        string? codec = null;
         if (root.TryGetProperty("streams", out var streams))
         {
             foreach (var s in streams.EnumerateArray())
@@ -102,7 +103,9 @@ public sealed class MediaProbe
                     width = s.TryGetProperty("width", out var w) ? w.GetInt32() : 0;
                     height = s.TryGetProperty("height", out var h) ? h.GetInt32() : 0;
                     fps = ParseRate(s.TryGetProperty("avg_frame_rate", out var r) ? r.GetString() : null);
-                    if (TryRotation(s) is 90 or 270)
+                    codec = s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
+                    rotation = TryRotation(s) ?? 0;
+                    if (rotation is 90 or 270)
                     {
                         (width, height) = (height, width);
                     }
@@ -114,7 +117,7 @@ public sealed class MediaProbe
             }
         }
 
-        return new MediaInfo(path, duration, width, height, fps, hasVideo, hasAudio);
+        return new MediaInfo(path, duration, width, height, fps, hasVideo, hasAudio, codec, rotation);
     }
 
     private static int? TryRotation(JsonElement stream)

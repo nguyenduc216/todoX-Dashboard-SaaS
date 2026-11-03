@@ -17,6 +17,32 @@ export type Caption = {
   end: number;
 };
 
+export type Style = {
+  id: string;
+  name: string;
+  accent: string;
+  background: string;
+  text: string;
+  fontFamily: string;
+  /** karaoke | box | pop | plain */
+  captionStyle: string;
+  /** fade | slide | mix */
+  transition: string;
+  zoomAmount: number;
+};
+
+export const defaultStyle: Style = {
+  id: 'todox',
+  name: 'TodoX',
+  accent: '#FFBE2E',
+  background: '#0B0D10',
+  text: '#FFFFFF',
+  fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+  captionStyle: 'karaoke',
+  transition: 'mix',
+  zoomAmount: 0.08,
+};
+
 export type AutoEditProps = {
   width: number;
   height: number;
@@ -29,6 +55,7 @@ export type AutoEditProps = {
   voiceover: { src: string; volume: number } | null;
   music: { src: string; volume: number } | null;
   accentColor: string;
+  style: Style;
 };
 
 export const defaultProps: AutoEditProps = {
@@ -37,12 +64,13 @@ export const defaultProps: AutoEditProps = {
   fps: 30,
   clips: [],
   transitionSeconds: 0.5,
-  intro: { title: 'TodoX', subtitle: 'Edit video bằng AI', seconds: 2.5 },
+  intro: { title: 'TodoX', subtitle: 'TODO EXCELLENCE', seconds: 2.5 },
   outro: null,
   captions: [],
   voiceover: null,
   music: null,
-  accentColor: '#2449C9',
+  accentColor: '#FFBE2E',
+  style: defaultStyle,
 };
 
 /** Total length in frames, accounting for transition overlaps between consecutive scenes. */

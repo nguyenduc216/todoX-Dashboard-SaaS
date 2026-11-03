@@ -44,6 +44,19 @@ public sealed class LicenseVerifier
 
     public LicensePayload? Verify(string? document)
     {
+        try
+        {
+            return VerifyBody(document) is { } body ? JsonSerializer.Deserialize<LicensePayload>(body, Json) : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Returns the signed bytes of any TodoX "body.signature" document (license, edit plan), or null.</summary>
+    public byte[]? VerifyBody(string? document)
+    {
         var parts = document?.Split('.');
         if (parts is not { Length: 2 })
         {
@@ -55,11 +68,9 @@ public sealed class LicenseVerifier
             using var key = ECDsa.Create();
             key.ImportFromPem(_publicKeyPem);
             var body = FromBase64Url(parts[0]);
-            return key.VerifyData(body, FromBase64Url(parts[1]), HashAlgorithmName.SHA256)
-                ? JsonSerializer.Deserialize<LicensePayload>(body, Json)
-                : null;
+            return key.VerifyData(body, FromBase64Url(parts[1]), HashAlgorithmName.SHA256) ? body : null;
         }
-        catch (Exception ex) when (ex is FormatException or CryptographicException or JsonException or ArgumentException)
+        catch (Exception ex) when (ex is FormatException or CryptographicException or ArgumentException)
         {
             return null;
         }

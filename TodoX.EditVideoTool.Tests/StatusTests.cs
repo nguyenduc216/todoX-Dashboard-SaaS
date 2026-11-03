@@ -56,15 +56,27 @@ public sealed class StatusTests : IDisposable
     }
 
     [Fact]
-    public async Task Status_tool_returns_camel_case_json()
+    public async Task Health_check_offline_reports_every_problem_without_calling_home()
     {
         var paths = new AgentPaths(Path.Combine(_root, "home"));
-        var tool = new StatusTools(new StatusService(paths, new ComponentLocator(paths, () => _pathDir), Guard(paths)));
+        var locator = new ComponentLocator(paths, () => _pathDir);
+        var handler = new FakeHandler();
+        handler.Replies.Enqueue((System.Net.HttpStatusCode.OK, null)); // ping fails
+        var server = new TodoX.EditVideoTool.Server.TodoXServerClient(new HttpClient(handler), new LicenseStore(paths), new FakeDevice());
+        var notifier = new CountingNotifier();
+        var connectivity = new TodoX.EditVideoTool.Server.ServerConnectivity(server, notifier, (_, _) => Task.CompletedTask);
+        var health = new HealthCheck(locator, new TodoX.EditVideoTool.Media.RemotionRenderer(paths, locator), Guard(paths), server, connectivity, paths);
 
-        using var doc = JsonDocument.Parse(await tool.Status(CancellationToken.None));
+        var report = await health.RunAsync(serverAttempts: 1);
 
-        Assert.Equal("not_activated", doc.RootElement.GetProperty("licenseState").GetString());
+        Assert.False(report.Ok);
+        Assert.False(report.ServerReachable);
+        Assert.Equal("not_activated", report.LicenseState);
+        Assert.Contains(report.Problems, p => p.Id == "server");
+        Assert.Contains(report.Problems, p => p.Id == "ffmpeg");
+        Assert.Single(notifier.Shown);
+        Assert.Single(handler.Requests); // no session/log upload when offline
+        using var doc = JsonDocument.Parse(HealthCheck.Describe(report));
         Assert.Equal(StatusService.Version, doc.RootElement.GetProperty("version").GetString());
-        Assert.Equal(3, doc.RootElement.GetProperty("components").GetArrayLength());
     }
 }

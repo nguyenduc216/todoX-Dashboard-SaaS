@@ -40,6 +40,11 @@ public sealed class RemotionRenderer
         }
     }
 
+    /// <summary>Remotion keeps its downloaded headless browser under node_modules/.remotion.</summary>
+    public static bool HasRenderBrowser(string remotionDir) =>
+        Directory.Exists(Path.Combine(remotionDir, "node_modules", ".remotion"))
+        && Directory.EnumerateFiles(Path.Combine(remotionDir, "node_modules", ".remotion"), "*.exe", SearchOption.AllDirectories).Any();
+
     public async Task<RenderResult> RenderAsync(AutoEditPlan plan, string outputPath, IProgress<RenderProgress>? progress, CancellationToken ct = default)
     {
         var node = _components.Locate("node");

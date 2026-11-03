@@ -8,7 +8,7 @@ public static class LicenseMessages
 {
     public static string ForServerError(string? code, string? serverMessage, JsonElement? detail = null) => code switch
     {
-        "invalid_request" => "License key không đúng định dạng (TDXV-XXXXX-XXXXX-XXXXX-XXXXX).",
+        "invalid_request" => "License key không đúng định dạng. Copy nguyên key TodoX (dạng tdxv_... hoặc TDXV-XXXXX-...).",
         "invalid_license" => "License key không tồn tại. Kiểm tra lại key TodoX đã gửi.",
         "license_suspended" => "License đang bị tạm khóa. Liên hệ TodoX.",
         "license_revoked" => "License đã bị thu hồi.",

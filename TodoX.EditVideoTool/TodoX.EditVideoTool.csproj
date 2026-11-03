@@ -2,16 +2,18 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>todox-editvideo</AssemblyName>
     <RootNamespace>TodoX.EditVideoTool</RootNamespace>
-    <Version>0.1.0</Version>
-    <Product>TodoX EditVideoTool</Product>
+    <Version>0.4.0</Version>
+    <Product>TodoX EditVideo</Product>
     <Company>TodoX</Company>
     <!-- Required by the LibraryImport source generator (volume serial P/Invoke). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>Assets/favicon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Release distribution: one self-contained exe for Windows x64. -->
@@ -22,6 +24,11 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType>none</DebugType>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets/todox-logo.png" LogicalName="todox-logo.png" />
+    <EmbeddedResource Include="Skill\SKILL.md" LogicalName="SKILL.md" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="TodoX.EditVideoTool.Tests" />

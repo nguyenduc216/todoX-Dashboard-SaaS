@@ -15,14 +15,14 @@ public sealed class StatusTools
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    private readonly StatusService _status;
+    private readonly HealthCheck _health;
 
-    public StatusTools(StatusService status)
+    public StatusTools(HealthCheck health)
     {
-        _status = status;
+        _health = health;
     }
 
     [McpServerTool(Name = "todox_status", ReadOnly = true, Idempotent = true)]
-    [Description("Show TodoX EditVideoTool version, license state and which video components are installed.")]
-    public async Task<string> Status(CancellationToken ct) => JsonSerializer.Serialize(await _status.GetAsync(ct), Json);
+    [Description("Check TodoX EditVideo before working: components, renderer, connection to TodoX, license and updates. Relay any problem and its fix to the user.")]
+    public async Task<string> Status(CancellationToken ct) => HealthCheck.Describe(await _health.RunAsync(serverAttempts: 1, ct: ct));
 }
