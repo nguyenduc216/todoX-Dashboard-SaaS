@@ -49,15 +49,37 @@
                         }
                         @if (!string.IsNullOrWhiteSpace(_model.VideoUrl))
                         {
-                            <video src="@_model.VideoUrl" poster="@_model.PosterUrl" controls playsinline preload="metadata" style="max-width:100%;max-height:300px"></video>
+                            <video src="@_model.VideoUrl" poster="@PreviewPoster" controls playsinline preload="metadata" style="max-width:100%;max-height:300px"></video>
                         }
                     </MudStack>
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudStack Spacing="2">
-                        <MudText>Ảnh đại diện JPG/PNG/WebP:</MudText>
-                        <InputFile OnChange="UploadPosterAsync" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled="@_busy" />
-                        @if (!string.IsNullOrWhiteSpace(_model.PosterUrl)) { <img src="@_model.PosterUrl" alt="Ảnh đại diện" style="max-width:100%;max-height:300px" /> }
+                        <MudText>Thumbnail 9:16 (dọc, khuyên dùng 1080×1920):</MudText>
+                        <InputFile OnChange="@(args => UploadAsync(args, ImageSlot.Portrait))" accept="@ImageAccept" disabled="@_busy" />
+                        @if (!string.IsNullOrWhiteSpace(_model.ThumbnailPortraitUrl)) { <img src="@_model.ThumbnailPortraitUrl" alt="Thumbnail 9:16" style="max-width:100%;max-height:300px;aspect-ratio:9/16;object-fit:cover" /> }
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+            <MudText Typo="Typo.subtitle2">Ảnh hiển thị thêm</MudText>
+            <MudText Typo="Typo.caption">Hệ thống tự chọn ảnh phù hợp: thẻ video và trình phát dùng thumbnail cùng tỉ lệ với video; khi dán link vào Zalo/Facebook/Messenger dùng ảnh chia sẻ, nếu chưa có thì dùng thumbnail 16:9, cuối cùng là thumbnail còn lại.</MudText>
+            @if (!_thumbnailsReady)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">Cần chạy script <code>@LandingVideoSampleRepository.ThumbnailsScript</code> trên database để lưu ảnh chia sẻ và giữ cả hai thumbnail (hiện chỉ lưu thumbnail cùng tỉ lệ với video).</MudAlert>
+            }
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudStack Spacing="2">
+                        <MudText>Thumbnail 16:9 (ngang, khuyên dùng 1920×1080):</MudText>
+                        <InputFile OnChange="@(args => UploadAsync(args, ImageSlot.Landscape))" accept="@ImageAccept" disabled="@_busy" />
+                        @if (!string.IsNullOrWhiteSpace(_model.ThumbnailLandscapeUrl)) { <img src="@_model.ThumbnailLandscapeUrl" alt="Thumbnail 16:9" style="max-width:100%;max-height:200px;aspect-ratio:16/9;object-fit:cover" /> }
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudStack Spacing="2">
+                        <MudText>Ảnh chia sẻ Zalo/Facebook (1200×630):</MudText>
+                        <InputFile OnChange="@(args => UploadAsync(args, ImageSlot.Share))" accept="@ImageAccept" disabled="@(_busy || !_thumbnailsReady)" />
+                        @if (!string.IsNullOrWhiteSpace(_model.ShareImageUrl)) { <img src="@_model.ShareImageUrl" alt="Ảnh chia sẻ" style="max-width:100%;max-height:200px;aspect-ratio:1200/630;object-fit:cover" /> }
                     </MudStack>
                 </MudItem>
             </MudGrid>
@@ -81,17 +103,36 @@
     private string? _serviceChoice;
     private bool _busy;
     private bool _uploadingVideo;
+    private bool _thumbnailsReady;
     private string? _error;
 
-    protected override void OnInitialized()
+    private const string ImageAccept = ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
+    private enum ImageSlot { Video, Portrait, Landscape, Share }
+
+    private string? PreviewPoster => (_model.AspectRatio == LandingVideoSampleRepository.Landscape
+        ? _model.ThumbnailLandscapeUrl ?? _model.ThumbnailPortraitUrl
+        : _model.ThumbnailPortraitUrl ?? _model.ThumbnailLandscapeUrl) ?? _model.PosterUrl;
+
+    protected override async Task OnInitializedAsync()
     {
+        try { _thumbnailsReady = await Repository.SupportsThumbnailsAsync(); }
+        catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample thumbnail columns check failed."); }
+
         if (Source is not null)
         {
             _model = new LandingVideoSample
             {
                 Id = Source.Id, Title = Source.Title, Description = Source.Description, AspectRatio = Source.AspectRatio,
-                VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, ServiceId = Source.ServiceId
+                VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, ServiceId = Source.ServiceId,
+                ThumbnailLandscapeUrl = Source.ThumbnailLandscapeUrl, ShareImageUrl = Source.ShareImageUrl,
+                ThumbnailPortraitUrl = Source.ThumbnailPortraitUrl
             };
+            // Samples saved before the extra slots existed only have the main poster: show it in its ratio's slot.
+            if (_model.ThumbnailPortraitUrl is null && _model.ThumbnailLandscapeUrl is null)
+            {
+                if (_model.AspectRatio == LandingVideoSampleRepository.Landscape) _model.ThumbnailLandscapeUrl = _model.PosterUrl;
+                else _model.ThumbnailPortraitUrl = _model.PosterUrl;
+            }
             _serviceChoice = Source.ServiceId?.ToString() ?? LandingVideoSampleRepository.OtherServiceChoice;
         }
 
@@ -101,10 +142,10 @@
 
     private void Cancel() => MudDialog.Cancel();
 
-    private Task UploadVideoAsync(InputFileChangeEventArgs args) => UploadAsync(args, true);
-    private Task UploadPosterAsync(InputFileChangeEventArgs args) => UploadAsync(args, false);
-    private async Task UploadAsync(InputFileChangeEventArgs args, bool video)
+    private Task UploadVideoAsync(InputFileChangeEventArgs args) => UploadAsync(args, ImageSlot.Video);
+    private async Task UploadAsync(InputFileChangeEventArgs args, ImageSlot slot)
     {
+        var video = slot == ImageSlot.Video;
         if (_busy) return;
         _busy = true;
         _uploadingVideo = video;
@@ -112,8 +153,13 @@
         try
         {
             var url = await Media.UploadAsync(args.File, video, LandingVideoSampleRepository.MediaArea);
-            if (video) _model.VideoUrl = url;
-            else _model.PosterUrl = url;
+            switch (slot)
+            {
+                case ImageSlot.Video: _model.VideoUrl = url; break;
+                case ImageSlot.Portrait: _model.ThumbnailPortraitUrl = url; break;
+                case ImageSlot.Landscape: _model.ThumbnailLandscapeUrl = url; break;
+                case ImageSlot.Share: _model.ShareImageUrl = url; break;
+            }
             Snackbar.Add("Upload thành công. Nhấn Lưu video mẫu để áp dụng.", Severity.Success);
         }
         catch (Exception ex)
@@ -123,7 +169,7 @@
             var category = IntroUploadDiagnostics.Classify(ex, storageAvailable);
             Logger.LogError(ex,
                 "Landing video sample upload failed. FileName={FileName} FileSize={FileSize} UploadType={UploadType} MaxBytes={MaxBytes} StorageAvailable={StorageAvailable} ExceptionType={ExceptionType} ErrorCategory={ErrorCategory} CorrelationId={CorrelationId}",
-                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, video ? "video" : "poster",
+                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, slot.ToString(),
                 maxBytes, storageAvailable, ex.GetType().Name, category, Activity.Current?.Id);
             _error = IntroUploadDiagnostics.Message(category, maxBytes);
         }

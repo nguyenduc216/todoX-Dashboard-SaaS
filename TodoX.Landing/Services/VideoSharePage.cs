@@ -24,6 +24,8 @@ public static class VideoSharePage
         public required string SharePath { get; init; }
         public required string VideoUrl { get; init; }
         public string? ThumbnailUrl { get; init; }
+        // Image for Open Graph / Twitter previews; the player poster uses ThumbnailUrl.
+        public string? ShareImageUrl { get; init; }
         public string? Description { get; init; }
         public string AspectRatio { get; init; } = "9:16";
         public DateTimeOffset? CreatedAt { get; init; }
@@ -66,6 +68,8 @@ public static class VideoSharePage
         Slug = sample.Slug,
         SharePath = sample.SharePath,
         VideoUrl = sample.VideoUrl,
+        // Link previews (Facebook/Zalo/Messenger) crop to ~1.91:1, so prefer the share image, then 16:9.
+        ShareImageUrl = sample.ShareImageUrl ?? sample.ThumbnailLandscapeUrl ?? sample.PosterUrl,
         ThumbnailUrl = sample.PosterUrl,
         Description = sample.Description,
         AspectRatio = sample.AspectRatio,
@@ -92,7 +96,8 @@ public static class VideoSharePage
         var pageTitle = $"{m.Title} | Video mẫu TodoX";
         var description = Truncate(FirstNonEmpty(m.Description, m.FallbackDescription));
         var canonical = Absolute(baseUrl, m.SharePath);
-        var image = Absolute(baseUrl, FirstNonEmpty(m.ThumbnailUrl, FallbackImage));
+        var image = Absolute(baseUrl, FirstNonEmpty(m.ShareImageUrl, m.ThumbnailUrl, FallbackImage));
+        var poster = Absolute(baseUrl, FirstNonEmpty(m.ThumbnailUrl, FallbackImage));
         var videoUrl = Absolute(baseUrl, m.VideoUrl);
         var landscape = m.AspectRatio == "16:9";
         var (width, height) = landscape ? (1280, 720) : (720, 1280);
@@ -159,7 +164,7 @@ public static class VideoSharePage
               <main class="vp-main">
                 <section class="vp-player {{(landscape ? "is-landscape" : "is-portrait")}}">
                   <div class="vp-player__media">
-                    <video src="{{E(m.VideoUrl)}}" poster="{{E(image)}}" controls playsinline preload="auto"></video>
+                    <video src="{{E(m.VideoUrl)}}" poster="{{E(poster)}}" controls playsinline preload="auto"></video>
                   </div>
                   <div class="vp-player__content">
                     <span class="vp-eyebrow">{{E(m.Eyebrow)}}</span>
