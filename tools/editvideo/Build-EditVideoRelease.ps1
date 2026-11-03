@@ -17,7 +17,9 @@ param(
     [switch] $Upload,
     [string] $Notes = '',
     [string] $FfmpegZipUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-8.1.zip',
-    [string] $RemotionVersion = '4.0.540'
+    [string] $RemotionVersion = '4.0.540',
+    [string] $WhisperZipUrl = 'https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip',
+    [string] $WhisperModelUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,6 +76,25 @@ if (-not (Test-Path $ffZip)) {
     Zip-Dir $d $ffZip
 }
 
+# ---------------------------------------------------------------- whisper (listen-back check)
+$whZip = Join-Path $Comp 'todox-whisper-b5454-small-q5_1.zip'
+if (-not (Test-Path $whZip)) {
+    Step 'Download + package whisper.cpp + small multilingual model'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $dl = Join-Path $Work 'whisper-src.zip'
+    Invoke-WebRequest -Uri $WhisperZipUrl -OutFile $dl -UseBasicParsing
+    $x = Join-Path $Work 'whisper-src'; Remove-Item $x -Recurse -Force -ErrorAction SilentlyContinue
+    Expand-Archive $dl $x
+    $cli = Get-ChildItem $x -Recurse -Filter whisper-cli.exe | Select-Object -First 1
+    $d = Join-Path $Work 'whisper'; Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory (Join-Path $d 'bin'), (Join-Path $d 'models') | Out-Null
+    Copy-Item $cli.FullName (Join-Path $d 'bin')
+    Get-ChildItem $cli.DirectoryName -Filter *.dll | Where-Object { $_.Name -match '^(whisper|ggml)' } | Copy-Item -Destination (Join-Path $d 'bin')
+    Invoke-WebRequest -Uri $WhisperModelUrl -OutFile (Join-Path $d 'models\ggml-small-q5_1.bin') -UseBasicParsing
+    Set-Content (Join-Path $d 'SOURCE.txt') "whisper.cpp $WhisperZipUrl (MIT, https://github.com/ggml-org/whisper.cpp); model $WhisperModelUrl (MIT, OpenAI Whisper)" -Encoding ascii
+    Zip-Dir $d $whZip
+}
+
 # ---------------------------------------------------------------- remotion (render runtime only)
 $remZip = Join-Path $Comp "todox-remotion-$RemotionVersion.zip"
 $templates = Join-Path $Repo 'TodoX.EditVideoTool.Templates'
@@ -101,7 +122,8 @@ $files = @(
     (Entry (Join-Path $Out $appName) 'app' $null $version),
     (Entry $nodeZip 'component' 'node' $nodeVersion),
     (Entry $ffZip 'component' 'ffmpeg' 'n8.1-lgpl'),
-    (Entry $remZip 'component' 'remotion' "$RemotionVersion-$bundleHash")
+    (Entry $remZip 'component' 'remotion' "$RemotionVersion-$bundleHash"),
+    (Entry $whZip 'component' 'whisper' 'b5454-small-q5_1')
 )
 $manifest = [ordered]@{ version = $version; minSupported = '0.4.0'; publishedAt = (Get-Date).ToUniversalTime().ToString('o'); notes = $Notes; files = $files }
 $manifestPath = Join-Path $Out 'manifest.json'

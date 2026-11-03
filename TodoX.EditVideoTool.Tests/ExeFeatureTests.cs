@@ -179,5 +179,47 @@ public sealed class ExeFeatureTests : IDisposable
         Assert.StartsWith("---", skill);
     }
 
+    [Fact]
+    public void Whisper_json_is_parsed_into_timed_segments()
+    {
+        const string json = """
+            {"transcription":[
+              {"offsets":{"from":0,"to":2480},"text":" Xin chào, đây là video"},
+              {"offsets":{"from":2480,"to":6500},"text":" dựng tự động bằng TodoX."},
+              {"offsets":{"from":6500,"to":6600},"text":"  "}]}
+            """;
+
+        var t = Transcriber.Parse(json);
+
+        Assert.Equal(2, t.Segments.Count);
+        Assert.Equal(2.48, t.Segments[1].Start);
+        Assert.Equal(6.5, t.Seconds);
+        Assert.Equal("Xin chào, đây là video dựng tự động bằng TodoX.", t.Text);
+    }
+
+    [Fact]
+    public void Voice_check_passes_a_faithful_read_and_flags_missing_words()
+    {
+        const string script = "Xin chào, đây là video dựng tự động bằng TodoX EditVideo. Video được xử lý ngay trên máy tính của bạn.";
+
+        var good = Transcriber.Compare(script, "xin chao day la video dung tu dong bang todox editvideo video duoc xu ly ngay tren may tinh cua ban");
+        Assert.True(good.Ok);
+        Assert.Equal(1.0, good.Score);
+
+        var slip = Transcriber.Compare(script, "Xin chào đây là video dựng tự động bằng tu đu ếch Edit Video. Video được xử lý ngay trên máy tính của bạn.");
+        Assert.True(slip.Score > 0.8);
+
+        var bad = Transcriber.Compare(script, "Xin chào đây là video.");
+        Assert.False(bad.Ok);
+        Assert.Contains("ban", bad.Missing);
+        Assert.Contains("dung", bad.Missing);
+    }
+
+    [Fact]
+    public void Vietnamese_words_are_normalised_without_tone_marks()
+    {
+        Assert.Equal(["duong", "dien", "bien", "phu"], Transcriber.Words("Đường Điện, Biên-Phủ!"));
+    }
+
     private static string SignBytes(TestSigner signer, byte[] body) => signer.SignRaw(body);
 }

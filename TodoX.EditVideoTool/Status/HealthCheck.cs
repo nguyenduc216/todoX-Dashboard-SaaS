@@ -33,9 +33,11 @@ public sealed class HealthCheck
     private readonly TodoXServerClient _server;
     private readonly ServerConnectivity _connectivity;
     private readonly AgentPaths _paths;
+    private readonly Transcriber _transcriber;
 
-    public HealthCheck(ComponentLocator components, RemotionRenderer remotion, LicenseGuard license, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths)
+    public HealthCheck(ComponentLocator components, RemotionRenderer remotion, LicenseGuard license, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber)
     {
+        _transcriber = transcriber;
         _components = components;
         _remotion = remotion;
         _license = license;
@@ -62,6 +64,9 @@ public sealed class HealthCheck
         items.Add(new HealthItem("browser", "Trình duyệt dựng hình", browser,
             browser ? "sẵn sàng" : "chưa tải (sẽ tự tải ~150 MB ở lần dựng đầu)", null));
 
+        items.Add(new HealthItem("whisper", "Nghe lại lời thoại (Whisper)", _transcriber.IsAvailable,
+            _transcriber.IsAvailable ? Path.GetFileName(_transcriber.ModelPath!) : "chưa cài (tự tải khi cập nhật)", null));
+
         status?.Invoke("Đang kết nối máy chủ TodoX...");
         var reachable = await _connectivity.EnsureConnectedAsync(serverAttempts, status, ct);
         items.Add(new HealthItem("server", "Kết nối máy chủ TodoX", reachable,
@@ -87,7 +92,7 @@ public sealed class HealthCheck
             updateAvailable ? $"{StatusService.Version} → có bản mới {latest}" : $"{StatusService.Version} (mới nhất)",
             updateAvailable ? "Tool sẽ tự cập nhật ở lần khởi động tới." : null));
 
-        var report = new HealthReport(StatusService.Version, items.All(i => i.Ok || i.Id is "browser" or "update"),
+        var report = new HealthReport(StatusService.Version, items.All(i => i.Ok || i.Id is "browser" or "update" or "whisper"),
             reachable, license.Code, latest, updateAvailable, items);
 
         if (reportProblems && reachable && license.IsUsable && report.Problems.Any(p => p.Id is not "update"))

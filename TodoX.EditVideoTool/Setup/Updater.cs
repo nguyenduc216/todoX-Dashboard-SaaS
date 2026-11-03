@@ -19,12 +19,28 @@ public sealed class Updater
         _paths = paths;
     }
 
-    /// <summary>Exe only; safe while the MCP server runs. Returns the staged version or null.</summary>
-    public async Task<string?> CheckAndStageAsync(CancellationToken ct)
+    /// <summary>
+    /// Safe while the MCP server runs: installs components this machine does not have yet (a feature added after
+    /// the customer installed, e.g. Whisper — nothing is using them), then stages a newer exe. Components that
+    /// already exist are only replaced by the window app / "update", never under a running edit.
+    /// Returns the staged exe version or null.
+    /// </summary>
+    public async Task<string?> CheckAndStageAsync(CancellationToken ct, IProgress<string>? status = null)
     {
         CleanupOldExes();
         var manifest = await _components.LatestAsync(ct);
-        if (manifest?.App is not { } app || !HealthCheck.IsNewer(manifest.Version, StatusService.Version))
+        if (manifest is null)
+        {
+            return null;
+        }
+
+        foreach (var missing in manifest.Components.Where(f => _components.InstalledVersion(f.Component!) is null))
+        {
+            status?.Report($"Cài thêm thành phần mới: {missing.Component} {missing.Version}");
+            await _components.InstallComponentAsync(missing, status, ct);
+        }
+
+        if (manifest.App is not { } app || !HealthCheck.IsNewer(manifest.Version, StatusService.Version))
         {
             return null;
         }
@@ -48,7 +64,7 @@ public sealed class Updater
             await _components.InstallComponentAsync(file, status, ct);
         }
 
-        var staged = await CheckAndStageAsync(ct);
+        var staged = await CheckAndStageAsync(ct, status);
         return staged is null
             ? $"Đang dùng bản mới nhất ({StatusService.Version})."
             : $"Đã tải bản {staged}. Đóng và mở lại TodoX EditVideo (và Claude/Codex) để dùng bản mới.";

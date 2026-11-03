@@ -23,10 +23,12 @@ public sealed class VideoTools
     private readonly TodoXServerClient _server;
     private readonly ServerConnectivity _connectivity;
     private readonly AgentPaths _paths;
+    private readonly Transcriber _transcriber;
 
     public VideoTools(LicenseGuard license, LicenseVerifier verifier, MediaProbe probe, ClipNormalizer normalizer,
-        RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths)
+        RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber)
     {
+        _transcriber = transcriber;
         _license = license;
         _verifier = verifier;
         _probe = probe;
@@ -107,7 +109,59 @@ public sealed class VideoTools
         }
 
         var result = await CreateVoiceAsync(text, voice, folder ?? DefaultVoiceFolder(), session, progress, ct);
-        return result.Error ?? JsonSerializer.Serialize(new { audio = result.Path, seconds = result.Seconds, points = result.Points }, StatusTools.Json);
+        return result.Error ?? JsonSerializer.Serialize(new { audio = result.Path, seconds = result.Seconds, points = result.Points, voiceCheck = result.Check }, StatusTools.Json);
+    }
+
+    [McpServerTool(Name = "todox_transcribe", ReadOnly = true, Idempotent = true)]
+    [Description("Listen to an audio or video file on this computer and return what is said, with timestamps (offline speech-to-text).")]
+    public async Task<string> Transcribe(
+        [Description("Audio or video file.")] string path,
+        CancellationToken ct,
+        [Description("Spoken language code, default vi.")] string language = "vi")
+    {
+        await using var session = await SessionLogger.StartAsync(_server, _paths, "transcribe", ct);
+        if (await ReadyProblemAsync(session, ct) is { } problem)
+        {
+            return problem;
+        }
+
+        try
+        {
+            var t = await _transcriber.TranscribeAsync(Path.GetFullPath(path), language, ct);
+            session.Info("transcribed", null, new { seconds = t.Seconds, segments = t.Segments.Count });
+            return JsonSerializer.Serialize(t, StatusTools.Json);
+        }
+        catch (InvalidOperationException ex)
+        {
+            session.Error("transcribe_failed", ex.Message);
+            return ex.Message;
+        }
+    }
+
+    [McpServerTool(Name = "todox_voice_check", ReadOnly = true, Idempotent = true)]
+    [Description("Check that a voiceover says the script: listens to the audio and returns a match score (0-1), missing and extra words.")]
+    public async Task<string> VoiceCheck(
+        [Description("Voiceover audio (or video) file.")] string audio,
+        [Description("The script the voice should read.")] string script,
+        CancellationToken ct)
+    {
+        await using var session = await SessionLogger.StartAsync(_server, _paths, "voice_check", ct);
+        if (await ReadyProblemAsync(session, ct) is { } problem)
+        {
+            return problem;
+        }
+
+        try
+        {
+            var result = await CheckVoiceAsync(Path.GetFullPath(audio), script, ct);
+            session.Info("voice_checked", null, new { result!.Score, result.Ok });
+            return JsonSerializer.Serialize(result, StatusTools.Json);
+        }
+        catch (InvalidOperationException ex)
+        {
+            session.Error("voice_check_failed", ex.Message);
+            return ex.Message;
+        }
     }
 
     [McpServerTool(Name = "todox_convert", Destructive = false)]
@@ -182,6 +236,7 @@ public sealed class VideoTools
 
             var outDir = Path.GetDirectoryName(Path.GetFullPath(output ?? Path.Combine(Path.GetDirectoryName(files[0])!, "output", "x.mp4")))!;
             string? voicePath = voiceover is null ? null : Path.GetFullPath(voiceover);
+            VoiceCheckResult? voiceCheck = null;
             if (voicePath is null && !string.IsNullOrWhiteSpace(voice) && !string.IsNullOrWhiteSpace(script))
             {
                 Report(progress, 5, "Đang tạo giọng đọc TodoX");
@@ -192,6 +247,7 @@ public sealed class VideoTools
                 }
 
                 voicePath = created.Path;
+                voiceCheck = created.Check;
             }
 
             double? voiceSeconds = voicePath is null ? null : (await _probe.ProbeAsync(voicePath, ct)).DurationSeconds;
@@ -283,6 +339,7 @@ public sealed class VideoTools
                 clipsGiven = files.Count,
                 captions = plan.Captions.Count,
                 voiceover = voicePath,
+                voiceCheck = voiceCheck is null ? null : new { voiceCheck.Score, voiceCheck.Ok, missing = voiceCheck.Missing.Take(10) },
                 renderSeconds = Math.Round(result.Elapsed.TotalSeconds, 0)
             }, StatusTools.Json);
         }
@@ -293,7 +350,7 @@ public sealed class VideoTools
         }
     }
 
-    private sealed record VoiceResult(string? Path, double Seconds, decimal Points, string? Error);
+    private sealed record VoiceResult(string? Path, double Seconds, decimal Points, string? Error, VoiceCheckResult? Check = null);
 
     private async Task<VoiceResult> CreateVoiceAsync(string text, string? voice, string folder, SessionLogger session, IProgress<ProgressNotificationValue> progress, CancellationToken ct)
     {
@@ -331,7 +388,37 @@ public sealed class VideoTools
         var seconds = (await _probe.ProbeAsync(path, ct)).DurationSeconds;
         var points = job.TryGetProperty("points", out var p) ? p.GetDecimal() : 0;
         session.Info("voice_done", null, new { seconds = Math.Round(seconds, 1), points, chars = text.Length });
-        return new VoiceResult(path, Math.Round(seconds, 1), points, null);
+
+        // Listen back to the voiceover so a wrong/garbled read is caught before it goes into a video.
+        VoiceCheckResult? check = null;
+        if (_transcriber.IsAvailable)
+        {
+            Report(progress, 10, "Đang nghe lại giọng đọc để kiểm tra");
+            try
+            {
+                check = await CheckVoiceAsync(path, text, ct);
+                if (check is { Ok: false })
+                {
+                    session.Warn("voice_check_low", $"score {check.Score}", new { missing = check.Missing.Take(10), extra = check.Extra.Take(10) });
+                }
+                else
+                {
+                    session.Info("voice_check_ok", null, new { check!.Score });
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                session.Warn("voice_check_skipped", ex.Message);
+            }
+        }
+
+        return new VoiceResult(path, Math.Round(seconds, 1), points, null, check);
+    }
+
+    private async Task<VoiceCheckResult?> CheckVoiceAsync(string audio, string script, CancellationToken ct)
+    {
+        var heard = await _transcriber.TranscribeAsync(audio, "vi", ct);
+        return Transcriber.Compare(script, heard.Text);
     }
 
     /// <summary>

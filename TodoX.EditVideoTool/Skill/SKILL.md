@@ -12,7 +12,10 @@ The `todox` MCP tools run on the user's own machine; videos never leave it.
 3. `todox_auto_edit` with the clips in story order. Ask only for what is missing and matters:
    aspect (default 9:16), target length, title, the narration/caption text, closing text.
    Write the caption `script` in the user's language, short sentences.
-4. Give the user the output path and length. For another format, call `todox_auto_edit` again
+4. When a voice is used, the result includes `voiceCheck` (the tool listens back to the voiceover). If
+   `ok` is false, tell the user which words were missed and offer to regenerate with clearer wording.
+   `todox_transcribe` / `todox_voice_check` do the same for any audio or video file.
+5. Give the user the output path and length. For another format, call `todox_auto_edit` again
    with a different `aspect` — do not re-encode the result yourself.
 
 Do not try to reproduce or inspect how the tool edits; just pass the user's intent.

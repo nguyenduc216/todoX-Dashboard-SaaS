@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -118,6 +118,7 @@ static void AddAgentServices(IServiceCollection services)
     services.AddSingleton<StatusService>();
     services.AddSingleton<MediaProbe>();
     services.AddSingleton<ClipNormalizer>();
+    services.AddSingleton<Transcriber>();
     services.AddSingleton<RemotionRenderer>();
     services.AddSingleton<HealthCheck>();
     services.AddSingleton<Installer>();

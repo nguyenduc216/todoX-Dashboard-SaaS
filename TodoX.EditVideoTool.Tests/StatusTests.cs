@@ -65,7 +65,7 @@ public sealed class StatusTests : IDisposable
         var server = new TodoX.EditVideoTool.Server.TodoXServerClient(new HttpClient(handler), new LicenseStore(paths), new FakeDevice());
         var notifier = new CountingNotifier();
         var connectivity = new TodoX.EditVideoTool.Server.ServerConnectivity(server, notifier, (_, _) => Task.CompletedTask);
-        var health = new HealthCheck(locator, new TodoX.EditVideoTool.Media.RemotionRenderer(paths, locator), Guard(paths), server, connectivity, paths);
+        var health = new HealthCheck(locator, new TodoX.EditVideoTool.Media.RemotionRenderer(paths, locator), Guard(paths), server, connectivity, paths, new TodoX.EditVideoTool.Media.Transcriber(locator, paths));
 
         var report = await health.RunAsync(serverAttempts: 1);
 
@@ -74,6 +74,7 @@ public sealed class StatusTests : IDisposable
         Assert.Equal("not_activated", report.LicenseState);
         Assert.Contains(report.Problems, p => p.Id == "server");
         Assert.Contains(report.Problems, p => p.Id == "ffmpeg");
+        Assert.Contains(report.Problems, p => p.Id == "whisper");
         Assert.Single(notifier.Shown);
         Assert.Single(handler.Requests); // no session/log upload when offline
         using var doc = JsonDocument.Parse(HealthCheck.Describe(report));
