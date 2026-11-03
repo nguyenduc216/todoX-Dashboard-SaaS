@@ -1,2 +1,3 @@
 applied_at	database	script	sha256
 2026-11-03T16:18:02.5969298+07:00	todo_saas	database/manual/editvideo-tool/20261103_editvideo_licensing.sql	329E3273EEEDDBCCA5D5F599E903D0F20A65251D13C69A7F657DB6E02798DAEB
+2026-11-03T18:31:21.3705812+07:00	todo_saas	database/manual/todox_landing_video_samples_thumbnails.sql	B7AF81E73DFA885B4E1CF975D1878F26FE6E35A6F71A37C37761F10E3D020404
