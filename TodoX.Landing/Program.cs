@@ -231,7 +231,27 @@ app.MapGet("/video/{slug}", async (
 
     http.Response.Headers.CacheControl = "public,max-age=300";
     var baseUrl = VideoSharePage.ResolveBaseUrl(http.Request, configuration);
-    return Results.Content(VideoSharePage.Render(found.Video, found.Industry, baseUrl), "text/html; charset=utf-8");
+    return Results.Content(VideoSharePage.Render(VideoSharePage.FromIndustry(found.Video, found.Industry), baseUrl), "text/html; charset=utf-8");
+});
+
+// Same for the sample library: /mau-video/{slug} is the shareable page of one sample.
+app.MapGet("/mau-video/{slug}", async (
+    string slug,
+    HttpContext http,
+    VideoSampleRepository repository,
+    IConfiguration configuration,
+    CancellationToken ct) =>
+{
+    var match = await repository.FindBySlugAsync(slug, ct);
+    if (match is not { } found)
+        return Results.Redirect("/mau-video");
+
+    if (!string.Equals(slug, found.Sample.Slug, StringComparison.Ordinal))
+        return Results.Redirect(found.Sample.SharePath, permanent: true);
+
+    http.Response.Headers.CacheControl = "public,max-age=300";
+    var baseUrl = VideoSharePage.ResolveBaseUrl(http.Request, configuration);
+    return Results.Content(VideoSharePage.Render(VideoSharePage.FromSample(found.Sample, found.Catalog), baseUrl), "text/html; charset=utf-8");
 });
 
 // Serve the marketing deep link as its own document, including on refresh.

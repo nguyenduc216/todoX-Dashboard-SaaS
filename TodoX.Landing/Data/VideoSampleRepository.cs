@@ -15,6 +15,11 @@ public sealed class VideoSample
     public string PosterUrl { get; set; } = "";
     public string? GroupCode { get; set; }
     public string? GroupName { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
+
+    // Computed from the title (not stored): readable share link that carries Open Graph previews.
+    public string Slug { get; set; } = "";
+    public string SharePath { get; set; } = "";
 }
 
 public sealed record VideoSampleGroup(string Code, string Name, int Count);
@@ -41,7 +46,7 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
             var rows = await connection.QueryAsync<VideoSample>(new CommandDefinition("""
                 select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
                        s.video_url as VideoUrl, s.poster_url as PosterUrl,
-                       sv.service_code as GroupCode, sv.service_name as GroupName
+                       sv.service_code as GroupCode, sv.service_name as GroupName, s.created_at as CreatedAt
                 from landing.video_samples s
                 left join catalog.services sv on sv.id = s.service_id
                 where sv.id is null or sv.status = 'active'
@@ -52,6 +57,12 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
             {
                 video.GroupCode = OtherGroupCode;
                 video.GroupName = OtherGroupName;
+            }
+            var slugs = VideoSlug.Assign(videos, video => video.Id, video => video.Title);
+            foreach (var video in videos)
+            {
+                video.Slug = slugs[video.Id];
+                video.SharePath = VideoSlug.SampleRoutePrefix + video.Slug;
             }
             return new VideoSampleCatalog
             {
@@ -65,6 +76,13 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
             logger.LogWarning(ex, "Landing video samples unavailable.");
             return new();
         }
+    }
+
+    public async Task<(VideoSample Sample, VideoSampleCatalog Catalog)?> FindBySlugAsync(string slug, CancellationToken ct = default)
+    {
+        var catalog = await GetPublicAsync(ct);
+        var sample = VideoSlug.Find(catalog.Videos, slug, video => video.Id, video => video.Title, video => video.Slug);
+        return sample is null ? null : (sample, catalog);
     }
 
     private static bool IsPublishable(VideoSample video, string root)

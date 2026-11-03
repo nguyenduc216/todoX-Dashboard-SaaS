@@ -12,6 +12,8 @@
   const grid = document.getElementById('sampleGrid');
   const player = document.getElementById('samplePlayer');
   const playerVideo = document.getElementById('samplePlayerVideo');
+  const shareButton = document.getElementById('samplePlayerShare');
+  const validSharePath = path => typeof path === 'string' && /^\/mau-video\/[a-z0-9-]+$/.test(path);
   const validMedia = (url, folder) => typeof url === 'string' && new RegExp(`^/media/landing/video-samples/${folder}/[a-f0-9]{32}\\.[a-z0-9]+$`).test(url);
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -23,6 +25,8 @@
   let groups = [];
   let videos = [];
   let current = '';
+  // True while the address bar shows a sample's own link pushed by openPlayer.
+  let pushedSample = false;
 
   const openPlayer = video => {
     document.getElementById('samplePlayerTitle').textContent = video.title;
@@ -30,13 +34,29 @@
     player.classList.toggle('is-portrait', video.aspectRatio === '9:16');
     playerVideo.poster = video.posterUrl;
     playerVideo.src = video.videoUrl;
+    const sharePath = validSharePath(video.sharePath) ? video.sharePath : '';
+    shareButton.hidden = !sharePath;
+    shareButton.dataset.shareUrl = sharePath;
+    shareButton.dataset.shareTitle = video.title;
+    if (sharePath && window.location.pathname !== sharePath) {
+      history.pushState({ sample: sharePath }, '', sharePath);
+      pushedSample = true;
+    }
     player.showModal();
     playerVideo.play().catch(() => {});
   };
   const closePlayer = () => { if (player.open) player.close(); };
   document.getElementById('samplePlayerClose').addEventListener('click', closePlayer);
   player.addEventListener('click', event => { if (event.target === player) closePlayer(); });
-  player.addEventListener('close', () => { playerVideo.pause(); playerVideo.removeAttribute('src'); playerVideo.load(); });
+  player.addEventListener('close', () => {
+    playerVideo.pause();
+    playerVideo.removeAttribute('src');
+    playerVideo.load();
+    if (pushedSample) {
+      pushedSample = false;
+      history.back();
+    }
+  });
 
   const card = video => {
     const article = el('article', video.aspectRatio === '16:9' ? 'vs-card is-landscape' : 'vs-card');
@@ -52,7 +72,21 @@
     icon.setAttribute('aria-hidden', 'true');
     thumb.append(image, icon, el('span', 'vs-ratio', video.aspectRatio));
     const body = el('div', 'vs-body');
-    body.append(el('span', 'vs-group', video.groupName), el('h2', '', video.title));
+    const heading = el('h2');
+    if (validSharePath(video.sharePath)) {
+      // Real link for crawlers, copy-link and new tabs; a plain click opens the player in place.
+      const link = el('a', '', video.title);
+      link.href = video.sharePath;
+      link.addEventListener('click', event => {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        openPlayer(video);
+      });
+      heading.append(link);
+    } else {
+      heading.textContent = video.title;
+    }
+    body.append(el('span', 'vs-group', video.groupName), heading);
     if (video.description) body.append(el('p', '', video.description));
     article.append(thumb, body);
     return article;
@@ -81,7 +115,14 @@
     return button;
   };
 
-  window.addEventListener('popstate', () => { current = groupFromUrl(); render(); });
+  window.addEventListener('popstate', () => {
+    if (player.open && !window.location.pathname.startsWith('/mau-video/')) {
+      pushedSample = false;
+      player.close();
+    }
+    current = groupFromUrl();
+    render();
+  });
 
   fetch('/api/landing/video-samples', { credentials: 'same-origin' })
     .then(response => { if (!response.ok) throw new Error('Samples unavailable'); return response.json(); })

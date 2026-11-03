@@ -5,11 +5,12 @@ using TodoX.Landing.Models;
 namespace TodoX.Landing.Services;
 
 /// <summary>
-/// Builds readable share URLs (/video/{slug}) from video titles without storing anything in the DB.
+/// Builds readable share URLs from video titles without storing anything in the DB.
 /// </summary>
 public static class VideoSlug
 {
-    public const string RoutePrefix = "/video/";
+    public const string IndustryRoutePrefix = "/video/";
+    public const string SampleRoutePrefix = "/mau-video/";
     private const int MaxLength = 80;
     private const int IdSuffixLength = 8;
 
@@ -49,58 +50,74 @@ public static class VideoSlug
     }
 
     /// <summary>
-    /// Assigns Slug/SharePath to every video. A title slug is used as-is when unique;
+    /// Returns a slug per item. A title slug is used as-is when unique;
     /// duplicates (or empty titles) get a short id suffix so each URL stays stable.
     /// </summary>
-    public static void Assign(IEnumerable<IndustrySolution> industries)
+    public static Dictionary<Guid, string> Assign<T>(IReadOnlyList<T> items, Func<T, Guid> id, Func<T, string?> title)
     {
-        var videos = industries.SelectMany(i => i.Videos.Select(v => (Video: v, Industry: i))).ToList();
-        var baseSlugs = videos.ToDictionary(
-            x => x.Video,
-            x => Slugify(string.IsNullOrWhiteSpace(x.Video.Title) ? x.Industry.Title : x.Video.Title));
-        var counts = baseSlugs.Values.GroupBy(x => x).ToDictionary(g => g.Key, g => g.Count());
-
-        foreach (var (video, _) in videos)
+        var baseSlugs = items.Select(x => (Id: id(x), Slug: Slugify(title(x)))).ToList();
+        var counts = baseSlugs.GroupBy(x => x.Slug).ToDictionary(g => g.Key, g => g.Count());
+        var result = new Dictionary<Guid, string>();
+        foreach (var (itemId, baseSlug) in baseSlugs)
         {
-            var baseSlug = baseSlugs[video];
-            var slug = baseSlug.Length > 0 && counts[baseSlug] == 1
+            result[itemId] = baseSlug.Length > 0 && counts[baseSlug] == 1
                 ? baseSlug
-                : JoinSuffix(baseSlug, IdSuffix(video.Id));
-            video.Slug = slug;
-            video.SharePath = RoutePrefix + slug;
+                : JoinSuffix(baseSlug, IdSuffix(itemId));
         }
+        return result;
     }
 
     /// <summary>
     /// Resolves a requested slug, tolerating links shared before a duplicate title appeared
-    /// (base slug) or after a title changed (id suffix).
+    /// (base slug), after a title changed (id suffix), or typed with accents/upper case.
     /// </summary>
-    public static (IndustrySolutionVideo Video, IndustrySolution Industry)? Find(
-        IEnumerable<IndustrySolution> industries, string? requested)
+    public static T? Find<T>(IReadOnlyList<T> items, string? requested, Func<T, Guid> id, Func<T, string?> title, Func<T, string> slug)
+        where T : class
     {
-        // Normalizing also accepts hand-typed links such as /video/Review-Mỹ-Phẩm.
-        var slug = Slugify(requested);
-        if (slug.Length == 0)
+        var normalized = Slugify(requested);
+        if (normalized.Length == 0)
             return null;
 
-        var videos = industries.SelectMany(i => i.Videos.Select(v => (Video: v, Industry: i))).ToList();
+        var exact = items.FirstOrDefault(x => slug(x) == normalized);
+        if (exact is not null)
+            return exact;
 
-        foreach (var item in videos)
-            if (item.Video.Slug == slug)
-                return item;
-
-        var dash = slug.LastIndexOf('-');
-        var suffix = dash >= 0 ? slug[(dash + 1)..] : slug;
+        var dash = normalized.LastIndexOf('-');
+        var suffix = dash >= 0 ? normalized[(dash + 1)..] : normalized;
         if (suffix.Length == IdSuffixLength)
-            foreach (var item in videos)
-                if (IdSuffix(item.Video.Id) == suffix)
-                    return item;
+        {
+            var byId = items.FirstOrDefault(x => IdSuffix(id(x)) == suffix);
+            if (byId is not null)
+                return byId;
+        }
 
+        return items.FirstOrDefault(x => Slugify(title(x)) == normalized);
+    }
+
+    public static void AssignIndustryVideos(IEnumerable<IndustrySolution> industries)
+    {
+        var videos = IndustryVideos(industries);
+        var slugs = Assign(videos, x => x.Video.Id, x => x.Title);
         foreach (var item in videos)
-            if (Slugify(string.IsNullOrWhiteSpace(item.Video.Title) ? item.Industry.Title : item.Video.Title) == slug)
-                return item;
+        {
+            item.Video.Slug = slugs[item.Video.Id];
+            item.Video.SharePath = IndustryRoutePrefix + item.Video.Slug;
+        }
+    }
 
-        return null;
+    public static (IndustrySolutionVideo Video, IndustrySolution Industry)? FindIndustryVideo(
+        IEnumerable<IndustrySolution> industries, string? requested)
+    {
+        var match = Find(IndustryVideos(industries), requested, x => x.Video.Id, x => x.Title, x => x.Video.Slug);
+        return match is null ? null : (match.Video, match.Industry);
+    }
+
+    private static List<IndustryVideoRef> IndustryVideos(IEnumerable<IndustrySolution> industries) =>
+        industries.SelectMany(i => i.Videos.Select(v => new IndustryVideoRef(v, i))).ToList();
+
+    private sealed record IndustryVideoRef(IndustrySolutionVideo Video, IndustrySolution Industry)
+    {
+        public string Title => string.IsNullOrWhiteSpace(Video.Title) ? Industry.Title : Video.Title;
     }
 
     private static string IdSuffix(Guid id) => id.ToString("N")[..IdSuffixLength];

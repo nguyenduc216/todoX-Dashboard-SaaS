@@ -125,7 +125,7 @@ public sealed class IndustrySolutionRepository
 
     public async Task<(IndustrySolutionVideo Video, IndustrySolution Industry)?> FindVideoBySlugAsync(
         string slug, CancellationToken ct = default) =>
-        VideoSlug.Find(await ListPublicAsync(ct), slug);
+        VideoSlug.FindIndustryVideo(await ListPublicAsync(ct), slug);
 
     private static List<IndustrySolution> WithShareLinks(List<IndustrySolution> industries)
     {
@@ -157,7 +157,7 @@ public sealed class IndustrySolutionRepository
             };
         }
 
-        VideoSlug.Assign(industries);
+        VideoSlug.AssignIndustryVideos(industries);
         return industries;
     }
 
