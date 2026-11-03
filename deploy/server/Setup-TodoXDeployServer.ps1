@@ -70,7 +70,7 @@ do {
     if (-not $hostBinding) { $hostBinding = $site.Bindings.Collection | Select-Object -First 1 }
     $parts = $hostBinding.bindingInformation.Split(':')
     $hostName = if ($parts.Count -ge 3 -and $parts[2]) { $parts[2] } else { 'localhost' }
-    $healthUrl = Ask 'URL kiem tra sau khi deploy (bo trong = chi kiem tra trang chu tra ve 200)' "$($hostBinding.protocol)://$hostName/system/version"
+    $healthUrl = Ask 'URL kiem tra sau khi deploy (bo trong = chi kiem tra trang chu tra ve 200)' $(if ($targetName -eq 'dashboard') { "$($hostBinding.protocol)://$hostName/system/version" } else { "$($hostBinding.protocol)://$hostName/" })
 
     $targets[$targetName] = [ordered]@{
         SiteName  = $site.Name

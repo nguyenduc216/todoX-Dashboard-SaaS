@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   One-time, server-side: re-encode landing videos already uploaded (Kho mẫu video, intro, /video-ngan)
   into web-optimized MP4 so they stream smoothly from a modest uplink. Never runs SQL.
