@@ -1,5 +1,6 @@
 using System.Text.Json;
 using TodoX.EditVideoTool.Components;
+using TodoX.EditVideoTool.Licensing;
 using TodoX.EditVideoTool.Mcp;
 using TodoX.EditVideoTool.Status;
 
@@ -19,13 +20,16 @@ public sealed class StatusTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
+    private static LicenseGuard Guard(AgentPaths paths) =>
+        new(new LicenseStore(paths), new LicenseVerifier(), new FakeDevice(), new LicenseApiClient(new HttpClient(new FakeHandler())));
+
     private static string Exe(string name) => OperatingSystem.IsWindows() ? name + ".exe" : name;
 
     [Fact]
-    public void Fresh_install_reports_not_activated_and_missing_components()
+    public async Task Fresh_install_reports_not_activated_and_missing_components()
     {
         var paths = new AgentPaths(Path.Combine(_root, "home"));
-        var status = new StatusService(paths, new ComponentLocator(paths, () => _pathDir)).Get();
+        var status = await new StatusService(paths, new ComponentLocator(paths, () => _pathDir), Guard(paths)).GetAsync();
 
         Assert.Equal("not_activated", status.LicenseState);
         Assert.All(status.Components, c => Assert.False(c.Installed));
@@ -52,12 +56,12 @@ public sealed class StatusTests : IDisposable
     }
 
     [Fact]
-    public void Status_tool_returns_camel_case_json()
+    public async Task Status_tool_returns_camel_case_json()
     {
         var paths = new AgentPaths(Path.Combine(_root, "home"));
-        var tool = new StatusTools(new StatusService(paths, new ComponentLocator(paths, () => _pathDir)));
+        var tool = new StatusTools(new StatusService(paths, new ComponentLocator(paths, () => _pathDir), Guard(paths)));
 
-        using var doc = JsonDocument.Parse(tool.Status());
+        using var doc = JsonDocument.Parse(await tool.Status(CancellationToken.None));
 
         Assert.Equal("not_activated", doc.RootElement.GetProperty("licenseState").GetString());
         Assert.Equal(StatusService.Version, doc.RootElement.GetProperty("version").GetString());
