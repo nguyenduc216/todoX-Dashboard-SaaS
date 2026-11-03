@@ -32,7 +32,7 @@ if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrat
 }
 
 # ---------------------------------------------------------------- 1. IIS site
-Step '1. Chon website TodoX trong IIS'
+Step '1. Dang ky cac website TodoX trong IIS (moi du an = 1 target)'
 Import-Module WebAdministration
 $sites = @(Get-Website | Sort-Object Name)
 if ($sites.Count -eq 0) { throw 'Khong tim thay website nao trong IIS.' }
@@ -41,28 +41,46 @@ for ($i = 0; $i -lt $sites.Count; $i++) {
     $bind = ($s.Bindings.Collection | ForEach-Object { $_.bindingInformation }) -join ', '
     Write-Host ("  [{0}] {1}  |  pool={2}  |  {3}  |  {4}" -f ($i + 1), $s.Name, $s.applicationPool, $s.PhysicalPath, $bind)
 }
-$guess = 1
-for ($i = 0; $i -lt $sites.Count; $i++) {
-    if ($sites[$i].Name -match 'todox|dashboard') { $guess = $i + 1; break }
-}
-$pick = [int](Ask 'Nhap so thu tu website TodoX Dashboard' "$guess")
-$site = $sites[$pick - 1]
-$sitePath = [Environment]::ExpandEnvironmentVariables($site.PhysicalPath)
-$pool = $site.applicationPool
-Write-Host "  Website : $($site.Name)"
-Write-Host "  Thu muc : $sitePath"
-Write-Host "  AppPool : $pool"
-if (-not (Test-Path (Join-Path $sitePath 'TodoX.Web.dll'))) {
-    Write-Warning "Khong thay TodoX.Web.dll trong $sitePath - kiem tra lai website da chon."
-    if ((Ask 'Van tiep tuc? (y/n)' 'n') -ne 'y') { exit 1 }
+
+# Each TodoX project in deploy/targets.json (dashboard, landing, ...) is registered under its target name.
+# Running the setup again adds/updates targets and keeps the ones already registered.
+$KnownTargets = [ordered]@{ dashboard = 'TodoX.Web.dll'; landing = 'TodoX.Landing.dll' }
+$configPath = Join-Path $DeployRoot 'deploy-config.json'
+$targets = [ordered]@{}
+if (Test-Path $configPath) {
+    $old = Get-Content $configPath -Raw | ConvertFrom-Json
+    if ($old.Targets) { $old.Targets.PSObject.Properties | ForEach-Object { $targets[$_.Name] = $_.Value } }
 }
 
-$hostBinding = ($site.Bindings.Collection | Where-Object { $_.protocol -eq 'https' } | Select-Object -First 1)
-if (-not $hostBinding) { $hostBinding = $site.Bindings.Collection | Select-Object -First 1 }
-$parts = $hostBinding.bindingInformation.Split(':')
-$hostName = if ($parts.Count -ge 3 -and $parts[2]) { $parts[2] } else { 'localhost' }
-$defaultHealth = "$($hostBinding.protocol)://$hostName/system/version"
-$healthUrl = Ask 'URL kiem tra phien ban sau khi deploy' $defaultHealth
+do {
+    $targetName = (Ask "Ten target (vd: $($KnownTargets.Keys -join ', '))" 'dashboard').ToLowerInvariant()
+    $mainDll = Ask 'File DLL chinh cua du an' $(if ($KnownTargets[$targetName]) { $KnownTargets[$targetName] } else { 'TodoX.Web.dll' })
+    $pick = [int](Ask "Nhap so thu tu website IIS cho target '$targetName'" '1')
+    $site = $sites[$pick - 1]
+    $sitePath = [Environment]::ExpandEnvironmentVariables($site.PhysicalPath)
+    Write-Host "  Website : $($site.Name)"
+    Write-Host "  Thu muc : $sitePath"
+    Write-Host "  AppPool : $($site.applicationPool)"
+    if (-not (Test-Path (Join-Path $sitePath $mainDll))) {
+        Write-Warning "Khong thay $mainDll trong $sitePath - kiem tra lai website da chon."
+        if ((Ask 'Van dang ky target nay? (y/n)' 'n') -ne 'y') { continue }
+    }
+
+    $hostBinding = ($site.Bindings.Collection | Where-Object { $_.protocol -eq 'https' } | Select-Object -First 1)
+    if (-not $hostBinding) { $hostBinding = $site.Bindings.Collection | Select-Object -First 1 }
+    $parts = $hostBinding.bindingInformation.Split(':')
+    $hostName = if ($parts.Count -ge 3 -and $parts[2]) { $parts[2] } else { 'localhost' }
+    $healthUrl = Ask 'URL kiem tra sau khi deploy (bo trong = chi kiem tra trang chu tra ve 200)' "$($hostBinding.protocol)://$hostName/system/version"
+
+    $targets[$targetName] = [ordered]@{
+        SiteName  = $site.Name
+        SitePath  = $sitePath
+        AppPool   = $site.applicationPool
+        MainDll   = $mainDll
+        HealthUrl = $healthUrl
+    }
+    Write-Host "  => Da dang ky target '$targetName'" -ForegroundColor Green
+} while ((Ask 'Dang ky them website/du an khac? (y/n)' 'n') -eq 'y')
 
 # ---------------------------------------------------------------- 2. OpenSSH server
 Step '2. Cai OpenSSH Server'
@@ -115,14 +133,10 @@ foreach ($d in 'incoming', 'logs', 'staging', 'backups') { New-Item -ItemType Di
 Copy-Item (Join-Path $Here 'Apply-TodoXRelease.ps1') (Join-Path $DeployRoot 'Apply-TodoXRelease.ps1') -Force
 Unblock-File (Join-Path $DeployRoot 'Apply-TodoXRelease.ps1')
 [ordered]@{
-    SiteName   = $site.Name
-    SitePath   = $sitePath
-    AppPool    = $pool
-    MainDll    = 'TodoX.Web.dll'
-    HealthUrl  = $healthUrl
     BackupRoot = (Join-Path $DeployRoot 'backups')
     Incoming   = (Join-Path $DeployRoot 'incoming')
-} | ConvertTo-Json | Set-Content -Path (Join-Path $DeployRoot 'deploy-config.json') -Encoding UTF8
+    Targets    = $targets
+} | ConvertTo-Json -Depth 5 | Set-Content -Path $configPath -Encoding UTF8
 
 # ---------------------------------------------------------------- 6. Summary
 Step '6. XONG - gui thong tin duoi day cho Claude'
@@ -134,11 +148,9 @@ TODOX DEPLOY SERVER
   IP noi bo   : $ips
   SSH port    : $port
   SSH user    : $env:USERNAME
-  Website     : $($site.Name)
-  Folder      : $sitePath
-  AppPool     : $pool
-  Health URL  : $healthUrl
   Host key    : $fp
+  Targets     :
+$(($targets.GetEnumerator() | ForEach-Object { "    - $($_.Key): site=$($_.Value.SiteName) | folder=$($_.Value.SitePath) | pool=$($_.Value.AppPool) | health=$($_.Value.HealthUrl)" }) -join "`r`n")
 "@
 Write-Host $summary -ForegroundColor Green
 $summaryFile = Join-Path $DeployRoot 'server-info.txt'

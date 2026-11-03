@@ -20,13 +20,20 @@
 param(
     [Parameter(Mandatory = $true)][string] $SqlFile,
     [switch] $Apply,
-    [string] $ConnectionSettings = 'D:\todoX\Dashboard-web\TodoXPortal\deployed-todoX-Dashboard-SaaS\appsettings.json',
-    [string] $ConnectionName = 'TodoXSaaS',
+    # Logical database name from deploy/targets.json ("databases" section).
+    [string] $Database = 'todo_saas',
     [string] $Psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
 )
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$Registry = Get-Content (Join-Path $RepoRoot 'deploy\targets.json') -Raw | ConvertFrom-Json
+$DbEntry = $Registry.databases.$Database
+if (-not $DbEntry) { throw "Unknown database '$Database' (see deploy/targets.json)." }
+$ConnectionSettings = $DbEntry.settingsFile
+$ConnectionName = $DbEntry.connectionName
+# Committed ledger: which script (and which exact content) was applied to which logical database.
+$Ledger = Join-Path $PSScriptRoot 'applied-ledger.tsv'
 $LogDir = Join-Path $PSScriptRoot 'logs'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -70,10 +77,17 @@ $dbHost = $parts['host']; $dbPort = if ($parts['port']) { $parts['port'] } else 
 $dbName = $parts['database']; $dbUser = $parts['username']
 if (-not $dbUser) { $dbUser = $parts['user id'] }
 
-Log "Script : $($sqlPath.Substring($RepoRoot.Length + 1))"
+$relPath = $sqlPath.Substring($RepoRoot.Length + 1).Replace('\', '/')
+$sqlSha = (Get-FileHash $sqlPath -Algorithm SHA256).Hash
+Log "Script : $relPath"
 Log "Test   : $($testPath.Substring($RepoRoot.Length + 1))"
-Log "Target : $dbUser@$dbHost`:$dbPort/$dbName"
-Log "SHA256 : $((Get-FileHash $sqlPath -Algorithm SHA256).Hash)"
+Log "Target : $Database -> $dbUser@$dbHost`:$dbPort/$dbName"
+Log "SHA256 : $sqlSha"
+
+if ($Apply -and (Test-Path $Ledger) -and (Select-String -Path $Ledger -SimpleMatch "`t$Database`t$relPath`t$sqlSha" -Quiet)) {
+    Log 'RESULT: ALREADY APPLIED (same content) - nothing to do.'
+    exit 0
+}
 
 function Invoke-Batch([string] $Mode) {
     $end = if ($Mode -eq 'apply') { 'COMMIT;' } else { 'ROLLBACK;' }
@@ -138,7 +152,9 @@ if ($applied -ne 0) {
     exit 1
 }
 
-$ledger = Join-Path $PSScriptRoot 'applied.log'
-Add-Content -Path $ledger -Encoding UTF8 -Value ("{0}`t{1}`t{2}`t{3}" -f (Get-Date -Format o), "$dbHost/$dbName", $sqlPath.Substring($RepoRoot.Length + 1), (Get-FileHash $sqlPath -Algorithm SHA256).Hash)
+if (-not (Test-Path $Ledger)) {
+    [IO.File]::WriteAllText($Ledger, "applied_at`tdatabase`tscript`tsha256`r`n", (New-Object Text.UTF8Encoding $false))
+}
+[IO.File]::AppendAllText($Ledger, ("{0}`t{1}`t{2}`t{3}`r`n" -f (Get-Date -Format o), $Database, $relPath, $sqlSha), (New-Object Text.UTF8Encoding $false))
 Log "RESULT: APPLIED and verified. Log: $LogFile"
 exit 0

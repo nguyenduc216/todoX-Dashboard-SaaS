@@ -10,6 +10,8 @@
   5. On any failure after step 2, restore the backup and start the pool again.
 #>
 param(
+    # Target name registered by Setup-TodoXDeployServer.ps1 (e.g. dashboard, landing).
+    [Parameter(Mandatory = $true)][string] $Target,
     [Parameter(Mandatory = $true)][string] $Package,
     [Parameter(Mandatory = $true)][string] $Sha256,
     [string] $ExpectedCommit,
@@ -23,7 +25,7 @@ $Config = Get-Content (Join-Path $Root 'deploy-config.json') -Raw | ConvertFrom-
 Import-Module WebAdministration
 
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$LogFile = Join-Path $Root "logs\apply-$Stamp.log"
+$LogFile = Join-Path $Root "logs\apply-$Target-$Stamp.log"
 New-Item -ItemType Directory -Force -Path (Split-Path $LogFile) | Out-Null
 function Log([string] $m) {
     $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m
@@ -31,8 +33,11 @@ function Log([string] $m) {
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
 }
 
-$Site = $Config.SitePath
-$Pool = $Config.AppPool
+$T = $Config.Targets.$Target
+if (-not $T) { throw "Target '$Target' is not registered on this server. Run Setup-TodoXDeployServer.bat again to add it." }
+$Site = $T.SitePath
+$Pool = $T.AppPool
+Log "Target: $Target -> site=$($T.SiteName) folder=$Site pool=$Pool"
 $Preserve = @('appsettings.json', 'appsettings.Production.json', 'appsettings.Development.json', 'web.config')
 $PreserveDirs = @('keys', 'logs', 'wwwroot\uploads')
 
@@ -45,10 +50,15 @@ function Wait-PoolState([string] $State) {
 }
 
 function Test-Health {
-    if (-not $Config.HealthUrl) { return $true }
+    if (-not $T.HealthUrl) { return $true }
     for ($i = 0; $i -lt 20; $i++) {
         try {
-            $r = Invoke-RestMethod -Uri $Config.HealthUrl -TimeoutSec 15 -UseBasicParsing
+            $r = Invoke-RestMethod -Uri $T.HealthUrl -TimeoutSec 15 -UseBasicParsing
+            if ($r -is [string]) {
+                # Plain page (e.g. landing home): HTTP 200 is the health signal; no commit to compare.
+                Log 'Health OK: HTTP 200 (no version endpoint)'
+                return $true
+            }
             if (-not $ExpectedCommit -or ($r.commit -and $r.commit.StartsWith($ExpectedCommit))) {
                 Log "Health OK: version=$($r.version) commit=$($r.commit)"
                 return $true
@@ -76,9 +86,9 @@ Log "Checksum OK: $actual"
 
 $staging = Join-Path $Root "staging\$Stamp"
 Expand-Archive -Path $Package -DestinationPath $staging -Force
-if (-not (Test-Path (Join-Path $staging $Config.MainDll))) { throw "Package does not contain $($Config.MainDll)" }
+if (-not (Test-Path (Join-Path $staging $T.MainDll))) { throw "Package does not contain $($T.MainDll)" }
 
-$backup = Join-Path $Config.BackupRoot "site-$Stamp"
+$backup = Join-Path $Config.BackupRoot "$Target-$Stamp"
 $stopped = $false
 try {
     Log "Stopping app pool '$Pool'"
@@ -125,6 +135,6 @@ catch {
 finally {
     Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
     # Keep the last 5 backups.
-    Get-ChildItem $Config.BackupRoot -Directory -Filter 'site-*' | Sort-Object Name -Descending |
+    Get-ChildItem $Config.BackupRoot -Directory -Filter "$Target-*" | Sort-Object Name -Descending |
         Select-Object -Skip 5 | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }

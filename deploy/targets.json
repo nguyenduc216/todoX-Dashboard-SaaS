@@ -1,0 +1,32 @@
+{
+  "_comment": "Deploy registry. No secrets here. Server addresses live in deploy/remote.local.json; site folders/app pools live in C:/TodoXDeploy/deploy-config.json on each server (written by Setup-TodoXDeployServer.bat).",
+  "databases": {
+    "todo_saas": {
+      "description": "TodoX SaaS main database (dashboard + landing + editvideo licensing)",
+      "settingsFile": "D:/todoX/Dashboard-web/TodoXPortal/deployed-todoX-Dashboard-SaaS/appsettings.json",
+      "connectionName": "TodoXSaaS"
+    }
+  },
+  "targets": {
+    "dashboard": {
+      "description": "TodoX Dashboard (Blazor) - dashboard.todox.vn",
+      "project": "TodoX.Web/TodoX.Web.csproj",
+      "mainDll": "TodoX.Web.dll",
+      "pathsInRepo": ["TodoX.Web/", "database/manual/"],
+      "tests": ["TodoX.EditVideoTool.Tests/TodoX.EditVideoTool.Tests.csproj"],
+      "server": "prod",
+      "database": "todo_saas",
+      "sqlDirs": ["database/manual"]
+    },
+    "landing": {
+      "description": "TodoX Landing page",
+      "project": "TodoX.Landing/TodoX.Landing.csproj",
+      "mainDll": "TodoX.Landing.dll",
+      "pathsInRepo": ["TodoX.Landing/"],
+      "tests": [],
+      "server": "prod",
+      "database": "todo_saas",
+      "sqlDirs": []
+    }
+  }
+}
