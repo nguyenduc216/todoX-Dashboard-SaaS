@@ -7,6 +7,19 @@ namespace TodoX.EditVideoTool.Setup;
 
 public sealed record ReleaseFile(string Name, string Kind, string? Component, string? Version, string Sha256, long Size, string? Url);
 
+public static class ComponentNames
+{
+    /// <summary>Customer-facing name of each installable component.</summary>
+    public static string Of(string? component) => component switch
+    {
+        "node" => "Node.js",
+        "ffmpeg" => "FFmpeg (xử lý video)",
+        "remotion" => "Bộ dựng video Remotion",
+        "whisper" => "Công cụ nghe lại lời thoại (Whisper)",
+        _ => component ?? "thành phần"
+    };
+}
+
 public sealed record ReleaseManifest(string Version, string MinSupported, DateTimeOffset PublishedAt, string? Notes, IReadOnlyList<ReleaseFile> Files)
 {
     public ReleaseFile? App => Files.FirstOrDefault(f => f.Kind == "app");
