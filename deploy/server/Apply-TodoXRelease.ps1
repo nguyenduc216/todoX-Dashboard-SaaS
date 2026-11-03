@@ -20,6 +20,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 defaults to TLS 1.0, which modern HTTPS sites reject during the health check.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Config = Get-Content (Join-Path $Root 'deploy-config.json') -Raw | ConvertFrom-Json
 Import-Module WebAdministration
