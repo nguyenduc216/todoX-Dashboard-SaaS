@@ -37,8 +37,8 @@ public sealed class TodoXServerClient
     public Task<ServerResult<JsonElement>> PingAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "ping", null, authenticated: false, ct, TimeSpan.FromSeconds(8));
 
-    public Task<ServerResult<JsonElement>> StartSessionAsync(string tool, string appVersion, CancellationToken ct = default) =>
-        SendAsync<JsonElement>(HttpMethod.Post, "sessions", new { tool, appVersion }, true, ct);
+    public Task<ServerResult<JsonElement>> StartSessionAsync(string tool, string appVersion, string? client, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "sessions", new { tool, appVersion, client }, true, ct);
 
     public Task<ServerResult<JsonElement>> SendLogsAsync(Guid sessionId, IEnumerable<object> entries, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Post, $"sessions/{sessionId}/logs", new { entries }, true, ct);

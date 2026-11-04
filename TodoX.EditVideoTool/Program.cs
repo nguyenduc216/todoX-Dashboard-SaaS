@@ -18,6 +18,7 @@ if (command is not "mcp")
 {
     // CLI messages are Vietnamese; the default Windows console code page would mangle them.
     Console.OutputEncoding = System.Text.Encoding.UTF8;
+    CallerApp.Set(command == "app" ? "todox-window" : "todox-cli");
 }
 
 switch (command)
@@ -145,7 +146,13 @@ static async Task RunMcpServerAsync(string[] args)
     builder.Services
         .AddMcpServer(o => o.ServerInfo = new() { Name = "todox-editvideo", Version = StatusService.Version })
         .WithStdioServerTransport()
-        .WithToolsFromAssembly();
+        .WithToolsFromAssembly()
+        .WithRequestFilters(f => f.AddCallToolFilter(next => (context, ct) =>
+        {
+            // Claude Desktop, Claude Code and Codex each send their own name when they connect.
+            CallerApp.Set(context.Server.ClientInfo?.Name ?? "mcp", context.Server.ClientInfo?.Version);
+            return next(context, ct);
+        }));
 
     var host = builder.Build();
     // Pull a newer version in the background; it is switched in on the next start, never mid-session.

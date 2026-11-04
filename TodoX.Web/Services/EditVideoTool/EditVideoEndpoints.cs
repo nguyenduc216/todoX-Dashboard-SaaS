@@ -12,7 +12,7 @@ public static class EditVideoEndpoints
 {
     public const string DeviceHashHeader = "X-TodoX-Device";
 
-    public sealed record SessionStartRequest(string? Tool, string? AppVersion);
+    public sealed record SessionStartRequest(string? Tool, string? AppVersion, string? Client);
     public sealed record SessionLogsRequest(List<EditVideoLogEntry>? Entries);
     public sealed record SessionEndRequest(string? Status, JsonElement? Summary);
     public sealed record VoiceRequest(string? Text, string? VoiceCode, Guid? SessionId);
@@ -59,7 +59,7 @@ public static class EditVideoEndpoints
                 return ToResult(auth);
             }
 
-            var id = await usage.StartSessionAsync(auth.Value.License, auth.Value.Device, body.Tool, body.AppVersion, ct);
+            var id = await usage.StartSessionAsync(auth.Value.License, auth.Value.Device, body.Tool, body.AppVersion, body.Client, ct);
             return Results.Json(new { success = true, data = new { sessionId = id } });
         }).DisableAntiforgery();
 
