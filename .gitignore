@@ -2,39 +2,37 @@
 bin/
 obj/
 logs/
-
 *.user
 *.suo
 *.userosscache
 *.sln.docstates
 *.log
-
-
-
 [Dd]ebug/
 [Rr]elease/
 publish/
 publish-iis/
-logs/
 
+# Environment-specific settings (server keeps its own copy)
 appsettings.Production.json
 appsettings.Development.json
-Dashboard-web/Properties/launchSettings.json
-Dashboard-web/build-check.log
-/TodoX.Web/publish_backup/20260630-183646
-TodoX.Web/keys/todox-vertex-sa.json
-TodoX.Web/keys/todox-vertex-sa.json
-/TodoX.Web/keys
-TodoX.Web/keys/todox-vertex-sa.json
-TodoX.Web/keys/todox-vertex-sa.json
-TodoX.Web/keys/todox-vertex-sa.json
-TodoX.Web.Tests/TodoX.Web.Tests.csproj
-TodoX.Web.Tests/SceneImageRenderServiceTests.cs
-TodoX.Web.Tests/SceneImagePromptBuilderTests.cs
-TodoX.Web.Tests/GoogleVertexRateLimiterTests.cs
-TodoX.Web/keys/todox-vertex-sa.json
-TodoX.Web/keys/todox-vertex-sa.json
+
+# Secrets: never commit service-account keys
+/TodoX.Web/keys/
+*-sa.json
+*-sa1.json
+
+# Runtime user uploads (served from disk on the server; not source)
+/TodoX.Web/wwwroot/uploads/*
+!/TodoX.Web/wwwroot/uploads/system/
+
+# Build/publish output and agent scratch
 /artifacts
+/TodoX.Web/artifacts/
+/TodoX.Web/publish_backup/
+**/.claude/settings.local.json
+*.csx
+*.bak
+
 database/manual/yescale-omni-flash-default/00_preflight.sql
 
 # TodoX deploy: per-machine server address
