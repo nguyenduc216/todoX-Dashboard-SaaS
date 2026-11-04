@@ -46,6 +46,7 @@ builder.Services.AddScoped<CustomerRepository>();
 builder.Services.AddScoped<ServiceFavoriteRepository>();
 builder.Services.AddScoped<PermissionRepository>();
 builder.Services.AddScoped<NavigationMenuRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.Affiliate.AffiliateRepository>();
 builder.Services.AddScoped<LandingContactLeadRepository>();
 builder.Services.AddScoped<LandingIndustrySolutionRepository>();
 builder.Services.AddScoped<LandingIndustryMediaService>();

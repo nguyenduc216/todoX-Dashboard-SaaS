@@ -14,15 +14,18 @@ public sealed class AccountService
     private readonly ServiceFavoriteRepository _favorites;
     private readonly PermissionRepository _permissions;
     private readonly PasswordHasher _passwords;
+    private readonly Affiliate.AffiliateRepository _affiliates;
 
     public AccountService(AccountRepository accounts, CustomerRepository customers,
-        ServiceFavoriteRepository favorites, PermissionRepository permissions, PasswordHasher passwords)
+        ServiceFavoriteRepository favorites, PermissionRepository permissions, PasswordHasher passwords,
+        Affiliate.AffiliateRepository affiliates)
     {
         _accounts = accounts;
         _customers = customers;
         _favorites = favorites;
         _permissions = permissions;
         _passwords = passwords;
+        _affiliates = affiliates;
     }
 
     // ===================== Reads =====================
@@ -157,6 +160,12 @@ public sealed class AccountService
             return (false, "Email đã tồn tại trong hệ thống.");
         }
 
+        var referralCode = Affiliate.AffiliateRules.NormalizeCode(model.ReferralCode);
+        if (referralCode.Length > 0 && await _affiliates.FindActiveAgentAsync(referralCode) is null)
+        {
+            return (false, "Mã đại lý không hợp lệ hoặc đã ngưng hoạt động.");
+        }
+
         var customerId = await _customers.InsertCustomerAsync(new CustomerProfile
         {
             CompanyName = model.CompanyName.Trim(),
@@ -178,6 +187,11 @@ public sealed class AccountService
             Role = TodoXUserRole.CustomerOwner,
             Status = TodoXAccountStatus.Pending
         }, _passwords.Hash(model.Password));
+
+        if (referralCode.Length > 0)
+        {
+            await _affiliates.AssignReferralAsync(customerId, referralCode, "register", null);
+        }
 
         return (true, "Đăng ký thành công. Tài khoản đang chờ quản trị viên duyệt.");
     }
@@ -250,7 +264,7 @@ public sealed class AccountService
 
         if (model.Id == Guid.Empty)
         {
-            await _customers.InsertCustomerAsync(model);
+            model.Id = await _customers.InsertCustomerAsync(model);
             return (true, "Đã thêm khách hàng.");
         }
 

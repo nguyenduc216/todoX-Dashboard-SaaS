@@ -45,6 +45,7 @@ public static class NavigationAccessRules
         return path.StartsWith("/admin/", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/customers", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/customer-accounts", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/affiliates", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/permissions", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/settings", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/activity-logs", StringComparison.OrdinalIgnoreCase)
