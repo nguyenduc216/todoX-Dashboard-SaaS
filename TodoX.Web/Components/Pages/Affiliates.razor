@@ -1,0 +1,675 @@
+@page "/affiliates"
+@using TodoX.Web.Services.Affiliate
+@inject AffiliateRepository AffiliateRepo
+@inject AccountService Accounts
+@inject AuditRepository Audit
+@inject AuthStateService AuthState
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Đại lý & hoa hồng</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Đại lý & hoa hồng</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tỷ lệ hoa hồng theo gói, đại lý, lịch sử mua gói và trạng thái chuyển khoản hoa hồng.</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Làm mới</MudButton>
+    </MudStack>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser))
+    {
+        <MudAlert Severity="Severity.Error">Chỉ quản trị viên được truy cập phân hệ đại lý.</MudAlert>
+    }
+    else if (!_ready)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Database chưa có schema đại lý. Hãy chạy thủ công script
+            <code>TodoX.Web/database/manual/affiliate/20261104_affiliate_commission.sql</code> trên todo_saas.
+        </MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Đại lý hoạt động</MudText>
+                    <div class="todox-stat-value">@_agents.Count(x => x.IsActive)</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Khách hàng được giới thiệu</MudText>
+                    <div class="todox-stat-value">@_agents.Sum(x => x.ReferredCount)</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Hoa hồng chưa chuyển khoản</MudText>
+                    <div class="todox-stat-value">@Money(_agents.Sum(x => x.PendingAmount))</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Hoa hồng đã chuyển khoản</MudText>
+                    <div class="todox-stat-value">@Money(_agents.Sum(x => x.PaidAmount))</div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_tab">
+            @* ===================== Gói & tỷ lệ hoa hồng ===================== *@
+            <MudTabPanel Text="Gói & tỷ lệ hoa hồng" Icon="@Icons.Material.Filled.Percent">
+                <MudPaper Class="todox-table-card pa-4" rounded="true">
+                    <MudText Typo="Typo.h6" Class="mb-2">@(_package.Id == Guid.Empty ? "Thêm gói" : $"Sửa gói {_package.PackageCode}")</MudText>
+                    <MudGrid>
+                        <MudItem xs="6" sm="3" md="2"><MudTextField T="string" Label="Mã gói" @bind-Value="_package.PackageCode" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="6" sm="3" md="3"><MudTextField T="string" Label="Tên gói" @bind-Value="_package.PackageName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="6" sm="3" md="2"><MudNumericField T="decimal" Label="Giá gói (VND)" @bind-Value="_package.PriceAmount" Min="0" Format="N0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="6" sm="3" md="1"><MudNumericField T="int" Label="Chu kỳ (tháng)" @bind-Value="_package.CycleMonths" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="6" sm="3" md="2"><MudNumericField T="decimal" Label="Hoa hồng đại lý (%)" @bind-Value="_package.CommissionPercent" Min="0" Max="100" Step="0.5m" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="6" sm="3" md="1"><MudNumericField T="int" Label="Thứ tự" @bind-Value="_package.SortOrder" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="12" sm="3" md="1" Class="d-flex align-center"><MudSwitch T="bool" @bind-Value="_package.IsActive" Label="Bật" Color="Color.Success" /></MudItem>
+                        <MudItem xs="12"><MudTextField T="string" Label="Mô tả" @bind-Value="_package.Description" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                    </MudGrid>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                        Hoa hồng dự kiến mỗi lần mua: @Money(AffiliateRules.CalculateCommission(_package.PriceAmount, _package.CommissionPercent)).
+                        Đổi tỷ lệ chỉ áp dụng cho các lần mua sau; hoa hồng đã phát sinh giữ nguyên.
+                    </MudText>
+                    <MudStack Row="true" Spacing="2" Class="mt-3">
+                        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" OnClick="SavePackageAsync">Lưu gói</MudButton>
+                        @if (_package.Id != Guid.Empty)
+                        {
+                            <MudButton Variant="Variant.Text" OnClick="@(() => _package = NewPackage())">Hủy sửa</MudButton>
+                        }
+                    </MudStack>
+                </MudPaper>
+
+                <MudPaper Class="todox-table-card pa-4 mt-3" rounded="true">
+                    <MudTable Items="@_packages" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                        <HeaderContent>
+                            <MudTh>Mã gói</MudTh>
+                            <MudTh>Tên gói</MudTh>
+                            <MudTh Style="text-align:right">Giá</MudTh>
+                            <MudTh>Chu kỳ</MudTh>
+                            <MudTh Style="text-align:right">Hoa hồng</MudTh>
+                            <MudTh Style="text-align:right">Tiền hoa hồng / lần</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                            <MudTh Style="text-align:right">Thao tác</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Mã gói"><span class="todox-badge">@context.PackageCode</span></MudTd>
+                            <MudTd DataLabel="Tên gói">@context.PackageName</MudTd>
+                            <MudTd DataLabel="Giá" Style="text-align:right">@Money(context.PriceAmount, context.Currency)</MudTd>
+                            <MudTd DataLabel="Chu kỳ">@(context.CycleMonths > 0 ? $"{context.CycleMonths} tháng" : "Không thời hạn")</MudTd>
+                            <MudTd DataLabel="Hoa hồng" Style="text-align:right">@context.CommissionPercent.ToString("0.##")%</MudTd>
+                            <MudTd DataLabel="Tiền hoa hồng / lần" Style="text-align:right">@Money(AffiliateRules.CalculateCommission(context.PriceAmount, context.CommissionPercent), context.Currency)</MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">@(context.IsActive ? "Hoạt động" : "Ngưng")</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Thao tác" Style="text-align:right">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => EditPackage(context))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeletePackageAsync(context))" />
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có gói nào. Thêm gói A, B, C... ở form phía trên.</MudText></NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudTabPanel>
+
+            @* ===================== Đại lý ===================== *@
+            <MudTabPanel Text="Đại lý" Icon="@Icons.Material.Filled.Handshake">
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                    Để tạo đại lý: vào <MudLink Href="/customers">Quản lý khách hàng</MudLink>, sửa khách hàng và tích "Là đại lý" — hệ thống tự sinh mã đại lý.
+                    Khách hàng mới nhập mã khi đăng ký, hoặc gửi link <code>/register?ref=MÃ_ĐẠI_LÝ</code>.
+                </MudAlert>
+
+                @if (_editAgent is not null)
+                {
+                    <MudPaper Class="todox-table-card pa-4 mb-3" rounded="true">
+                        <MudText Typo="Typo.h6" Class="mb-2">Thông tin chuyển khoản — @_editAgent.AgentCode (@_editAgent.CustomerName)</MudText>
+                        <MudGrid>
+                            <MudItem xs="12" sm="4"><MudTextField T="string" Label="Ngân hàng" @bind-Value="_editAgent.BankName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField T="string" Label="Số tài khoản" @bind-Value="_editAgent.BankAccountNo" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField T="string" Label="Chủ tài khoản" @bind-Value="_editAgent.BankAccountName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="9"><MudTextField T="string" Label="Ghi chú" @bind-Value="_editAgent.Note" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="3" Class="d-flex align-center"><MudSwitch T="bool" @bind-Value="_editAgent.IsActive" Label="Đại lý hoạt động" Color="Color.Success" /></MudItem>
+                        </MudGrid>
+                        <MudStack Row="true" Spacing="2" Class="mt-3">
+                            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAgentAsync">Lưu</MudButton>
+                            <MudButton Variant="Variant.Text" OnClick="@(() => _editAgent = null)">Đóng</MudButton>
+                        </MudStack>
+                    </MudPaper>
+                }
+
+                <MudPaper Class="todox-table-card pa-4" rounded="true">
+                    <MudTable Items="@_agents" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                        <HeaderContent>
+                            <MudTh>Mã đại lý</MudTh>
+                            <MudTh>Khách hàng</MudTh>
+                            <MudTh>Liên hệ</MudTh>
+                            <MudTh>Tài khoản ngân hàng</MudTh>
+                            <MudTh Style="text-align:right">KH giới thiệu</MudTh>
+                            <MudTh Style="text-align:right">Chưa chuyển</MudTh>
+                            <MudTh Style="text-align:right">Đã chuyển</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                            <MudTh Style="text-align:right">Thao tác</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Mã đại lý"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.AgentCode</MudChip></MudTd>
+                            <MudTd DataLabel="Khách hàng">@context.CustomerCode — @context.CustomerName</MudTd>
+                            <MudTd DataLabel="Liên hệ">@context.Email<br />@context.Phone</MudTd>
+                            <MudTd DataLabel="Tài khoản ngân hàng">@BankText(context.BankName, context.BankAccountNo, context.BankAccountName)</MudTd>
+                            <MudTd DataLabel="KH giới thiệu" Style="text-align:right">@context.ReferredCount</MudTd>
+                            <MudTd DataLabel="Chưa chuyển" Style="text-align:right">@Money(context.PendingAmount)</MudTd>
+                            <MudTd DataLabel="Đã chuyển" Style="text-align:right">@Money(context.PaidAmount)</MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">@(context.IsActive ? "Hoạt động" : "Ngưng")</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Thao tác" Style="text-align:right">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa thông tin chuyển khoản" OnClick="@(() => EditAgent(context))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.ReceiptLong" Size="Size.Small" title="Xem hoa hồng" OnClick="@(() => ShowAgentCommissionsAsync(context))" />
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có đại lý nào.</MudText></NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudTabPanel>
+
+            @* ===================== Mua gói ===================== *@
+            <MudTabPanel Text="Lịch sử mua gói" Icon="@Icons.Material.Filled.ShoppingCart">
+                <MudPaper Class="todox-table-card pa-4" rounded="true">
+                    <MudText Typo="Typo.h6" Class="mb-2">Ghi nhận khách hàng mua / gia hạn gói</MudText>
+                    <MudGrid>
+                        <MudItem xs="12" md="4">
+                            <MudAutocomplete T="CustomerProfile" @bind-Value="_purchaseCustomer" SearchFunc="SearchCustomersAsync" ToStringFunc="CustomerDisplay"
+                                             Label="Khách hàng" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                             ResetValueOnEmptyText="true" CoerceText="true" />
+                            @if (_purchaseCustomer is not null)
+                            {
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                                    @(string.IsNullOrWhiteSpace(_purchaseCustomer.ReferralCode)
+                                        ? "Không có đại lý giới thiệu — sẽ không phát sinh hoa hồng."
+                                        : $"Đại lý giới thiệu: {_purchaseCustomer.ReferralCode} {_purchaseCustomer.ReferredByAgentName}")
+                                </MudText>
+                            }
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudSelect T="Guid" Label="Gói" Value="_purchase.PackageId" ValueChanged="OnPackageChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                @foreach (var p in _packages.Where(x => x.IsActive))
+                                {
+                                    <MudSelectItem Value="@p.Id">@p.PackageCode — @p.PackageName (@Money(p.PriceAmount, p.Currency))</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="2">
+                            <MudNumericField T="decimal?" Label="Số tiền thực thu" @bind-Value="_purchase.Amount" Min="0" Format="N0" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudDatePicker Label="Ngày mua" @bind-Date="_purchaseDate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudDatePicker Label="Bắt đầu chu kỳ (trống = tự nối tiếp)" @bind-Date="_purchase.CycleStart" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                        </MudItem>
+                        <MudItem xs="12" md="9">
+                            <MudTextField T="string" Label="Ghi chú (mã giao dịch, kênh thanh toán...)" @bind-Value="_purchase.Note" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                    </MudGrid>
+                    <MudButton Class="todox-primary-btn mt-3" StartIcon="@Icons.Material.Filled.AddShoppingCart" OnClick="RecordPurchaseAsync" Disabled="_busy">Ghi nhận mua gói</MudButton>
+                </MudPaper>
+
+                <MudPaper Class="todox-table-card pa-4 mt-3" rounded="true">
+                    <MudTable Items="@_purchases" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                        <HeaderContent>
+                            <MudTh>Ngày mua</MudTh>
+                            <MudTh>Khách hàng</MudTh>
+                            <MudTh>Gói</MudTh>
+                            <MudTh Style="text-align:right">Số tiền</MudTh>
+                            <MudTh>Chu kỳ</MudTh>
+                            <MudTh>Đại lý</MudTh>
+                            <MudTh Style="text-align:right">Hoa hồng</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                            <MudTh Style="text-align:right">Thao tác</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Ngày mua">@context.PurchasedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                            <MudTd DataLabel="Khách hàng">@context.CustomerCode — @context.CustomerName</MudTd>
+                            <MudTd DataLabel="Gói"><span class="todox-badge">@context.PackageCode</span> @context.PackageName</MudTd>
+                            <MudTd DataLabel="Số tiền" Style="text-align:right">@Money(context.Amount, context.Currency)</MudTd>
+                            <MudTd DataLabel="Chu kỳ">@CycleText(context.CycleStart, context.CycleEnd)</MudTd>
+                            <MudTd DataLabel="Đại lý">@context.AgentCode</MudTd>
+                            <MudTd DataLabel="Hoa hồng" Style="text-align:right">
+                                @if (context.CommissionAmount is decimal c)
+                                {
+                                    <span>@Money(c, context.Currency)</span><br />
+                                    <MudText Typo="Typo.caption">@AffiliateCommissionStatuses.Label(context.CommissionStatus)</MudText>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@(context.Status == "paid" ? Color.Success : Color.Default)">@(context.Status == "paid" ? "Đã thanh toán" : "Đã hủy")</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Thao tác" Style="text-align:right">
+                                @if (context.Status == "paid")
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" title="Hủy lần mua" OnClick="@(() => CancelPurchaseAsync(context))" />
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có lần mua gói nào.</MudText></NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudTabPanel>
+
+            @* ===================== Hoa hồng ===================== *@
+            <MudTabPanel Text="Hoa hồng & chuyển khoản" Icon="@Icons.Material.Filled.Payments">
+                <MudPaper Class="todox-table-card pa-4" rounded="true">
+                    <MudGrid>
+                        <MudItem xs="12" sm="6" md="4">
+                            <MudSelect T="Guid?" Label="Đại lý" Value="_filterAgentId" ValueChanged="OnAgentFilterChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem T="Guid?" Value="null">Tất cả đại lý</MudSelectItem>
+                                @foreach (var a in _agents)
+                                {
+                                    <MudSelectItem T="Guid?" Value="@a.Id">@a.AgentCode — @a.CustomerName</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudSelect T="string" Label="Trạng thái" Value="_filterStatus" ValueChanged="OnStatusFilterChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@string.Empty">Tất cả</MudSelectItem>
+                                @foreach (var s in AffiliateCommissionStatuses.All)
+                                {
+                                    <MudSelectItem Value="@s">@AffiliateCommissionStatuses.Label(s)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" md="5" Class="d-flex align-center">
+                            <MudText Typo="Typo.body2">
+                                Đang lọc: @_commissions.Count khoản ·
+                                chưa chuyển <b>@Money(_commissions.Where(x => x.Status == AffiliateCommissionStatuses.Pending).Sum(x => x.CommissionAmount))</b> ·
+                                đã chuyển <b>@Money(_commissions.Where(x => x.Status == AffiliateCommissionStatuses.Paid).Sum(x => x.CommissionAmount))</b>
+                            </MudText>
+                        </MudItem>
+                    </MudGrid>
+
+                    @if (_selected.Count > 0)
+                    {
+                        <MudPaper Class="todox-card pa-3 mt-3" Elevation="0">
+                            <MudText Typo="Typo.subtitle2">
+                                Đánh dấu đã chuyển khoản @_selected.Count(x => x.Status == AffiliateCommissionStatuses.Pending) khoản
+                                (@Money(_selected.Where(x => x.Status == AffiliateCommissionStatuses.Pending).Sum(x => x.CommissionAmount)))
+                            </MudText>
+                            <MudGrid>
+                                <MudItem xs="12" sm="4"><MudDatePicker Label="Ngày chuyển khoản" @bind-Date="_paidDate" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudTextField T="string" Label="Mã giao dịch ngân hàng" @bind-Value="_bankReference" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudTextField T="string" Label="Ghi chú" @bind-Value="_paidNote" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            </MudGrid>
+                            <MudButton Class="todox-primary-btn mt-2" StartIcon="@Icons.Material.Filled.CheckCircle" OnClick="MarkPaidAsync" Disabled="_busy">Xác nhận đã chuyển khoản</MudButton>
+                        </MudPaper>
+                    }
+
+                    <MudTable T="AffiliateCommissionView" Items="@_commissions" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table mt-3"
+                              MultiSelection="true" @bind-SelectedItems="_selected">
+                        <HeaderContent>
+                            <MudTh>Ngày phát sinh</MudTh>
+                            <MudTh>Đại lý</MudTh>
+                            <MudTh>Khách hàng</MudTh>
+                            <MudTh>Gói</MudTh>
+                            <MudTh Style="text-align:right">Giá trị gói</MudTh>
+                            <MudTh Style="text-align:right">Tỷ lệ</MudTh>
+                            <MudTh Style="text-align:right">Hoa hồng</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                            <MudTh>Chuyển khoản</MudTh>
+                            <MudTh Style="text-align:right">Thao tác</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Ngày phát sinh">@context.PurchasedAt.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+                            <MudTd DataLabel="Đại lý">
+                                <span class="todox-badge">@context.AgentCode</span> @context.AgentName
+                                <br /><MudText Typo="Typo.caption">@BankText(context.BankName, context.BankAccountNo, context.BankAccountName)</MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Khách hàng">@context.CustomerCode — @context.CustomerName</MudTd>
+                            <MudTd DataLabel="Gói">@context.PackageCode</MudTd>
+                            <MudTd DataLabel="Giá trị gói" Style="text-align:right">@Money(context.BaseAmount, context.Currency)</MudTd>
+                            <MudTd DataLabel="Tỷ lệ" Style="text-align:right">@context.CommissionPercent.ToString("0.##")%</MudTd>
+                            <MudTd DataLabel="Hoa hồng" Style="text-align:right"><b>@Money(context.CommissionAmount, context.Currency)</b></MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@AffiliateCommissionStatuses.Label(context.Status)</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Chuyển khoản">
+                                @if (context.PaidAt is DateTime paidAt)
+                                {
+                                    <span>@paidAt.ToLocalTime().ToString("dd/MM/yyyy")</span>
+                                    @if (!string.IsNullOrWhiteSpace(context.BankReference))
+                                    {
+                                        <br /><MudText Typo="Typo.caption">@context.BankReference</MudText>
+                                    }
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Thao tác" Style="text-align:right">
+                                @if (context.Status == AffiliateCommissionStatuses.Paid)
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small" title="Chuyển về chưa chuyển khoản" OnClick="@(() => UndoPaidAsync(context))" />
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có hoa hồng nào.</MudText></NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudStack>
+
+@code {
+    private bool _loaded;
+    private bool _ready;
+    private bool _busy;
+    private int _tab;
+
+    private IReadOnlyList<AffiliatePackage> _packages = Array.Empty<AffiliatePackage>();
+    private IReadOnlyList<AffiliateAgentView> _agents = Array.Empty<AffiliateAgentView>();
+    private IReadOnlyList<AffiliatePurchaseView> _purchases = Array.Empty<AffiliatePurchaseView>();
+    private IReadOnlyList<AffiliateCommissionView> _commissions = Array.Empty<AffiliateCommissionView>();
+    private IReadOnlyList<CustomerProfile> _customers = Array.Empty<CustomerProfile>();
+
+    private AffiliatePackage _package = NewPackage();
+    private AffiliateAgentView? _editAgent;
+
+    private CustomerProfile? _purchaseCustomer;
+    private AffiliatePurchaseRequest _purchase = new();
+    private DateTime? _purchaseDate = DateTime.Today;
+
+    private Guid? _filterAgentId;
+    private string _filterStatus = string.Empty;
+    private HashSet<AffiliateCommissionView> _selected = new();
+    private DateTime? _paidDate = DateTime.Today;
+    private string? _bankReference;
+    private string? _paidNote;
+
+    private Guid? ActorId => AuthState.CurrentUser?.UserId;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private static AffiliatePackage NewPackage() => new() { Id = Guid.Empty, IsActive = true, CycleMonths = 1 };
+
+    private async Task LoadAsync()
+    {
+        _loaded = false;
+        _ready = AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) && await AffiliateRepo.IsReadyAsync();
+        if (_ready)
+        {
+            _packages = await AffiliateRepo.GetPackagesAsync();
+            _agents = await AffiliateRepo.GetAgentsAsync();
+            _purchases = await AffiliateRepo.GetPurchasesAsync();
+            await LoadCommissionsAsync();
+
+            var customers = await Accounts.GetCustomersAsync();
+            var map = await AffiliateRepo.GetCustomerAffiliateMapAsync();
+            foreach (var c in customers)
+            {
+                if (map.TryGetValue(c.Id, out var info))
+                {
+                    c.IsAgent = info.IsAgent;
+                    c.AgentCode = info.OwnAgentCode;
+                    c.ReferralCode = info.ReferredByAgentCode;
+                    c.ReferredByAgentName = info.ReferredByAgentName;
+                }
+            }
+
+            _customers = customers;
+        }
+
+        _loaded = true;
+    }
+
+    private async Task LoadCommissionsAsync()
+    {
+        _commissions = await AffiliateRepo.GetCommissionsAsync(_filterAgentId, _filterStatus);
+        _selected = new HashSet<AffiliateCommissionView>();
+    }
+
+    // ---------- Packages ----------
+
+    private void EditPackage(AffiliatePackage p) => _package = new AffiliatePackage
+    {
+        Id = p.Id,
+        PackageCode = p.PackageCode,
+        PackageName = p.PackageName,
+        PriceAmount = p.PriceAmount,
+        Currency = p.Currency,
+        CycleMonths = p.CycleMonths,
+        CommissionPercent = p.CommissionPercent,
+        Description = p.Description,
+        IsActive = p.IsActive,
+        SortOrder = p.SortOrder
+    };
+
+    private async Task SavePackageAsync()
+    {
+        var (ok, message) = await AffiliateRepo.SavePackageAsync(_package, ActorId);
+        Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+        if (ok)
+        {
+            await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "package_save", entityDisplay: _package.PackageCode);
+            _package = NewPackage();
+            _packages = await AffiliateRepo.GetPackagesAsync();
+        }
+    }
+
+    private async Task DeletePackageAsync(AffiliatePackage p)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync("Xóa gói", $"Xóa gói {p.PackageCode}?", yesText: "Xóa", cancelText: "Hủy");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        var (ok, message) = await AffiliateRepo.DeletePackageAsync(p.Id);
+        Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+        _packages = await AffiliateRepo.GetPackagesAsync();
+    }
+
+    // ---------- Agents ----------
+
+    private void EditAgent(AffiliateAgentView a) => _editAgent = new AffiliateAgentView
+    {
+        Id = a.Id,
+        AgentCode = a.AgentCode,
+        CustomerName = a.CustomerName,
+        BankName = a.BankName,
+        BankAccountNo = a.BankAccountNo,
+        BankAccountName = a.BankAccountName,
+        Note = a.Note,
+        IsActive = a.IsActive
+    };
+
+    private async Task SaveAgentAsync()
+    {
+        if (_editAgent is null)
+        {
+            return;
+        }
+
+        await AffiliateRepo.UpdateAgentAsync(_editAgent, ActorId);
+        await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "agent_update", entityDisplay: _editAgent.AgentCode);
+        Snackbar.Add("Đã cập nhật đại lý.", Severity.Success);
+        _editAgent = null;
+        _agents = await AffiliateRepo.GetAgentsAsync();
+    }
+
+    private async Task ShowAgentCommissionsAsync(AffiliateAgentView a)
+    {
+        _filterAgentId = a.Id;
+        _filterStatus = string.Empty;
+        await LoadCommissionsAsync();
+        _tab = 3;
+    }
+
+    // ---------- Purchases ----------
+
+    private Task<IEnumerable<CustomerProfile>> SearchCustomersAsync(string value, CancellationToken cancellationToken)
+    {
+        var q = value?.Trim() ?? string.Empty;
+        IEnumerable<CustomerProfile> result = _customers
+            .Where(x => q.Length == 0
+                        || x.CustomerCode.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || x.CompanyName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || x.ContactName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || x.Email.Contains(q, StringComparison.OrdinalIgnoreCase))
+            .Take(30);
+        return Task.FromResult(result);
+    }
+
+    private static string CustomerDisplay(CustomerProfile? c)
+        => c is null ? string.Empty : $"{c.CustomerCode} — {c.CompanyName} ({c.Email})";
+
+    private void OnPackageChanged(Guid packageId)
+    {
+        _purchase.PackageId = packageId;
+        _purchase.Amount = _packages.FirstOrDefault(x => x.Id == packageId)?.PriceAmount;
+    }
+
+    private async Task RecordPurchaseAsync()
+    {
+        if (_purchaseCustomer is null || _purchase.PackageId == Guid.Empty)
+        {
+            Snackbar.Add("Chọn khách hàng và gói.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _purchase.CustomerId = _purchaseCustomer.Id;
+            _purchase.PurchasedAt = PurchaseMoment(_purchaseDate);
+            var (ok, message) = await AffiliateRepo.RecordPurchaseAsync(_purchase, ActorId);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+            if (ok)
+            {
+                await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "purchase_record", entityDisplay: _purchaseCustomer.CompanyName);
+                _purchase = new AffiliatePurchaseRequest();
+                _purchaseCustomer = null;
+                _purchaseDate = DateTime.Today;
+                _purchases = await AffiliateRepo.GetPurchasesAsync();
+                _agents = await AffiliateRepo.GetAgentsAsync();
+                await LoadCommissionsAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Ngày hôm nay giữ giờ hiện tại; ngày khác lấy giữa trưa để không lệch ngày khi đổi múi giờ.</summary>
+    private static DateTime PurchaseMoment(DateTime? date)
+    {
+        var day = (date ?? DateTime.Today).Date;
+        return day == DateTime.Today ? DateTime.Now : day.AddHours(12);
+    }
+
+    private async Task CancelPurchaseAsync(AffiliatePurchaseView p)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync("Hủy lần mua gói",
+            $"Hủy lần mua gói {p.PackageCode} của {p.CustomerName}? Hoa hồng chưa chuyển khoản của lần mua này cũng bị hủy.",
+            yesText: "Hủy lần mua", cancelText: "Đóng");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        var (ok, message) = await AffiliateRepo.CancelPurchaseAsync(p.Id);
+        Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+        if (ok)
+        {
+            await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "purchase_cancel", entityDisplay: p.PackageCode);
+            _purchases = await AffiliateRepo.GetPurchasesAsync();
+            _agents = await AffiliateRepo.GetAgentsAsync();
+            await LoadCommissionsAsync();
+        }
+    }
+
+    // ---------- Commissions ----------
+
+    private async Task OnAgentFilterChanged(Guid? agentId)
+    {
+        _filterAgentId = agentId;
+        await LoadCommissionsAsync();
+    }
+
+    private async Task OnStatusFilterChanged(string status)
+    {
+        _filterStatus = status;
+        await LoadCommissionsAsync();
+    }
+
+    private async Task MarkPaidAsync()
+    {
+        var ids = _selected.Where(x => x.Status == AffiliateCommissionStatuses.Pending).Select(x => x.Id).ToList();
+        if (ids.Count == 0)
+        {
+            Snackbar.Add("Chọn ít nhất một khoản đang \"chưa chuyển khoản\".", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var count = await AffiliateRepo.MarkCommissionsPaidAsync(ids, PurchaseMoment(_paidDate), _bankReference, _paidNote, ActorId);
+            await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "commission_paid", entityDisplay: $"{count} khoản {_bankReference}");
+            Snackbar.Add($"Đã đánh dấu {count} khoản là đã chuyển khoản.", Severity.Success);
+            _bankReference = null;
+            _paidNote = null;
+            _agents = await AffiliateRepo.GetAgentsAsync();
+            _purchases = await AffiliateRepo.GetPurchasesAsync();
+            await LoadCommissionsAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task UndoPaidAsync(AffiliateCommissionView c)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync("Hoàn tác chuyển khoản",
+            $"Chuyển khoản hoa hồng {Money(c.CommissionAmount, c.Currency)} của {c.AgentCode} về \"chưa chuyển khoản\"?",
+            yesText: "Hoàn tác", cancelText: "Đóng");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        await AffiliateRepo.MarkCommissionPendingAsync(c.Id);
+        await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "commission_unpaid", entityDisplay: c.AgentCode);
+        _agents = await AffiliateRepo.GetAgentsAsync();
+        _purchases = await AffiliateRepo.GetPurchasesAsync();
+        await LoadCommissionsAsync();
+    }
+
+    // ---------- Formatting ----------
+
+    private static string Money(decimal amount, string currency = "VND") => $"{amount:N0} {currency}";
+
+    private static string BankText(string? bank, string? accountNo, string? accountName)
+    {
+        var parts = new[] { bank, accountNo, accountName }.Where(x => !string.IsNullOrWhiteSpace(x));
+        var text = string.Join(" · ", parts);
+        return text.Length == 0 ? "Chưa có" : text;
+    }
+
+    private static string CycleText(DateTime? start, DateTime? end)
+        => start is null ? string.Empty : end is null ? $"Từ {start:dd/MM/yyyy}" : $"{start:dd/MM/yyyy} → {end:dd/MM/yyyy}";
+
+    private static Color StatusColor(string status) => status switch
+    {
+        AffiliateCommissionStatuses.Paid => Color.Success,
+        AffiliateCommissionStatuses.Pending => Color.Warning,
+        _ => Color.Default
+    };
+}

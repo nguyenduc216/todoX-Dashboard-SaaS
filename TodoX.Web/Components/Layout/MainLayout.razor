@@ -668,6 +668,28 @@
             }
         }
 
+        if (!existingCodes.Contains("affiliates"))
+        {
+            var affiliatesItem = new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                Code = "affiliates",
+                Title = "Đại lý & hoa hồng",
+                Href = "/affiliates",
+                IconKey = "Handshake",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "admin_job_monitor",
+                MatchAll = false,
+                SortOrder = 25
+            };
+            var administration = list.FirstOrDefault(g => g.Code.Equals("administration", StringComparison.OrdinalIgnoreCase));
+            if (administration is not null)
+            {
+                affiliatesItem.GroupId = administration.Id;
+                administration.Items.Add(affiliatesItem);
+            }
+        }
+
         if (!existingCodes.Contains("admin_system_diagnostics"))
         {
             var diagnosticsItem = new NavigationMenuItemDto
@@ -869,6 +891,7 @@
         "Article" => Icons.Material.Filled.Article,
         "Monitor" => Icons.Material.Filled.Monitor,
         "Memory" => Icons.Material.Filled.Memory,
+        "Handshake" => Icons.Material.Filled.Handshake,
         _ => Icons.Material.Filled.Circle
     };
 
@@ -916,6 +939,7 @@
                 Item("admin_users", "Quản trị viên", "/admin-users", "AdminPanelSettings", new[] { "admin_users" }, sort: 10),
                 Item("customers", "Quản lý khách hàng", "/customers", "Groups", new[] { "customers" }, sort: 20),
                 Item("customer_accounts", "Quản lý tài khoản", "/customer-accounts", "ManageAccounts", new[] { "customer_accounts" }, sort: 30),
+                Item("affiliates", "Đại lý & hoa hồng", "/affiliates", "Handshake", Array.Empty<string>(), "admin_job_monitor", sort: 35),
                 Item("permissions", "Phân quyền", "/permissions", "Security", new[] { "roles", "permissions" }, sort: 40),
                 Item("settings", "Cài đặt hệ thống", "/settings", "Settings", new[] { "settings", "app_settings" }, sort: 50),
                 Item("activity_logs", "Nhật ký hoạt động", "/activity-logs", "Article", new[] { "audit_logs" }, sort: 60),
