@@ -95,6 +95,7 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         int? promptTokens = null, outputTokens = null, completionTokens = null, totalTokens = null; decimal? credit = null; string? runtimeProvider = null;
         var sawSse = false; var firstEventMs = (int?)null; var firstContentMs = (int?)null; var lastSseEventMs = (int?)null; var done = false;
         var sseDataCount = 0; var rawResponseTruncated = false;
+        string? sseEventName = null; var sawProviderError = false; string? providerErrorCode = null, providerErrorMessage = null;
         var httpContentType = response.Content.Headers.ContentType?.ToString();
         try
         {
@@ -108,6 +109,8 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
                 if (line is null) break;
                 {
                 AppendBoundedLine(raw, line, ref rawResponseTruncated);
+                if (line.Length == 0) { sseEventName = null; continue; }
+                if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase)) { sseEventName = line[6..].Trim(); continue; }
                 if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
                 sseDataCount++;
                 sawSse = true; var nowMs = (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds; firstEventMs ??= nowMs; lastSseEventMs = nowMs;
@@ -116,6 +119,12 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
                 if (string.Equals(data, "[DONE]", StringComparison.Ordinal)) { done = true; break; }
                 try
                 {
+                    if (string.Equals(sseEventName, "error", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sawProviderError = true;
+                        ReadProviderError(data, ref providerErrorCode, ref providerErrorMessage);
+                        continue;
+                    }
                     TryReadChunk(data, content, ref promptTokens, ref outputTokens, ref completionTokens, ref totalTokens, ref credit, ref runtimeProvider, ref firstContentMs, started);
                 }
                 catch (JsonException ex)
@@ -159,6 +168,10 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
         var sanitizedContent = SanitizeAndBound(content.ToString(), credential.Secret);
         var diagnostics = BuildDiagnostics(httpContentType, sseDataCount, done, raw.Length, rawResponseTruncated, content.Length,
             firstEventMs, firstContentMs, started);
+        if (sawProviderError && content.Length == 0)
+            throw new ServicePromptProviderException("gommo_stream_error",
+                Sanitize(BuildProviderErrorMessage(providerErrorCode, providerErrorMessage), credential.Secret), sanitized,
+                sanitizedAssembledContent: sanitizedContent, diagnostics: diagnostics);
         if (!sawSse || !done || !string.Equals(response.Content.Headers.ContentType?.MediaType, "text/event-stream", StringComparison.OrdinalIgnoreCase))
             throw new ServicePromptProviderException("invalid_sse", "Gommo Agent response is not SSE.", sanitized,
                 sanitizedAssembledContent: sanitizedContent, diagnostics: diagnostics);
@@ -195,6 +208,20 @@ public sealed class ServicePrompt79AiClient : IServicePromptProviderClient
             credit = ReadDecimal(usage, "credit") ?? credit;
             runtimeProvider = ReadString(usage, "provider") ?? runtimeProvider;
         }
+    }
+
+    private static void ReadProviderError(string data, ref string? code, ref string? message)
+    {
+        using var document = JsonDocument.Parse(data); var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) return;
+        code ??= ReadString(root, "error_code");
+        message ??= ReadString(root, "message");
+    }
+
+    private static string BuildProviderErrorMessage(string? code, string? message)
+    {
+        var summary = string.IsNullOrWhiteSpace(message) ? "Gommo Agent báo lỗi khi tạo nội dung." : message.Trim();
+        return string.IsNullOrWhiteSpace(code) ? summary : $"{summary} ({code.Trim()})";
     }
 
     private static int? ReadInt(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) ? result : null;
