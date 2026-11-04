@@ -21,6 +21,17 @@ public sealed class AffiliateAgentView
     public DateTime CreatedAt { get; set; }
 }
 
+/// <summary>Khách hàng do đại lý giới thiệu, hiển thị cho chính đại lý (không có email/điện thoại).</summary>
+public sealed class AffiliateReferredCustomer
+{
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public DateTime ReferredAt { get; set; }
+    public int PurchaseCount { get; set; }
+    public string? LatestPackageCode { get; set; }
+    public DateTime? CurrentCycleEnd { get; set; }
+}
+
 /// <summary>Thông tin đại lý gắn với một khách hàng: bản thân có là đại lý không, và được đại lý nào giới thiệu.</summary>
 public sealed class CustomerAffiliateInfo
 {

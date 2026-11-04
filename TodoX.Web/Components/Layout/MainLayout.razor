@@ -4,6 +4,7 @@
 @inject AuthStateService AuthState
 @inject AccountService Accounts
 @inject NavigationMenuRepository NavigationMenus
+@inject TodoX.Web.Services.Affiliate.AffiliateRepository AffiliateRepo
 @inject WalletService Wallets
 @inject IPointBalanceChangeNotifier PointBalanceChanges
 @inject IRuntimeBuildInfoProvider RuntimeBuildInfo
@@ -168,6 +169,7 @@
     private bool _userMenuOpen;
     private bool _notifyOpen;
     private IReadOnlyList<NavigationMenuGroupDto> _menuGroups = Array.Empty<NavigationMenuGroupDto>();
+    private bool _isAgent;
     private bool _menuLoaded;
     private decimal? _balance;
     private bool _disposed;
@@ -350,6 +352,8 @@
             return;
         }
 
+        await LoadAgentFlagAsync();
+
         try
         {
             var groups = await NavigationMenus.GetActiveMenuAsync();
@@ -375,6 +379,23 @@
         }
 
         _menuLoaded = true;
+    }
+
+    /// <summary>Khách hàng là đại lý đang hoạt động thì có thêm menu "Hoa hồng của tôi".</summary>
+    private async Task LoadAgentFlagAsync()
+    {
+        _isAgent = false;
+        if (AuthState.CurrentUser is { IsCustomer: true, CustomerId: Guid customerId })
+        {
+            try
+            {
+                _isAgent = await AffiliateRepo.IsActiveAgentAsync(customerId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Affiliate agent check failed; hiding agent menu.");
+            }
+        }
     }
 
     private async Task LoadBalanceAsync()
@@ -481,7 +502,7 @@
             };
         }
 
-        return new[]
+        var menu = new List<NavigationMenuGroupDto>
         {
             Group("overview", "Trang chủ", "Dashboard", 10, true,
                 Item("dashboard", () => new NavigationMenuItemDto
@@ -584,6 +605,25 @@
                     SortOrder = 30
                 }))
         };
+
+        if (_isAgent)
+        {
+            menu.Add(Group("affiliate_agent", "Đại lý", "Handshake", 50, true,
+                Item("my_commissions", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "my_commissions",
+                    Title = "Hoa hồng của tôi",
+                    Href = "/my-commissions",
+                    IconKey = "Payments",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = false,
+                    SortOrder = 10
+                })));
+        }
+
+        return menu;
     }
 
     private static IReadOnlyList<NavigationMenuGroupDto> MergeSupplementalMenu(IEnumerable<NavigationMenuGroupDto> groups)
@@ -892,6 +932,7 @@
         "Monitor" => Icons.Material.Filled.Monitor,
         "Memory" => Icons.Material.Filled.Memory,
         "Handshake" => Icons.Material.Filled.Handshake,
+        "Payments" => Icons.Material.Filled.Payments,
         _ => Icons.Material.Filled.Circle
     };
 

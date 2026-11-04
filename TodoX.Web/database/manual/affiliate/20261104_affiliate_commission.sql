@@ -137,7 +137,7 @@ CREATE INDEX IF NOT EXISTS ix_affiliate_commissions_agent_status
 INSERT INTO system.navigation_menu_items
 (group_id, code, title, href, icon_key, module_keys, visibility_policy, match_all, sort_order, is_active, description)
 SELECT g.id, 'affiliates', 'Đại lý & hoa hồng', '/affiliates', 'Handshake',
-       ARRAY[]::text[], 'admin_job_monitor', false, 25, true,
+       ARRAY['customers']::text[], 'any_module', false, 25, true,
        'Quản lý đại lý, tỷ lệ hoa hồng theo gói, lịch sử mua gói và chi trả hoa hồng'
   FROM system.navigation_menu_groups g
  WHERE g.code = 'administration'

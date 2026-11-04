@@ -1,0 +1,200 @@
+@page "/my-commissions"
+@using TodoX.Web.Services.Affiliate
+@inject AffiliateRepository AffiliateRepo
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageTitle>Hoa hồng của tôi</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Hoa hồng của tôi</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Khách hàng bạn giới thiệu và hoa hồng đại lý đã / chưa chuyển khoản.</MudText>
+    </div>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser?.CustomerId is null)
+    {
+        <MudAlert Severity="Severity.Info">Trang này dành cho tài khoản khách hàng là đại lý. Quản trị viên xem hoa hồng tại <MudLink Href="/affiliates">Đại lý & hoa hồng</MudLink>.</MudAlert>
+    }
+    else if (_agent is null || !_agent.IsActive)
+    {
+        <MudAlert Severity="Severity.Info">Tài khoản của bạn chưa là đại lý (hoặc đã ngưng). Vui lòng liên hệ TodoX để đăng ký làm đại lý.</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Mã đại lý của bạn</MudText>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <div class="todox-stat-value">@_agent.AgentCode</div>
+                        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" OnClick="@(() => CopyAsync(_agent.AgentCode))" />
+                    </MudStack>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Link đăng ký giới thiệu:</MudText>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudText Typo="Typo.body2" Style="word-break:break-all">@ReferralLink</MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" OnClick="@(() => CopyAsync(ReferralLink))" />
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="4" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Khách hàng giới thiệu</MudText>
+                    <div class="todox-stat-value">@_agent.ReferredCount</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="4" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Chưa chuyển khoản</MudText>
+                    <div class="todox-stat-value">@Money(_agent.PendingAmount)</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="4" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Đã chuyển khoản</MudText>
+                    <div class="todox-stat-value">@Money(_agent.PaidAmount)</div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudText Typo="Typo.h6" Class="mb-2">Tài khoản nhận hoa hồng</MudText>
+            <MudGrid>
+                <MudItem xs="12" sm="4"><MudTextField T="string" Label="Ngân hàng" @bind-Value="_bankName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                <MudItem xs="12" sm="4"><MudTextField T="string" Label="Số tài khoản" @bind-Value="_bankAccountNo" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                <MudItem xs="12" sm="4"><MudTextField T="string" Label="Chủ tài khoản" @bind-Value="_bankAccountName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            </MudGrid>
+            <MudButton Class="todox-primary-btn mt-3" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveBankAsync">Lưu tài khoản</MudButton>
+        </MudPaper>
+
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudText Typo="Typo.h6" Class="mb-2">Lịch sử hoa hồng</MudText>
+            <MudTable Items="@_commissions" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                <HeaderContent>
+                    <MudTh>Ngày phát sinh</MudTh>
+                    <MudTh>Khách hàng</MudTh>
+                    <MudTh>Gói</MudTh>
+                    <MudTh Style="text-align:right">Giá trị gói</MudTh>
+                    <MudTh Style="text-align:right">Tỷ lệ</MudTh>
+                    <MudTh Style="text-align:right">Hoa hồng</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Ngày chuyển khoản</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Ngày phát sinh">@context.PurchasedAt.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+                    <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                    <MudTd DataLabel="Gói">@context.PackageCode — @context.PackageName</MudTd>
+                    <MudTd DataLabel="Giá trị gói" Style="text-align:right">@Money(context.BaseAmount, context.Currency)</MudTd>
+                    <MudTd DataLabel="Tỷ lệ" Style="text-align:right">@context.CommissionPercent.ToString("0.##")%</MudTd>
+                    <MudTd DataLabel="Hoa hồng" Style="text-align:right"><b>@Money(context.CommissionAmount, context.Currency)</b></MudTd>
+                    <MudTd DataLabel="Trạng thái">
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@AffiliateCommissionStatuses.Label(context.Status)</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Ngày chuyển khoản">
+                        @if (context.PaidAt is DateTime paidAt)
+                        {
+                            <span>@paidAt.ToLocalTime().ToString("dd/MM/yyyy")</span>
+                            @if (!string.IsNullOrWhiteSpace(context.BankReference))
+                            {
+                                <br /><MudText Typo="Typo.caption">@context.BankReference</MudText>
+                            }
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa phát sinh hoa hồng.</MudText></NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudText Typo="Typo.h6" Class="mb-2">Khách hàng bạn giới thiệu</MudText>
+            <MudTable Items="@_referred" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                <HeaderContent>
+                    <MudTh>Mã KH</MudTh>
+                    <MudTh>Khách hàng</MudTh>
+                    <MudTh>Ngày giới thiệu</MudTh>
+                    <MudTh Style="text-align:right">Số lần mua gói</MudTh>
+                    <MudTh>Gói gần nhất</MudTh>
+                    <MudTh>Hạn gói</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Mã KH">@context.CustomerCode</MudTd>
+                    <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                    <MudTd DataLabel="Ngày giới thiệu">@context.ReferredAt.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+                    <MudTd DataLabel="Số lần mua gói" Style="text-align:right">@context.PurchaseCount</MudTd>
+                    <MudTd DataLabel="Gói gần nhất">@context.LatestPackageCode</MudTd>
+                    <MudTd DataLabel="Hạn gói">@context.CurrentCycleEnd?.ToString("dd/MM/yyyy")</MudTd>
+                </RowTemplate>
+                <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có khách hàng nào dùng mã của bạn.</MudText></NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private bool _loaded;
+    private AffiliateAgentView? _agent;
+    private IReadOnlyList<AffiliateCommissionView> _commissions = Array.Empty<AffiliateCommissionView>();
+    private IReadOnlyList<AffiliateReferredCustomer> _referred = Array.Empty<AffiliateReferredCustomer>();
+    private string? _bankName;
+    private string? _bankAccountNo;
+    private string? _bankAccountName;
+
+    private string ReferralLink => $"{Navigation.BaseUri.TrimEnd('/')}/register?ref={Uri.EscapeDataString(_agent?.AgentCode ?? string.Empty)}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.CurrentUser?.CustomerId is Guid customerId)
+        {
+            _agent = await AffiliateRepo.GetAgentByCustomerAsync(customerId);
+            if (_agent is { IsActive: true })
+            {
+                _bankName = _agent.BankName;
+                _bankAccountNo = _agent.BankAccountNo;
+                _bankAccountName = _agent.BankAccountName;
+                _commissions = await AffiliateRepo.GetCommissionsAsync(_agent.Id);
+                _referred = await AffiliateRepo.GetReferredCustomersAsync(_agent.Id);
+            }
+        }
+
+        _loaded = true;
+    }
+
+    private async Task SaveBankAsync()
+    {
+        if (AuthState.CurrentUser?.CustomerId is not Guid customerId)
+        {
+            return;
+        }
+
+        var ok = await AffiliateRepo.UpdateOwnBankAsync(customerId, _bankName, _bankAccountNo, _bankAccountName, AuthState.CurrentUser.UserId);
+        Snackbar.Add(ok ? "Đã lưu tài khoản nhận hoa hồng." : "Không lưu được tài khoản.", ok ? Severity.Success : Severity.Error);
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add("Đã sao chép.", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Trình duyệt không cho phép sao chép, hãy copy thủ công.", Severity.Warning);
+        }
+    }
+
+    private static string Money(decimal amount, string currency = "VND") => $"{amount:N0} {currency}";
+
+    private static Color StatusColor(string status) => status switch
+    {
+        AffiliateCommissionStatuses.Paid => Color.Success,
+        AffiliateCommissionStatuses.Pending => Color.Warning,
+        _ => Color.Default
+    };
+}

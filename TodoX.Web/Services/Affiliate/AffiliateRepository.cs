@@ -86,7 +86,62 @@ public sealed class AffiliateRepository
 
     // ===================== Agents =====================
 
-    public async Task<IReadOnlyList<AffiliateAgentView>> GetAgentsAsync()
+    public async Task<IReadOnlyList<AffiliateAgentView>> GetAgentsAsync() => await QueryAgentsAsync(null);
+
+    /// <summary>Đại lý gắn với khách hàng đăng nhập (null nếu khách hàng không phải đại lý hoặc chưa có schema).</summary>
+    public async Task<AffiliateAgentView?> GetAgentByCustomerAsync(Guid customerId)
+    {
+        if (!await IsReadyAsync())
+        {
+            return null;
+        }
+
+        return (await QueryAgentsAsync(customerId)).FirstOrDefault();
+    }
+
+    public async Task<bool> IsActiveAgentAsync(Guid customerId)
+        => (await GetAgentByCustomerAsync(customerId))?.IsActive == true;
+
+    /// <summary>Khách hàng do một đại lý giới thiệu (chỉ thông tin cơ bản, không lộ email/điện thoại).</summary>
+    public async Task<IReadOnlyList<AffiliateReferredCustomer>> GetReferredCustomersAsync(Guid agentId)
+    {
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<AffiliateReferredCustomer>(
+            """
+            SELECT c.customer_code AS CustomerCode,
+                   COALESCE(NULLIF(c.company_name, ''), c.full_name, '') AS CustomerName,
+                   r.assigned_at AS ReferredAt,
+                   (SELECT count(*) FROM affiliate.package_purchases p
+                     WHERE p.customer_id = c.id AND p.status = 'paid')::int AS PurchaseCount,
+                   (SELECT p.package_code FROM affiliate.package_purchases p
+                     WHERE p.customer_id = c.id AND p.status = 'paid'
+                     ORDER BY p.purchased_at DESC LIMIT 1) AS LatestPackageCode,
+                   (SELECT max(p.cycle_end) FROM affiliate.package_purchases p
+                     WHERE p.customer_id = c.id AND p.status = 'paid') AS CurrentCycleEnd
+              FROM affiliate.customer_referrals r
+              JOIN crm.customers c ON c.id = r.customer_id
+             WHERE r.agent_id = @agentId
+             ORDER BY r.assigned_at DESC;
+            """, new { agentId });
+        return rows.ToList();
+    }
+
+    /// <summary>Đại lý tự cập nhật tài khoản nhận hoa hồng. Chỉ sửa được bản ghi của chính khách hàng đó.</summary>
+    public async Task<bool> UpdateOwnBankAsync(Guid customerId, string? bankName, string? accountNo, string? accountName, Guid? actorUserId)
+    {
+        using var conn = await _factory.OpenAsync();
+        var updated = await conn.ExecuteAsync(
+            """
+            UPDATE affiliate.agents
+               SET bank_name=@bankName, bank_account_no=@accountNo, bank_account_name=@accountName,
+                   updated_at=now(), updated_by=@actorUserId
+             WHERE customer_id=@customerId;
+            """,
+            new { customerId, bankName = Blank(bankName), accountNo = Blank(accountNo), accountName = Blank(accountName), actorUserId });
+        return updated > 0;
+    }
+
+    private async Task<IReadOnlyList<AffiliateAgentView>> QueryAgentsAsync(Guid? customerId)
     {
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
@@ -105,9 +160,9 @@ public sealed class AffiliateRepository
                               WHERE m.agent_id = a.id AND m.status = 'paid'), 0) AS PaidAmount
               FROM affiliate.agents a
               JOIN crm.customers c ON c.id = a.customer_id
-             WHERE a.tenant_id = @tenant
+             WHERE a.tenant_id = @tenant AND (@customerId::uuid IS NULL OR a.customer_id = @customerId)
              ORDER BY a.is_active DESC, a.created_at DESC;
-            """, new { tenant = _tenant.TenantId });
+            """, new { tenant = _tenant.TenantId, customerId });
         return rows.ToList();
     }
 

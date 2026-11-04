@@ -78,6 +78,24 @@ public sealed class AffiliateRulesTests
     }
 
     [Fact]
+    public void MyCommissionsPage_IsOpenToCustomersAndScopedToOwnCustomer()
+    {
+        Assert.False(NavigationAccessRules.IsAdminOnlyPath("/my-commissions"));
+        var customer = new CurrentUserSession { IsAuthenticated = true, Role = TodoXUserRole.CustomerOwner, CustomerId = Guid.NewGuid() };
+        Assert.True(NavigationAccessRules.CanAccessPath(customer, "/my-commissions"));
+
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var web = File.Exists(Path.Combine(root, "Components", "Pages", "MyCommissions.razor")) ? root : Path.Combine(root, "TodoX.Web");
+        var page = File.ReadAllText(Path.Combine(web, "Components", "Pages", "MyCommissions.razor"));
+
+        // Agent data must come only from the logged-in customer's own agent record.
+        Assert.Contains("GetAgentByCustomerAsync(customerId)", page);
+        Assert.Contains("GetCommissionsAsync(_agent.Id)", page);
+        Assert.DoesNotContain("GetAgentsAsync()", page);
+        Assert.DoesNotContain("SupplyParameterFromQuery", page);
+    }
+
+    [Fact]
     public void CommissionStatusLabels_CoverBankingStates()
     {
         Assert.Equal("Chưa chuyển khoản", AffiliateCommissionStatuses.Label(AffiliateCommissionStatuses.Pending));
