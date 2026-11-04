@@ -1,0 +1,167 @@
+@page "/my-editvideo"
+@using TodoX.Web.Services.EditVideoTool
+@inject EditVideoLicenseService Licenses
+@inject EditVideoUsageService Usage
+@inject EditVideoReleaseService Releases
+@inject AuthStateService AuthState
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>TodoX EditVideo</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">TodoX EditVideo</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dựng video bằng AI ngay trên máy tính của bạn với Claude hoặc Codex. Video không rời khỏi máy.</MudText>
+    </div>
+
+    @if (_customerId is null)
+    {
+        <MudAlert Severity="Severity.Info">Trang này dành cho tài khoản khách hàng.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="todox-card pa-4">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+                <div>
+                    <MudText Typo="Typo.h6">Tải bộ cài</MudText>
+                    @if (_release is not null)
+                    {
+                        <MudText Typo="Typo.body2">Phiên bản @_release.Version · Windows 10/11 64-bit · cài cho riêng tài khoản Windows của bạn, không cần quyền admin.</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2">Bộ cài đang được cập nhật, vui lòng quay lại sau.</MudText>
+                    }
+                    <MudText Typo="Typo.caption" Style="display:block">Bộ cài tự tải: bộ chạy nền TodoX, bộ ghép &amp; xử lý video, bộ hiệu ứng &amp; dựng hình, bộ nghe lại lời thoại (~350 MB, chỉ lần đầu). Bản cập nhật và thành phần mới được tải tự động.</MudText>
+                    <MudText Typo="Typo.caption" Style="display:block">Ứng dụng chưa đăng ký chữ ký số với Windows nên Windows có thể cảnh báo: chọn "More info" → "Run anyway". Hỗ trợ: <a href="https://todox.vn" target="_blank" rel="noopener">todox.vn</a></MudText>
+                </div>
+                @if (_installerUrl is not null)
+                {
+                    <MudButton Class="todox-primary-btn" Href="@_installerUrl" StartIcon="@Icons.Material.Filled.Download">Tải TodoX EditVideo</MudButton>
+                }
+            </MudStack>
+        </MudPaper>
+
+        @if (_licenses.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">Bạn chưa có license TodoX EditVideo. Liên hệ TodoX để được cấp.</MudAlert>
+        }
+
+        @foreach (var license in _licenses)
+        {
+            <MudPaper Class="todox-card pa-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                    <MudText Typo="Typo.h6">License @license.KeyPrefix… · gói @license.PlanCode</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@(license.Status == EditVideoLicenseStatuses.Active ? Color.Success : Color.Warning)">@StatusLabel(license.Status)</MudChip>
+                </MudStack>
+                <MudText Typo="Typo.body2" Class="mb-2">
+                    Máy tính @license.ActiveDesktopDevices/@license.MaxDesktopDevices · Điện thoại @license.ActiveMobileDevices/@license.MaxMobileDevices ·
+                    @(license.ExpiresAt?.ToLocalTime().ToString("'Hết hạn' dd/MM/yyyy") ?? "Không thời hạn")
+                </MudText>
+                @if (license.LimitExceededLast30Days > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">Có @license.LimitExceededLast30Days lần máy khác thử dùng key của bạn và đã bị chặn (30 ngày qua). Nếu không phải bạn, hãy liên hệ TodoX.</MudAlert>
+                }
+
+                <MudTable Items="@(_devices.GetValueOrDefault(license.Id) ?? [])" Dense="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                    <HeaderContent>
+                        <MudTh>Thiết bị</MudTh>
+                        <MudTh>Hệ điều hành</MudTh>
+                        <MudTh>Online lần cuối</MudTh>
+                        <MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Thiết bị">@(context.DeviceName ?? "—") (@(context.DeviceKind == EditVideoDeviceKinds.Mobile ? "điện thoại" : "máy tính"))</MudTd>
+                        <MudTd DataLabel="Hệ điều hành">@(context.Os ?? "—")</MudTd>
+                        <MudTd DataLabel="Online lần cuối">@context.LastSeenAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                        <MudTd Style="text-align:right">
+                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" OnClick="@(() => Release(context))">Gỡ máy này</MudButton>
+                        </MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Class="pa-2 todox-page-subtitle">Chưa có máy nào kích hoạt. Cài TodoX EditVideo rồi dán license key để bắt đầu.</MudText>
+                    </NoRecordsContent>
+                </MudTable>
+
+                <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Lần sử dụng gần đây</MudText>
+                @foreach (var s in _sessions.GetValueOrDefault(license.Id) ?? [])
+                {
+                    <MudText Typo="Typo.caption" Style="display:block" Color="@(s.Status == "failed" || s.ErrorCount > 0 ? Color.Error : Color.Default)">
+                        @s.StartedAt.ToLocalTime().ToString("dd/MM HH:mm") · @ToolLabel(s.Tool) · @(s.Status == "failed" ? "lỗi" : s.Status == "running" ? "đang chạy" : "xong")@(s.DeviceName is null ? "" : $" · {s.DeviceName}")
+                    </MudText>
+                }
+            </MudPaper>
+        }
+    }
+</MudStack>
+
+@code {
+    private Guid? _customerId;
+    private IReadOnlyList<EditVideoLicenseRow> _licenses = [];
+    private readonly Dictionary<Guid, IReadOnlyList<EditVideoDeviceRow>> _devices = new();
+    private readonly Dictionary<Guid, IReadOnlyList<EditVideoSessionRow>> _sessions = new();
+    private EditVideoReleaseManifest? _release;
+    private string? _installerUrl;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _customerId = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
+        _release = Releases.GetLatest();
+        _installerUrl = _release?.Files.FirstOrDefault(f => f.Kind == "app")?.Url;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        if (_customerId is not { } customerId)
+        {
+            return;
+        }
+
+        try
+        {
+            _licenses = (await Licenses.ListForCustomerAsync(customerId)).Where(l => l.Status != EditVideoLicenseStatuses.Revoked).ToList();
+            foreach (var l in _licenses)
+            {
+                _devices[l.Id] = (await Licenses.ListDevicesAsync(l.Id)).Where(d => d.Status == EditVideoDeviceStatuses.Active).ToList();
+                _sessions[l.Id] = await Usage.ListSessionsAsync(l.Id, 15);
+            }
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
+        {
+            _licenses = [];
+        }
+    }
+
+    private async Task Release(EditVideoDeviceRow device)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync("Gỡ thiết bị",
+            $"Gỡ \"{device.DeviceName ?? "thiết bị"}\"? Máy này sẽ ngừng dùng được TodoX EditVideo và bạn có thể kích hoạt trên máy khác.",
+            yesText: "Gỡ máy", cancelText: "Hủy");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        await Licenses.RevokeDeviceAsync(device.Id, AuthState.CurrentUser?.UserId, onlyForCustomerId: _customerId);
+        Snackbar.Add("Đã gỡ thiết bị.", Severity.Success);
+        await Reload();
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        EditVideoLicenseStatuses.Active => "Hoạt động",
+        EditVideoLicenseStatuses.Suspended => "Tạm khóa",
+        _ => status
+    };
+
+    internal static string ToolLabel(string tool) => tool switch
+    {
+        "auto_edit" => "Dựng video",
+        "voice" => "Giọng đọc",
+        "health" => "Kiểm tra hệ thống",
+        "convert" => "Chuyển đổi video",
+        _ => tool
+    };
+}

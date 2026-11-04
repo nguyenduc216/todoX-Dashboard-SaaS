@@ -95,7 +95,9 @@ if (!string.IsNullOrWhiteSpace(sharedMediaRoot))
         app.UseStaticFiles(new StaticFileOptions
         {
             FileProvider = new PhysicalFileProvider(physicalRoot),
-            RequestPath = "/" + (sharedMediaOptions.RequestPath ?? "/media").Trim('/')
+            RequestPath = "/" + (sharedMediaOptions.RequestPath ?? "/media").Trim('/'),
+            // Uploaded media gets a unique file name, so repeat views can come straight from the browser cache.
+            OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "public,max-age=604800"
         });
     }
     catch (Exception ex)
@@ -213,9 +215,51 @@ app.MapPost("/api/contact-leads", async (
     }
 }).RequireRateLimiting("contact-leads");
 
+// Readable share link per sample video, server-rendered so Facebook/Zalo/Messenger previews
+// show its title, description and thumbnail instead of a bare .mp4 URL.
+app.MapGet("/video/{slug}", async (
+    string slug,
+    HttpContext http,
+    IndustrySolutionRepository repository,
+    IConfiguration configuration,
+    CancellationToken ct) =>
+{
+    var match = await repository.FindVideoBySlugAsync(slug, ct);
+    if (match is not { } found || string.IsNullOrWhiteSpace(found.Video.VideoUrl))
+        return Results.Redirect("/#industries");
+
+    if (!string.Equals(slug, found.Video.Slug, StringComparison.Ordinal))
+        return Results.Redirect(found.Video.SharePath, permanent: true);
+
+    http.Response.Headers.CacheControl = "public,max-age=300";
+    var baseUrl = VideoSharePage.ResolveBaseUrl(http.Request, configuration);
+    return Results.Content(VideoSharePage.Render(VideoSharePage.FromIndustry(found.Video, found.Industry), baseUrl), "text/html; charset=utf-8");
+});
+
+// Same for the sample library: /mau-video/{slug} is the shareable page of one sample.
+app.MapGet("/mau-video/{slug}", async (
+    string slug,
+    HttpContext http,
+    VideoSampleRepository repository,
+    IConfiguration configuration,
+    CancellationToken ct) =>
+{
+    var match = await repository.FindBySlugAsync(slug, ct);
+    if (match is not { } found)
+        return Results.Redirect("/mau-video");
+
+    if (!string.Equals(slug, found.Sample.Slug, StringComparison.Ordinal))
+        return Results.Redirect(found.Sample.SharePath, permanent: true);
+
+    http.Response.Headers.CacheControl = "public,max-age=300";
+    var baseUrl = VideoSharePage.ResolveBaseUrl(http.Request, configuration);
+    return Results.Content(VideoSharePage.Render(VideoSharePage.FromSample(found.Sample, found.Catalog), baseUrl), "text/html; charset=utf-8");
+});
+
 // Serve the marketing deep link as its own document, including on refresh.
 app.MapGet("/bat-dong-san", () => Results.File(Path.Combine(app.Environment.WebRootPath, "bat-dong-san.html"), "text/html; charset=utf-8"));
 app.MapGet("/video-ngan", () => Results.File(Path.Combine(app.Environment.WebRootPath, "video-ngan.html"), "text/html; charset=utf-8"));
 app.MapGet("/mau-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "mau-video.html"), "text/html; charset=utf-8"));
+app.MapGet("/editvideo", () => Results.File(Path.Combine(app.Environment.WebRootPath, "editvideo.html"), "text/html; charset=utf-8"));
 app.MapFallbackToFile("index.html");
 app.Run();

@@ -37,5 +37,10 @@
 .vs-player video{display:block;width:100%;max-height:72vh;background:#000}
 .vs-player p{margin:12px 0 0;color:var(--muted);font-size:14px;white-space:pre-line}
 .vs-player p:empty{display:none}
+.vs-body h2 a:hover{color:var(--gold)}
+.vs-player-actions{display:flex;justify-content:flex-end;margin-top:12px}
+.vs-share{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border:1px solid #79571c;border-radius:999px;background:transparent;color:#fff;font-size:14px;font-weight:650}
+.vs-share:hover{border-color:var(--gold);color:var(--gold)}
+.vs-share[hidden]{display:none}
 @media(max-width:1050px){.vs-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.vs-main{padding-top:100px}.vs-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.vs-thumb i{width:44px;height:44px;font-size:16px}.vs-body{padding:10px 12px 12px}.vs-body h2{font-size:15px}}

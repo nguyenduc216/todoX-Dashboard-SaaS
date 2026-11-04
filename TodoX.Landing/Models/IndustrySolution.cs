@@ -14,6 +14,7 @@ public sealed class IndustrySolution
     public string? GoalNote { get; set; }
     public string? CapabilityNote { get; set; }
     public int DisplayOrder { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
     public IReadOnlyList<IndustrySolutionVideo> Videos { get; set; } = Array.Empty<IndustrySolutionVideo>();
 }
 
@@ -32,4 +33,9 @@ public sealed class IndustrySolutionVideo
     public string? CapabilityNote { get; set; }
     public int DisplayOrder { get; set; }
     public bool IsPrimary { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
+
+    // Computed from the title (not stored): readable share link that carries Open Graph previews.
+    public string Slug { get; set; } = string.Empty;
+    public string SharePath { get; set; } = string.Empty;
 }

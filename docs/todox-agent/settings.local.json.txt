@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File tools/prod-sql/Invoke-TodoXSql.ps1 *)",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File deploy/Deploy-TodoXRemote.ps1)",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File deploy/Deploy-TodoXRemote.ps1 *)",
+      "Bash(ssh -i ~/.ssh/todox_deploy *)",
+      "Bash(scp -i ~/.ssh/todox_deploy *)",
+      "Bash(scp -q -i ~/.ssh/todox_deploy *)"
+    ]
+  }
+}

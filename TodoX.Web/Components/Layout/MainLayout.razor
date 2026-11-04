@@ -542,6 +542,18 @@
                     VisibilityPolicy = "customer_only",
                     MatchAll = true,
                     SortOrder = 30
+                }),
+                Item("editvideo_my", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "editvideo_my",
+                    Title = "TodoX EditVideo",
+                    Href = "/my-editvideo",
+                    IconKey = "Movie",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = true,
+                    SortOrder = 40
                 })),
             Group("ai_studio", "AI Studio", "AutoFixHigh", 30, true,
                 Item("ai_characters", () => new NavigationMenuItemDto

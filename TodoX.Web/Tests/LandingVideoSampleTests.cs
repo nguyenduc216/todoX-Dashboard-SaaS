@@ -157,7 +157,9 @@ public sealed class LandingVideoSampleTests
         var dialog = File.ReadAllText(Path.Combine(web, "Components", "Dialogs", "LandingVideoSampleDialog.razor"));
         Assert.Contains("Nhóm dịch vụ video", dialog);
         Assert.Contains("OtherServiceChoice", dialog);
-        Assert.Contains("Ảnh đại diện", dialog);
+        Assert.Contains("Thumbnail 9:16", dialog);
+        Assert.Contains("Thumbnail 16:9", dialog);
+        Assert.Contains("Ảnh chia sẻ Zalo/Facebook", dialog);
         Assert.Contains("Thông tin nội dung video", dialog);
     }
 
@@ -202,6 +204,52 @@ public sealed class LandingVideoSampleTests
         var service = File.ReadAllText(Path.Combine(manual, "todox_landing_video_samples_service.sql"));
         Assert.Contains("service_id uuid references catalog.services (id) on delete set null", service);
         Assert.Contains("alter column category_id drop not null", service);
+    }
+
+    private const string PortraitThumb = "/media/landing/video-samples/posters/11111111111111111111111111111111.jpg";
+    private const string LandscapeThumb = "/media/landing/video-samples/posters/22222222222222222222222222222222.jpg";
+
+    [Theory]
+    [InlineData("9:16", PortraitThumb, LandscapeThumb, PortraitThumb)]
+    [InlineData("16:9", PortraitThumb, LandscapeThumb, LandscapeThumb)]
+    [InlineData("16:9", PortraitThumb, null, PortraitThumb)]
+    [InlineData("9:16", null, LandscapeThumb, LandscapeThumb)]
+    public void MainPosterFollowsVideoShape(string ratio, string? portrait, string? landscape, string expected)
+    {
+        var sample = Valid();
+        sample.AspectRatio = ratio;
+        sample.ThumbnailPortraitUrl = portrait;
+        sample.ThumbnailLandscapeUrl = landscape;
+        LandingVideoSampleRepository.Normalize(sample);
+        Assert.Equal(expected, sample.PosterUrl);
+        LandingVideoSampleRepository.Validate(sample);
+    }
+
+    [Fact]
+    public void LegacyPosterIsKeptWhenNoThumbnailSlotIsFilled()
+    {
+        var sample = Valid();
+        LandingVideoSampleRepository.Normalize(sample);
+        Assert.Equal(Poster, sample.PosterUrl);
+    }
+
+    [Fact]
+    public void ForeignImageUrlsAreRejected()
+    {
+        var sample = Valid();
+        sample.ShareImageUrl = "https://example.com/x.jpg";
+        LandingVideoSampleRepository.Normalize(sample);
+        Assert.Throws<ArgumentException>(() => LandingVideoSampleRepository.Validate(sample));
+    }
+
+    [Fact]
+    public void ThumbnailScriptOnlyAddsNullableColumns()
+    {
+        var sql = File.ReadAllText(Path.Combine(FindRoot(), LandingVideoSampleRepository.ThumbnailsScript));
+        foreach (var column in new[] { "thumbnail_portrait_url", "thumbnail_landscape_url", "share_image_url" })
+            Assert.Contains($"add column if not exists {column} text;", sql);
+        Assert.DoesNotContain("drop ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("not null", sql.Split("-- Verification")[0], StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FindRoot()

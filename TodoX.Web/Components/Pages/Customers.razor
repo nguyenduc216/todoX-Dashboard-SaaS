@@ -5,6 +5,8 @@
 @inject AuthStateService AuthState
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject TodoX.Web.Services.EditVideoTool.EditVideoLicenseService EditVideoLicenses
+@inject TodoX.Web.Services.EditVideoTool.EditVideoUsageService EditVideoUsage
 
 <PageTitle>Khách hàng</PageTitle>
 
@@ -18,6 +20,14 @@
             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Thêm khách hàng</MudButton>
         </IfCan>
     </MudStack>
+
+    @foreach (var alert in _editVideoAlerts)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" ContentAlignment="HorizontalAlignment.Left"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => ResolveAlert(alert.Id))">
+            TodoX EditVideo · @alert.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm") · @alert.Message (bấm × khi đã xử lý)
+        </MudAlert>
+    }
 
     <MudGrid>
         <MudItem xs="12" sm="6" md="3">
@@ -60,6 +70,7 @@
                 <MudTh>Số điện thoại</MudTh>
                 <MudTh>Trạng thái</MudTh>
                 <MudTh>Ngày tạo</MudTh>
+                <MudTh>License</MudTh>
                 <MudTh Style="text-align:right">Thao tác</MudTh>
             </HeaderContent>
             <RowTemplate>
@@ -72,7 +83,18 @@
                     <MudChip T="string" Size="Size.Small" Color="@TodoXLabels.StatusColor(context.Status)">@TodoXLabels.Status(context.Status)</MudChip>
                 </MudTd>
                 <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
+                <MudTd DataLabel="License">
+                    @if (_licenseSummary.TryGetValue(context.Id, out var lic))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@(lic.Alerts > 0 ? Color.Error : Color.Info)"
+                                 Icon="@(lic.Alerts > 0 ? Icons.Material.Filled.Warning : Icons.Material.Filled.VpnKey)"
+                                 OnClick="@(() => OpenLicenses(context))">
+                            @lic.Licenses@(lic.Alerts > 0 ? $" · {lic.Alerts} vượt máy" : "")
+                        </MudChip>
+                    }
+                </MudTd>
                 <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.VpnKey" Size="Size.Small" Title="License EditVideoTool" OnClick="@(() => OpenLicenses(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
                     @if (context.Status == TodoXAccountStatus.Locked)
                     {
@@ -95,10 +117,48 @@
 @code {
     private IReadOnlyList<CustomerProfile> _customers = new List<CustomerProfile>();
     private string _search = string.Empty;
+    private IReadOnlyDictionary<Guid, (int Licenses, int Alerts)> _licenseSummary = new Dictionary<Guid, (int, int)>();
+    private IReadOnlyList<TodoX.Web.Services.EditVideoTool.EditVideoAlertRow> _editVideoAlerts = [];
 
     protected override async Task OnInitializedAsync() => await Reload();
 
-    private async Task Reload() => _customers = await Accounts.GetCustomersAsync();
+    private async Task Reload()
+    {
+        _customers = await Accounts.GetCustomersAsync();
+        await ReloadLicenseSummary();
+    }
+
+    private async Task ReloadLicenseSummary()
+    {
+        try
+        {
+            _licenseSummary = await EditVideoLicenses.GetCustomerSummaryAsync();
+            _editVideoAlerts = await EditVideoUsage.ListOpenAlertsAsync();
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
+        {
+            // editvideo schema not installed yet; the license column stays empty.
+        }
+    }
+
+    private async Task ResolveAlert(Guid id)
+    {
+        await EditVideoUsage.ResolveAlertAsync(id);
+        await ReloadLicenseSummary();
+    }
+
+    private async Task OpenLicenses(CustomerProfile customer)
+    {
+        var parameters = new DialogParameters<CustomerLicensesDialog>
+        {
+            { x => x.CustomerId, customer.Id },
+            { x => x.CustomerName, customer.CompanyName }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<CustomerLicensesDialog>("License", parameters, options);
+        await dialog.Result;
+        await ReloadLicenseSummary();
+    }
 
     private IEnumerable<CustomerProfile> Filtered
     {

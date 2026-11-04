@@ -28,11 +28,11 @@ window.TODOX_LANDING_CONFIG = {
 
   ensureAsset("link", {
     rel: "stylesheet",
-    href: "/css/landing-industry-multivideo.css?v=20260810-2"
+    href: "/css/landing-industry-multivideo.css?v=20261103-1"
   }, "todox-landing-industry-multivideo-css");
 
   ensureAsset("script", {
-    src: "/js/landing-industry-multivideo.js?v=20260810-2",
+    src: "/js/landing-industry-multivideo.js?v=20261103-1",
     defer: "defer"
   }, "todox-landing-industry-multivideo-js");
 
