@@ -1,11 +1,9 @@
 -- TodoX Dashboard - Đại lý & hoa hồng (Affiliate commission)
 -- Target database: todo_saas (PostgreSQL)
--- Run manually. Application MUST NOT auto-run migrations.
+-- Run via tools/prod-sql/Invoke-TodoXSql.ps1 or deploy (wraps it in a transaction with the .test.sql).
 -- Idempotent: safe to execute more than once.
 -- Additive only: creates schema "affiliate"; does NOT alter Foundation V2 objects
 -- (crm.customers, auth.*, billing.* are only referenced by foreign keys).
-
-BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS affiliate;
@@ -152,11 +150,3 @@ SET group_id = EXCLUDED.group_id,
     is_active = true,
     description = EXCLUDED.description,
     updated_at = now();
-
-COMMIT;
-
--- Verification
-SELECT table_name
-  FROM information_schema.tables
- WHERE table_schema = 'affiliate'
- ORDER BY table_name;
