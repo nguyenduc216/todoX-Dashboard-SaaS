@@ -127,6 +127,8 @@ static void AddAgentServices(IServiceCollection services)
     services.AddSingleton<Updater>();
     services.AddSingleton<SkillSync>();
     services.AddSingleton<ProjectFolders>();
+    services.AddSingleton<EditStore>();
+    services.AddSingleton<SkillRunStore>();
 }
 
 static ServiceProvider BuildServices()
@@ -147,7 +149,11 @@ static async Task RunMcpServerAsync(string[] args)
     AddAgentServices(builder.Services);
 
     builder.Services
-        .AddMcpServer(o => o.ServerInfo = new() { Name = "todox-editvideo", Version = StatusService.Version })
+        .AddMcpServer(o =>
+        {
+            o.ServerInfo = new() { Name = "todox-editvideo", Version = StatusService.Version };
+            o.ServerInstructions = ServerGuide.Instructions;
+        })
         .WithStdioServerTransport()
         .WithToolsFromAssembly()
         .WithRequestFilters(f => f.AddCallToolFilter(next => (context, ct) =>

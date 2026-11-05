@@ -6,6 +6,39 @@ using TodoX.Web.Data;
 
 namespace TodoX.Web.Services.EditVideoTool;
 
+/// <summary>
+/// Fixed settings a skill applies when it runs (null = the customer's choice or TodoX's default). They stay on the
+/// server: the plan service applies them, the customer's machine never receives them.
+/// </summary>
+public sealed record EditVideoSkillSettings(
+    string? Aspect = null,
+    double? TargetSeconds = null,
+    string? StyleId = null,
+    string? CaptionStyle = null,
+    string? Transition = null,
+    double? TransitionSeconds = null,
+    double? MusicVolume = null)
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    public static EditVideoSkillSettings Parse(string? json)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(json) ? new() : JsonSerializer.Deserialize<EditVideoSkillSettings>(json, Json) ?? new();
+        }
+        catch (JsonException)
+        {
+            return new();
+        }
+    }
+
+    public string ToJson() => JsonSerializer.Serialize(this, Json);
+}
+
 /// <summary>A skill as edited in the dashboard (the draft) plus its latest published version.</summary>
 public sealed class EditVideoSkillRow
 {
@@ -15,6 +48,7 @@ public sealed class EditVideoSkillRow
     public string Description { get; set; } = string.Empty;
     public string? Category { get; set; }
     public string Content { get; set; } = string.Empty;
+    public string SettingsJson { get; set; } = "{}";
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; }
     public DateTimeOffset UpdatedAt { get; init; }
@@ -34,6 +68,7 @@ public sealed class EditVideoSkillVersionRow
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public string Content { get; init; } = string.Empty;
+    public string SettingsJson { get; init; } = "{}";
     public string? Notes { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
 }
@@ -73,13 +108,13 @@ public sealed partial class EditVideoSkillService
         using var conn = await _factory.OpenAsync(ct);
         var rows = await conn.QueryAsync<EditVideoSkillRow>(
             """
-            SELECT s.id, s.slug, s.title, s.description, s.category, s.content, s.is_active AS IsActive,
+            SELECT s.id, s.slug, s.title, s.description, s.category, s.content, s.settings::text AS SettingsJson, s.is_active AS IsActive,
                    s.sort_order AS SortOrder, s.updated_at AS UpdatedAt,
                    v.version_no AS LatestVersionNo, v.version_name AS LatestVersionName,
-                   (v.id IS NULL OR (s.title, s.description, s.content) IS DISTINCT FROM (v.title, v.description, v.content)) AS HasUnpublishedChanges
+                   (v.id IS NULL OR (s.title, s.description, s.content, s.settings) IS DISTINCT FROM (v.title, v.description, v.content, v.settings)) AS HasUnpublishedChanges
               FROM editvideo.skills s
               LEFT JOIN LATERAL (
-                    SELECT id, version_no, version_name, title, description, content
+                    SELECT id, version_no, version_name, title, description, content, settings
                       FROM editvideo.skill_versions
                      WHERE skill_id = s.id
                      ORDER BY version_no DESC
@@ -98,7 +133,7 @@ public sealed partial class EditVideoSkillService
         return (await conn.QueryAsync<EditVideoSkillVersionRow>(
             """
             SELECT id, skill_id AS SkillId, version_no AS VersionNo, version_name AS VersionName, title, description,
-                   content, notes, created_at AS CreatedAt
+                   content, settings::text AS SettingsJson, notes, created_at AS CreatedAt
               FROM editvideo.skill_versions
              WHERE skill_id = @skillId AND tenant_id = @tenantId
              ORDER BY version_no DESC;
@@ -115,7 +150,7 @@ public sealed partial class EditVideoSkillService
         var versions = (await conn.QueryAsync<EditVideoSkillVersionRow>(
             """
             SELECT id, skill_id AS SkillId, version_no AS VersionNo, version_name AS VersionName, title, description,
-                   content, notes, created_at AS CreatedAt
+                   content, settings::text AS SettingsJson, notes, created_at AS CreatedAt
               FROM editvideo.skill_versions
              WHERE tenant_id = @tenantId AND skill_id = ANY(@ids)
              ORDER BY version_no;
@@ -126,7 +161,7 @@ public sealed partial class EditVideoSkillService
             .Where(s => versions[s.Id].Any())
             .Select(s => new EditVideoSkillFile(s.Slug, s.Title, s.Category, s.LatestVersionNo!.Value,
                 versions[s.Id].Select(v => new EditVideoSkillVersionFile(v.VersionNo, v.VersionName, v.Notes, v.CreatedAt,
-                    BuildMarkdown(s.Slug, v.Title, v.Description, v.Content, v.VersionNo, v.VersionName))).ToList()))
+                    BuildCustomerMarkdown(s.Slug, v.Title, v.Description, v.VersionNo, v.VersionName))).ToList()))
             .ToList();
     }
 
@@ -156,6 +191,7 @@ public sealed partial class EditVideoSkillService
             description = skill.Description.Trim(),
             category = string.IsNullOrWhiteSpace(skill.Category) ? null : skill.Category.Trim(),
             content = skill.Content.Replace("\r\n", "\n").Trim(),
+            settings = EditVideoSkillSettings.Parse(skill.SettingsJson).ToJson(),
             isActive = skill.IsActive,
             sortOrder = skill.SortOrder,
             actor = actorUserId
@@ -186,14 +222,15 @@ public sealed partial class EditVideoSkillService
         var id = skill.Id == Guid.Empty
             ? await conn.ExecuteScalarAsync<Guid>(
                 """
-                INSERT INTO editvideo.skills (tenant_id, slug, title, description, category, content, is_active, sort_order, updated_by)
-                VALUES (@tenantId, @slug, @title, @description, @category, @content, @isActive, @sortOrder, @actor)
+                INSERT INTO editvideo.skills (tenant_id, slug, title, description, category, content, settings, is_active, sort_order, updated_by)
+                VALUES (@tenantId, @slug, @title, @description, @category, @content, CAST(@settings AS jsonb), @isActive, @sortOrder, @actor)
                 RETURNING id;
                 """, args)
             : await conn.ExecuteScalarAsync<Guid>(
                 """
                 UPDATE editvideo.skills
                    SET slug = @slug, title = @title, description = @description, category = @category, content = @content,
+                       settings = CAST(@settings AS jsonb),
                        is_active = @isActive, sort_order = @sortOrder, updated_by = @actor, updated_at = now()
                  WHERE id = @id AND tenant_id = @tenantId
                 RETURNING id;
@@ -226,10 +263,10 @@ public sealed partial class EditVideoSkillService
 
         var id = await conn.ExecuteScalarAsync<Guid>(
             """
-            INSERT INTO editvideo.skill_versions (tenant_id, skill_id, version_no, version_name, title, description, content, notes, created_by)
+            INSERT INTO editvideo.skill_versions (tenant_id, skill_id, version_no, version_name, title, description, content, settings, notes, created_by)
             SELECT s.tenant_id, s.id,
                    COALESCE((SELECT max(version_no) FROM editvideo.skill_versions WHERE skill_id = s.id), 0) + 1,
-                   @versionName, s.title, s.description, s.content, @notes, @actor
+                   @versionName, s.title, s.description, s.content, s.settings, @notes, @actor
               FROM editvideo.skills s
              WHERE s.id = @skillId AND s.tenant_id = @tenantId
             RETURNING id;
@@ -248,14 +285,33 @@ public sealed partial class EditVideoSkillService
         await conn.ExecuteAsync("DELETE FROM editvideo.skills WHERE id = @id AND tenant_id = @tenantId;", new { id, tenantId = _tenant.TenantId });
     }
 
+    /// <summary>A published version of an active skill by slug; the latest one when no number is given.</summary>
+    public async Task<EditVideoSkillVersionRow?> FindVersionAsync(string slug, int? versionNo, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QueryFirstOrDefaultAsync<EditVideoSkillVersionRow>(
+            """
+            SELECT v.id, v.skill_id AS SkillId, v.version_no AS VersionNo, v.version_name AS VersionName, v.title, v.description,
+                   v.content, v.settings::text AS SettingsJson, v.notes, v.created_at AS CreatedAt
+              FROM editvideo.skill_versions v
+              JOIN editvideo.skills s ON s.id = v.skill_id
+             WHERE s.tenant_id = @tenantId AND s.slug = @slug AND s.is_active
+               AND (@versionNo::int IS NULL OR v.version_no = @versionNo)
+             ORDER BY v.version_no DESC
+             LIMIT 1;
+            """,
+            new { tenantId = _tenant.TenantId, slug = NormalizeSlug(slug), versionNo });
+    }
+
     private async Task<EditVideoSkillRow?> FindAsync(Guid id, CancellationToken ct) =>
         (await ListAsync(activeOnly: false, ct)).FirstOrDefault(s => s.Id == id);
 
     /// <summary>
-    /// SKILL.md as installed on the customer's machine: front matter (name, description) + body, and for a published
-    /// version a closing note so Claude passes the skill and version to todox_auto_edit (each video is tagged).
+    /// SKILL.md as installed on the customer's machine: only when to use the skill and how to start it. The skill's
+    /// steps stay on the server and reach Claude one at a time through todox_skill_start / todox_skill_next.
     /// </summary>
-    public static string BuildMarkdown(string slug, string title, string description, string content, int? versionNo = null, string? versionName = null)
+    public static string BuildCustomerMarkdown(string slug, string title, string description, int versionNo, string? versionName)
     {
         var md = new StringBuilder();
         md.Append("---\n");
@@ -264,23 +320,79 @@ public sealed partial class EditVideoSkillService
         md.Append("description: ").Append(JsonSerializer.Serialize(OneLine(description), YamlSafeJson)).Append('\n');
         md.Append("---\n\n");
         md.Append("# ").Append(title.Trim()).Append("\n\n");
-        md.Append(content.Replace("\r\n", "\n").Trim()).Append('\n');
-        if (versionNo is { } no)
+        md.Append(description.Replace("\r\n", "\n").Trim()).Append("\n\n");
+        md.Append($"Phiên bản skill: **v{versionNo} – {OneLine(versionName ?? string.Empty)}** (`{slug}` v{versionNo}).\n\n");
+        md.Append("Cách dùng: gọi `todox_skill_start` với ").Append($"`skill: \"{slug}\"`")
+          .Append(" (bỏ `version` để dùng phiên bản người dùng đã chọn). TodoX trả về từng bước: làm đúng bước đó bằng các công cụ `todox_*`, ")
+          .Append("xong thì gọi `todox_skill_next` để nhận bước tiếp theo, đến khi TodoX báo hoàn tất. ")
+          .Append("Khi gọi `todox_edit_start` / `todox_auto_edit`, truyền `skill` và `skillVersion` mà TodoX trả về để video được đánh dấu.\n\n");
+        md.Append("Nếu không có công cụ `todox_skill_start`, hãy nhắc người dùng cập nhật TodoX EditVideo.\n");
+        md.Append("Người dùng muốn đổi phiên bản: `todox_skill_versions` để xem, `todox_skill_use` để đặt mặc định.\n");
+        return md.ToString();
+    }
+
+    /// <summary>
+    /// Splits the hidden content into steps at level-2 headings ("## Bước 1 …"). Text before the first heading belongs
+    /// to step 1; content without headings is a single step.
+    /// </summary>
+    public static IReadOnlyList<string> SplitSteps(string content)
+    {
+        var steps = new List<StringBuilder> { new() };
+        var hasHeading = false;
+        foreach (var line in content.Replace("\r\n", "\n").Split('\n'))
         {
-            md.Append("\n---\n\n");
-            md.Append($"Phiên bản skill: **v{no} – {OneLine(versionName ?? string.Empty)}** (`{slug}` v{no}).\n");
-            md.Append($"Khi gọi `todox_auto_edit`, luôn truyền `skill: \"{slug}\"` và `skillVersion: {no}` để video được đánh dấu theo phiên bản này.\n");
-            md.Append("Người dùng muốn đổi phiên bản: `todox_skill_versions` để xem, `todox_skill_use` để đặt mặc định, `todox_skill_get` để dùng một phiên bản khác cho lần này.\n");
+            var heading = line.StartsWith("## ", StringComparison.Ordinal);
+            if (heading && hasHeading)
+            {
+                steps.Add(new StringBuilder());
+            }
+
+            hasHeading |= heading;
+            steps[^1].Append(line).Append('\n');
+        }
+
+        return steps.Select(b => b.ToString().Trim()).Where(t => t.Length > 0).ToList();
+    }
+
+    /// <summary>One step as sent to Claude: the step text plus where it is in the run and what to do next.</summary>
+    public static string BuildStep(string title, int versionNo, string? versionName, IReadOnlyList<string> steps, int index) =>
+        $"[{title} v{versionNo}{(string.IsNullOrWhiteSpace(versionName) ? "" : " – " + OneLine(versionName))} · bước {index + 1}/{steps.Count}]\n\n{steps[index]}";
+
+    /// <summary>Dashboard preview: what lands on the customer's machine and what only the server keeps.</summary>
+    public static string BuildPreview(string slug, string title, string description, string content, string settingsJson, int versionNo, string? versionName)
+    {
+        var steps = SplitSteps(content);
+        var md = new StringBuilder();
+        md.Append("=== Trên máy khách (SKILL.md Claude đọc) ===\n\n");
+        md.Append(BuildCustomerMarkdown(slug, title, description, versionNo, versionName));
+        md.Append("\n=== Chỉ server giữ: Claude nhận từng bước một ===\n");
+        md.Append("Thiết lập cố định: ").Append(DescribeSettings(EditVideoSkillSettings.Parse(settingsJson))).Append('\n');
+        for (var i = 0; i < steps.Count; i++)
+        {
+            md.Append("\n--- ").Append(BuildStep(title, versionNo, versionName, steps, i)).Append('\n');
         }
 
         return md.ToString();
     }
 
-    public static string BuildDraftMarkdown(EditVideoSkillRow skill) =>
-        BuildMarkdown(skill.Slug, skill.Title, skill.Description, skill.Content, (skill.LatestVersionNo ?? 0) + 1, "(bản nháp)");
+    public static string BuildDraftPreview(EditVideoSkillRow skill) =>
+        BuildPreview(skill.Slug, skill.Title, skill.Description, skill.Content, skill.SettingsJson, (skill.LatestVersionNo ?? 0) + 1, "(bản nháp)");
 
-    public static string BuildVersionMarkdown(string slug, EditVideoSkillVersionRow v) =>
-        BuildMarkdown(slug, v.Title, v.Description, v.Content, v.VersionNo, v.VersionName);
+    public static string BuildVersionPreview(string slug, EditVideoSkillVersionRow v) =>
+        BuildPreview(slug, v.Title, v.Description, v.Content, v.SettingsJson, v.VersionNo, v.VersionName);
+
+    public static string DescribeSettings(EditVideoSkillSettings s)
+    {
+        var parts = new List<string>();
+        if (s.Aspect is { } a) parts.Add("khung " + a);
+        if (s.TargetSeconds is { } t) parts.Add($"{t:0.#} giây");
+        if (s.StyleId is { } st) parts.Add("style " + st);
+        if (s.CaptionStyle is { } c) parts.Add("caption " + c);
+        if (s.Transition is { } tr) parts.Add("chuyển cảnh " + tr + (s.TransitionSeconds is { } ts ? $" {ts:0.##}s" : ""));
+        else if (s.TransitionSeconds is { } ts2) parts.Add($"chuyển cảnh {ts2:0.##}s");
+        if (s.MusicVolume is { } m) parts.Add($"nhạc {m:0.##}");
+        return parts.Count == 0 ? "không (theo yêu cầu của khách)" : string.Join(" · ", parts);
+    }
 
     public static string NormalizeSlug(string? slug) => (slug ?? string.Empty).Trim().ToLowerInvariant();
 

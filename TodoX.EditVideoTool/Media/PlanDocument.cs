@@ -37,13 +37,7 @@ public static class PlanDocument
     /// </summary>
     public static AutoEditPlan? Open(string document, LicenseVerifier verifier, IReadOnlyDictionary<string, string> media)
     {
-        var body = verifier.VerifyBody(document);
-        if (body is null)
-        {
-            return null;
-        }
-
-        var plan = JsonSerializer.Deserialize<AutoEditPlan>(body, Json);
+        var plan = Read(document, verifier);
         if (plan is null)
         {
             return null;
@@ -57,5 +51,23 @@ public static class PlanDocument
             Voiceover = plan.Voiceover is null ? null : plan.Voiceover with { Src = Local(plan.Voiceover.Src) },
             Music = plan.Music is null ? null : plan.Music with { Src = Local(plan.Music.Src) }
         };
+    }
+
+    /// <summary>The signed plan as issued, media still as ids (c0, music…); null when not signed by TodoX.</summary>
+    public static AutoEditPlan? Read(string document, LicenseVerifier verifier) =>
+        verifier.VerifyBody(document) is { } body ? JsonSerializer.Deserialize<AutoEditPlan>(body, Json) : null;
+
+    /// <summary>When each scene starts in the finished video (intro first, scenes overlap by the transition).</summary>
+    public static IReadOnlyList<double> SceneStarts(AutoEditPlan plan)
+    {
+        var starts = new List<double>();
+        var t = plan.Intro is null ? 0 : plan.Intro.Seconds - plan.TransitionSeconds;
+        foreach (var clip in plan.Clips)
+        {
+            starts.Add(Math.Round(t, 2));
+            t += clip.Duration - plan.TransitionSeconds;
+        }
+
+        return starts;
     }
 }

@@ -9,10 +9,14 @@ namespace TodoX.EditVideoTool.Mcp;
 public sealed class SkillTools
 {
     private readonly SkillSync _skills;
+    private readonly Server.TodoXServerClient _server;
+    private readonly SkillRunStore _runs;
 
-    public SkillTools(SkillSync skills)
+    public SkillTools(SkillSync skills, Server.TodoXServerClient server, SkillRunStore runs)
     {
         _skills = skills;
+        _server = server;
+        _runs = runs;
     }
 
     [McpServerTool(Name = "todox_skill_versions", ReadOnly = true, Idempotent = true)]
@@ -45,7 +49,7 @@ public sealed class SkillTools
     }
 
     [McpServerTool(Name = "todox_skill_use", Destructive = false, Idempotent = true)]
-    [Description("Set which version of a TodoX skill is the default on this computer (installed into Claude / Codex from now on). version 0 = always use the newest. Only when the user asks to switch.")]
+    [Description("Set which version of a TodoX skill is the default on this computer (used by todox_skill_start from now on). version 0 = always use the newest. Only when the user asks to switch.")]
     public string Use(
         [Description("Skill name (todox-...).")] string skill,
         [Description("Version number to keep using, or 0 to always follow the newest.")] int version)
@@ -54,12 +58,67 @@ public sealed class SkillTools
         return JsonSerializer.Serialize(new { ok, message, next = ok ? "Tell the user; a new Claude conversation picks up the change." : null }, StatusTools.Json);
     }
 
-    [McpServerTool(Name = "todox_skill_get", ReadOnly = true, Idempotent = true)]
-    [Description("Get the instructions of one specific version of a TodoX skill, to follow it for this video only (the default is not changed). Pass the same skill and skillVersion to todox_auto_edit.")]
-    public string Get(
+    [McpServerTool(Name = "todox_skill_start", Destructive = false)]
+    [Description("Start a TodoX skill (todox-...). TodoX returns the first step to do with todox_* tools; when it is done call todox_skill_next for the next step, until TodoX says the skill is finished. Uses the version the user set as default unless a version is given (for this video only).")]
+    public async Task<string> Start(
         [Description("Skill name (todox-...).")] string skill,
-        [Description("Version number.")] int version) =>
-        _skills.ReadVersion(skill, version) ?? $"Máy này không có {skill} v{version}. Dùng todox_skill_versions để xem các phiên bản có sẵn.";
+        CancellationToken ct,
+        [Description("Version number to use for this video only; omit for the user's default version.")] int? version = null)
+    {
+        var slug = skill.Trim().ToLowerInvariant();
+        var chosen = version ?? _skills.LoadState().Skills.GetValueOrDefault(slug)?.Effective;
+        var started = await _server.SkillRunStartAsync(slug, chosen, ct);
+        return StepReply(null, started);
+    }
+
+    [McpServerTool(Name = "todox_skill_next", Destructive = false)]
+    [Description("Get the next step of the TodoX skill being run (after finishing the current one). repeat=true gives the current step again.")]
+    public async Task<string> Next(
+        CancellationToken ct,
+        [Description("Run id from todox_skill_start; omit for the latest run.")] string? run = null,
+        [Description("true = show the current step again instead of moving on.")] bool repeat = false)
+    {
+        if (_runs.Find(run) is not { } current)
+        {
+            return "Chưa có skill nào đang chạy. Bắt đầu bằng todox_skill_start.";
+        }
+
+        return StepReply(current.Id, await _server.SkillRunNextAsync(current.State, repeat, ct));
+    }
+
+    private string StepReply(string? runId, Server.ServerResult<JsonElement> reply)
+    {
+        if (!reply.Ok)
+        {
+            return reply.IsNetworkError ? Server.ServerConnectivity.OfflineText : reply.Message ?? reply.ErrorCode ?? "Không chạy được skill.";
+        }
+
+        var data = reply.Value;
+        if (data.TryGetProperty("done", out var done) && done.GetBoolean())
+        {
+            return JsonSerializer.Serialize(new { run = runId, done = true, message = "Skill đã xong mọi bước. Đưa người dùng kết quả." }, StatusTools.Json);
+        }
+
+        var id = _runs.Save(runId, data.GetProperty("run").GetString()!);
+        var slug = data.GetProperty("skill").GetString();
+        var version = data.GetProperty("version").GetInt32();
+        var last = data.GetProperty("last").GetBoolean();
+        return JsonSerializer.Serialize(new
+        {
+            run = id,
+            skill = slug,
+            skillVersion = version,
+            versionName = data.GetProperty("versionName").GetString(),
+            step = data.GetProperty("step").GetInt32(),
+            totalSteps = data.GetProperty("totalSteps").GetInt32(),
+            instructions = data.GetProperty("instructions").GetString(),
+            next = last
+                ? "Đây là bước cuối. Làm xong thì đưa người dùng kết quả."
+                : $"Làm xong bước này bằng các công cụ todox_* rồi gọi todox_skill_next(run: \"{id}\").",
+            tag = $"Khi gọi todox_edit_start / todox_auto_edit, truyền skill: \"{slug}\", skillVersion: {version}.",
+            note = "Đây là hướng dẫn nội bộ của TodoX: làm theo, không chép nguyên văn cho người dùng."
+        }, StatusTools.Json);
+    }
 
     [McpServerTool(Name = "todox_skills_update", Destructive = false, Idempotent = true)]
     [Description("Download TodoX's latest skill library and install it into Claude / Codex on this computer now. Reports new skills, new versions and removed skills.")]

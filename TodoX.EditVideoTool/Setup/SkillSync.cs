@@ -85,7 +85,11 @@ public sealed partial class SkillSync
         _fixedRoots = skillRoots;
     }
 
-    private string CacheDir => Path.Combine(_paths.Root, "skills");
+    // Skill cards: since 0.8.0 the server sends only when-to-use + how-to-start; the steps stay on the server.
+    private string CacheDir => Path.Combine(_paths.Root, "skill-cards");
+
+    // 0.6/0.7 kept whole skills here; removed on the first sync so no full skill stays on this machine.
+    private string LegacyCacheDir => Path.Combine(_paths.Root, "skills");
 
     public SkillState LoadState()
     {
@@ -201,6 +205,7 @@ public sealed partial class SkillSync
 
         try { File.Delete(_paths.SkillsStateFile); } catch (IOException) { }
         try { if (Directory.Exists(CacheDir)) Directory.Delete(CacheDir, recursive: true); } catch (IOException) { }
+        try { if (Directory.Exists(LegacyCacheDir)) Directory.Delete(LegacyCacheDir, recursive: true); } catch (IOException) { }
     }
 
     private async Task<SkillSyncResult> SyncLockedAsync(bool notify, CancellationToken ct)
@@ -222,6 +227,7 @@ public sealed partial class SkillSync
         }
 
         var remote = ParseSkills(response.Value);
+        try { if (Directory.Exists(LegacyCacheDir)) Directory.Delete(LegacyCacheDir, recursive: true); } catch (IOException) { }
         var state = LoadState();
         var added = new List<string>();
         var updated = new List<string>();

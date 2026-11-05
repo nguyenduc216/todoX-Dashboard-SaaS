@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using TodoX.EditVideo.Planning;
 using TodoX.Web.Services.EditVideoTool;
 using Xunit;
 
@@ -23,26 +25,56 @@ public sealed class EditVideoSkillTests
         Assert.Equal(valid, EditVideoSkillService.IsValidSlug(slug));
 
     [Fact]
-    public void Skill_file_has_front_matter_with_a_quoted_one_line_description()
+    public void Customer_skill_file_has_front_matter_and_never_the_steps()
     {
-        var md = EditVideoSkillService.BuildMarkdown("todox-bds-ve-ban-do", "TodoX BĐS – vẽ bản đồ",
-            "Dùng khi khách cần: bản đồ vị trí \"dự án\"\nvideo bất động sản", "1. Bước một\r\n2. Bước hai");
+        var md = EditVideoSkillService.BuildCustomerMarkdown("todox-bds-nha-pho", "Nhà phố",
+            "Dùng khi khách cần: video \"nhà phố\"\ngiới thiệu", 3, "Bản tối giản");
 
-        Assert.StartsWith("---\nname: todox-bds-ve-ban-do\ndescription: \"Dùng khi khách cần: bản đồ vị trí \\\"dự án\\\" video bất động sản\"\n---\n", md);
-        Assert.Contains("# TodoX BĐS – vẽ bản đồ\n\n1. Bước một\n2. Bước hai\n", md);
-        Assert.DoesNotContain("Phiên bản skill", md);
+        Assert.StartsWith("---\nname: todox-bds-nha-pho\ndescription: \"Dùng khi khách cần: video \\\"nhà phố\\\" giới thiệu\"\n---\n", md);
+        Assert.Contains("**v3 – Bản tối giản**", md);
+        Assert.Contains("`todox_skill_start`", md);
+        Assert.Contains("`skill: \"todox-bds-nha-pho\"`", md);
     }
 
     [Fact]
-    public void Published_version_tells_Claude_to_tag_the_video_with_skill_and_version()
+    public void Content_is_split_into_steps_at_level_two_headings()
     {
-        var md = EditVideoSkillService.BuildVersionMarkdown("todox-bds-nha-pho", new EditVideoSkillVersionRow
-        {
-            VersionNo = 3, VersionName = "Bản tối giản", Title = "Nhà phố", Description = "d", Content = "c"
-        });
+        var steps = EditVideoSkillService.SplitSteps("Chỉ dùng todox_.\r\n\r\n## Bước 1\r\nMở thư mục.\n### chi tiết\nx\n## Bước 2\nDựng.\n");
 
-        Assert.Contains("**v3 – Bản tối giản**", md);
-        Assert.Contains("`skill: \"todox-bds-nha-pho\"` và `skillVersion: 3`", md);
+        Assert.Equal(2, steps.Count);
+        Assert.StartsWith("Chỉ dùng todox_.", steps[0]);
+        Assert.Contains("### chi tiết", steps[0]);
+        Assert.Equal("## Bước 2\nDựng.", steps[1]);
+        Assert.Equal(["một khối"], EditVideoSkillService.SplitSteps("một khối"));
+        Assert.Contains("bước 2/2", EditVideoSkillService.BuildStep("Nhà phố", 3, "Gọn", steps, 1));
+    }
+
+    [Fact]
+    public void Preview_shows_the_machine_file_the_steps_and_the_fixed_settings()
+    {
+        var preview = EditVideoSkillService.BuildPreview("todox-a", "A", "khi nào", "## Bước 1\nbí quyết", "{\"aspect\":\"16:9\",\"targetSeconds\":45}", 2, "x");
+
+        Assert.Contains("khung 16:9 · 45 giây", preview);
+        Assert.Contains("bí quyết", preview);
+        Assert.DoesNotContain("bí quyết", EditVideoSkillService.BuildCustomerMarkdown("todox-a", "A", "khi nào", 2, "x"));
+    }
+
+    [Fact]
+    public void Skill_settings_fill_only_what_the_customer_left_unset()
+    {
+        using var signer = new EditVideoLicenseSigner(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        var plans = new EditVideoPlanService(signer);
+        var settings = EditVideoSkillSettings.Parse("{\"aspect\":\"16:9\",\"targetSeconds\":12,\"captionStyle\":\"box\",\"transition\":\"slide\",\"bogus\":1}");
+        ClipInput[] clips = [new("c0", 30, 1920, 1080, true, true)];
+
+        var bySkill = plans.Create(new PlanRequest(clips), settings).Value!.Plan;
+        Assert.Equal((1920, 1080), (bySkill.Width, bySkill.Height));
+        Assert.Equal(12, bySkill.TotalSeconds, 1);
+        Assert.Equal(("box", "slide"), (bySkill.Style.CaptionStyle, bySkill.Style.Transition));
+
+        var byCustomer = plans.Create(new PlanRequest(clips, Aspect: "9:16"), settings).Value!.Plan;
+        Assert.Equal((1080, 1920), (byCustomer.Width, byCustomer.Height));
+        Assert.Equal("{}", EditVideoSkillSettings.Parse("not json").ToJson());
     }
 
     [Fact]

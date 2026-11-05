@@ -11,7 +11,7 @@ using TodoX.EditVideoTool.Status;
 namespace TodoX.EditVideoTool.Mcp;
 
 [McpServerToolType]
-public sealed class VideoTools
+public sealed partial class VideoTools
 {
     /// <summary>Connectivity attempts inside a tool call: first try + 3 retries 15 s apart.</summary>
     private const int ServerAttempts = 4;
@@ -26,11 +26,13 @@ public sealed class VideoTools
     private readonly AgentPaths _paths;
     private readonly Transcriber _transcriber;
     private readonly SkillSync _skills;
+    private readonly EditStore _edits;
 
     public VideoTools(LicenseGuard license, LicenseVerifier verifier, MediaProbe probe, ClipNormalizer normalizer,
         RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber,
-        SkillSync skills)
+        SkillSync skills, EditStore edits)
     {
+        _edits = edits;
         _skills = skills;
         _transcriber = transcriber;
         _license = license;
@@ -197,13 +199,13 @@ public sealed class VideoTools
     }
 
     [McpServerTool(Name = "todox_auto_edit", Destructive = false, OpenWorld = false)]
-    [Description("Edit clips into one finished video on this computer: TodoX picks the best part of each clip and adds intro/outro, transitions, animated captions from the script, optional music and a TodoX voiceover, then renders an MP4. Returns the output file path.")]
+    [Description("Edit clips into one finished video on this computer: TodoX picks the best part of each clip and adds intro/outro, transitions, animated captions from the script, optional music and a TodoX voiceover, then renders an MP4. Returns the output file path and an edit id: adjust the result with todox_cut, todox_join, todox_caption, todox_titles, todox_audio, todox_look and render again with todox_export.")]
     public async Task<string> AutoEdit(
         [Description("Video files and/or folders, in the order they should appear.")] string[] clips,
         IProgress<ProgressNotificationValue> progress,
         CancellationToken ct,
-        [Description("9:16 (TikTok/Reels, default), 16:9 (YouTube), 1:1 or 4:5.")] string aspect = "9:16",
-        [Description("Target length in seconds.")] double targetSeconds = 30,
+        [Description("9:16 (TikTok/Reels), 16:9 (YouTube), 1:1 or 4:5; omit for the skill's or the default (9:16).")] string? aspect = null,
+        [Description("Target length in seconds; omit for the skill's or the default (30).")] double? targetSeconds = null,
         [Description("Intro title; omit for no intro.")] string? title = null,
         [Description("Intro subtitle line.")] string? subtitle = null,
         [Description("Narration/caption text shown as animated captions (and read aloud when voice is set).")] string? script = null,
@@ -225,136 +227,9 @@ public sealed class VideoTools
 
         try
         {
-            var files = MediaProbe.ExpandInputs(clips);
-            if (files.Count == 0)
-            {
-                return "Không tìm thấy clip video nào trong đường dẫn đã cho.";
-            }
-
-            Report(progress, 2, $"Đang đọc {files.Count} clip");
-            var infos = new List<MediaInfo>();
-            foreach (var f in files)
-            {
-                infos.Add(await _probe.ProbeAsync(f, ct));
-            }
-
-            session.Info("probed", null, new { clips = infos.Count, seconds = Math.Round(infos.Sum(i => i.DurationSeconds), 1) });
-
-            var outDir = Path.GetDirectoryName(Path.GetFullPath(output ?? Path.Combine(Path.GetDirectoryName(files[0])!, "output", "x.mp4")))!;
-            string? voicePath = voiceover is null ? null : Path.GetFullPath(voiceover);
-            VoiceCheckResult? voiceCheck = null;
-            if (voicePath is null && !string.IsNullOrWhiteSpace(voice) && !string.IsNullOrWhiteSpace(script))
-            {
-                Report(progress, 5, "Đang tạo giọng đọc TodoX");
-                var created = await CreateVoiceAsync(script, voice == "default" ? null : voice, outDir, session, progress, ct);
-                if (created.Error is not null)
-                {
-                    return created.Error;
-                }
-
-                voicePath = created.Path;
-                voiceCheck = created.Check;
-            }
-
-            double? voiceSeconds = voicePath is null ? null : (await _probe.ProbeAsync(voicePath, ct)).DurationSeconds;
-
-            // Only technical metadata leaves the machine: ids, durations, sizes. Never paths or footage.
-            var media = new Dictionary<string, string>();
-            var inputs = infos.Select((info, i) =>
-            {
-                media[$"c{i}"] = info.Path;
-                return new { id = $"c{i}", info.DurationSeconds, info.Width, info.Height, info.HasVideo, info.HasAudio };
-            }).ToList();
-            if (music is not null)
-            {
-                media["music"] = Path.GetFullPath(music);
-            }
-
-            if (voicePath is not null)
-            {
-                media["voiceover"] = voicePath;
-            }
-
-            Report(progress, 12, "TodoX đang lên kế hoạch dựng");
-            var planned = await _server.PlanAsync(new
-            {
-                clips = inputs,
-                aspect,
-                targetSeconds,
-                title,
-                subtitle,
-                script,
-                outroText,
-                hasMusic = music is not null,
-                hasVoiceover = voicePath is not null,
-                voiceoverSeconds = voiceSeconds,
-                styleId = style,
-                accentColor
-            }, ct);
-            if (!planned.Ok)
-            {
-                session.Error("plan_failed", planned.Message, new { planned.ErrorCode });
-                return Explain(planned);
-            }
-
-            var plan = PlanDocument.Open(planned.Value.GetProperty("document").GetString()!, _verifier, media);
-            if (plan is null)
-            {
-                session.Error("plan_signature_invalid");
-                return "Kế hoạch dựng không có chữ ký hợp lệ của TodoX. Hãy cập nhật TodoX EditVideo.";
-            }
-
-            // Phone footage (rotated / HEVC / 4K) gets a cached 1080p proxy so rendering is stable and fast.
-            var proxied = 0;
-            var clipsReady = new List<PlanClip>();
-            foreach (var clip in plan.Clips)
-            {
-                var info = infos.First(i => i.Path == clip.Src);
-                if (ClipNormalizer.NeedsProxy(info))
-                {
-                    Report(progress, 15, $"Chuẩn hóa clip {Path.GetFileName(info.Path)}");
-                    proxied++;
-                }
-
-                clipsReady.Add(clip with { Src = await _normalizer.PrepareAsync(info, ct) });
-            }
-
-            plan = plan with { Clips = clipsReady };
-            session.Info("planned", null, new { scenes = plan.Clips.Count, plan.TotalSeconds, style = plan.Style.Id, proxied, aspect });
-
-            var outPath = output ?? Path.Combine(outDir, $"todox-{DateTime.Now:yyyyMMdd-HHmmss}-{aspect.Replace(':', 'x')}.mp4");
-            var last = -1.0;
-            var result = await _renderer.RenderAsync(plan, outPath, new Progress<RenderProgress>(p =>
-            {
-                var pct = 20 + p.Percent * 0.8;
-                if (pct - last >= 2 || p.Percent >= 100)
-                {
-                    last = pct;
-                    Report(progress, pct, p.Stage);
-                }
-            }), ct);
-
-            session.Info("rendered", null, new { seconds = Math.Round(result.Seconds, 1), renderSeconds = Math.Round(result.Elapsed.TotalSeconds) });
-
-            // Every video is tagged with the skill version that made it: in the usage log (dashboard) and in a small
-            // file next to the video, so versions can be compared later.
-            var tag = SkillTag(skill, skillVersion);
-            WriteVideoInfo(result.OutputPath, tag, plan.Style.Name, aspect, result.Seconds);
-            await session.EndAsync("ok", tag is null ? null : new { skill = tag.Skill, skillVersion = tag.Version, skillVersionName = tag.VersionName, skillTitle = tag.Title }, ct);
-            return JsonSerializer.Serialize(new
-            {
-                output = result.OutputPath,
-                skill = tag is null ? null : new { tag.Skill, tag.Title, version = tag.Version, versionName = tag.VersionName },
-                seconds = Math.Round(result.Seconds, 1),
-                resolution = $"{plan.Width}x{plan.Height}",
-                style = plan.Style.Name,
-                scenes = plan.Clips.Count,
-                clipsGiven = files.Count,
-                captions = plan.Captions.Count,
-                voiceover = voicePath,
-                voiceCheck = voiceCheck is null ? null : new { voiceCheck.Score, voiceCheck.Ok, missing = voiceCheck.Missing.Take(10) },
-                renderSeconds = Math.Round(result.Elapsed.TotalSeconds, 0)
-            }, StatusTools.Json);
+            // Same path as the step tools: a signed edit is kept, so the result can be adjusted and exported again.
+            var started = await StartEditAsync(new EditBrief(clips, aspect, targetSeconds, title, subtitle, script, voice, outroText, music, voiceover, style, accentColor, skill, skillVersion), session, progress, ct);
+            return started.Error ?? await ExportAsync(started.Edit!, output, session, progress, 15, ct, started.VoiceCheck);
         }
         catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or ArgumentException or IOException)
         {

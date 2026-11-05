@@ -99,9 +99,43 @@ else
                                     <MudNumericField @bind-Value="_editing.SortOrder" Label="Thứ tự" Variant="Variant.Outlined" Style="max-width:140px" />
                                     <MudSwitch @bind-Value="_editing.IsActive" Color="Color.Warning" Label="Đang bật (máy khách sẽ cài)" />
                                 </MudStack>
-                                <MudTextField @bind-Value="_editing.Content" Label="Nội dung skill (Markdown)" Variant="Variant.Outlined" Lines="22"
+                                <MudTextField @bind-Value="_editing.Content" Label="Nội dung skill – chỉ server giữ (Markdown)" Variant="Variant.Outlined" Lines="22"
                                               Style="font-family:Consolas,monospace;font-size:13px"
-                                              HelperText="Hướng dẫn Claude từng bước, gọi các công cụ todox_... của app. Phần --- name/description --- và dòng phiên bản hệ thống tự thêm." />
+                                              HelperText="Chia bước bằng tiêu đề '## Bước 1 …', '## Bước 2 …'. Máy khách chỉ có tên + mô tả; Claude nhận từng bước một khi chạy skill (todox_skill_start / todox_skill_next). Chỉ dùng công cụ todox_..." />
+                                <MudText Typo="Typo.subtitle2">Thiết lập cố định (server tự áp dụng, để trống = theo yêu cầu của khách)</MudText>
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                    <MudSelect T="string" @bind-Value="_sAspect" Label="Khung hình" Variant="Variant.Outlined" Style="min-width:150px">
+                                        <MudSelectItem Value="@("")">Theo khách</MudSelectItem>
+                                        @foreach (var a in new[] { "9:16", "16:9", "1:1", "4:5" })
+                                        {
+                                            <MudSelectItem Value="@a">@a</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudNumericField T="double?" @bind-Value="_sTarget" Label="Độ dài (giây)" Variant="Variant.Outlined" Min="5" Max="600" Style="max-width:150px" />
+                                    <MudSelect T="string" @bind-Value="_sStyle" Label="Style" Variant="Variant.Outlined" Style="min-width:180px">
+                                        <MudSelectItem Value="@("")">Theo khách</MudSelectItem>
+                                        @foreach (var st in TodoX.EditVideo.Planning.StyleCatalog.All)
+                                        {
+                                            <MudSelectItem Value="@st.Id">@st.Name</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudSelect T="string" @bind-Value="_sCaption" Label="Kiểu caption" Variant="Variant.Outlined" Style="min-width:150px">
+                                        <MudSelectItem Value="@("")">Theo style</MudSelectItem>
+                                        @foreach (var c in TodoX.EditVideo.Planning.PlanEditor.CaptionStyles)
+                                        {
+                                            <MudSelectItem Value="@c">@c</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudSelect T="string" @bind-Value="_sTransition" Label="Chuyển cảnh" Variant="Variant.Outlined" Style="min-width:150px">
+                                        <MudSelectItem Value="@("")">Theo style</MudSelectItem>
+                                        @foreach (var t in TodoX.EditVideo.Planning.PlanEditor.Transitions)
+                                        {
+                                            <MudSelectItem Value="@t">@t</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudNumericField T="double?" @bind-Value="_sTransitionSeconds" Label="Chuyển cảnh (giây)" Variant="Variant.Outlined" Min="0" Max="1.5" Step="0.1" Style="max-width:160px" />
+                                    <MudNumericField T="double?" @bind-Value="_sMusicVolume" Label="Âm lượng nhạc" Variant="Variant.Outlined" Min="0" Max="1.5" Step="0.1" Style="max-width:150px" />
+                                </MudStack>
                                 <MudStack Row="true" Spacing="2" Justify="Justify.SpaceBetween" Class="flex-wrap">
                                     <MudStack Row="true" Spacing="2" Class="flex-wrap">
                                         <MudButton Class="todox-primary-btn" OnClick="Save" Disabled="_saving">Lưu</MudButton>
@@ -109,8 +143,8 @@ else
                                         {
                                             <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="AskPublish">Tạo phiên bản mới…</MudButton>
                                         }
-                                        <MudButton Variant="Variant.Outlined" OnClick="@(() => _preview = _preview is null ? EditVideoSkillService.BuildDraftMarkdown(_editing) : null)">
-                                            @(_preview is null ? "Xem" : "Ẩn") file SKILL.md
+                                        <MudButton Variant="Variant.Outlined" OnClick="@(() => { SyncSettings(); _preview = _preview is null ? EditVideoSkillService.BuildDraftPreview(_editing) : null; })">
+                                            @(_preview is null ? "Xem" : "Ẩn") máy khách & các bước
                                         </MudButton>
                                     </MudStack>
                                     @if (_editing.Id != Guid.Empty)
@@ -141,7 +175,7 @@ else
                                             <MudText Typo="Typo.caption" Style="display:block">@v.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")@(v.Notes is null ? "" : $" · {v.Notes}")</MudText>
                                         </div>
                                         <MudStack Row="true" Spacing="1">
-                                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => _preview = EditVideoSkillService.BuildVersionMarkdown(_editing.Slug, v))">Xem</MudButton>
+                                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => _preview = EditVideoSkillService.BuildVersionPreview(_editing.Slug, v))">Xem</MudButton>
                                             <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => CopyToDraft(v))">Chép vào bản nháp</MudButton>
                                         </MudStack>
                                     </MudStack>
@@ -164,13 +198,19 @@ else
 @code {
     private const string Template =
         """
-        Dùng các công cụ `todox_...` của TodoX EditVideo (chạy trên máy khách, video không rời máy).
+        Chỉ dùng các công cụ `todox_...` của TodoX EditVideo (chạy trên máy khách, video không rời máy).
 
-        1. Nếu khách nhắc tới một dự án (vd "dự án An Đông"), gọi `todox_project_folder` với tên dự án để mở
-           thư mục tư liệu của dự án; nhờ khách chép ảnh/video vào đó rồi báo lại.
-        2. `todox_probe` thư mục dự án để xem có những tư liệu gì.
-        3. ... các bước riêng của loại video này (bố cục, thời lượng, lời thoại, nhạc) ...
-        4. `todox_auto_edit` với các clip theo thứ tự câu chuyện; đưa khách đường dẫn file kết quả.
+        ## Bước 1 – Tư liệu
+        Nếu khách nhắc tới một dự án (vd "dự án An Đông"), gọi `todox_project_folder` với tên dự án để mở thư mục
+        tư liệu; nhờ khách chép ảnh/video vào đó rồi báo lại. Sau đó `todox_probe` thư mục để xem có gì.
+
+        ## Bước 2 – Dựng bản đầu
+        ... bố cục, thứ tự cảnh, lời thoại riêng của loại video này ...
+        Gọi `todox_edit_start` với các clip theo thứ tự câu chuyện, kèm `skill` và `skillVersion`.
+
+        ## Bước 3 – Chỉnh và xuất
+        Chỉnh bằng `todox_cut` / `todox_join` / `todox_caption` / `todox_titles` / `todox_audio`, rồi `todox_export`;
+        đưa khách đường dẫn file kết quả.
         """;
 
     private bool _initialized;
@@ -183,6 +223,8 @@ else
     private IReadOnlyList<EditVideoSkillRow> _skills = [];
     private IReadOnlyList<EditVideoSkillVersionRow> _versions = [];
     private EditVideoSkillRow? _editing;
+    private string _sAspect = "", _sStyle = "", _sCaption = "", _sTransition = "";
+    private double? _sTarget, _sTransitionSeconds, _sMusicVolume;
 
     private int NextVersionNo => (_editing?.LatestVersionNo ?? 0) + 1;
 
@@ -214,6 +256,7 @@ else
     {
         _editing = new EditVideoSkillRow { Slug = EditVideoSkillService.SlugPrefix, Content = Template, IsActive = true, HasUnpublishedChanges = true };
         _versions = [];
+        LoadSettings(null);
         _preview = null;
         _askPublish = false;
     }
@@ -224,10 +267,11 @@ else
         _editing = new EditVideoSkillRow
         {
             Id = skill.Id, Slug = skill.Slug, Title = skill.Title, Description = skill.Description, Category = skill.Category,
-            Content = skill.Content, IsActive = skill.IsActive, SortOrder = skill.SortOrder, UpdatedAt = skill.UpdatedAt,
+            Content = skill.Content, SettingsJson = skill.SettingsJson, IsActive = skill.IsActive, SortOrder = skill.SortOrder, UpdatedAt = skill.UpdatedAt,
             LatestVersionNo = skill.LatestVersionNo, LatestVersionName = skill.LatestVersionName, HasUnpublishedChanges = skill.HasUnpublishedChanges
         };
         _versions = await Skills.ListVersionsAsync(skill.Id);
+        LoadSettings(skill.SettingsJson);
         _preview = null;
         _askPublish = false;
     }
@@ -250,6 +294,7 @@ else
         _saving = true;
         try
         {
+            SyncSettings();
             var result = await Skills.SaveAsync(_editing, AuthState.CurrentUser?.UserId);
             if (!result.Ok)
             {
@@ -273,6 +318,29 @@ else
         {
             _saving = false;
         }
+    }
+
+    private void LoadSettings(string? json)
+    {
+        var s = EditVideoSkillSettings.Parse(json);
+        _sAspect = s.Aspect ?? "";
+        _sTarget = s.TargetSeconds;
+        _sStyle = s.StyleId ?? "";
+        _sCaption = s.CaptionStyle ?? "";
+        _sTransition = s.Transition ?? "";
+        _sTransitionSeconds = s.TransitionSeconds;
+        _sMusicVolume = s.MusicVolume;
+    }
+
+    private void SyncSettings()
+    {
+        if (_editing is not null)
+        {
+            _editing.SettingsJson = new EditVideoSkillSettings(
+                Blank(_sAspect), _sTarget, Blank(_sStyle), Blank(_sCaption), Blank(_sTransition), _sTransitionSeconds, _sMusicVolume).ToJson();
+        }
+
+        static string? Blank(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
     }
 
     private void AskPublish()
@@ -322,6 +390,8 @@ else
         _editing.Title = version.Title;
         _editing.Description = version.Description;
         _editing.Content = version.Content;
+        _editing.SettingsJson = version.SettingsJson;
+        LoadSettings(version.SettingsJson);
         _preview = null;
         Snackbar.Add($"Đã chép nội dung v{version.VersionNo} vào bản nháp. Bấm Lưu để giữ, rồi tạo phiên bản mới nếu muốn phát hành lại.", Severity.Info);
     }

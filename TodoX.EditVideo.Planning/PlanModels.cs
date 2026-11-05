@@ -9,8 +9,8 @@ public sealed record ClipInput(string Id, double DurationSeconds, int Width, int
 /// <summary>The customer's brief, as passed through by the assistant.</summary>
 public sealed record PlanRequest(
     IReadOnlyList<ClipInput> Clips,
-    string Aspect = "9:16",
-    double TargetSeconds = 30,
+    string? Aspect = null,
+    double? TargetSeconds = null,
     string? Title = null,
     string? Subtitle = null,
     string? Script = null,
@@ -19,7 +19,10 @@ public sealed record PlanRequest(
     bool HasVoiceover = false,
     double? VoiceoverSeconds = null,
     string? StyleId = null,
-    string? AccentColor = null);
+    string? AccentColor = null,
+    // The TodoX skill version guiding the video; its fixed settings fill whatever the customer left unset.
+    string? Skill = null,
+    int? SkillVersion = null);
 
 // The plan mirrors TodoX.EditVideoTool.Templates/src/types.ts (serialized camelCase). Media `Src` values are
 // clip ids ("c0", "music", "voiceover"); the tool swaps them for local paths before rendering.
