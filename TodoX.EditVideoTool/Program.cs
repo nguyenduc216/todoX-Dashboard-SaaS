@@ -127,6 +127,7 @@ static void AddAgentServices(IServiceCollection services)
     services.AddSingleton<Updater>();
     services.AddSingleton<SkillSync>();
     services.AddSingleton<ProjectFolders>();
+    services.AddSingleton(sp => new AiGenerator(sp.GetRequiredService<TodoXServerClient>()));
     services.AddSingleton<EditStore>();
     services.AddSingleton<SkillRunStore>();
 }

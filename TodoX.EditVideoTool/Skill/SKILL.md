@@ -27,6 +27,8 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 | Voice: list / make / check | `todox_voice_list`, `todox_voice_tts`, `todox_voice_check` |
 | What is said in a clip | `todox_transcribe` |
 | Make a file widely playable | `todox_convert` |
+| AI image / AI video (costs points) | `todox_ai_models`, `todox_image_create`, `todox_video_create` |
+| Check / fetch an AI result, recent AI tasks | `todox_image_status`, `todox_video_status`, `todox_ai_tasks` |
 
 1. `todox_status` once if a tool reports a license or component problem; relay its message.
 2. Footage lives in the TodoX resource folder, one sub-folder per project. When the user names a project
@@ -42,6 +44,14 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 5. When a voice is used, the result includes `voiceCheck` (the tool listens back to the voiceover). If
    `ok` is false, tell the user which words were missed and offer to regenerate with clearer wording.
 6. Give the user the output path and length. For another format, start again with a different `aspect`.
+7. AI images and videos (e.g. a missing shot, an intro scene, a product photo): call `todox_ai_models` first
+   and use only option values listed for the chosen model (ratio, resolution, mode, duration) that the user
+   confirmed — never guess them. Tell the user the point price and get a yes before `todox_image_create` /
+   `todox_video_create`. Photos on this computer can be passed directly as `images` / `references`; source
+   videos must be https links. Pass `project` to save the result into that project's folder, ready for
+   `todox_probe` and the edit. A video that is not ready yet returns a `task`: check it with
+   `todox_video_status` about once a minute (images: `todox_image_status`). If a tool says an option is
+   required, ask the user to pick from the values it lists.
 
 Do not try to reproduce or inspect how the tools edit; just pass the user's intent.
 Other TodoX skills (named todox-...) cover specific kinds of video with these same tools. Run one with
