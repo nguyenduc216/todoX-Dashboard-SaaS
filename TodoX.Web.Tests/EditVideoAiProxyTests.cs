@@ -133,6 +133,16 @@ public sealed class EditVideoAiProxyTests
     }
 
     [Fact]
+    public void Rejected_create_has_no_task_id_and_keeps_gommos_reason()
+    {
+        // Real Gommo reply (HTTP 200) when a model needs an input video.
+        var rejected = JsonNode.Parse("""{"countTasks":0,"domain":"79ai.net","success":true,"error":2100,"message":"Vui lòng đính kèm video.","runtime":0.5}""");
+
+        Assert.Null(EditVideoGommoJson.IdBase(rejected));
+        Assert.Equal("Vui lòng đính kèm video.", EditVideoGommoJson.ErrorMessage(rejected));
+    }
+
+    [Fact]
     public void Create_fields_map_inputs_to_gommo_and_never_carry_secrets()
     {
         var image = EditVideoAiService.CreateFields("image", "banana",
@@ -141,7 +151,7 @@ public sealed class EditVideoAiProxyTests
 
         Assert.Equal("a cat", image["prompt"]);
         Assert.Equal("true", image["editImage"]);
-        Assert.Equal("""["https://x/a.png","https://x/b.png"]""", image["subjects"]);
+        Assert.Equal("""[{"url":"https://x/a.png"},{"url":"https://x/b.png"}]""", image["subjects"]);
         Assert.Equal("PRIVATE", image["privacy"]);
         Assert.False(image.ContainsKey("access_token"));
 

@@ -23,8 +23,8 @@ public sealed class EditVideoAiOptions
     /// <summary>What one Gommo credit costs TodoX, in VND.</summary>
     public decimal VndPerCredit { get; set; } = 1m;
 
-    /// <summary>Multiplier on the Gommo cost before converting to points (1 = sell at cost).</summary>
-    public decimal Markup { get; set; } = 1m;
+    /// <summary>Multiplier on the Gommo cost before converting to points (1 = sell at cost; agreed rate 3).</summary>
+    public decimal Markup { get; set; } = 3m;
 
     /// <summary>Value of one TodoX point in VND; empty → AiImageBilling:TodoXVndPerPoint.</summary>
     public decimal? VndPerPoint { get; set; }

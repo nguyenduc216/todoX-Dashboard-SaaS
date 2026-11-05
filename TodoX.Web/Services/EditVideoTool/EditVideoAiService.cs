@@ -327,7 +327,8 @@ public sealed class EditVideoAiService
             if (inputs.Count > 0)
             {
                 fields["editImage"] = "true";
-                fields["subjects"] = JsonSerializer.Serialize(inputs);
+                // Gommo only honours subjects as [{url}] objects (verified 2026-11-05; a plain URL list is ignored).
+                fields["subjects"] = JsonSerializer.Serialize(inputs.Select(url => new { url }));
             }
 
             return fields;
