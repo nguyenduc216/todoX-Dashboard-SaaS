@@ -1,6 +1,8 @@
 @page "/register"
 @layout AuthLayout
 @inject AccountService Accounts
+@inject AuthStateService AuthState
+@inject TodoX.Web.Services.Email.SignupEmails SignupEmails
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
@@ -10,69 +12,119 @@
     <div class="todox-auth-grid">
         <div class="todox-auth-hero">
             <img src="img/todox-logo.jpg" alt="TodoX" />
-            <MudText Typo="Typo.h3" Class="mt-6 todox-page-title">Đăng ký khách hàng</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle mt-2">Tạo hồ sơ khách hàng và tài khoản chủ sở hữu để sử dụng dịch vụ TodoX.</MudText>
+            <MudText Typo="Typo.h3" Class="mt-6 todox-page-title">@(IsEditVideo ? "Đăng ký dùng TodoX EditVideo" : "Đăng ký tài khoản TodoX")</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle mt-2">
+                @(IsEditVideo
+                    ? "Tạo tài khoản miễn phí trong 1 phút. Sau đó chọn gói trong tài khoản và dán mã license vào ứng dụng TodoX EditVideo trên máy."
+                    : "Tạo tài khoản miễn phí để dùng các dịch vụ của TodoX.")
+            </MudText>
         </div>
 
         <MudPaper Class="todox-auth-card pa-6" rounded="true">
             <MudText Typo="Typo.h5" Class="todox-page-title">Thông tin đăng ký</MudText>
             <MudGrid Class="mt-2">
                 <MudItem xs="12">
-                    <MudTextField T="string" Label="Tên công ty / khách hàng" Variant="Variant.Outlined" @bind-Value="_model.CompanyName" />
+                    <MudTextField T="string" Label="Họ tên" Variant="Variant.Outlined" @bind-Value="_model.ContactName" Required="true" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Người liên hệ" Variant="Variant.Outlined" @bind-Value="_model.ContactName" />
+                    <MudTextField T="string" Label="Email" Variant="Variant.Outlined" @bind-Value="_model.Email" InputType="InputType.Email" Required="true" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Số điện thoại" Variant="Variant.Outlined" @bind-Value="_model.Phone" />
+                    <MudTextField T="string" Label="Số điện thoại" Variant="Variant.Outlined" @bind-Value="_model.Phone" InputType="InputType.Telephone" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Tên công ty (không bắt buộc)" Variant="Variant.Outlined" @bind-Value="_model.CompanyName" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Email" Variant="Variant.Outlined" @bind-Value="_model.Email" />
+                    <MudTextField T="string" Label="Mật khẩu (ít nhất 8 ký tự)" Variant="Variant.Outlined" @bind-Value="_model.Password" InputType="InputType.Password" Required="true" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Mã số thuế" Variant="Variant.Outlined" @bind-Value="_model.TaxCode" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Giới tính" Variant="Variant.Outlined" @bind-Value="_model.Gender">
-                        <MudSelectItem Value="@("male")">Nam</MudSelectItem>
-                        <MudSelectItem Value="@("female")">Nữ</MudSelectItem>
-                        <MudSelectItem Value="@("other")">Khác</MudSelectItem>
-                    </MudSelect>
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <MudDatePicker Label="Ngày sinh" Variant="Variant.Outlined" @bind-Date="_dob" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Mật khẩu" Variant="Variant.Outlined" @bind-Value="_model.Password" InputType="InputType.Password" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Xác nhận mật khẩu" Variant="Variant.Outlined" @bind-Value="_model.ConfirmPassword" InputType="InputType.Password" />
+                    <MudTextField T="string" Label="Nhập lại mật khẩu" Variant="Variant.Outlined" @bind-Value="_model.ConfirmPassword" InputType="InputType.Password" Required="true"
+                                  OnKeyDown="OnKeyDown" />
                 </MudItem>
             </MudGrid>
+            @* Hidden from people; bots that fill every field get a fake success. *@
+            <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" @bind="_website"
+                   style="position:absolute;left:-10000px;width:1px;height:1px" />
 
-            <MudButton FullWidth="true" Class="todox-primary-btn mt-5" OnClick="RegisterCustomer">Đăng ký</MudButton>
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4">@_error</MudAlert>
+            }
+
+            <MudButton FullWidth="true" Class="todox-primary-btn mt-5" OnClick="RegisterCustomer" Disabled="_busy">
+                @(_busy ? "Đang tạo tài khoản…" : "Tạo tài khoản")
+            </MudButton>
             <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-5 todox-page-subtitle">
-                Đã có tài khoản? <MudLink Href="/login" Class="todox-gold">Đăng nhập</MudLink>
+                Đã có tài khoản? <MudLink Href="@LoginHref" Class="todox-gold">Đăng nhập</MudLink>
             </MudText>
         </MudPaper>
     </div>
 </div>
 
 @code {
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? From { get; set; }
+
     private readonly CustomerRegistration _model = new();
-    private DateTime? _dob;
+    private string? _website;
+    private string? _error;
+    private bool _busy;
+
+    private bool IsEditVideo => string.Equals(From, "editvideo", StringComparison.OrdinalIgnoreCase);
+    private string AfterSignUp => IsEditVideo ? "/my-editvideo" : "/";
+    private string LoginHref => IsEditVideo ? "/login?returnUrl=%2Fmy-editvideo" : "/login";
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or "NumpadEnter") await RegisterCustomer();
+    }
 
     private async Task RegisterCustomer()
     {
-        _model.DateOfBirth = _dob;
-        var result = await Accounts.RegisterCustomerAsync(_model);
-        if (!result.Success)
+        if (_busy)
         {
-            Snackbar.Add(result.Message, Severity.Error);
             return;
         }
 
-        Snackbar.Add(result.Message, Severity.Success);
-        Navigation.NavigateTo("/login");
+        _error = null;
+        if (!string.IsNullOrEmpty(_website))
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Accounts.RegisterCustomerAsync(_model);
+            if (!result.Success)
+            {
+                _error = result.Message;
+                return;
+            }
+
+            _ = SignupEmails.SendAsync(_model.ContactName.Trim(), _model.Email.Trim(), _model.Phone.Trim(), IsEditVideo ? "TodoX EditVideo" : null);
+
+            var user = await Accounts.LoginAsync(new LoginRequest { UsernameOrEmail = _model.Email.Trim(), Password = _model.Password });
+            if (user is null)
+            {
+                Snackbar.Add("Đã tạo tài khoản. Hãy đăng nhập.", Severity.Success);
+                Navigation.NavigateTo(LoginHref);
+                return;
+            }
+
+            await AuthState.SignInAsync(user, rememberMe: true);
+            Snackbar.Add("Chào mừng bạn đến với TodoX.", Severity.Success);
+            Navigation.NavigateTo(AfterSignUp);
+        }
+        catch (Exception)
+        {
+            _error = "Chưa tạo được tài khoản. Thử lại sau ít phút.";
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 }

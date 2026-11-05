@@ -277,6 +277,8 @@ builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
 builder.Services.AddScoped<TokenSettingsService>();
+builder.Services.AddScoped<TodoX.Web.Services.Email.EmailService>();
+builder.Services.AddScoped<TodoX.Web.Services.Email.SignupEmails>();
 builder.Services.AddScoped<WalletService>();
 builder.Services.AddSingleton<IPointBalanceChangeNotifier, PointBalanceChangeNotifier>();
 builder.Services.AddScoped<IRenderJobService, RenderJobService>();

@@ -63,6 +63,7 @@
   </Target>
 
   <ItemGroup>
+    <PackageReference Include="MailKit" Version="4.18.2" />
     <PackageReference Include="MudBlazor" Version="9.6.0" />
     <PackageReference Include="Npgsql" Version="9.0.2" />
     <PackageReference Include="Dapper" Version="2.1.66" />
