@@ -16,6 +16,10 @@ public sealed class EditVideoSessionRow
     /// <summary>Raw MCP client name the tool reported (e.g. claude-ai, claude-code, codex-mcp-client).</summary>
     public string? Client { get; init; }
     public string? Summary { get; init; }
+    /// <summary>Skill and version the video was made with (todox_auto_edit's skill / skillVersion), when given.</summary>
+    public string? Skill { get; init; }
+    public string? SkillVersion { get; init; }
+    public string? SkillVersionName { get; init; }
     public DateTimeOffset StartedAt { get; init; }
     public DateTimeOffset? EndedAt { get; init; }
     public int ErrorCount { get; init; }
@@ -187,6 +191,7 @@ public sealed class EditVideoUsageService
                    CASE WHEN s.status = 'running' AND s.started_at < now() - make_interval(hours => @staleHours)
                         THEN 'interrupted' ELSE s.status END AS Status,
                    d.device_name AS DeviceName, s.summary->>'client' AS Client,
+                   s.summary->>'skill' AS Skill, s.summary->>'skillVersion' AS SkillVersion, s.summary->>'skillVersionName' AS SkillVersionName,
                    s.summary::text AS Summary, s.started_at AS StartedAt, s.ended_at AS EndedAt,
                    (SELECT count(*) FROM editvideo.usage_logs l WHERE l.session_id = s.id AND l.level = 'error')::int AS ErrorCount
               FROM editvideo.usage_sessions s

@@ -6,6 +6,7 @@ using TodoX.Web.Data;
 
 namespace TodoX.Web.Services.EditVideoTool;
 
+/// <summary>A skill as edited in the dashboard (the draft) plus its latest published version.</summary>
 public sealed class EditVideoSkillRow
 {
     public Guid Id { get; init; }
@@ -15,17 +16,43 @@ public sealed class EditVideoSkillRow
     public string? Category { get; set; }
     public string Content { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
-    public int Version { get; init; }
     public int SortOrder { get; set; }
     public DateTimeOffset UpdatedAt { get; init; }
+    public int? LatestVersionNo { get; init; }
+    public string? LatestVersionName { get; init; }
+    /// <summary>The draft differs from the latest published version (or nothing is published yet).</summary>
+    public bool HasUnpublishedChanges { get; init; }
 }
 
-/// <summary>What the customer's tool downloads: the ready-to-write SKILL.md for each active skill.</summary>
-public sealed record EditVideoSkillFile(string Slug, string Title, string? Category, int Version, DateTimeOffset UpdatedAt, string Markdown);
+/// <summary>A published version: a frozen copy of the skill, never edited.</summary>
+public sealed class EditVideoSkillVersionRow
+{
+    public Guid Id { get; init; }
+    public Guid SkillId { get; init; }
+    public int VersionNo { get; init; }
+    public string VersionName { get; init; } = string.Empty;
+    public string Title { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public string Content { get; init; } = string.Empty;
+    public string? Notes { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+}
+
+/// <summary>What the customer's tool downloads: every published version of every active skill.</summary>
+public sealed record EditVideoSkillFile(
+    string Slug, string Title, string? Category, int LatestVersion, IReadOnlyList<EditVideoSkillVersionFile> Versions)
+{
+    // Kept for 0.6.0 tools, which read one markdown per skill.
+    public int Version => LatestVersion;
+    public string Markdown => Versions.First(v => v.Version == LatestVersion).Markdown;
+}
+
+public sealed record EditVideoSkillVersionFile(int Version, string Name, string? Notes, DateTimeOffset CreatedAt, string Markdown);
 
 /// <summary>
-/// TodoX skill library (editvideo.skills). Admins write skills in the dashboard; every activated tool downloads the
-/// active ones and installs them into Claude / Codex. Skill names always start with "todox-".
+/// TodoX skill library (editvideo.skills + editvideo.skill_versions). Admins edit a draft in the dashboard and publish
+/// it as a numbered, named version; only published versions reach customers, and every version is kept so a
+/// customer can stay on the one they like. Skill names always start with "todox-".
 /// </summary>
 public sealed partial class EditVideoSkillService
 {
@@ -46,21 +73,64 @@ public sealed partial class EditVideoSkillService
         using var conn = await _factory.OpenAsync(ct);
         var rows = await conn.QueryAsync<EditVideoSkillRow>(
             """
-            SELECT id, slug, title, description, category, content, is_active AS IsActive, version, sort_order AS SortOrder, updated_at AS UpdatedAt
-              FROM editvideo.skills
-             WHERE tenant_id = @tenantId AND (@activeOnly = false OR is_active)
-             ORDER BY sort_order, title;
+            SELECT s.id, s.slug, s.title, s.description, s.category, s.content, s.is_active AS IsActive,
+                   s.sort_order AS SortOrder, s.updated_at AS UpdatedAt,
+                   v.version_no AS LatestVersionNo, v.version_name AS LatestVersionName,
+                   (v.id IS NULL OR (s.title, s.description, s.content) IS DISTINCT FROM (v.title, v.description, v.content)) AS HasUnpublishedChanges
+              FROM editvideo.skills s
+              LEFT JOIN LATERAL (
+                    SELECT id, version_no, version_name, title, description, content
+                      FROM editvideo.skill_versions
+                     WHERE skill_id = s.id
+                     ORDER BY version_no DESC
+                     LIMIT 1) v ON true
+             WHERE s.tenant_id = @tenantId AND (@activeOnly = false OR s.is_active)
+             ORDER BY s.sort_order, s.title;
             """,
             new { tenantId = _tenant.TenantId, activeOnly });
         return rows.ToList();
     }
 
-    public async Task<IReadOnlyList<EditVideoSkillFile>> ListFilesAsync(CancellationToken ct = default) =>
-        (await ListAsync(activeOnly: true, ct))
-            .Select(s => new EditVideoSkillFile(s.Slug, s.Title, s.Category, s.Version, s.UpdatedAt, BuildMarkdown(s)))
-            .ToList();
+    public async Task<IReadOnlyList<EditVideoSkillVersionRow>> ListVersionsAsync(Guid skillId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return (await conn.QueryAsync<EditVideoSkillVersionRow>(
+            """
+            SELECT id, skill_id AS SkillId, version_no AS VersionNo, version_name AS VersionName, title, description,
+                   content, notes, created_at AS CreatedAt
+              FROM editvideo.skill_versions
+             WHERE skill_id = @skillId AND tenant_id = @tenantId
+             ORDER BY version_no DESC;
+            """,
+            new { skillId, tenantId = _tenant.TenantId })).ToList();
+    }
 
-    /// <summary>Inserts or updates a skill; the version goes up whenever what the customer receives changes.</summary>
+    /// <summary>Active skills that have at least one published version, with all their versions.</summary>
+    public async Task<IReadOnlyList<EditVideoSkillFile>> ListFilesAsync(CancellationToken ct = default)
+    {
+        var skills = (await ListAsync(activeOnly: true, ct)).Where(s => s.LatestVersionNo is not null).ToList();
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var versions = (await conn.QueryAsync<EditVideoSkillVersionRow>(
+            """
+            SELECT id, skill_id AS SkillId, version_no AS VersionNo, version_name AS VersionName, title, description,
+                   content, notes, created_at AS CreatedAt
+              FROM editvideo.skill_versions
+             WHERE tenant_id = @tenantId AND skill_id = ANY(@ids)
+             ORDER BY version_no;
+            """,
+            new { tenantId = _tenant.TenantId, ids = skills.Select(s => s.Id).ToArray() })).ToLookup(v => v.SkillId);
+
+        return skills
+            .Where(s => versions[s.Id].Any())
+            .Select(s => new EditVideoSkillFile(s.Slug, s.Title, s.Category, s.LatestVersionNo!.Value,
+                versions[s.Id].Select(v => new EditVideoSkillVersionFile(v.VersionNo, v.VersionName, v.Notes, v.CreatedAt,
+                    BuildMarkdown(s.Slug, v.Title, v.Description, v.Content, v.VersionNo, v.VersionName))).ToList()))
+            .ToList();
+    }
+
+    /// <summary>Saves the draft. Nothing reaches customers until a version is published.</summary>
     public async Task<EditVideoResult<EditVideoSkillRow>> SaveAsync(EditVideoSkillRow skill, Guid? actorUserId, CancellationToken ct = default)
     {
         var slug = NormalizeSlug(skill.Slug);
@@ -98,6 +168,21 @@ public sealed partial class EditVideoSkillService
             return EditVideoResult<EditVideoSkillRow>.Fail(EditVideoErrorCodes.InvalidRequest, $"Đã có skill mã \"{slug}\".");
         }
 
+        if (skill.Id != Guid.Empty)
+        {
+            // The slug is the folder name on customers' machines; once a version is out it must not move.
+            var published = await conn.ExecuteScalarAsync<string?>(
+                """
+                SELECT s.slug FROM editvideo.skills s
+                 WHERE s.id = @id AND s.tenant_id = @tenantId AND EXISTS (SELECT 1 FROM editvideo.skill_versions v WHERE v.skill_id = s.id);
+                """, args);
+            if (published is not null && published != slug)
+            {
+                return EditVideoResult<EditVideoSkillRow>.Fail(EditVideoErrorCodes.InvalidRequest,
+                    $"Skill đã phát hành nên không đổi mã được (đang là \"{published}\").");
+            }
+        }
+
         var id = skill.Id == Guid.Empty
             ? await conn.ExecuteScalarAsync<Guid>(
                 """
@@ -108,18 +193,52 @@ public sealed partial class EditVideoSkillService
             : await conn.ExecuteScalarAsync<Guid>(
                 """
                 UPDATE editvideo.skills
-                   SET version = version + CASE WHEN (slug, title, description, content, is_active)
-                                                 IS DISTINCT FROM (@slug, @title, @description, @content, @isActive) THEN 1 ELSE 0 END,
-                       slug = @slug, title = @title, description = @description, category = @category, content = @content,
+                   SET slug = @slug, title = @title, description = @description, category = @category, content = @content,
                        is_active = @isActive, sort_order = @sortOrder, updated_by = @actor, updated_at = now()
                  WHERE id = @id AND tenant_id = @tenantId
                 RETURNING id;
                 """, args);
 
-        var saved = (await ListAsync(activeOnly: false, ct)).FirstOrDefault(s => s.Id == id);
-        return saved is null
-            ? EditVideoResult<EditVideoSkillRow>.Fail("not_found", "Không tìm thấy skill.")
-            : EditVideoResult<EditVideoSkillRow>.Success(saved);
+        return await FindAsync(id, ct) is { } saved
+            ? EditVideoResult<EditVideoSkillRow>.Success(saved)
+            : EditVideoResult<EditVideoSkillRow>.Fail("not_found", "Không tìm thấy skill.");
+    }
+
+    /// <summary>Freezes the current draft as the next version number. Earlier versions are kept unchanged.</summary>
+    public async Task<EditVideoResult<EditVideoSkillVersionRow>> PublishVersionAsync(Guid skillId, string? versionName, string? notes, Guid? actorUserId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(versionName))
+        {
+            return EditVideoResult<EditVideoSkillVersionRow>.Fail(EditVideoErrorCodes.InvalidRequest, "Đặt tên cho phiên bản (ví dụ: \"Thêm bản đồ vị trí\").");
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        // Lock the skill so two admins publishing at once cannot take the same number.
+        var locked = await conn.ExecuteScalarAsync<Guid?>(
+            "SELECT id FROM editvideo.skills WHERE id = @skillId AND tenant_id = @tenantId FOR UPDATE;",
+            new { skillId, tenantId = _tenant.TenantId }, tx);
+        if (locked is null)
+        {
+            return EditVideoResult<EditVideoSkillVersionRow>.Fail("not_found", "Không tìm thấy skill.");
+        }
+
+        var id = await conn.ExecuteScalarAsync<Guid>(
+            """
+            INSERT INTO editvideo.skill_versions (tenant_id, skill_id, version_no, version_name, title, description, content, notes, created_by)
+            SELECT s.tenant_id, s.id,
+                   COALESCE((SELECT max(version_no) FROM editvideo.skill_versions WHERE skill_id = s.id), 0) + 1,
+                   @versionName, s.title, s.description, s.content, @notes, @actor
+              FROM editvideo.skills s
+             WHERE s.id = @skillId AND s.tenant_id = @tenantId
+            RETURNING id;
+            """,
+            new { skillId, tenantId = _tenant.TenantId, versionName = versionName.Trim(), notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(), actor = actorUserId }, tx);
+        tx.Commit();
+
+        var version = (await ListVersionsAsync(skillId, ct)).First(v => v.Id == id);
+        return EditVideoResult<EditVideoSkillVersionRow>.Success(version);
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
@@ -129,19 +248,39 @@ public sealed partial class EditVideoSkillService
         await conn.ExecuteAsync("DELETE FROM editvideo.skills WHERE id = @id AND tenant_id = @tenantId;", new { id, tenantId = _tenant.TenantId });
     }
 
-    /// <summary>SKILL.md as installed on the customer's machine: front matter (name, description) + body.</summary>
-    public static string BuildMarkdown(EditVideoSkillRow skill)
+    private async Task<EditVideoSkillRow?> FindAsync(Guid id, CancellationToken ct) =>
+        (await ListAsync(activeOnly: false, ct)).FirstOrDefault(s => s.Id == id);
+
+    /// <summary>
+    /// SKILL.md as installed on the customer's machine: front matter (name, description) + body, and for a published
+    /// version a closing note so Claude passes the skill and version to todox_auto_edit (each video is tagged).
+    /// </summary>
+    public static string BuildMarkdown(string slug, string title, string description, string content, int? versionNo = null, string? versionName = null)
     {
         var md = new StringBuilder();
         md.Append("---\n");
-        md.Append("name: ").Append(skill.Slug).Append('\n');
+        md.Append("name: ").Append(slug).Append('\n');
         // A JSON string is valid YAML and keeps quotes, colons and line breaks in the description safe.
-        md.Append("description: ").Append(JsonSerializer.Serialize(OneLine(skill.Description), YamlSafeJson)).Append('\n');
+        md.Append("description: ").Append(JsonSerializer.Serialize(OneLine(description), YamlSafeJson)).Append('\n');
         md.Append("---\n\n");
-        md.Append("# ").Append(skill.Title.Trim()).Append("\n\n");
-        md.Append(skill.Content.Replace("\r\n", "\n").Trim()).Append('\n');
+        md.Append("# ").Append(title.Trim()).Append("\n\n");
+        md.Append(content.Replace("\r\n", "\n").Trim()).Append('\n');
+        if (versionNo is { } no)
+        {
+            md.Append("\n---\n\n");
+            md.Append($"Phiên bản skill: **v{no} – {OneLine(versionName ?? string.Empty)}** (`{slug}` v{no}).\n");
+            md.Append($"Khi gọi `todox_auto_edit`, luôn truyền `skill: \"{slug}\"` và `skillVersion: {no}` để video được đánh dấu theo phiên bản này.\n");
+            md.Append("Người dùng muốn đổi phiên bản: `todox_skill_versions` để xem, `todox_skill_use` để đặt mặc định, `todox_skill_get` để dùng một phiên bản khác cho lần này.\n");
+        }
+
         return md.ToString();
     }
+
+    public static string BuildDraftMarkdown(EditVideoSkillRow skill) =>
+        BuildMarkdown(skill.Slug, skill.Title, skill.Description, skill.Content, (skill.LatestVersionNo ?? 0) + 1, "(bản nháp)");
+
+    public static string BuildVersionMarkdown(string slug, EditVideoSkillVersionRow v) =>
+        BuildMarkdown(slug, v.Title, v.Description, v.Content, v.VersionNo, v.VersionName);
 
     public static string NormalizeSlug(string? slug) => (slug ?? string.Empty).Trim().ToLowerInvariant();
 

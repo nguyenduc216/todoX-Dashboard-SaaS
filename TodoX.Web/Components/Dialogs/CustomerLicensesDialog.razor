@@ -160,7 +160,7 @@
                     {
                         <div>
                             <MudLink Typo="Typo.caption" Color="@(s.Status == "failed" || s.ErrorCount > 0 ? Color.Error : Color.Primary)" OnClick="@(() => ToggleSession(s.Id))">
-                                @s.StartedAt.ToLocalTime().ToString("dd/MM HH:mm") · @TodoX.Web.Components.Pages.MyEditVideo.ToolLabel(s.Tool) · @TodoX.Web.Components.Pages.MyEditVideo.SessionStatusLabel(s.Status)@(s.ErrorCount > 0 ? $" · {s.ErrorCount} lỗi" : "")@(s.Client is null ? "" : $" · từ {TodoX.Web.Components.Pages.MyEditVideo.ClientLabel(s.Client)}")@(s.DeviceName is null ? "" : $" · {s.DeviceName}")@(s.AppVersion is null ? "" : $" · v{s.AppVersion}")
+                                @s.StartedAt.ToLocalTime().ToString("dd/MM HH:mm") · @TodoX.Web.Components.Pages.MyEditVideo.ToolLabel(s.Tool) · @TodoX.Web.Components.Pages.MyEditVideo.SessionStatusLabel(s.Status)@TodoX.Web.Components.Pages.MyEditVideo.SkillLabel(s)@(s.ErrorCount > 0 ? $" · {s.ErrorCount} lỗi" : "")@(s.Client is null ? "" : $" · từ {TodoX.Web.Components.Pages.MyEditVideo.ClientLabel(s.Client)}")@(s.DeviceName is null ? "" : $" · {s.DeviceName}")@(s.AppVersion is null ? "" : $" · v{s.AppVersion}")
                             </MudLink>
                             @if (_openSession == s.Id)
                             {

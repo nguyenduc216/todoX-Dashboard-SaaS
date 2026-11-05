@@ -5,6 +5,7 @@ using ModelContextProtocol.Server;
 using TodoX.EditVideoTool.Licensing;
 using TodoX.EditVideoTool.Media;
 using TodoX.EditVideoTool.Server;
+using TodoX.EditVideoTool.Setup;
 using TodoX.EditVideoTool.Status;
 
 namespace TodoX.EditVideoTool.Mcp;
@@ -24,10 +25,13 @@ public sealed class VideoTools
     private readonly ServerConnectivity _connectivity;
     private readonly AgentPaths _paths;
     private readonly Transcriber _transcriber;
+    private readonly SkillSync _skills;
 
     public VideoTools(LicenseGuard license, LicenseVerifier verifier, MediaProbe probe, ClipNormalizer normalizer,
-        RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber)
+        RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber,
+        SkillSync skills)
     {
+        _skills = skills;
         _transcriber = transcriber;
         _license = license;
         _verifier = verifier;
@@ -209,7 +213,9 @@ public sealed class VideoTools
         [Description("Existing voiceover audio file (instead of voice).")] string? voiceover = null,
         [Description("Look id from todox_styles; default TodoX.")] string? style = null,
         [Description("Brand accent color, hex, overrides the style's.")] string? accentColor = null,
-        [Description("Output .mp4 path; default: an 'output' folder next to the first clip.")] string? output = null)
+        [Description("Output .mp4 path; default: an 'output' folder next to the first clip.")] string? output = null,
+        [Description("The TodoX skill (todox-...) guiding this video, as stated at the end of that skill.")] string? skill = null,
+        [Description("That skill's version number, as stated at the end of the skill.")] int? skillVersion = null)
     {
         await using var session = await SessionLogger.StartAsync(_server, _paths, "auto_edit", ct);
         if (await ReadyProblemAsync(session, ct) is { } problem)
@@ -329,9 +335,16 @@ public sealed class VideoTools
             }), ct);
 
             session.Info("rendered", null, new { seconds = Math.Round(result.Seconds, 1), renderSeconds = Math.Round(result.Elapsed.TotalSeconds) });
+
+            // Every video is tagged with the skill version that made it: in the usage log (dashboard) and in a small
+            // file next to the video, so versions can be compared later.
+            var tag = SkillTag(skill, skillVersion);
+            WriteVideoInfo(result.OutputPath, tag, plan.Style.Name, aspect, result.Seconds);
+            await session.EndAsync("ok", tag is null ? null : new { skill = tag.Skill, skillVersion = tag.Version, skillVersionName = tag.VersionName, skillTitle = tag.Title }, ct);
             return JsonSerializer.Serialize(new
             {
                 output = result.OutputPath,
+                skill = tag is null ? null : new { tag.Skill, tag.Title, version = tag.Version, versionName = tag.VersionName },
                 seconds = Math.Round(result.Seconds, 1),
                 resolution = $"{plan.Width}x{plan.Height}",
                 style = plan.Style.Name,
@@ -347,6 +360,46 @@ public sealed class VideoTools
         {
             session.Error("auto_edit_failed", ex.Message);
             return ex.Message;
+        }
+    }
+
+    private sealed record SkillTagInfo(string Skill, int? Version, string? VersionName, string? Title);
+
+    private SkillTagInfo? SkillTag(string? skill, int? version)
+    {
+        if (string.IsNullOrWhiteSpace(skill))
+        {
+            return null;
+        }
+
+        var slug = skill.Trim();
+        var local = _skills.LoadState().Skills.GetValueOrDefault(slug);
+        // No version given: the one installed in Claude right now.
+        var v = version ?? local?.Installed ?? local?.Effective;
+        return new SkillTagInfo(slug, v, v is { } n ? local?.Find(n)?.Name : null, local?.Title);
+    }
+
+    private static void WriteVideoInfo(string videoPath, SkillTagInfo? tag, string style, string aspect, double seconds)
+    {
+        try
+        {
+            File.WriteAllText(videoPath + ".todox.json", JsonSerializer.Serialize(new
+            {
+                video = Path.GetFileName(videoPath),
+                created = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                app = StatusService.Version,
+                skill = tag?.Skill,
+                skillTitle = tag?.Title,
+                skillVersion = tag?.Version,
+                skillVersionName = tag?.VersionName,
+                style,
+                aspect,
+                seconds = Math.Round(seconds, 1)
+            }, new JsonSerializerOptions(StatusTools.Json) { WriteIndented = true }));
+        }
+        catch (IOException)
+        {
+            // The video itself is what matters; the info file is a convenience.
         }
     }
 

@@ -41,6 +41,8 @@ public sealed partial class MainWindow : Form
     private readonly Label _skillsLabel = Label("", 9.5f);
     private readonly NumericUpDown _skillHours = new() { Minimum = 1, Maximum = 48, Width = 60, BackColor = Panel, ForeColor = Ink, Font = new Font("Segoe UI", 10), Margin = new Padding(0, 6, 8, 0) };
     private readonly Label _resourceLabel = Label("", 9.5f);
+    private readonly ComboBox _skillPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Panel, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
+    private readonly ComboBox _versionPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Panel, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
     private readonly TextBox _log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Height = 110, Width = 640, BackColor = Panel, ForeColor = Muted, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9) };
     private readonly List<Button> _actions = [];
 
@@ -62,7 +64,7 @@ public sealed partial class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(700, 820);
+        ClientSize = new Size(700, 860);
         AutoScroll = true;
 
         var root = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28, 20, 28, 20), AutoScroll = true };
@@ -106,6 +108,12 @@ public sealed partial class MainWindow : Form
         skillRow.Controls.Add(_skillHours);
         skillRow.Controls.Add(new Label { Text = "giờ", AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 10, 0, 0) });
         root.Controls.Add(skillRow);
+        var pinRow = Row();
+        pinRow.Controls.Add(_skillPick);
+        pinRow.Controls.Add(_versionPick);
+        pinRow.Controls.Add(Action("Đặt làm mặc định", PinSkillAsync));
+        root.Controls.Add(pinRow);
+        _skillPick.SelectedIndexChanged += (_, _) => FillVersions();
 
         root.Controls.Add(Section("Thư mục tư liệu dự án"));
         root.Controls.Add(_resourceLabel);
@@ -275,6 +283,16 @@ public sealed partial class MainWindow : Form
         _resourceLabel.Text = $"{root}{Environment.NewLine}{projects} dự án · mỗi dự án một thư mục con; Claude mở đúng thư mục khi bạn nhắc tên dự án.";
     }
 
+    private sealed record SkillChoice(string Slug, string Text)
+    {
+        public override string ToString() => Text;
+    }
+
+    private sealed record VersionChoice(int? Version, string Text)
+    {
+        public override string ToString() => Text;
+    }
+
     private void RefreshSkills()
     {
         if (InvokeRequired)
@@ -284,10 +302,56 @@ public sealed partial class MainWindow : Form
         }
 
         var state = _skills.LoadState();
-        var names = state.Skills.Values.Select(s => s.Title).ToList();
+        var lines = state.Skills.Values.Select(s =>
+            $"• {s.Title}: dùng v{s.Effective}{(s.Pinned is null ? " (luôn bản mới nhất)" : s.Effective != s.Latest ? $" — đã có v{s.Latest}" : "")}").ToList();
         _skillsLabel.Text = state.LastSync is { } last
-            ? $"{names.Count} skill · kiểm tra lần cuối {last.ToLocalTime():dd/MM HH:mm}{(names.Count > 0 ? Environment.NewLine + string.Join(", ", names) : "")}"
+            ? $"{state.Skills.Count} skill · kiểm tra lần cuối {last.ToLocalTime():dd/MM HH:mm}{(lines.Count > 0 ? Environment.NewLine + string.Join(Environment.NewLine, lines) : "")}"
             : "Chưa tải bộ skill TodoX (cần kích hoạt license và có Claude / Codex trên máy).";
+
+        var selected = (_skillPick.SelectedItem as SkillChoice)?.Slug;
+        _skillPick.Items.Clear();
+        foreach (var (slug, skill) in state.Skills.OrderBy(s => s.Value.Category).ThenBy(s => s.Value.Title))
+        {
+            _skillPick.Items.Add(new SkillChoice(slug, skill.Category is null ? skill.Title : $"{skill.Category} · {skill.Title}"));
+        }
+
+        var index = _skillPick.Items.Cast<SkillChoice>().ToList().FindIndex(c => c.Slug == selected);
+        _skillPick.SelectedIndex = _skillPick.Items.Count == 0 ? -1 : Math.Max(index, 0);
+        if (_skillPick.Items.Count == 0)
+        {
+            _versionPick.Items.Clear();
+        }
+    }
+
+    private void FillVersions()
+    {
+        _versionPick.Items.Clear();
+        if (_skillPick.SelectedItem is not SkillChoice choice || !_skills.LoadState().Skills.TryGetValue(choice.Slug, out var skill))
+        {
+            return;
+        }
+
+        _versionPick.Items.Add(new VersionChoice(null, $"Luôn dùng bản mới nhất (v{skill.Latest})"));
+        foreach (var v in skill.Versions.OrderByDescending(v => v.Version))
+        {
+            _versionPick.Items.Add(new VersionChoice(v.Version, $"v{v.Version} – {v.Name}{(v.CreatedAt is { } at ? $" · {at.ToLocalTime():dd/MM/yyyy}" : "")}"));
+        }
+
+        _versionPick.SelectedIndex = skill.Pinned is { } p ? Math.Max(_versionPick.Items.Cast<VersionChoice>().ToList().FindIndex(c => c.Version == p), 0) : 0;
+    }
+
+    private Task PinSkillAsync()
+    {
+        if (_skillPick.SelectedItem is not SkillChoice skill || _versionPick.SelectedItem is not VersionChoice version)
+        {
+            Log("Chọn skill và phiên bản trước.");
+            return Task.CompletedTask;
+        }
+
+        var (_, message) = _skills.Pin(skill.Slug, version.Version);
+        Log(message + " Mở cuộc trò chuyện mới trong Claude / Codex để dùng.");
+        RefreshSkills();
+        return Task.CompletedTask;
     }
 
     private async Task RunHealthAsync(bool untilConnected)

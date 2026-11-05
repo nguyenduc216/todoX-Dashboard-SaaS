@@ -10,7 +10,7 @@ public sealed record SkillSyncResult(bool Ok, string Message, IReadOnlyList<stri
 {
     public bool Changed => Added.Count + Updated.Count + Removed.Count > 0;
 
-    /// <summary>One line for a Windows notification / the window log, e.g. "Skill mới: TodoX BĐS – vẽ bản đồ".</summary>
+    /// <summary>One line for a Windows notification / the window log, e.g. "Skill mới: TodoX BĐS – nhà phố v1".</summary>
     public string Describe()
     {
         if (!Ok)
@@ -25,7 +25,7 @@ public sealed record SkillSyncResult(bool Ok, string Message, IReadOnlyList<stri
 
         var parts = new List<string>();
         if (Added.Count > 0) parts.Add("Skill mới: " + string.Join(", ", Added));
-        if (Updated.Count > 0) parts.Add("Đã cập nhật: " + string.Join(", ", Updated));
+        if (Updated.Count > 0) parts.Add("Phiên bản mới: " + string.Join(", ", Updated));
         if (Removed.Count > 0) parts.Add("Đã gỡ: " + string.Join(", ", Removed));
         return string.Join(". ", parts) + ". Mở cuộc trò chuyện mới trong Claude / Codex để dùng.";
     }
@@ -34,14 +34,35 @@ public sealed record SkillSyncResult(bool Ok, string Message, IReadOnlyList<stri
 public sealed class SkillState
 {
     public DateTimeOffset? LastSync { get; set; }
-    public Dictionary<string, SkillStateEntry> Skills { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, LocalSkill> Skills { get; set; } = new(StringComparer.Ordinal);
 }
 
-public sealed record SkillStateEntry(string Title, int Version, string Hash);
+/// <summary>A TodoX skill on this machine: every version ever received, and the one the customer picked.</summary>
+public sealed class LocalSkill
+{
+    public string Title { get; set; } = string.Empty;
+    public string? Category { get; set; }
+    public List<LocalSkillVersion> Versions { get; set; } = [];
+    /// <summary>Version the customer chose as default; null = always the newest.</summary>
+    public int? Pinned { get; set; }
+    /// <summary>Version currently installed into Claude / Codex.</summary>
+    public int? Installed { get; set; }
+
+    public int? Latest => Versions.Count == 0 ? null : Versions.Max(v => v.Version);
+
+    /// <summary>The version to install: the pinned one while it exists here, otherwise the newest.</summary>
+    public int? Effective => Pinned is { } p && Versions.Any(v => v.Version == p) ? p : Latest;
+
+    public LocalSkillVersion? Find(int version) => Versions.FirstOrDefault(v => v.Version == version);
+}
+
+public sealed record LocalSkillVersion(int Version, string Name, string? Notes, DateTimeOffset? CreatedAt);
 
 /// <summary>
-/// Installs TodoX's skill library (written by TodoX in the dashboard) into Claude / Codex on this machine and keeps
-/// it current. Only folders named todox-... that this tool installed are ever touched or removed.
+/// Installs TodoX's skill library (written in the dashboard, published as numbered versions) into Claude / Codex on
+/// this machine. Every version received is kept in skills\&lt;slug&gt;\v&lt;N&gt;.md and never overwritten, so the customer can
+/// pick the version they like as the default per skill. Only folders named todox-... that this tool installed are
+/// ever touched or removed.
 /// </summary>
 public sealed partial class SkillSync
 {
@@ -64,6 +85,8 @@ public sealed partial class SkillSync
         _fixedRoots = skillRoots;
     }
 
+    private string CacheDir => Path.Combine(_paths.Root, "skills");
+
     public SkillState LoadState()
     {
         try
@@ -80,37 +103,56 @@ public sealed partial class SkillSync
         return new SkillState();
     }
 
+    /// <summary>Text of one stored version (works offline), or null when this machine does not have it.</summary>
+    public string? ReadVersion(string slug, int version)
+    {
+        var file = VersionFile(slug, version);
+        return SafeSlug().IsMatch(slug) && File.Exists(file) ? File.ReadAllText(file) : null;
+    }
+
+    /// <summary>
+    /// Makes <paramref name="version"/> the default of a skill (null = always the newest) and installs it right away.
+    /// Returns a message for the user.
+    /// </summary>
+    public (bool Ok, string Message) Pin(string slug, int? version)
+    {
+        using var guard = Lock();
+        if (!guard.Owned)
+        {
+            return (false, "Đang có một lần cập nhật skill khác chạy, thử lại sau ít giây.");
+        }
+
+        var state = LoadState();
+        if (!state.Skills.TryGetValue(slug, out var skill))
+        {
+            return (false, $"Không có skill \"{slug}\" trên máy này.");
+        }
+
+        if (version is { } v && skill.Find(v) is null)
+        {
+            return (false, $"Skill \"{skill.Title}\" không có phiên bản v{v}. Có: {string.Join(", ", skill.Versions.Select(x => "v" + x.Version))}.");
+        }
+
+        skill.Pinned = version;
+        Install(slug, skill, Roots());
+        SaveState(state);
+        var effective = skill.Find(skill.Effective!.Value)!;
+        return (true, version is null
+            ? $"{skill.Title}: luôn dùng bản mới nhất (hiện là v{effective.Version} – {effective.Name})."
+            : $"{skill.Title}: đã đặt v{effective.Version} – {effective.Name} làm mặc định.");
+    }
+
     /// <summary>Checks TodoX now and installs/updates/removes skills. Never throws for network problems.</summary>
     public async Task<SkillSyncResult> SyncAsync(bool notify, CancellationToken ct)
     {
         // Claude Desktop, Claude Code and the window may each start a tool at the same moment; one sync at a time.
-        using var mutex = new Mutex(false, @"Local\TodoX.EditVideo.SkillSync");
-        var owned = false;
-        try
+        using var guard = Lock();
+        if (!guard.Owned)
         {
-            try
-            {
-                owned = mutex.WaitOne(TimeSpan.FromSeconds(30));
-            }
-            catch (AbandonedMutexException)
-            {
-                owned = true;
-            }
-
-            if (!owned)
-            {
-                return Fail("Đang có một lần cập nhật skill khác chạy.");
-            }
-
-            return await SyncLockedAsync(notify, ct);
+            return Fail("Đang có một lần cập nhật skill khác chạy.");
         }
-        finally
-        {
-            if (owned)
-            {
-                mutex.ReleaseMutex();
-            }
-        }
+
+        return await SyncLockedAsync(notify, ct);
     }
 
     /// <summary>Background loop for a running tool: sync now, then every N hours (from the window's settings).</summary>
@@ -158,11 +200,12 @@ public sealed partial class SkillSync
         }
 
         try { File.Delete(_paths.SkillsStateFile); } catch (IOException) { }
+        try { if (Directory.Exists(CacheDir)) Directory.Delete(CacheDir, recursive: true); } catch (IOException) { }
     }
 
     private async Task<SkillSyncResult> SyncLockedAsync(bool notify, CancellationToken ct)
     {
-        var roots = _fixedRoots ?? _clients.SkillRoots();
+        var roots = Roots();
         if (roots.Count == 0)
         {
             return Fail("Chưa thấy Claude Desktop / Claude Code / Codex trên máy nên chưa cài skill.");
@@ -172,57 +215,80 @@ public sealed partial class SkillSync
         if (!response.Ok)
         {
             // Not activated / offline: keep whatever is installed, make sure the basic skill is there.
-            WriteBaseSkill(roots, serverSkills: []);
+            WriteBaseSkill(roots, serverSlugs: new HashSet<string>());
             return Fail(response.ErrorCode == "not_activated"
                 ? "Chưa kích hoạt license nên chưa tải được bộ skill TodoX."
                 : $"Chưa tải được skill từ TodoX: {response.Message ?? response.ErrorCode}");
         }
 
-        var skills = ParseSkills(response.Value);
+        var remote = ParseSkills(response.Value);
         var state = LoadState();
         var added = new List<string>();
         var updated = new List<string>();
         var removed = new List<string>();
-        var next = new Dictionary<string, SkillStateEntry>(StringComparer.Ordinal);
 
-        foreach (var skill in skills)
+        foreach (var skill in remote)
         {
-            var hash = Hash(skill.Markdown);
-            foreach (var root in roots)
+            var isNew = !state.Skills.TryGetValue(skill.Slug, out var local);
+            local ??= new LocalSkill();
+            local.Title = skill.Title;
+            local.Category = skill.Category;
+            var fresh = new List<RemoteVersion>();
+            foreach (var version in skill.Versions)
             {
-                WriteIfChanged(Path.Combine(root, skill.Slug, "SKILL.md"), skill.Markdown);
+                // A version is frozen on the server; the first copy received is kept as is.
+                var file = VersionFile(skill.Slug, version.Version);
+                if (!File.Exists(file))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                    File.WriteAllText(file, version.Markdown);
+                }
+
+                if (local.Find(version.Version) is null)
+                {
+                    local.Versions.Add(new LocalSkillVersion(version.Version, version.Name, version.Notes, version.CreatedAt));
+                    fresh.Add(version);
+                }
             }
 
-            if (!state.Skills.TryGetValue(skill.Slug, out var before))
-            {
-                added.Add(skill.Title);
-            }
-            else if (before.Hash != hash)
-            {
-                updated.Add(skill.Title);
-            }
+            local.Versions.Sort((a, b) => a.Version.CompareTo(b.Version));
+            state.Skills[skill.Slug] = local;
+            Install(skill.Slug, local, roots);
 
-            next[skill.Slug] = new SkillStateEntry(skill.Title, skill.Version, hash);
+            var newest = fresh.MaxBy(v => v.Version);
+            if (isNew)
+            {
+                added.Add($"{skill.Title} v{local.Latest}");
+            }
+            else if (newest is not null)
+            {
+                updated.Add(local.Pinned is { } pinned && pinned != newest.Version
+                    ? $"{skill.Title} v{newest.Version} \"{newest.Name}\" (bạn đang dùng v{local.Effective})"
+                    : $"{skill.Title} v{newest.Version} \"{newest.Name}\"");
+            }
         }
 
         // The basic skill is never removed: without a TodoX version it falls back to the copy built into the exe.
-        foreach (var (slug, entry) in state.Skills.Where(s => !next.ContainsKey(s.Key) && s.Key != BaseSkill))
+        var serverSlugs = remote.Select(s => s.Slug).ToHashSet(StringComparer.Ordinal);
+        foreach (var (slug, local) in state.Skills.Where(s => !serverSlugs.Contains(s.Key)).ToList())
         {
-            foreach (var root in AllRoots())
+            if (slug != BaseSkill)
             {
-                DeleteSkill(root, slug);
+                foreach (var root in AllRoots())
+                {
+                    DeleteSkill(root, slug);
+                }
             }
 
-            removed.Add(entry.Title);
+            state.Skills.Remove(slug);
+            removed.Add(local.Title);
         }
 
-        WriteBaseSkill(roots, skills);
-        state.Skills = next;
+        WriteBaseSkill(roots, serverSlugs);
         state.LastSync = DateTimeOffset.Now;
-        Directory.CreateDirectory(_paths.Root);
-        File.WriteAllText(_paths.SkillsStateFile, JsonSerializer.Serialize(state, Json));
+        SaveState(state);
 
-        var result = new SkillSyncResult(true, "ok", added, updated, removed, next.Count + (next.ContainsKey(BaseSkill) ? 0 : 1));
+        var result = new SkillSyncResult(true, "ok", added, updated, removed, state.Skills.Count + (serverSlugs.Contains(BaseSkill) ? 0 : 1));
         if (notify && result.Changed)
         {
             _notifier.Show("TodoX EditVideo – skill", result.Describe());
@@ -231,7 +297,25 @@ public sealed partial class SkillSync
         return result;
     }
 
-    internal sealed record RemoteSkill(string Slug, string Title, int Version, string Markdown);
+    /// <summary>Writes the effective version of a skill into every assistant's skill folder.</summary>
+    private void Install(string slug, LocalSkill skill, IEnumerable<string> roots)
+    {
+        if (skill.Effective is not { } version || ReadVersion(slug, version) is not { } markdown)
+        {
+            return;
+        }
+
+        foreach (var root in roots)
+        {
+            WriteIfChanged(Path.Combine(root, slug, "SKILL.md"), markdown);
+        }
+
+        skill.Installed = version;
+    }
+
+    internal sealed record RemoteVersion(int Version, string Name, string? Notes, DateTimeOffset? CreatedAt, string Markdown);
+
+    internal sealed record RemoteSkill(string Slug, string Title, string? Category, IReadOnlyList<RemoteVersion> Versions);
 
     internal static IReadOnlyList<RemoteSkill> ParseSkills(JsonElement data)
     {
@@ -243,25 +327,54 @@ public sealed partial class SkillSync
 
         foreach (var item in items.EnumerateArray())
         {
-            var slug = item.TryGetProperty("slug", out var s) ? s.GetString() : null;
-            var markdown = item.TryGetProperty("markdown", out var m) ? m.GetString() : null;
+            var slug = Str(item, "slug");
             // The slug becomes a folder name: only todox-... with safe characters is accepted.
-            if (slug is null || markdown is null || !SafeSlug().IsMatch(slug))
+            if (slug is null || !SafeSlug().IsMatch(slug))
             {
                 continue;
             }
 
-            var title = item.TryGetProperty("title", out var t) ? t.GetString() : null;
-            var version = item.TryGetProperty("version", out var v) && v.TryGetInt32(out var n) ? n : 1;
-            list.Add(new RemoteSkill(slug, string.IsNullOrWhiteSpace(title) ? slug : title, version, markdown));
+            var versions = new List<RemoteVersion>();
+            if (item.TryGetProperty("versions", out var vs) && vs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var v in vs.EnumerateArray())
+                {
+                    if (v.TryGetProperty("version", out var n) && n.TryGetInt32(out var no) && no > 0 && Str(v, "markdown") is { } md)
+                    {
+                        versions.Add(new RemoteVersion(no, Str(v, "name") ?? $"v{no}", Str(v, "notes"),
+                            v.TryGetProperty("createdAt", out var c) && c.TryGetDateTimeOffset(out var at) ? at : null, md));
+                    }
+                }
+            }
+
+            if (versions.Count == 0)
+            {
+                continue;
+            }
+
+            var title = Str(item, "title");
+            list.Add(new RemoteSkill(slug, string.IsNullOrWhiteSpace(title) ? slug : title, Str(item, "category"), versions));
         }
 
         return list;
     }
 
-    private static void WriteBaseSkill(IEnumerable<string> roots, IReadOnlyList<RemoteSkill> serverSkills)
+    private static string? Str(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+    private string VersionFile(string slug, int version) => Path.Combine(CacheDir, slug, $"v{version}.md");
+
+    private void SaveState(SkillState state)
     {
-        if (serverSkills.Any(s => s.Slug == BaseSkill))
+        Directory.CreateDirectory(_paths.Root);
+        File.WriteAllText(_paths.SkillsStateFile, JsonSerializer.Serialize(state, Json));
+    }
+
+    private IReadOnlyList<string> Roots() => _fixedRoots ?? _clients.SkillRoots();
+
+    private static void WriteBaseSkill(IEnumerable<string> roots, IReadOnlySet<string> serverSlugs)
+    {
+        if (serverSlugs.Contains(BaseSkill))
         {
             return;
         }
@@ -304,10 +417,37 @@ public sealed partial class SkillSync
         }
     }
 
-    private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
-
     private static SkillSyncResult Fail(string message) => new(false, message, [], [], [], 0);
 
     [GeneratedRegex("^todox-[a-z0-9]+(-[a-z0-9]+)*$")]
     private static partial Regex SafeSlug();
+
+    private static LockGuard Lock() => new(new Semaphore(1, 1, @"Local\TodoX.EditVideo.SkillSync"));
+
+    /// <summary>
+    /// Cross-process lock shared by every running copy of the tool. A semaphore, not a mutex: the sync awaits while
+    /// holding it and may resume on another thread.
+    /// </summary>
+    private sealed class LockGuard : IDisposable
+    {
+        private readonly Semaphore _semaphore;
+
+        public LockGuard(Semaphore semaphore)
+        {
+            _semaphore = semaphore;
+            Owned = semaphore.WaitOne(TimeSpan.FromSeconds(30));
+        }
+
+        public bool Owned { get; }
+
+        public void Dispose()
+        {
+            if (Owned)
+            {
+                _semaphore.Release();
+            }
+
+            _semaphore.Dispose();
+        }
+    }
 }

@@ -23,5 +23,7 @@ The `todox` MCP tools run on the user's own machine; videos never leave it.
    with a different `aspect` — do not re-encode the result yourself.
 
 Do not try to reproduce or inspect how the tool edits; just pass the user's intent.
-Other TodoX skills (named todox-...) cover specific kinds of video; they use these same tools.
-`todox_skills_update` refreshes them on request.
+Other TodoX skills (named todox-...) cover specific kinds of video; they use these same tools. Each states
+its version at the end: pass that `skill` and `skillVersion` to `todox_auto_edit` so the video is tagged.
+`todox_skill_versions` / `todox_skill_use` / `todox_skill_get` let the user see, set as default, or use once
+another version; `todox_skills_update` refreshes the library on request.
