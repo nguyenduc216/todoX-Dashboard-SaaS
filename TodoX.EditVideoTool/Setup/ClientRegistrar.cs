@@ -33,6 +33,27 @@ public sealed class ClientRegistrar
             File.Exists(CodexConfig) && File.ReadAllText(CodexConfig).Contains($"[mcp_servers.{ServerName}]"), CodexConfig)
     ];
 
+    /// <summary>
+    /// Skill folders of the assistants on this machine. Claude Desktop (Code tab) and Claude Code share
+    /// ~/.claude/skills; Codex reads ~/.codex/skills.
+    /// </summary>
+    public IReadOnlyList<string> SkillRoots()
+    {
+        var detected = Detect(string.Empty).Where(c => c.Detected).Select(c => c.Id).ToHashSet();
+        var roots = new List<string>();
+        if (detected.Contains("claude-desktop") || detected.Contains("claude-code"))
+        {
+            roots.Add(Path.Combine(_home, ".claude", "skills"));
+        }
+
+        if (detected.Contains("codex"))
+        {
+            roots.Add(Path.Combine(_home, ".codex", "skills"));
+        }
+
+        return roots;
+    }
+
     public IReadOnlyList<string> RegisterAll(string exePath, string skillMarkdown)
     {
         var done = new List<string>();

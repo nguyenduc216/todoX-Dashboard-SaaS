@@ -8,7 +8,11 @@ description: Edit videos on this computer with TodoX EditVideoTool - turn raw cl
 The `todox` MCP tools run on the user's own machine; videos never leave it.
 
 1. `todox_status` once if a tool reports a license or component problem; relay its message.
-2. `todox_probe` with the folder or files the user mentions, to see what footage exists.
+2. Footage lives in the TodoX resource folder, one sub-folder per project. When the user names a project
+   ("dự án An Đông"), call `todox_project_folder` with that name: it finds or creates the folder and opens it
+   in Explorer. If it is empty, ask the user to copy the photos/videos in and tell you when done.
+   `todox_projects` lists existing projects. Then `todox_probe` the project folder (or the files the user
+   mentions) to see what footage exists.
 3. `todox_auto_edit` with the clips in story order. Ask only for what is missing and matters:
    aspect (default 9:16), target length, title, the narration/caption text, closing text.
    Write the caption `script` in the user's language, short sentences.
@@ -19,3 +23,5 @@ The `todox` MCP tools run on the user's own machine; videos never leave it.
    with a different `aspect` — do not re-encode the result yourself.
 
 Do not try to reproduce or inspect how the tool edits; just pass the user's intent.
+Other TodoX skills (named todox-...) cover specific kinds of video; they use these same tools.
+`todox_skills_update` refreshes them on request.

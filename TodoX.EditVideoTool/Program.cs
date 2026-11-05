@@ -7,6 +7,7 @@ using TodoX.EditVideoTool.Components;
 using TodoX.EditVideoTool.Licensing;
 using TodoX.EditVideoTool.Mcp;
 using TodoX.EditVideoTool.Media;
+using TodoX.EditVideoTool.Projects;
 using TodoX.EditVideoTool.Server;
 using TodoX.EditVideoTool.Status;
 using TodoX.EditVideoTool.Setup;
@@ -124,6 +125,8 @@ static void AddAgentServices(IServiceCollection services)
     services.AddSingleton<HealthCheck>();
     services.AddSingleton<Installer>();
     services.AddSingleton<Updater>();
+    services.AddSingleton<SkillSync>();
+    services.AddSingleton<ProjectFolders>();
 }
 
 static ServiceProvider BuildServices()
@@ -167,5 +170,8 @@ static async Task RunMcpServerAsync(string[] args)
             // Updates must never break the MCP session.
         }
     });
+    // Skill library: install/refresh TodoX skills now and every few hours while Claude/Codex keeps us running.
+    var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+    _ = Task.Run(() => host.Services.GetRequiredService<SkillSync>().RunPeriodicallyAsync(lifetime.ApplicationStopping));
     await host.RunAsync();
 }

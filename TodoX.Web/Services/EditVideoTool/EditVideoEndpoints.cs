@@ -108,6 +108,18 @@ public static class EditVideoEndpoints
                 : ToResult(result);
         }).DisableAntiforgery();
 
+        // ---- TodoX skill library: the tool installs every active skill into Claude / Codex
+        group.MapGet("/skills", async (HttpContext http, EditVideoLicenseService licenses, EditVideoSkillService skills, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return ToResult(auth);
+            }
+
+            return Results.Json(new { success = true, data = new { skills = await skills.ListFilesAsync(ct) } });
+        });
+
         // ---- voices (Vbee through TodoX's account)
         group.MapGet("/voices", async (HttpContext http, EditVideoLicenseService licenses, EditVideoVoiceService voices, CancellationToken ct) =>
         {

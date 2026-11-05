@@ -61,6 +61,9 @@ public sealed class TodoXServerClient
     public Task<ServerResult<JsonElement>> TtsStatusAsync(Guid jobId, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"tts/{jobId}", null, true, ct, TimeSpan.FromSeconds(60));
 
+    public Task<ServerResult<JsonElement>> SkillsAsync(CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, "skills", null, true, ct, TimeSpan.FromSeconds(30));
+
     public Task<ServerResult<JsonElement>> LatestReleaseAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "releases/latest", null, false, ct, TimeSpan.FromSeconds(15));
 

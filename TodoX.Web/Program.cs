@@ -300,6 +300,7 @@ builder.Services.AddScoped<EditVideoLicenseService>();
 builder.Services.AddScoped<EditVideoUsageService>();
 builder.Services.AddScoped<EditVideoPlanService>();
 builder.Services.AddScoped<EditVideoVoiceService>();
+builder.Services.AddScoped<EditVideoSkillService>();
 builder.Services.AddSingleton<EditVideoReleaseService>();
 builder.Services.AddScoped<ReupCampaignRepository>();
 builder.Services.AddScoped<ReupLogService>();

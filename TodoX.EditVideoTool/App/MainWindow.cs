@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
 using TodoX.EditVideoTool.Licensing;
+using TodoX.EditVideoTool.Projects;
 using TodoX.EditVideoTool.Server;
 using TodoX.EditVideoTool.Setup;
 using TodoX.EditVideoTool.Status;
@@ -29,12 +30,17 @@ public sealed partial class MainWindow : Form
     private readonly HealthCheck _health;
     private readonly Installer _installer;
     private readonly Updater _updater;
+    private readonly SkillSync _skills;
+    private readonly AgentPaths _paths;
     private readonly CancellationTokenSource _closing = new();
 
     private readonly Label _licenseState = Label("", 11);
     private readonly TextBox _keyBox = new() { Width = 520, Font = new Font("Segoe UI", 10), BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Dán license key TodoX (tdxv_...)" };
     private readonly ListView _checks = new() { View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.None, Height = 190, Width = 640, BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 9.5f) };
     private readonly Label _clientsLabel = Label("", 9.5f);
+    private readonly Label _skillsLabel = Label("", 9.5f);
+    private readonly NumericUpDown _skillHours = new() { Minimum = 1, Maximum = 48, Width = 60, BackColor = Panel, ForeColor = Ink, Font = new Font("Segoe UI", 10), Margin = new Padding(0, 6, 8, 0) };
+    private readonly Label _resourceLabel = Label("", 9.5f);
     private readonly TextBox _log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Height = 110, Width = 640, BackColor = Panel, ForeColor = Muted, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9) };
     private readonly List<Button> _actions = [];
 
@@ -45,6 +51,8 @@ public sealed partial class MainWindow : Form
         _health = services.GetRequiredService<HealthCheck>();
         _installer = services.GetRequiredService<Installer>();
         _updater = services.GetRequiredService<Updater>();
+        _skills = services.GetRequiredService<SkillSync>();
+        _paths = services.GetRequiredService<AgentPaths>();
 
         Text = "TodoX EditVideo";
         Icon = WindowsNotifier.AppIcon();
@@ -54,7 +62,7 @@ public sealed partial class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(700, 760);
+        ClientSize = new Size(700, 820);
         AutoScroll = true;
 
         var root = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28, 20, 28, 20), AutoScroll = true };
@@ -90,13 +98,41 @@ public sealed partial class MainWindow : Form
         clientRow.Controls.Add(Action("Kết nối Claude / Codex", ConnectAsync));
         root.Controls.Add(clientRow);
 
+        root.Controls.Add(Section("Skill TodoX"));
+        root.Controls.Add(_skillsLabel);
+        var skillRow = Row();
+        skillRow.Controls.Add(Action("Cập nhật skill", () => SyncSkillsAsync(notify: false)));
+        skillRow.Controls.Add(new Label { Text = "Tự kiểm tra mỗi", AutoSize = true, ForeColor = Muted, Margin = new Padding(8, 10, 6, 0) });
+        skillRow.Controls.Add(_skillHours);
+        skillRow.Controls.Add(new Label { Text = "giờ", AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 10, 0, 0) });
+        root.Controls.Add(skillRow);
+
+        root.Controls.Add(Section("Thư mục tư liệu dự án"));
+        root.Controls.Add(_resourceLabel);
+        var resourceRow = Row();
+        resourceRow.Controls.Add(Action("Mở thư mục", OpenResourcesAsync));
+        resourceRow.Controls.Add(Action("Đổi thư mục...", ChangeResourcesAsync));
+        root.Controls.Add(resourceRow);
+
         root.Controls.Add(Section("Nhật ký"));
         root.Controls.Add(_log);
+
+        var settings = UserSettings.Load(_paths);
+        _skillHours.Value = Math.Clamp(settings.SkillSyncHours, 1, 48);
+        _skillHours.ValueChanged += (_, _) =>
+        {
+            var current = UserSettings.Load(_paths);
+            current.SkillSyncHours = (int)_skillHours.Value;
+            current.Save(_paths);
+        };
+        RefreshResources();
+        RefreshSkills();
 
         Shown += async (_, _) =>
         {
             RefreshClients();
             await RefreshLicenseAsync();
+            _ = SkillLoopAsync();
             await RunHealthAsync(untilConnected: true);
         };
         FormClosing += (_, _) => _closing.Cancel();
@@ -135,6 +171,7 @@ public sealed partial class MainWindow : Form
         if (result.IsUsable)
         {
             _keyBox.Clear();
+            await SyncSkillsAsync(notify: false);
         }
 
         await RefreshLicenseAsync();
@@ -172,6 +209,85 @@ public sealed partial class MainWindow : Form
         Log(done.Count > 0 ? $"Đã kết nối: {string.Join(", ", done)}. Khởi động lại các ứng dụng này." : "Chưa thấy Claude Desktop / Claude Code / Codex trên máy này.");
         RefreshClients();
         return Task.CompletedTask;
+    }
+
+    /// <summary>Skills are checked when the window opens and then every N hours while it stays open.</summary>
+    private async Task SkillLoopAsync()
+    {
+        try
+        {
+            while (!_closing.IsCancellationRequested)
+            {
+                var ok = await SyncSkillsAsync(notify: true);
+                await Task.Delay(ok ? UserSettings.Load(_paths).SkillSyncInterval : TimeSpan.FromMinutes(30), _closing.Token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task<bool> SyncSkillsAsync(bool notify)
+    {
+        var result = await Task.Run(() => _skills.SyncAsync(notify, _closing.Token));
+        Log(result.Describe());
+        RefreshSkills();
+        return result.Ok;
+    }
+
+    private Task OpenResourcesAsync()
+    {
+        var root = UserSettings.Load(_paths).EffectiveResourceRoot;
+        if (!ProjectFolders.Open(root))
+        {
+            Log($"Không mở được thư mục {root}.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task ChangeResourcesAsync()
+    {
+        var settings = UserSettings.Load(_paths);
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Chọn thư mục chứa tư liệu các dự án video (mỗi dự án một thư mục con)",
+            UseDescriptionForTitle = true,
+            InitialDirectory = settings.EffectiveResourceRoot,
+            ShowNewFolderButton = true
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            settings.ResourceRoot = dialog.SelectedPath;
+            settings.Save(_paths);
+            Log($"Thư mục tư liệu dự án: {dialog.SelectedPath}");
+            RefreshResources();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void RefreshResources()
+    {
+        var root = UserSettings.Load(_paths).EffectiveResourceRoot;
+        Directory.CreateDirectory(root);
+        var projects = Directory.EnumerateDirectories(root).Count();
+        _resourceLabel.Text = $"{root}{Environment.NewLine}{projects} dự án · mỗi dự án một thư mục con; Claude mở đúng thư mục khi bạn nhắc tên dự án.";
+    }
+
+    private void RefreshSkills()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(RefreshSkills);
+            return;
+        }
+
+        var state = _skills.LoadState();
+        var names = state.Skills.Values.Select(s => s.Title).ToList();
+        _skillsLabel.Text = state.LastSync is { } last
+            ? $"{names.Count} skill · kiểm tra lần cuối {last.ToLocalTime():dd/MM HH:mm}{(names.Count > 0 ? Environment.NewLine + string.Join(", ", names) : "")}"
+            : "Chưa tải bộ skill TodoX (cần kích hoạt license và có Claude / Codex trên máy).";
     }
 
     private async Task RunHealthAsync(bool untilConnected)

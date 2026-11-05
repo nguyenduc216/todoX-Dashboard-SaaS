@@ -14,6 +14,8 @@ public sealed class AgentPaths
     public string ComponentsDir => Path.Combine(Root, "components");
     public string LicenseFile => Path.Combine(Root, "license.json");
     public string LogsDir => Path.Combine(Root, "logs");
+    public string SettingsFile => Path.Combine(Root, "settings.json");
+    public string SkillsStateFile => Path.Combine(Root, "skills.json");
 
     public static AgentPaths Default()
     {
