@@ -63,7 +63,7 @@ public static class PromptAssistantEndpoints
                 {productionContract}
                 Treat the user's text as a creative brief, not as narration to reproduce verbatim. You may create a hook and develop a complete fictional story with scenes, dialogue, camera direction and visual effects where appropriate. A call to action is optional unless the user or an applicable business template requires one. Do not ask for confirmation when the brief is sufficient to create a story. If the user explicitly requires verbatim narration, preserve that wording and do not invent additional spoken lines. Do not invent unverified factual claims from source material.
                 The user requests a target video duration of {targetDuration} seconds. Choose the scene count yourself; do not use a fixed scene count.
-                Keep every scene duration_seconds an integer from 4 through 8 inclusive. Get the total as close to the target as possible while prioritizing coherent content, semantic scene boundaries, and valid scene durations. Never create a scene outside that range. Set the root duration to the sum of scene durations.
+                Keep every scene duration_seconds an integer from {PromptAssistantVideoOutputValidator.MinSceneSeconds} through {PromptAssistantVideoOutputValidator.MaxSceneSeconds} inclusive. Get the total as close to the target as possible while prioritizing coherent content, semantic scene boundaries, and valid scene durations. Never create a scene outside that range. Set the root duration to the sum of scene durations.
 
                 For every scene return scene_purpose, duration_seconds, image_prompt, motion_prompt, voice, and tts_rate. Set tts_rate to a positive JSON number representing speech rate; use 1.0 by default.
                 Keep the existing TodoX JSON schema and return final JSON only, with no markdown fence or explanation.
@@ -78,7 +78,7 @@ public static class PromptAssistantEndpoints
             {productionContract}
             Treat all user text below as the exact source content for the video's narration. Preserve every idea, its meaning, and its original order. Do not rewrite, paraphrase, omit, or add source narration. Do not invent a new hook, conclusion, call to action, or other content; keep the opening from the source.
             Analyze the source into content units, using punctuation (periods, commas, questions, exclamations), line breaks, and semantic boundaries as cues. Do not create one scene per punctuation mark. Merge units that are too short and split long units at semantic boundaries while preserving the source wording and order. Decide the scene count yourself; do not use a fixed scene count.
-            Keep every scene duration_seconds an integer from 4 through 8 inclusive. Never create a scene outside that range. Set the root duration to the sum of scene durations.
+            Keep every scene duration_seconds an integer from {PromptAssistantVideoOutputValidator.MinSceneSeconds} through {PromptAssistantVideoOutputValidator.MaxSceneSeconds} inclusive. Never create a scene outside that range. Set the root duration to the sum of scene durations.
 
             For every scene return scene_purpose, duration_seconds, image_prompt, motion_prompt, voice, and tts_rate. Distribute the source wording verbatim across voice fields. Set tts_rate to a positive JSON number representing speech rate; use 1.0 by default.
             Keep the existing TodoX JSON schema and return final JSON only, with no markdown fence or explanation.

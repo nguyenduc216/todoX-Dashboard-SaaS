@@ -19,7 +19,7 @@ public sealed class PromptAssistantEndpointsTests
         Assert.Contains("punctuation", input, StringComparison.Ordinal);
         Assert.Contains("semantic boundaries", input, StringComparison.Ordinal);
         Assert.Contains("Decide the scene count yourself", input, StringComparison.Ordinal);
-        Assert.Contains("integer from 4 through 8", input, StringComparison.Ordinal);
+        Assert.Contains("integer from 4 through 15", input, StringComparison.Ordinal);
         Assert.Contains("positive JSON number", input, StringComparison.Ordinal);
         Assert.DoesNotContain("1.0 through 1.2", input, StringComparison.Ordinal);
         Assert.DoesNotContain("Scene count: 7", input, StringComparison.Ordinal);

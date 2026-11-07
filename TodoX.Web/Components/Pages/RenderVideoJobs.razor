@@ -2129,8 +2129,10 @@ else
 
         }
 
-        // Options arrive in the service's configured model order; the first one is the default.
-        return _sceneVideoModelOptions.First();
+        // Options arrive in the service's configured model order; default to the first model that
+        // offers the scene's exact duration, else the first model.
+        return _sceneVideoModelOptions.FirstOrDefault(option => option.Durations.Contains(scene.DurationSeconds))
+               ?? _sceneVideoModelOptions.First();
 
     }
 

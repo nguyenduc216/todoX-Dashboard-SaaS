@@ -402,7 +402,8 @@ string ResolveModelKey(VideoProjectSceneDto scene){
      || string.Equals(x.Key.Replace('|','/'),k,StringComparison.OrdinalIgnoreCase));
    if(selected is not null) return selected.Key;
  }
- return _opts.FirstOrDefault()?.Key ?? string.Empty;
+ // Default: first model (service priority order) that offers the scene's exact duration.
+ return (_opts.FirstOrDefault(x=>x.Durations.Contains(scene.DurationSeconds)) ?? _opts.FirstOrDefault())?.Key ?? string.Empty;
 }
 async Task HandleModelChangedAsync(VideoProjectSceneDto scene, string key){
  var opt = _opts.FirstOrDefault(x=>string.Equals(x.Key,key,StringComparison.OrdinalIgnoreCase));
