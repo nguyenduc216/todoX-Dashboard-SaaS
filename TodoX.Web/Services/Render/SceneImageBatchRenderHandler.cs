@@ -21,6 +21,13 @@ public sealed class SceneImageBatchInput
     public long? CharacterId { get; set; }
     public string? CharacterReferenceObjectKey { get; set; }
     public string? CharacterReferenceUrl { get; set; }
+    /// <summary>
+    /// Linked scene ("Video liên kết"): last frame of the previous scene video. When set it replaces the
+    /// character reference for the scenes in this batch and the prompt asks for a seamless continuation.
+    /// </summary>
+    public Guid? LinkedReferenceMediaId { get; set; }
+    public string? LinkedReferenceObjectKey { get; set; }
+    public string? LinkedReferenceUrl { get; set; }
     public Guid UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public string? CreatedBy { get; set; }
@@ -166,6 +173,10 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         var imageWorkScenes = billingScenes
             .Where(x => input.SceneIds is null || input.SceneIds.Contains(x.Id))
             .Where(x => ShouldRenderScene(x, input.OnlyMissingOrFailed))
+            // Linked scenes get their image from the previous scene's last frame (RVideoSceneLinkService),
+            // never from an ordinary batch.
+            .Where(x => input.LinkedReferenceMediaId is not null
+                        || !TodoX.Web.Services.VideoRender.RVideoSceneLink.IsLinked(x, billingScenes))
             .ToList();
         var activeSceneIds = new HashSet<long>();
         foreach (var scene in imageWorkScenes)
@@ -186,6 +197,15 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
         var (referenceMediaId, referenceUrl, referenceObjectKey, characterPrompt) =
             await ResolveCharacterReferenceAsync(input, ct);
+        if (input.LinkedReferenceMediaId is Guid linkedMediaId)
+        {
+            referenceMediaId = linkedMediaId;
+            referenceUrl = input.LinkedReferenceUrl;
+            referenceObjectKey = input.LinkedReferenceObjectKey;
+            characterPrompt = string.IsNullOrWhiteSpace(characterPrompt)
+                ? TodoX.Web.Services.VideoRender.RVideoSceneLink.ContinuationInstruction
+                : TodoX.Web.Services.VideoRender.RVideoSceneLink.ContinuationInstruction + " " + characterPrompt;
+        }
 
         foreach (var scene in imageWorkScenes)
         {

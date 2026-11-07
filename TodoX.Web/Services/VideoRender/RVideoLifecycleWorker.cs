@@ -47,11 +47,12 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var catalog = scope.ServiceProvider.GetRequiredService<IAiStudioCatalogService>();
                 var versions = scope.ServiceProvider.GetRequiredService<ISceneMediaVersioningService>();
                 var finalization = scope.ServiceProvider.GetRequiredService<IRVideoProjectFinalizationService>();
+                var sceneLinks = scope.ServiceProvider.GetService<IRVideoSceneLinkService>();
                 foreach (var setting in settings)
                 {
                     try
                     {
-                        await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, finalizer, autoChain, versions, finalization, factory, tenant, catalog, stoppingToken);
+                        await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, finalizer, autoChain, versions, finalization, factory, tenant, catalog, stoppingToken, sceneLinks);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
                     catch (Exception ex)
@@ -73,7 +74,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
     }
 
-    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, IRVideoSceneAudioAutoChainService audioAutoChain, IRVideoSceneMediaFinalizerService finalizer, IRVideoSceneVideoAutoChainService autoChain, ISceneMediaVersioningService versions, IRVideoProjectFinalizationService finalization, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
+    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, IRVideoSceneAudioAutoChainService audioAutoChain, IRVideoSceneMediaFinalizerService finalizer, IRVideoSceneVideoAutoChainService autoChain, ISceneMediaVersioningService versions, IRVideoProjectFinalizationService finalization, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct, IRVideoSceneLinkService? sceneLinks = null)
     {
         var project = await repo.GetProjectAsync(setting.ProjectId, ct);
         if (project is null || project.Scenes.Count == 0) return;
@@ -142,8 +143,14 @@ public sealed class RVideoLifecycleWorker : BackgroundService
 
         var userId = project.UserId ?? Guid.Empty;
         var isAuto = string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase);
+        // Linked scenes ("Video liên kết") get their image from the previous scene's last frame instead.
+        var orderedScenes = project.Scenes.OrderBy(x => x.SceneIndex).ToList();
+        var linkedSceneIds = usesSharedReferenceImage
+            ? new HashSet<long>()
+            : orderedScenes.Where(x => RVideoSceneLink.IsLinked(x, orderedScenes)).Select(x => x.Id).ToHashSet();
         var imageSceneIds = isAuto && !usesSharedReferenceImage
             ? sceneStates
+                .Where(x => !linkedSceneIds.Contains(x.SceneId))
                 .Where(RVideoRules.NeedsImageWork)
                 .Select(x => x.SceneId)
                 .ToArray()
@@ -196,11 +203,24 @@ public sealed class RVideoLifecycleWorker : BackgroundService
             }, project.Id, ct);
         }
 
+        var linkedNotReady = new HashSet<long>();
+        if (isAuto && linkedSceneIds.Count > 0)
+        {
+            if (sceneLinks is not null)
+                await sceneLinks.AdvanceAsync(project, setting, ct);
+            foreach (var linked in orderedScenes.Where(x => linkedSceneIds.Contains(x.Id)))
+            {
+                var previousVideo = await versions.GetSelectedVideoVersionAsync(RVideoSceneLink.Previous(linked, orderedScenes)!.Id, ct);
+                if (!RVideoSceneLink.IsLinkCurrent(linked, previousVideo))
+                    linkedNotReady.Add(linked.Id);
+            }
+        }
         var readyScenes = isAuto
             ? sceneStates
                 .Where(x => x.IsImageReady || x.UsesSharedReferenceImage)
                 .Select(x => x.SceneId)
                 .Except(activeSceneIds.VideoSceneIds)
+                .Except(linkedNotReady)
                 .ToArray()
             : Array.Empty<long>();
         foreach (var sceneId in project.Scenes

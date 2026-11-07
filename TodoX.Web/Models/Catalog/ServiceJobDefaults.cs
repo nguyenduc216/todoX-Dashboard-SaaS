@@ -30,6 +30,8 @@ public sealed class ServiceJobDefaults
     public string? CharacterProductMode { get; set; }
     /// <summary>RVideo scene-video model order ("provider|model|mode" keys); null = default order.</summary>
     public List<string>? VideoModelOrder { get; set; }
+    /// <summary>RVideo "Video liên kết" default for new projects of this service.</summary>
+    public bool? LinkedScenes { get; set; }
 }
 
 public static class ServiceJobDefaultsCodec

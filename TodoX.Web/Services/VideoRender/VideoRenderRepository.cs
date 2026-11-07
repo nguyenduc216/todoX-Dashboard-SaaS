@@ -628,6 +628,40 @@ public sealed class VideoRenderRepository
         }
     }
 
+    /// <summary>Updates only the scene metadata JSON (scene_prompt); status and media columns are untouched.</summary>
+    public async Task UpdateScenePromptOnlyAsync(long sceneId, string scenePrompt, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.video_project_scenes
+               SET scene_prompt=@scenePrompt, updated_at=now()
+             WHERE id=@sceneId AND tenant_id=@tenant;
+            """,
+            new { sceneId, scenePrompt, tenant = _tenant.TenantId });
+    }
+
+    /// <summary>Scene split: shortens part 1 and updates its prompts; media, status and history are untouched.</summary>
+    public async Task UpdateSceneForSplitAsync(long sceneId, int durationSeconds, string? videoPrompt, string? voiceText,
+        string scenePrompt, string title, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.video_project_scenes
+               SET duration_seconds=@durationSeconds,
+                   video_prompt=COALESCE(@videoPrompt, video_prompt),
+                   voice_text=@voiceText,
+                   scene_prompt=@scenePrompt,
+                   title=@title,
+                   updated_at=now()
+             WHERE id=@sceneId AND tenant_id=@tenant;
+            """,
+            new { sceneId, durationSeconds, videoPrompt, voiceText, scenePrompt, title, tenant = _tenant.TenantId });
+    }
+
     public async Task UpdateVideoOperationSceneAsync(Guid ownerJobId, long sceneId, string status,
         string? imageUrl = null, string? imagePath = null, string? videoUrl = null, string? videoPath = null,
         string? errorMessage = null, string? title = null, string? scenePrompt = null, string? imagePrompt = null,
@@ -1188,7 +1222,7 @@ public sealed class VideoRenderRepository
     private static string AspectRatioLabel(string aspectRatio)
         => string.Equals(aspectRatio, "16:9", StringComparison.Ordinal) ? "horizontal 16:9" : "vertical 9:16";
 
-    private static bool CanAccessProject(VideoProjectDto project, CurrentUserSession user)
+    internal static bool CanAccessProject(VideoProjectDto project, CurrentUserSession user)
         => CanCrossCustomer(user)
            || project.UserId == user.UserId
            || (user.CustomerId is not null && project.CustomerId == user.CustomerId);

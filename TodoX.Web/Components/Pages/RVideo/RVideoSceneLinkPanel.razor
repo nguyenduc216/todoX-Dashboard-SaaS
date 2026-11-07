@@ -1,0 +1,158 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.VideoRender
+@inject AuthStateService AuthState
+@inject IRVideoSceneLinkService SceneLinks
+@inject IRVideoSceneSplitService SceneSplit
+@inject ISceneMediaVersioningService Versions
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+@* Per-scene "Video liên kết" controls: link mode, relink prompt when the previous clip changed,
+   and the split suggestion when the scene video could not be produced. *@
+<div class="rvideo-scene-link-panel" data-testid="rvideo-scene-link-panel" style="display:flex; flex-direction:column; gap:8px; margin-top:8px">
+    @if (_previous is not null)
+    {
+        <MudSelect T="string" Label="Nối từ cảnh trước" Value="@(_mode ?? NoneValue)" ValueChanged="OnModeChangedAsync"
+                   Dense="true" Variant="Variant.Outlined" Disabled="@_busy">
+            @if (!_isSplitPart)
+            {
+                <MudSelectItem T="string" Value="@NoneValue">Không nối (cảnh độc lập)</MudSelectItem>
+            }
+            <MudSelectItem T="string" Value="@RVideoSceneLinkModes.Regenerate">Tạo ảnh mới từ khung cuối cảnh trước</MudSelectItem>
+            <MudSelectItem T="string" Value="@RVideoSceneLinkModes.Frame">Dùng thẳng khung cuối cảnh trước</MudSelectItem>
+        </MudSelect>
+        @if (_mode is not null && !_previousHasVideo)
+        {
+            <MudText Typo="Typo.caption">Cảnh này sẽ bắt đầu sau khi video cảnh @_previous.SceneIndex hoàn tất.</MudText>
+        }
+        @if (_stale)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">
+                Video cảnh @_previous.SceneIndex đã thay đổi. Nối lại cảnh này từ khung cuối mới?
+                Sau khi có ảnh mới, bấm "Tạo lượt video mới" để tạo lại video (lịch sử video cũ vẫn được giữ).
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Class="ml-2"
+                           Disabled="@_busy" OnClick="RelinkAsync">Nối lại từ cảnh trước</MudButton>
+            </MudAlert>
+        }
+        else if (_needsFirstLink)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">
+                Video cảnh @_previous.SceneIndex đã xong. Chế độ tự động sẽ tự tạo ảnh nối tiếp; ở chế độ duyệt từng bước, bấm để tạo.
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Class="ml-2"
+                           Disabled="@_busy" OnClick="RelinkAsync">Tạo ảnh nối tiếp</MudButton>
+            </MudAlert>
+        }
+    }
+    @if (_canSplit)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true">
+            Không tạo được video cho cảnh @Scene.DurationSeconds giây. Gợi ý: tách thành 2 cảnh
+            @($"{RVideoSceneSplit.SplitDuration(Scene.DurationSeconds).First}s + {RVideoSceneSplit.SplitDuration(Scene.DurationSeconds).Second}s"),
+            cảnh sau nối tiếp từ khung cuối của cảnh trước.
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" Class="ml-2"
+                       Disabled="@_busy" OnClick="SplitAsync">Tách thành 2 cảnh</MudButton>
+        </MudAlert>
+    }
+</div>
+
+@code {
+    private const string NoneValue = "none";
+
+    [Parameter] public long ProjectId { get; set; }
+    [Parameter] public VideoProjectSceneDto Scene { get; set; } = default!;
+    [Parameter] public IReadOnlyList<VideoProjectSceneDto> Scenes { get; set; } = Array.Empty<VideoProjectSceneDto>();
+    [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>Raised after a split with the id of part 1, so the page can start its new video.</summary>
+    [Parameter] public EventCallback<long> OnSplit { get; set; }
+
+    private VideoProjectSceneDto? _previous;
+    private string? _mode;
+    private bool _isSplitPart;
+    private bool _previousHasVideo;
+    private bool _stale;
+    private bool _needsFirstLink;
+    private bool _canSplit;
+    private bool _busy;
+    private string? _loadedKey;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var ordered = Scenes.OrderBy(x => x.SceneIndex).ToList();
+        _previous = RVideoSceneLink.Previous(Scene, ordered);
+        // The page re-renders often (polling); only re-query versions when either scene row changed.
+        var key = $"{Scene.Id}|{Scene.SceneIndex}|{Scene.Status}|{Scene.UpdatedAt:O}|{Scene.ScenePrompt?.GetHashCode()}|"
+                  + $"{_previous?.Id}|{_previous?.Status}|{_previous?.UpdatedAt:O}";
+        if (key == _loadedKey) return;
+        _loadedKey = key;
+        var metadata = ScenePromptMetadata.FromScene(Scene);
+        _mode = RVideoSceneLink.GetMode(metadata);
+        _isSplitPart = metadata.Extra.ContainsKey(RVideoSceneSplit.SplitFromKey);
+        _stale = false;
+        _needsFirstLink = false;
+        _previousHasVideo = false;
+        var ownVideo = await Versions.GetSelectedVideoVersionAsync(Scene.Id);
+        var hasOwnVideo = RVideoSceneLink.IsCompleted(ownVideo);
+        if (_previous is not null && _mode is not null)
+        {
+            var previousVideo = await Versions.GetSelectedVideoVersionAsync(_previous.Id);
+            _previousHasVideo = RVideoSceneLink.IsCompleted(previousVideo);
+            var linkCurrent = RVideoSceneLink.IsLinkCurrent(Scene, previousVideo);
+            _stale = _previousHasVideo && hasOwnVideo && !linkCurrent;
+            _needsFirstLink = _previousHasVideo && !hasOwnVideo && !linkCurrent && !await Versions.HasActiveImageVersionAsync(Scene.Id);
+        }
+        _canSplit = !hasOwnVideo
+                    && string.Equals(Scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase)
+                    && RVideoSceneSplit.CanSplit(Scene.DurationSeconds);
+    }
+
+    private async Task OnModeChangedAsync(string value)
+    {
+        if (AuthState.CurrentUser is not { } user) return;
+        _busy = true;
+        try
+        {
+            var result = await SceneLinks.SetLinkModeAsync(ProjectId, Scene.Id, value == NoneValue ? null : value, user);
+            Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+            if (result.Started) await OnChanged.InvokeAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RelinkAsync()
+    {
+        if (AuthState.CurrentUser is not { } user) return;
+        _busy = true;
+        try
+        {
+            var result = await SceneLinks.RelinkSceneForUserAsync(ProjectId, Scene.Id, user);
+            Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+            if (result.Started) await OnChanged.InvokeAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SplitAsync()
+    {
+        if (AuthState.CurrentUser is not { } user) return;
+        var (first, second) = RVideoSceneSplit.SplitDuration(Scene.DurationSeconds);
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Tách cảnh",
+            $"Tách cảnh {Scene.SceneIndex} ({Scene.DurationSeconds}s) thành 2 cảnh {first}s + {second}s? Lời thoại được chia theo câu; cảnh sau nối tiếp từ khung cuối của cảnh trước. Lịch sử video của cảnh hiện tại vẫn được giữ.",
+            yesText: "Tách cảnh", cancelText: "Hủy");
+        if (confirm != true) return;
+        _busy = true;
+        try
+        {
+            var result = await SceneSplit.SplitAsync(ProjectId, Scene.Id, user);
+            if (!result.Success)
+            {
+                Snackbar.Add(result.ErrorMessage ?? "Chưa tách được cảnh.", Severity.Error);
+                return;
+            }
+            Snackbar.Add($"Đã tách thành 2 cảnh ({first}s + {second}s).", Severity.Success);
+            await OnChanged.InvokeAsync();
+            await OnSplit.InvokeAsync(Scene.Id);
+        }
+        finally { _busy = false; }
+    }
+}

@@ -73,6 +73,7 @@
 @inject TodoX.Web.Services.VideoRender.IRVideoSceneCollectionAction SceneCollection
 
 @inject TodoX.Web.Services.VideoRender.IRVideoSceneVideoModelOptionsService SceneVideoModelOptionsService
+@inject TodoX.Web.Services.VideoRender.IRVideoSceneLinkService SceneLinkService
 
 @inject TodoX.Web.Services.VideoRender.IRVideoSceneAddDefaultResolver SceneAddResolver
 
@@ -625,7 +626,12 @@ else
                                         {
 
                                             <MudAlert Severity="Severity.Info" Dense="true">Server sẽ tiếp tục ảnh → video → hoàn thiện mà không cần xác nhận giữa các giai đoạn.</MudAlert>
-
+                                        }
+                                        <MudSwitch T="bool" Value="@_linkedVideo" ValueChanged="OnLinkedVideoChangedAsync" Color="Color.Warning"
+                                                   Label="Video liên kết: các cảnh chạy nối tiếp, cảnh sau bắt đầu từ khung cuối của cảnh trước" />
+                                        @if (_linkedVideo)
+                                        {
+                                            <MudText Typo="Typo.caption">Các cảnh tạo tuần tự nên lâu hơn chế độ song song. Có thể chọn cách nối cho từng cảnh ở tab Xem trước.</MudText>
                                         }
 
                                     </MudPaper>
@@ -1197,6 +1203,8 @@ else
                                                     }
 
                                                 }
+                                                <RVideoSceneLinkPanel ProjectId="@_project.Id" Scene="@scene" Scenes="@_project.Scenes"
+                                                                      OnChanged="@(() => OnSceneLinkChangedAsync(scene.Id))" OnSplit="OnSceneSplitAsync" />
 
                                                 @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
 
@@ -2759,6 +2767,7 @@ else
 
             }).ToList();
 
+            if (_linkedVideo) TodoX.Web.Services.VideoRender.RVideoSceneLinkService.ApplyLinkedToNewScenes(scenes);
             await VideoRepo.ReplaceScenesAsync(_projectId!.Value, scenes);
 
             await VideoRepo.AddProjectEventAsync(_projectId.Value, "SCENES_CREATED", "info", "RVIDEO scenes created from the saved Core Job.", new { jobId = _jobId, projectId = _projectId });
@@ -3949,6 +3958,7 @@ else
     {
 
         if (_project is null) return;
+        SyncLinkedVideoFromScenes();
 
         var sceneIds = _project.Scenes.Select(x => x.Id).ToHashSet();
 
@@ -7021,6 +7031,7 @@ else
         _sceneSeconds = defaults.SceneSeconds is > 0 ? defaults.SceneSeconds.Value : _sceneSeconds;
 
         _executionMode = NormalizeServiceExecutionMode(defaults.ExecutionMode) ?? _executionMode;
+        if (defaults.LinkedScenes is bool linkedDefault && (_project is null || _project.Scenes.Count < 2)) _linkedVideo = linkedDefault;
 
         _useReferenceImageForAllScenes = defaults.UseReferenceImageForAllScenes ?? _useReferenceImageForAllScenes;
 
@@ -9678,6 +9689,50 @@ else
     }
 
     private readonly Dictionary<long, RVideoSupersedeButton> _supersedeButtons = new();
+    private bool _linkedVideo;
+
+    // Video liên kết: project-level switch = scenes 2..N carry a link mode (scene metadata).
+    private async Task OnLinkedVideoChangedAsync(bool value)
+    {
+        _linkedVideo = value;
+        if (_project is { Scenes.Count: > 1 } && AuthState.CurrentUser is { } user)
+        {
+            var result = await SceneLinkService.SetProjectLinkedAsync(_project.Id, value, user);
+            Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+            foreach (var id in _project.Scenes.Select(x => x.Id).ToList())
+                if (_sceneDrafts.TryGetValue(id, out var draft) && !draft.IsDirty) _sceneDrafts.Remove(id);
+            await ReloadAsync();
+        }
+    }
+
+    private void SyncLinkedVideoFromScenes()
+    {
+        if (_project is not { Scenes.Count: > 1 }) return;
+        _linkedVideo = _project.Scenes.OrderBy(x => x.SceneIndex).Skip(1).Any(scene =>
+        {
+            var metadata = ScenePromptMetadata.FromScene(scene);
+            return TodoX.Web.Services.VideoRender.RVideoSceneLink.GetMode(metadata) is not null
+                   && !metadata.Extra.ContainsKey(TodoX.Web.Services.VideoRender.RVideoSceneSplit.SplitFromKey);
+        });
+    }
+
+    private async Task OnSceneLinkChangedAsync(long sceneId)
+    {
+        // Drop an unedited draft so a later save does not write back the old scene metadata.
+        if (_sceneDrafts.TryGetValue(sceneId, out var draft) && !draft.IsDirty) _sceneDrafts.Remove(sceneId);
+        await ReloadAsync();
+    }
+
+    // After a split, part 1 (shorter) needs a new video: open the usual estimate/confirm flow for it.
+    private async Task OnSceneSplitAsync(long sceneId)
+    {
+        _sceneDrafts.Remove(sceneId);
+        await ReloadAsync();
+        StateHasChanged();
+        await Task.Yield();
+        var scene = _project?.Scenes.FirstOrDefault(x => x.Id == sceneId);
+        if (scene is not null) await RerenderSceneVideoAsync(scene);
+    }
     private TodoX.Web.Services.VideoRender.SceneVideoUiState? SupersedeState(VideoProjectSceneDto scene)
         => _sceneVideoUiStates.GetValueOrDefault(scene.Id);
     private bool NeedsExplicitVideoOperation(VideoProjectSceneDto scene) => SupersedeState(scene) is { } state

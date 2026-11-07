@@ -123,6 +123,7 @@
                                     </MudSelect>
                                 </MudItem>
                                 <MudItem xs="12"><MudCheckBox @bind-Value="_defaults.UseReferenceImageForAllScenes" Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" /></MudItem>
+                                <MudItem xs="12"><MudCheckBox T="bool" Value="@(_defaults.LinkedScenes == true)" ValueChanged="@((bool v) => _defaults.LinkedScenes = v ? true : null)" Label="Video liên kết mặc định (cảnh sau bắt đầu từ khung cuối của cảnh trước)" /></MudItem>
                                 <MudItem xs="12" sm="4"><MudSelect T="string" Label="Voice mode" @bind-Value="_defaults.VoiceMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoVoiceModes.None">none</MudSelectItem><MudSelectItem T="string" Value="@RVideoVoiceModes.Native">native</MudSelectItem><MudSelectItem T="string" Value="@RVideoVoiceModes.Library">library</MudSelectItem></MudSelect></MudItem>
                                 <MudItem xs="12" sm="4"><MudTextField T="string" Label="Voice catalog" @bind-Value="_defaults.VoiceCatalogCode" Variant="Variant.Outlined" /></MudItem>
                                 <MudItem xs="12" sm="4"><MudNumericField T="decimal?" Label="Voice volume" @bind-Value="_defaults.VoiceVolume" Variant="Variant.Outlined" Min="0m" Max="1m" Step="0.05m" /></MudItem>
@@ -366,6 +367,7 @@
             AutoFinish = _defaults.AutoFinish,
             ModelMode = NormalizeText(_defaults.ModelMode),
             CharacterProductMode = NormalizeText(_defaults.CharacterProductMode),
+            LinkedScenes = _defaults.LinkedScenes == true ? true : null,
             VideoModelOrder = IsRVideo
                 ? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.NormalizeConfiguredOrder(_videoModelOrder)
                 : _defaults.VideoModelOrder

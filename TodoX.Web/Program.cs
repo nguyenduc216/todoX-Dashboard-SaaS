@@ -269,6 +269,8 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.SceneVideoSubmitCoordi
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
 builder.Services.AddScoped<IRVideoInitialPointEstimateService, RVideoInitialPointEstimateService>();
 builder.Services.AddScoped<IRVideoSceneVideoAutoChainService, RVideoSceneVideoAutoChainService>();
+builder.Services.AddScoped<IRVideoSceneLinkService, RVideoSceneLinkService>();
+builder.Services.AddScoped<IRVideoSceneSplitService, RVideoSceneSplitService>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageBatchRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler>();
 builder.Services.AddScoped<IRenderJobHandler, DanceSellRenderHandler>();

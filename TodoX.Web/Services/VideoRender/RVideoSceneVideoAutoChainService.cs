@@ -17,6 +17,7 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
     private readonly IRVideoTrustedPayerContextService _payers;
     private readonly RVideoJobSettingsRepository _settings;
     private readonly ILogger<RVideoSceneVideoAutoChainService> _logger;
+    private readonly ISceneMediaVersioningService? _versions;
 
     public RVideoSceneVideoAutoChainService(
         VideoRenderRepository repo,
@@ -24,8 +25,10 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
         IRenderJobService jobs,
         IRVideoTrustedPayerContextService payers,
         RVideoJobSettingsRepository settings,
-        ILogger<RVideoSceneVideoAutoChainService> logger)
+        ILogger<RVideoSceneVideoAutoChainService> logger,
+        ISceneMediaVersioningService? versions = null)
     {
+        _versions = versions;
         _repo = repo;
         _eligibility = eligibility;
         _jobs = jobs;
@@ -51,6 +54,15 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
         }
 
         if (await _repo.HasVideoOperationHeadAsync(sceneId, ct)) return false; // Only explicit user action advances generation.
+        // Linked scene: wait until its start image was built from the previous scene's current video.
+        var orderedScenes = project.Scenes.OrderBy(x => x.SceneIndex).ToList();
+        if (_versions is not null && RVideoSceneLink.IsLinked(scene, orderedScenes))
+        {
+            var settings = await _settings.GetAsync(projectId, ct);
+            var previousVideo = await _versions.GetSelectedVideoVersionAsync(RVideoSceneLink.Previous(scene, orderedScenes)!.Id, ct);
+            if (settings?.UseReferenceImageForAllScenes != true && !RVideoSceneLink.IsLinkCurrent(scene, previousVideo))
+                return false;
+        }
         var eligibility = await _eligibility.GetVideoRenderEligibilityAsync(projectId, new[] { sceneId }, ct);
         var result = eligibility.Results.FirstOrDefault();
         if (result is null)
