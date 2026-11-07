@@ -47,7 +47,15 @@
   };
   const closePlayer = () => { if (player.open) player.close(); };
   document.getElementById('samplePlayerClose').addEventListener('click', closePlayer);
-  player.addEventListener('click', event => { if (event.target === player) closePlayer(); });
+  // A click on the dialog's own padding also targets the dialog, so only close for clicks
+  // that land outside its box (the backdrop); otherwise the popup closes and the address
+  // bar falls back to /mau-video while the viewer is still watching.
+  player.addEventListener('click', event => {
+    if (event.target !== player) return;
+    const box = player.getBoundingClientRect();
+    const inside = event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+    if (!inside) closePlayer();
+  });
   player.addEventListener('close', () => {
     playerVideo.pause();
     playerVideo.removeAttribute('src');
