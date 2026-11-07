@@ -70,6 +70,21 @@ public sealed class TodoXServerClient
     public Task<ServerResult<JsonElement>> TtsStatusAsync(Guid jobId, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"tts/{jobId}", null, true, ct, TimeSpan.FromSeconds(60));
 
+    public Task<ServerResult<JsonElement>> AiModelsAsync(string? type, string? model, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, $"ai/models?type={Uri.EscapeDataString(type ?? string.Empty)}&model={Uri.EscapeDataString(model ?? string.Empty)}", null, true, ct, TimeSpan.FromSeconds(60));
+
+    public Task<ServerResult<JsonElement>> AiCreateAsync(string kind, object request, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, kind == "video" ? "ai/videos" : "ai/images", request, true, ct, TimeSpan.FromSeconds(120));
+
+    public Task<ServerResult<JsonElement>> AiTaskAsync(Guid taskId, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, $"ai/tasks/{taskId}", null, true, ct, TimeSpan.FromSeconds(60));
+
+    public Task<ServerResult<JsonElement>> AiTasksAsync(string? type, int limit, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, $"ai/tasks?type={Uri.EscapeDataString(type ?? string.Empty)}&limit={limit}", null, true, ct, TimeSpan.FromSeconds(120));
+
+    public Task<ServerResult<JsonElement>> AiUploadAsync(string fileName, string base64, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "ai/uploads", new { fileName, data = base64 }, true, ct, TimeSpan.FromSeconds(180));
+
     public Task<ServerResult<JsonElement>> SkillsAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "skills", null, true, ct, TimeSpan.FromSeconds(30));
 

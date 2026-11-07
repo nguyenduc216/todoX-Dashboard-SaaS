@@ -207,6 +207,45 @@ public static class EditVideoEndpoints
             return Results.Json(new { success = true });
         }).DisableAntiforgery();
 
+        // ---- AI images & videos (Gommo/79AI through TodoX's account; results stay on Gommo's CDN)
+        var ai = group.MapGroup("/ai");
+
+        ai.MapGet("/models", async (HttpContext http, string? type, string? model, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await service.ModelsAsync(auth.Value.License.CustomerId, type, model, ct)) : ToResult(auth);
+        });
+
+        ai.MapPost("/images", async (HttpContext http, EditVideoAiCreateRequest body, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await service.CreateAsync(auth.Value.License, auth.Value.Device, "image", body, ct)) : ToResult(auth);
+        }).DisableAntiforgery();
+
+        ai.MapPost("/videos", async (HttpContext http, EditVideoAiCreateRequest body, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await service.CreateAsync(auth.Value.License, auth.Value.Device, "video", body, ct)) : ToResult(auth);
+        }).DisableAntiforgery();
+
+        ai.MapGet("/tasks/{taskId:guid}", async (Guid taskId, HttpContext http, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await service.GetAsync(taskId, auth.Value.License.Id, ct)) : ToResult(auth);
+        });
+
+        ai.MapGet("/tasks", async (HttpContext http, string? type, int? limit, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await service.ListAsync(auth.Value.License.Id, type, limit ?? 20, ct)) : ToResult(auth);
+        });
+
+        ai.MapPost("/uploads", async (HttpContext http, EditVideoAiUploadRequest body, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await service.UploadAsync(body, ct)) : ToResult(auth);
+        }).DisableAntiforgery();
+
         // ---- releases & downloads (public: the installer runs before activation)
         group.MapGet("/releases/latest", (EditVideoReleaseService releases) =>
             releases.GetLatest() is { } manifest
@@ -227,13 +266,13 @@ public static class EditVideoEndpoints
 
     internal static int StatusFor(string code) => code switch
     {
-        EditVideoErrorCodes.InvalidRequest => StatusCodes.Status400BadRequest,
+        EditVideoErrorCodes.InvalidRequest or "ai_option_required" => StatusCodes.Status400BadRequest,
         EditVideoErrorCodes.InvalidToken or EditVideoErrorCodes.DeviceMismatch => StatusCodes.Status401Unauthorized,
-        EditVideoErrorCodes.InvalidLicense or "not_found" or "voice_not_found" => StatusCodes.Status404NotFound,
+        EditVideoErrorCodes.InvalidLicense or "not_found" or "voice_not_found" or "model_not_found" => StatusCodes.Status404NotFound,
         EditVideoErrorCodes.DeviceLimitReached => StatusCodes.Status409Conflict,
         "insufficient_points" => StatusCodes.Status402PaymentRequired,
-        EditVideoErrorCodes.SigningUnavailable or "voice_service_unavailable" => StatusCodes.Status503ServiceUnavailable,
-        "voice_failed" => StatusCodes.Status502BadGateway,
+        EditVideoErrorCodes.SigningUnavailable or "voice_service_unavailable" or "ai_service_unavailable" => StatusCodes.Status503ServiceUnavailable,
+        "voice_failed" or "ai_failed" => StatusCodes.Status502BadGateway,
         _ => StatusCodes.Status403Forbidden
     };
 

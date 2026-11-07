@@ -27,11 +27,15 @@ public sealed partial class VideoTools
     private readonly Transcriber _transcriber;
     private readonly SkillSync _skills;
     private readonly EditStore _edits;
+    private readonly AiGenerator _ai;
+    private readonly Projects.ProjectFolders _projects;
 
     public VideoTools(LicenseGuard license, LicenseVerifier verifier, MediaProbe probe, ClipNormalizer normalizer,
         RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber,
-        SkillSync skills, EditStore edits)
+        SkillSync skills, EditStore edits, AiGenerator ai, Projects.ProjectFolders projects)
     {
+        _ai = ai;
+        _projects = projects;
         _edits = edits;
         _skills = skills;
         _transcriber = transcriber;
