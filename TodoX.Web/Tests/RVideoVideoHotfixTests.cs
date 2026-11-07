@@ -49,14 +49,37 @@ public sealed class RVideoVideoHotfixTests
         });
         Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetInitial().Model);
         Assert.Equal("flash", RVideoVideoModelPolicy.GetInitial().Mode);
-        Assert.Equal("normal", RVideoVideoModelPolicy.Models[3].Mode);
+        Assert.Equal("gemini-omni-flash-1.2", RVideoVideoModelPolicy.Models[3].Model);
+        Assert.Equal("normal", RVideoVideoModelPolicy.Models[4].Mode);
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
         Assert.Equal(5, RVideoVideoModelPolicy.Models.Count);
-        Assert.Equal("gemini-omni-flash-1.2", RVideoVideoModelPolicy.GetNext(3)!.Model);
-        Assert.Equal("flash", RVideoVideoModelPolicy.GetNext(3)!.Mode);
+        Assert.Equal("gemini-omni-flash-1.2", RVideoVideoModelPolicy.GetNext(2)!.Model);
+        Assert.Equal("grok_video_heavy", RVideoVideoModelPolicy.GetNext(3)!.Model);
         Assert.Null(RVideoVideoModelPolicy.GetNext(4));
+    }
+
+    [Fact]
+    public void ServiceVideoModelOrderReordersPoliciesAndKeepsUnlistedModelsInDefaultOrder()
+    {
+        var defaultKeys = RVideoVideoModelPolicy.Models.Select(RVideoVideoModelPolicy.BuildKey).ToArray();
+        Assert.Equal(defaultKeys, RVideoVideoModelPolicy.Ordered(null).Select(RVideoVideoModelPolicy.BuildKey));
+        Assert.Null(RVideoVideoModelPolicy.NormalizeConfiguredOrder(defaultKeys));
+        Assert.Null(RVideoVideoModelPolicy.NormalizeConfiguredOrder(null));
+
+        var ordered = RVideoVideoModelPolicy.Ordered(["79ai/grok_video_heavy/normal", "unknown|x|y", "79ai|gemini-omni-flash-1.2|flash"]);
+        Assert.Equal(
+            ["grok_video_heavy", "gemini-omni-flash-1.2", "veo_omni", "veo_3_1", "veo_3_1"],
+            ordered.Select(x => x.Model));
+        Assert.Equal(5, RVideoVideoModelPolicy.NormalizeConfiguredOrder(["79ai|grok_video_heavy|normal"])!.Count);
+
+        var input = new SceneVideoRenderWorkItemInput { ProviderCode = "79ai", VideoModelOrder = ["79ai|gemini-omni-flash-1.2|flash"] };
+        var policies = (IReadOnlyList<RVideoVideoModelPolicyEntry>)typeof(SceneVideoWorkerHandler)
+            .GetMethod("ResolveOrderedPolicies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .Invoke(null, [input])!;
+        Assert.Equal("gemini-omni-flash-1.2", policies[0].Model);
+        Assert.Equal(5, policies.Count);
     }
 
     [Fact]
@@ -1320,7 +1343,7 @@ public sealed class RVideoVideoHotfixTests
 
         await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
             Create79AiRuntime(),
-            RVideoVideoModelPolicy.Models[3],
+            RVideoVideoModelPolicy.Models.Single(x => x.Model == "grok_video_heavy"),
             "Animate the scene.",
             "9:16",
             "720p",

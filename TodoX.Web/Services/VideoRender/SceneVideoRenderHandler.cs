@@ -498,6 +498,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             BillingOperationId = input.BillingOperationId ?? RVideoParentBillingState.ResolveBillingOperationId(project, parentJob.Id),
             EstimatedUsd = resolvedPrice.ProviderEstimatedCostUsd,
             EstimatedPoints = 0,
+            VideoModelOrder = await ResolveServiceVideoModelOrderAsync(pointServiceId, ct),
             PricingMode = resolvedPrice.Mode,
             PricingRuleKey = resolvedPrice.RuleKey,
             TariffSnapshotJson = resolvedPrice.TariffSnapshotJson,
@@ -771,6 +772,23 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
            && version.Id != Guid.Empty
            && version.IsSelected
            && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase);
+
+    // Per-service scene-video model order (catalog.services.default_options.job_defaults.videoModelOrder).
+    private async Task<List<string>?> ResolveServiceVideoModelOrderAsync(Guid? serviceId, CancellationToken ct)
+    {
+        if (serviceId is not Guid id) return null;
+        using var conn = await _factory.OpenAsync(ct);
+        var json = await conn.ExecuteScalarAsync<string?>(
+            """
+            SELECT COALESCE(default_options->'job_defaults', '{}'::jsonb)::text
+              FROM catalog.services
+             WHERE id=@id
+             LIMIT 1;
+            """,
+            new { id });
+        return RVideoVideoModelPolicy.NormalizeConfiguredOrder(
+            TodoX.Web.Models.Catalog.ServiceJobDefaultsCodec.FromJson(json).VideoModelOrder);
+    }
 
     private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)
     {

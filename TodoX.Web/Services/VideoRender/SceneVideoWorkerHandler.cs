@@ -65,6 +65,8 @@ public sealed class SceneVideoRenderWorkItemInput
     public int? RequestedDurationSeconds { get; set; }
     public bool ManualOverride { get; set; }
     public bool StrictRequestedSettings { get; set; }
+    /// <summary>Service-configured model order for the fallback chain; null = default policy order.</summary>
+    public List<string>? VideoModelOrder { get; set; }
     public RVideoSceneVideoOperationSettings? ConfirmedOperationSettings { get; set; }
 }
 
@@ -2504,7 +2506,7 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
 
     private static IReadOnlyList<RVideoVideoModelPolicyEntry> ResolveOrderedPolicies(SceneVideoRenderWorkItemInput input)
     {
-        var policies = RVideoVideoModelPolicy.Models.ToList();
+        var policies = RVideoVideoModelPolicy.Ordered(input.VideoModelOrder).ToList();
         if (!input.ManualOverride || string.IsNullOrWhiteSpace(input.RequestedModelCode))
         {
             return policies;

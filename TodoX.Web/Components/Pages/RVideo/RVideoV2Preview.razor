@@ -280,11 +280,11 @@ protected override void OnParametersSet()
   // Use cached options synchronously if available (avoids blocking first render).
   if(!_optsReady)
   {
-    var cached = ModelOptions.GetCachedOptions();
+    var cached = ModelOptions.GetCachedOptions(JobView?.CoreJob.ServiceId);
     if(cached is { Count: > 0 }) { _opts = cached; _optsReady = true; }
     // RVID-UI-V2-PREVIEW-LOAD.2: start the single background fetch off the render path and
     // reuse it in OnAfterRenderAsync, removing the skeleton-content flicker on entry.
-    else if(_optsTask is null) { _optsTask = ModelOptions.GetOptionsAsync(); }
+    else if(_optsTask is null) { _optsTask = ModelOptions.GetOptionsAsync(JobView?.CoreJob.ServiceId); }
   }
 }
 
@@ -297,7 +297,7 @@ protected override async Task OnAfterRenderAsync(bool firstRender)
     // Load model options in background — UI already rendered with skeleton/metadata.
     try
     {
-      _optsTask ??= ModelOptions.GetOptionsAsync();
+      _optsTask ??= ModelOptions.GetOptionsAsync(JobView?.CoreJob.ServiceId);
       _opts = await _optsTask;
       _optsReady = true;
       StateHasChanged();
