@@ -2066,7 +2066,7 @@ else
 
     {
 
-        _sceneVideoModelOptions = await SceneVideoModelOptionsService.GetOptionsAsync();
+        _sceneVideoModelOptions = await SceneVideoModelOptionsService.GetOptionsAsync(ServiceId ?? ResolveCurrentService()?.Id);
 
     }
 
@@ -2129,16 +2129,9 @@ else
 
         }
 
-        var initial = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial();
-
-        return _sceneVideoModelOptions.FirstOrDefault(option =>
-
-                   string.Equals(option.ProviderCode, initial.ProviderCode, StringComparison.OrdinalIgnoreCase)
-
-                   && string.Equals(option.ModelCode, initial.Model, StringComparison.OrdinalIgnoreCase)
-
-                   && string.Equals(option.Mode, initial.Mode, StringComparison.OrdinalIgnoreCase))
-
+        // Options arrive in the service's configured model order; default to the first model that
+        // offers the scene's exact duration, else the first model.
+        return _sceneVideoModelOptions.FirstOrDefault(option => option.Durations.Contains(scene.DurationSeconds))
                ?? _sceneVideoModelOptions.First();
 
     }

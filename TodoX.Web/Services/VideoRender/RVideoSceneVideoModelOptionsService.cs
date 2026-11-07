@@ -17,27 +17,47 @@ public sealed record SceneVideoModelOption(
 public interface IRVideoSceneVideoModelOptionsService
 {
     Task<IReadOnlyList<SceneVideoModelOption>> GetOptionsAsync(CancellationToken ct = default);
+    /// <summary>Options ordered by the service's configured video model order.</summary>
+    Task<IReadOnlyList<SceneVideoModelOption>> GetOptionsAsync(Guid? serviceId, CancellationToken ct = default)
+        => GetOptionsAsync(ct);
     Task<IReadOnlyList<int>> GetAllDurationsAsync(CancellationToken ct = default);
     IReadOnlyList<SceneVideoModelOption> GetCachedOptions();
+    /// <summary>Cached options only when they were loaded for the same service order.</summary>
+    IReadOnlyList<SceneVideoModelOption> GetCachedOptions(Guid? serviceId) => GetCachedOptions();
 }
 
 public sealed class RVideoSceneVideoModelOptionsService : IRVideoSceneVideoModelOptionsService
 {
     private readonly IAiProviderModelService _models;
+    private readonly CatalogRepository? _catalog;
     private IReadOnlyList<SceneVideoModelOption> _cached = Array.Empty<SceneVideoModelOption>();
+    private Guid? _cachedServiceId;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    public RVideoSceneVideoModelOptionsService(IAiProviderModelService models) => _models = models;
+    public RVideoSceneVideoModelOptionsService(IAiProviderModelService models, CatalogRepository? catalog = null)
+    {
+        _models = models;
+        _catalog = catalog;
+    }
 
-    public async Task<IReadOnlyList<SceneVideoModelOption>> GetOptionsAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<SceneVideoModelOption>> GetOptionsAsync(CancellationToken ct = default)
+        => GetOptionsAsync(null, ct);
+
+    public async Task<IReadOnlyList<SceneVideoModelOption>> GetOptionsAsync(Guid? serviceId, CancellationToken ct = default)
     {
         var models = await _models.GetModelsAsync(
             RVideoVideoModelPolicy.ProviderCode,
             mediaType: "video",
             enabled: true,
             ct: ct);
-        var opts = BuildOptions(models);
+        List<string>? order = null;
+        if (serviceId is Guid id && _catalog is not null)
+        {
+            var service = await _catalog.GetServiceByIdAsync(id, ct);
+            order = TodoX.Web.Models.Catalog.ServiceJobDefaultsCodec.FromJson(service?.JobDefaultsJson).VideoModelOrder;
+        }
+        var opts = BuildOptions(models, order);
         await _gate.WaitAsync(ct);
-        try { _cached = opts; } finally { _gate.Release(); }
+        try { _cached = opts; _cachedServiceId = serviceId; } finally { _gate.Release(); }
         return opts;
     }
 
@@ -49,15 +69,21 @@ public sealed class RVideoSceneVideoModelOptionsService : IRVideoSceneVideoModel
 
     public IReadOnlyList<SceneVideoModelOption> GetCachedOptions() => _cached;
 
+    public IReadOnlyList<SceneVideoModelOption> GetCachedOptions(Guid? serviceId)
+        => _cachedServiceId == serviceId ? _cached : Array.Empty<SceneVideoModelOption>();
+
     public static bool IsSupportedDuration(SceneVideoModelOption option, int duration) => option.Durations.Contains(duration);
 
-    internal static IReadOnlyList<SceneVideoModelOption> BuildOptions(IReadOnlyList<AiProviderModelListItemDto> models)
+    internal static IReadOnlyList<SceneVideoModelOption> BuildOptions(
+        IReadOnlyList<AiProviderModelListItemDto> models,
+        IEnumerable<string>? configuredOrder = null)
     {
         if (models is null || models.Count == 0) return Array.Empty<SceneVideoModelOption>();
+        var ordered = RVideoVideoModelPolicy.Ordered(configuredOrder);
         return models
             .Where(m => m.AllowUserSelect && !m.IsDeprecated)
             .SelectMany(BuildForModel)
-            .OrderBy(o => ResolvePolicyRank(o.ModelCode, o.Mode))
+            .OrderBy(o => ResolvePolicyRank(ordered, o.ModelCode, o.Mode))
             .ThenBy(o => o.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -84,12 +110,15 @@ public sealed class RVideoSceneVideoModelOptionsService : IRVideoSceneVideoModel
         }
     }
 
-    private static int ResolvePolicyRank(string modelCode, string? mode)
+    private static int ResolvePolicyRank(IReadOnlyList<RVideoVideoModelPolicyEntry> ordered, string modelCode, string? mode)
     {
-        var p = RVideoVideoModelPolicy.Models.FirstOrDefault(x =>
-            string.Equals(x.Model, modelCode, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(x.Mode, mode, StringComparison.OrdinalIgnoreCase));
-        return p?.AttemptIndex ?? int.MaxValue;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            if (string.Equals(ordered[i].Model, modelCode, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(ordered[i].Mode, mode, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+        return int.MaxValue;
     }
 
     public static string BuildKey(string providerCode, string modelCode, string? mode)

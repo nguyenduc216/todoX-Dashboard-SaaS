@@ -42,6 +42,14 @@ public sealed class CustomerProfile
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public string? Gender { get; set; }
     public DateTime? DateOfBirth { get; set; }
+
+    /// <summary>Khách hàng là đại lý (affiliate.agents.is_active).</summary>
+    public bool IsAgent { get; set; }
+    /// <summary>Mã đại lý của chính khách hàng này (nếu là đại lý).</summary>
+    public string? AgentCode { get; set; }
+    /// <summary>Mã đại lý đã giới thiệu khách hàng này.</summary>
+    public string? ReferralCode { get; set; }
+    public string? ReferredByAgentName { get; set; }
 }
 
 public sealed class CustomerAccount
@@ -71,6 +79,8 @@ public sealed class CustomerRegistration
     public string ConfirmPassword { get; set; } = string.Empty;
     public string? Gender { get; set; }
     public DateTime? DateOfBirth { get; set; }
+    /// <summary>Mã đại lý giới thiệu (không bắt buộc).</summary>
+    public string? ReferralCode { get; set; }
 }
 
 public sealed class LoginRequest

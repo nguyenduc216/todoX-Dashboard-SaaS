@@ -65,6 +65,8 @@ public sealed class SceneVideoRenderWorkItemInput
     public int? RequestedDurationSeconds { get; set; }
     public bool ManualOverride { get; set; }
     public bool StrictRequestedSettings { get; set; }
+    /// <summary>Service-configured model order for the fallback chain; null = default policy order.</summary>
+    public List<string>? VideoModelOrder { get; set; }
     public RVideoSceneVideoOperationSettings? ConfirmedOperationSettings { get; set; }
 }
 
@@ -2288,6 +2290,13 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         return Math.Max(0, (maxMappedAttempt >= 0 ? maxMappedAttempt : maxAttempt) + 1);
     }
 
+    // Duration-aware ordering: models that offer the scene's exact duration are tried first (in the
+    // service's priority order); models that would need a longer, trimmed clip follow in the same order.
+    private static List<ResolvedFallbackCandidate> PreferExactDuration(List<ResolvedFallbackCandidate> candidates, int sceneDuration)
+        => candidates.Where(c => c.ProviderDurationSeconds == sceneDuration)
+            .Concat(candidates.Where(c => c.ProviderDurationSeconds != sceneDuration))
+            .ToList();
+
     private sealed record ResolvedFallbackCandidate(
         RVideoVideoModelPolicyEntry Policy,
         int ProviderDurationSeconds,
@@ -2499,12 +2508,12 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 null));
         }
 
-        return new FallbackCandidateResolution(resolved, diagnostics);
+        return new FallbackCandidateResolution(PreferExactDuration(resolved, input.DurationSeconds), diagnostics);
     }
 
     private static IReadOnlyList<RVideoVideoModelPolicyEntry> ResolveOrderedPolicies(SceneVideoRenderWorkItemInput input)
     {
-        var policies = RVideoVideoModelPolicy.Models.ToList();
+        var policies = RVideoVideoModelPolicy.Ordered(input.VideoModelOrder).ToList();
         if (!input.ManualOverride || string.IsNullOrWhiteSpace(input.RequestedModelCode))
         {
             return policies;

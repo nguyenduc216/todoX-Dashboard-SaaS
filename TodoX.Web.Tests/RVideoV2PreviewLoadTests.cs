@@ -52,8 +52,8 @@ public sealed class RVideoV2PreviewLoadTests
     public void Preview_UsesCachedModelOptions_ToAvoidSecondFetch()
     {
         // Reuses the existing GetCachedOptions() from IRVideoSceneVideoModelOptionsService (no new service).
-        Assert.Contains("ModelOptions.GetCachedOptions()", Preview);
-        Assert.Contains("ModelOptions.GetOptionsAsync()", Preview);
+        Assert.Contains("ModelOptions.GetCachedOptions(JobView?.CoreJob.ServiceId)", Preview);
+        Assert.Contains("ModelOptions.GetOptionsAsync(JobView?.CoreJob.ServiceId)", Preview);
     }
 
     // ---------------------------------------------------------------
@@ -240,10 +240,10 @@ public sealed class RVideoV2PreviewLoadTests
         Assert.Contains("_optsTask", Preview);
         var setBody = ExtractMethodBody(Preview, "protected override void OnParametersSet()");
         Assert.NotNull(setBody);
-        Assert.Contains("_optsTask = ModelOptions.GetOptionsAsync()", setBody!);
+        Assert.Contains("_optsTask = ModelOptions.GetOptionsAsync(JobView?.CoreJob.ServiceId)", setBody!);
         var afterBody = ExtractMethodBody(Preview, "protected override async Task OnAfterRenderAsync(bool firstRender)");
         Assert.NotNull(afterBody);
-        Assert.Contains("_optsTask ??= ModelOptions.GetOptionsAsync()", afterBody!);
+        Assert.Contains("_optsTask ??= ModelOptions.GetOptionsAsync(JobView?.CoreJob.ServiceId)", afterBody!);
         Assert.Contains("await _optsTask", afterBody!);
     }
 

@@ -28,6 +28,8 @@ public sealed class ServiceJobDefaults
     public bool? AutoFinish { get; set; }
     public string? ModelMode { get; set; }
     public string? CharacterProductMode { get; set; }
+    /// <summary>RVideo scene-video model order ("provider|model|mode" keys); null = default order.</summary>
+    public List<string>? VideoModelOrder { get; set; }
 }
 
 public static class ServiceJobDefaultsCodec

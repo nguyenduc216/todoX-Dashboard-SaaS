@@ -4,6 +4,7 @@
 @inject SystemImageStorage SystemImageStorage
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject TodoX.Web.Services.AiProviders.IAiProviderModelService ProviderModels
 
 <MudDialog>
     <TitleContent>
@@ -129,6 +130,26 @@
                                 <MudItem xs="12" sm="4"><MudSelect T="string" Label="Music mode" @bind-Value="_defaults.MusicMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoMusicModes.None">none</MudSelectItem><MudSelectItem T="string" Value="@RVideoMusicModes.Library">library</MudSelectItem><MudSelectItem T="string" Value="@RVideoMusicModes.Upload">upload</MudSelectItem></MudSelect></MudItem>
                                 <MudItem xs="12" sm="4"><MudTextField T="string" Label="Music catalog" @bind-Value="_defaults.MusicCatalogCode" Variant="Variant.Outlined" /></MudItem>
                                 <MudItem xs="12" sm="4"><MudNumericField T="decimal?" Label="Music volume" @bind-Value="_defaults.MusicVolume" Variant="Variant.Outlined" Min="0m" Max="1m" Step="0.05m" /></MudItem>
+                                <MudItem xs="12">
+                                    <MudPaper Outlined="true" Class="pa-3" data-testid="service-video-model-order">
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap">
+                                            <MudText Typo="Typo.subtitle2">Thứ tự model video</MudText>
+                                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Restore" OnClick="ResetVideoModelOrder">Khôi phục mặc định</MudButton>
+                                        </MudStack>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Model đầu tiên được chọn sẵn cho mỗi cảnh. Danh sách chọn model và thứ tự thử dự phòng khi render tự động đi theo thứ tự này.</MudText>
+                                        @for (var i = 0; i < _videoModelOrder.Count; i++)
+                                        {
+                                            var index = i;
+                                            var key = _videoModelOrder[index];
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
+                                                <MudText Typo="Typo.body2" Style="min-width:24px">@(index + 1).</MudText>
+                                                <MudText Typo="Typo.body2" Class="flex-grow-1">@VideoModelLabel(key)</MudText>
+                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="@(index == 0)" OnClick="@(() => MoveVideoModel(index, -1))" aria-label="Đưa lên" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="@(index == _videoModelOrder.Count - 1)" OnClick="@(() => MoveVideoModel(index, 1))" aria-label="Đưa xuống" />
+                                            </MudStack>
+                                        }
+                                    </MudPaper>
+                                </MudItem>
                             </MudGrid>
                         }
                         else if (IsTimelapse)
@@ -169,6 +190,8 @@
     private bool _isNew;
     private bool _thumbnailBusy;
     private ServiceJobDefaults _defaults = new();
+    private List<string> _videoModelOrder = new();
+    private Dictionary<string, string> _videoModelNames = new(StringComparer.OrdinalIgnoreCase);
 
     protected override void OnInitialized()
     {
@@ -194,7 +217,45 @@
             };
 
         _defaults = ServiceJobDefaultsCodec.FromJson(_model.JobDefaultsJson);
+        _videoModelOrder = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.Ordered(_defaults.VideoModelOrder)
+            .Select(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.BuildKey).ToList();
     }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var models = await ProviderModels.GetModelsAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode, mediaType: "video");
+            _videoModelNames = models
+                .Where(m => !string.IsNullOrWhiteSpace(m.DisplayName))
+                .GroupBy(m => m.ProviderModelCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().DisplayName.Trim(), StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            // Names are cosmetic; the order editor still shows model codes.
+        }
+    }
+
+    private string VideoModelLabel(string key)
+    {
+        var parts = key.Split('|');
+        var model = parts.Length > 1 ? parts[1] : key;
+        var mode = parts.Length > 2 ? parts[2] : string.Empty;
+        var name = _videoModelNames.TryGetValue(model, out var display) ? display : model;
+        return string.IsNullOrWhiteSpace(mode) ? name : $"{name} / {mode}";
+    }
+
+    private void MoveVideoModel(int index, int delta)
+    {
+        var target = index + delta;
+        if (target < 0 || target >= _videoModelOrder.Count) return;
+        (_videoModelOrder[index], _videoModelOrder[target]) = (_videoModelOrder[target], _videoModelOrder[index]);
+    }
+
+    private void ResetVideoModelOrder()
+        => _videoModelOrder = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.Models
+            .Select(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.BuildKey).ToList();
 
     private async Task UploadThumbnail(InputFileChangeEventArgs e)
     {
@@ -304,7 +365,10 @@
             RequireVideoConfirmation = _defaults.RequireVideoConfirmation,
             AutoFinish = _defaults.AutoFinish,
             ModelMode = NormalizeText(_defaults.ModelMode),
-            CharacterProductMode = NormalizeText(_defaults.CharacterProductMode)
+            CharacterProductMode = NormalizeText(_defaults.CharacterProductMode),
+            VideoModelOrder = IsRVideo
+                ? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.NormalizeConfiguredOrder(_videoModelOrder)
+                : _defaults.VideoModelOrder
         };
     }
 

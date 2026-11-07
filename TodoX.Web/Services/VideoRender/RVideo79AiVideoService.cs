@@ -18,11 +18,46 @@ public static class RVideoVideoModelPolicy
 
     public static readonly IReadOnlyList<RVideoVideoModelPolicyEntry> Models =
     [
-        new(0, ProviderCode, "veo_omni", "flash"),
-        new(1, ProviderCode, "veo_3_1", "fast"),
-        new(2, ProviderCode, "veo_3_1", "lite"),
-        new(3, ProviderCode, "grok_video_heavy", "normal")
+        // Gemini Omni Flash 1.2 (79AI, 2026-11) supports every duration from 4 to 15 seconds,
+        // so it is the default first choice; the others are duration-aware fallbacks.
+        new(0, ProviderCode, "gemini-omni-flash-1.2", "flash"),
+        new(1, ProviderCode, "veo_omni", "flash"),
+        new(2, ProviderCode, "veo_3_1", "fast"),
+        new(3, ProviderCode, "veo_3_1", "lite"),
+        new(4, ProviderCode, "grok_video_heavy", "normal")
     ];
+
+    /// <summary>Selection key of a policy entry: "provider|model|mode".</summary>
+    public static string BuildKey(RVideoVideoModelPolicyEntry policy)
+        => $"{policy.ProviderCode.Trim()}|{policy.Model.Trim()}|{policy.Mode?.Trim()}";
+
+    /// <summary>
+    /// Policy entries in a service's configured order (ServiceJobDefaults.VideoModelOrder).
+    /// Configured keys come first; unknown keys are ignored and models missing from the
+    /// configuration keep their default relative order after them. No configuration means
+    /// the default order above. The order drives both the model picker and the auto fallback chain.
+    /// </summary>
+    public static IReadOnlyList<RVideoVideoModelPolicyEntry> Ordered(IEnumerable<string>? configuredKeys)
+    {
+        if (configuredKeys is null) return Models;
+        var ordered = new List<RVideoVideoModelPolicyEntry>(Models.Count);
+        foreach (var raw in configuredKeys)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var key = raw.Trim().Replace('/', '|');
+            var policy = Models.FirstOrDefault(p => string.Equals(BuildKey(p), key, StringComparison.OrdinalIgnoreCase));
+            if (policy is not null && !ordered.Contains(policy)) ordered.Add(policy);
+        }
+        ordered.AddRange(Models.Where(p => !ordered.Contains(p)));
+        return ordered;
+    }
+
+    /// <summary>Normalized order to persist: null when it equals the default order.</summary>
+    public static List<string>? NormalizeConfiguredOrder(IEnumerable<string>? configuredKeys)
+    {
+        var keys = Ordered(configuredKeys).Select(BuildKey).ToList();
+        return keys.SequenceEqual(Models.Select(BuildKey), StringComparer.OrdinalIgnoreCase) ? null : keys;
+    }
 
     public static RVideoVideoModelPolicyEntry GetInitial() => Models[0];
 

@@ -113,6 +113,13 @@ public sealed class AccountRepository
             new { e = email, id = excludeId });
     }
 
+    public async Task<bool> PhoneExistsAsync(string phone)
+    {
+        using var conn = await _factory.OpenAsync();
+        return await conn.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS(SELECT 1 FROM auth.app_users WHERE phone=@p);", new { p = phone });
+    }
+
     /// <summary>Insert an admin/operator user and assign the matching role. Returns new id.</summary>
     public async Task<Guid> InsertSystemUserAsync(SystemUser user, string passwordHash)
     {

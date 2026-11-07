@@ -73,6 +73,61 @@ public sealed class GommoPromptAssistantTests
         Assert.NotNull(error.ParserErrorBytePositionInLine);
     }
 
+    [Fact]
+    public async Task ClientReportsProviderStreamErrorInsteadOfMissingContent()
+    {
+        var handler = new StubHandler(
+            $"data: {Chunk("")}\n\n" +
+            "event: error\ndata: {\"message\":\"Dịch vụ AI đang gặp lỗi tạm thời.\",\"error_code\":\"CHAT_STREAM_ERROR\"}\n\n" +
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+            "data: [DONE]\n\n");
+        var client = CreateClient(handler);
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("gommo_stream_error", error.Code);
+        Assert.Equal("Dịch vụ AI đang gặp lỗi tạm thời. (CHAT_STREAM_ERROR)", error.Message);
+        Assert.Contains("CHAT_STREAM_ERROR", error.SanitizedResponse, StringComparison.Ordinal);
+        Assert.True(error.Diagnostics?.DoneReceived);
+    }
+
+    [Fact]
+    public async Task ClientReportsProviderStreamErrorWhenStreamEndsWithoutDone()
+    {
+        var handler = new StubHandler("event: error\ndata: {\"message\":\"secret-token failed\"}\n\n");
+        var client = CreateClient(handler);
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("gommo_stream_error", error.Code);
+        Assert.Equal("*** failed", error.Message);
+    }
+
+    [Fact]
+    public async Task ClientStillReportsMissingContentWithoutProviderError()
+    {
+        var handler = new StubHandler($"data: {Chunk("")}\n\ndata: [DONE]\n\n");
+        var client = CreateClient(handler);
+
+        var error = await Assert.ThrowsAsync<ServicePromptProviderException>(() => client.CompleteAsync(CreateRequest()));
+
+        Assert.Equal("missing_content", error.Code);
+    }
+
+    [Fact]
+    public async Task ClientKeepsContentWhenErrorEventFollowsAssistantContent()
+    {
+        var handler = new StubHandler(
+            $"data: {Chunk("{\"title\":\"ok\"}")}\n\n" +
+            "event: error\ndata: {\"message\":\"late\",\"error_code\":\"CHAT_STREAM_ERROR\"}\n\n" +
+            "data: [DONE]\n\n");
+        var client = CreateClient(handler);
+
+        var result = await client.CompleteAsync(CreateRequest());
+
+        Assert.Equal("{\"title\":\"ok\"}", result.Content);
+    }
+
     private static ServicePrompt79AiClient CreateClient(StubHandler handler)
         => new(
             new HttpClient(handler),

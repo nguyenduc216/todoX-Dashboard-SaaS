@@ -14,15 +14,18 @@ public sealed class AccountService
     private readonly ServiceFavoriteRepository _favorites;
     private readonly PermissionRepository _permissions;
     private readonly PasswordHasher _passwords;
+    private readonly Affiliate.AffiliateRepository _affiliates;
 
     public AccountService(AccountRepository accounts, CustomerRepository customers,
-        ServiceFavoriteRepository favorites, PermissionRepository permissions, PasswordHasher passwords)
+        ServiceFavoriteRepository favorites, PermissionRepository permissions, PasswordHasher passwords,
+        Affiliate.AffiliateRepository affiliates)
     {
         _accounts = accounts;
         _customers = customers;
         _favorites = favorites;
         _permissions = permissions;
         _passwords = passwords;
+        _affiliates = affiliates;
     }
 
     // ===================== Reads =====================
@@ -140,46 +143,103 @@ public sealed class AccountService
     public Task<(string? Gender, DateTime? Dob)> GetProfileExtrasAsync(Guid userId)
         => _accounts.GetProfileExtrasAsync(userId);
 
+    /// <summary>
+    /// Self-service sign-up: creates the customer and its owner login, active at once so the customer can sign in
+    /// straight away (using a paid product still needs a package/license).
+    /// </summary>
     public async Task<(bool Success, string Message)> RegisterCustomerAsync(CustomerRegistration model)
     {
-        if (string.IsNullOrWhiteSpace(model.CompanyName) || string.IsNullOrWhiteSpace(model.ContactName) || string.IsNullOrWhiteSpace(model.Email))
+        var error = ValidateRegistration(model);
+        if (error is not null)
         {
-            return (false, "Vui lòng nhập đầy đủ tên công ty, người liên hệ và email.");
+            return (false, error);
         }
 
-        if (model.Password != model.ConfirmPassword)
+        var email = model.Email.Trim();
+        var phone = model.Phone.Trim();
+        if (await _accounts.EmailExistsAsync(email))
         {
-            return (false, "Mật khẩu xác nhận không khớp.");
+            return (false, "Email này đã có tài khoản. Hãy đăng nhập hoặc dùng \"Quên mật khẩu\".");
         }
 
-        if (await _accounts.EmailExistsAsync(model.Email.Trim()))
+        if (phone.Length > 0 && await _accounts.PhoneExistsAsync(phone))
         {
-            return (false, "Email đã tồn tại trong hệ thống.");
+            return (false, "Số điện thoại này đã có tài khoản.");
+        }
+
+        var referralCode = Affiliate.AffiliateRules.NormalizeCode(model.ReferralCode);
+        if (referralCode.Length > 0 && await _affiliates.FindActiveAgentAsync(referralCode) is null)
+        {
+            return (false, "Mã đại lý không hợp lệ hoặc đã ngưng hoạt động.");
         }
 
         var customerId = await _customers.InsertCustomerAsync(new CustomerProfile
         {
             CompanyName = model.CompanyName.Trim(),
             ContactName = model.ContactName.Trim(),
-            Email = model.Email.Trim(),
-            Phone = model.Phone.Trim(),
+            Email = email,
+            Phone = phone,
             TaxCode = model.TaxCode.Trim(),
-            Status = TodoXAccountStatus.Pending,
+            Status = TodoXAccountStatus.Active,
             Gender = model.Gender,
             DateOfBirth = model.DateOfBirth
         });
 
-        await _customers.InsertCustomerAccountAsync(new CustomerAccount
+        try
         {
-            CustomerId = customerId,
-            FullName = model.ContactName.Trim(),
-            Email = model.Email.Trim(),
-            Phone = model.Phone.Trim(),
-            Role = TodoXUserRole.CustomerOwner,
-            Status = TodoXAccountStatus.Pending
-        }, _passwords.Hash(model.Password));
+            await _customers.InsertCustomerAccountAsync(new CustomerAccount
+            {
+                CustomerId = customerId,
+                FullName = model.ContactName.Trim(),
+                Email = email,
+                Phone = phone,
+                Role = TodoXUserRole.CustomerOwner,
+                Status = TodoXAccountStatus.Active
+            }, _passwords.Hash(model.Password));
+        }
+        catch
+        {
+            await _customers.DeleteCustomerAsync(customerId);
+            throw;
+        }
 
-        return (true, "Đăng ký thành công. Tài khoản đang chờ quản trị viên duyệt.");
+        if (referralCode.Length > 0)
+        {
+            await _affiliates.AssignReferralAsync(customerId, referralCode, "register", null);
+        }
+
+                return (true, "Đã tạo tài khoản TodoX.");
+    }
+
+    public static string? ValidateRegistration(CustomerRegistration model)
+    {
+        if (string.IsNullOrWhiteSpace(model.ContactName))
+        {
+            return "Nhập họ tên.";
+        }
+
+        if (!TodoX.Web.Services.Email.EmailService.IsEmail(model.Email))
+        {
+            return "Email không hợp lệ.";
+        }
+
+        var phone = model.Phone?.Trim() ?? "";
+        if (phone.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(phone, @"^\+?[0-9 .]{8,15}$"))
+        {
+            return "Số điện thoại không hợp lệ.";
+        }
+
+        if (model.Password is null || model.Password.Length < 8)
+        {
+            return "Mật khẩu cần ít nhất 8 ký tự.";
+        }
+
+        if (model.Password != model.ConfirmPassword)
+        {
+            return "Mật khẩu xác nhận không khớp.";
+        }
+
+        return null;
     }
 
     // ===================== System (admin) users =====================
@@ -250,7 +310,7 @@ public sealed class AccountService
 
         if (model.Id == Guid.Empty)
         {
-            await _customers.InsertCustomerAsync(model);
+            model.Id = await _customers.InsertCustomerAsync(model);
             return (true, "Đã thêm khách hàng.");
         }
 

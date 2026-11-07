@@ -26,7 +26,7 @@ public sealed class PromptAssistantVideoOutputValidatorTests
 
     [Theory]
     [InlineData(3, 1.0, "duration_out_of_range")]
-    [InlineData(9, 1.0, "duration_out_of_range")]
+    [InlineData(16, 1.0, "duration_out_of_range")]
     [InlineData(4, 0.0, "tts_rate_invalid")]
     [InlineData(4, -0.5, "tts_rate_invalid")]
     public void RejectsDurationOrTtsSpeedOutsideAllowedRange(int duration, double speed, string expectedCode)

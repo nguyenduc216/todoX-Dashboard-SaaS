@@ -4,6 +4,10 @@ namespace TodoX.Web.Services.PromptAssistant;
 
 public static class PromptAssistantVideoOutputValidator
 {
+    // Scene length window for AI-written scripts: Gemini Omni Flash 1.2 renders every duration 4..15s.
+    public const int MinSceneSeconds = 4;
+    public const int MaxSceneSeconds = 15;
+
     public static IReadOnlyList<ServicePromptValidationError> Validate(JsonElement root)
     {
         var errors = new List<ServicePromptValidationError>();
@@ -35,9 +39,9 @@ public static class PromptAssistantVideoOutputValidator
             if (!TryGetProperty(scene, "duration_seconds", out var duration)
                 || duration.ValueKind != JsonValueKind.Number
                 || !duration.TryGetInt32(out var seconds)
-                || seconds is < 4 or > 8)
+                || seconds < MinSceneSeconds || seconds > MaxSceneSeconds)
             {
-                errors.Add(new($"{path}.duration_seconds", "duration_out_of_range", "Scene duration_seconds must be an integer from 4 through 8."));
+                errors.Add(new($"{path}.duration_seconds", "duration_out_of_range", $"Scene duration_seconds must be an integer from {MinSceneSeconds} through {MaxSceneSeconds}."));
             }
 
             RequireText(scene, path, "image_prompt", errors, "image_prompt");

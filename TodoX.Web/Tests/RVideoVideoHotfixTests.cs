@@ -47,14 +47,39 @@ public sealed class RVideoVideoHotfixTests
         {
             Assert.Equal(RVideoVideoModelPolicy.ProviderCode, model.ProviderCode);
         });
-        Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetInitial().Model);
+        Assert.Equal("gemini-omni-flash-1.2", RVideoVideoModelPolicy.GetInitial().Model);
         Assert.Equal("flash", RVideoVideoModelPolicy.GetInitial().Mode);
-        Assert.Equal("normal", RVideoVideoModelPolicy.Models[3].Mode);
+        Assert.Equal("veo_omni", RVideoVideoModelPolicy.Models[1].Model);
+        Assert.Equal("normal", RVideoVideoModelPolicy.Models[4].Mode);
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
-        Assert.Equal(4, RVideoVideoModelPolicy.Models.Count);
-        Assert.Null(RVideoVideoModelPolicy.GetNext(3));
+        Assert.Equal(5, RVideoVideoModelPolicy.Models.Count);
+        Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetNext(0)!.Model);
+        Assert.Equal("grok_video_heavy", RVideoVideoModelPolicy.GetNext(3)!.Model);
+        Assert.Null(RVideoVideoModelPolicy.GetNext(4));
+    }
+
+    [Fact]
+    public void ServiceVideoModelOrderReordersPoliciesAndKeepsUnlistedModelsInDefaultOrder()
+    {
+        var defaultKeys = RVideoVideoModelPolicy.Models.Select(RVideoVideoModelPolicy.BuildKey).ToArray();
+        Assert.Equal(defaultKeys, RVideoVideoModelPolicy.Ordered(null).Select(RVideoVideoModelPolicy.BuildKey));
+        Assert.Null(RVideoVideoModelPolicy.NormalizeConfiguredOrder(defaultKeys));
+        Assert.Null(RVideoVideoModelPolicy.NormalizeConfiguredOrder(null));
+
+        var ordered = RVideoVideoModelPolicy.Ordered(["79ai/grok_video_heavy/normal", "unknown|x|y", "79ai|gemini-omni-flash-1.2|flash"]);
+        Assert.Equal(
+            ["grok_video_heavy", "gemini-omni-flash-1.2", "veo_omni", "veo_3_1", "veo_3_1"],
+            ordered.Select(x => x.Model));
+        Assert.Equal(5, RVideoVideoModelPolicy.NormalizeConfiguredOrder(["79ai|grok_video_heavy|normal"])!.Count);
+
+        var input = new SceneVideoRenderWorkItemInput { ProviderCode = "79ai", VideoModelOrder = ["79ai|gemini-omni-flash-1.2|flash"] };
+        var policies = (IReadOnlyList<RVideoVideoModelPolicyEntry>)typeof(SceneVideoWorkerHandler)
+            .GetMethod("ResolveOrderedPolicies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .Invoke(null, [input])!;
+        Assert.Equal("gemini-omni-flash-1.2", policies[0].Model);
+        Assert.Equal(5, policies.Count);
     }
 
     [Fact]
@@ -1318,7 +1343,7 @@ public sealed class RVideoVideoHotfixTests
 
         await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
             Create79AiRuntime(),
-            RVideoVideoModelPolicy.Models[3],
+            RVideoVideoModelPolicy.Models.Single(x => x.Model == "grok_video_heavy"),
             "Animate the scene.",
             "9:16",
             "720p",
@@ -2493,7 +2518,7 @@ public sealed class RVideoVideoHotfixTests
                 """
         };
 
-        var resolved = resolver.Resolve(option, capability, RVideoVideoModelPolicy.GetInitial(), "9:16", "720p", 6);
+        var resolved = resolver.Resolve(option, capability, RVideoVideoModelPolicy.Models.Single(x => x.Model == "veo_omni"), "9:16", "720p", 6);
 
         Assert.Equal(42, resolved.ChargedPoints);
         Assert.Equal("catalog_todox_ai_model_price", resolved.CostSource);
@@ -2619,6 +2644,39 @@ public sealed class RVideoVideoHotfixTests
             6,
             SourceImage: null,
             ReferenceImages: Array.Empty<VideoProviderSourceImage>());
+
+    [Fact]
+    public void FallbackCandidatesPreferModelsWithTheExactSceneDuration()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "veo_omni", MediaType = "video", Enabled = true,
+                SupportedModes = ["flash"], SupportedDurations = [4, 6, 8, 10], SupportedResolutions = ["720p"]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "gemini-omni-flash-1.2", MediaType = "video", Enabled = true,
+                SupportedModes = ["flash"], SupportedDurations = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], SupportedResolutions = ["720p"]
+            }
+        };
+        // The service puts VEO Omni first, but it has no 7s option: Gemini 1.2 (exact 7s) goes first.
+        var input = new SceneVideoRenderWorkItemInput
+        {
+            ProviderCode = "79ai", DurationSeconds = 7, Resolution = "720p",
+            VideoModelOrder = ["79ai|veo_omni|flash"]
+        };
+        var resolved = ((System.Collections.IEnumerable)method.Invoke(null, new object[] { input, catalog })!)
+            .Cast<object>()
+            .Select(item => (
+                Model: (string)item.GetType().GetProperty("Policy")!.GetValue(item)!.GetType().GetProperty("Model")!.GetValue(item.GetType().GetProperty("Policy")!.GetValue(item))!,
+                Duration: (int)item.GetType().GetProperty("ProviderDurationSeconds")!.GetValue(item)!))
+            .ToArray();
+
+        Assert.Equal([("gemini-omni-flash-1.2", 7), ("veo_omni", 8)], resolved);
+    }
 
     private static IReadOnlyList<(string Model, string? Mode, int ProviderDuration, string ProviderResolution)> ResolveFallbackCandidatesForTest(
         int duration,
