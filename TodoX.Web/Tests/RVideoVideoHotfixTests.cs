@@ -53,8 +53,10 @@ public sealed class RVideoVideoHotfixTests
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
-        Assert.Equal(4, RVideoVideoModelPolicy.Models.Count);
-        Assert.Null(RVideoVideoModelPolicy.GetNext(3));
+        Assert.Equal(5, RVideoVideoModelPolicy.Models.Count);
+        Assert.Equal("gemini-omni-flash-1.2", RVideoVideoModelPolicy.GetNext(3)!.Model);
+        Assert.Equal("flash", RVideoVideoModelPolicy.GetNext(3)!.Mode);
+        Assert.Null(RVideoVideoModelPolicy.GetNext(4));
     }
 
     [Fact]

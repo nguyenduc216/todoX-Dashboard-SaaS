@@ -21,7 +21,10 @@ public static class RVideoVideoModelPolicy
         new(0, ProviderCode, "veo_omni", "flash"),
         new(1, ProviderCode, "veo_3_1", "fast"),
         new(2, ProviderCode, "veo_3_1", "lite"),
-        new(3, ProviderCode, "grok_video_heavy", "normal")
+        new(3, ProviderCode, "grok_video_heavy", "normal"),
+        // Gemini Omni Flash 1.2 (79AI, 2026-11): user-selectable, appended last so the existing
+        // default model and fallback order stay unchanged.
+        new(4, ProviderCode, "gemini-omni-flash-1.2", "flash")
     ];
 
     public static RVideoVideoModelPolicyEntry GetInitial() => Models[0];
