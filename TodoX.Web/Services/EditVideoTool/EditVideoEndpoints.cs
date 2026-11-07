@@ -12,10 +12,12 @@ public static class EditVideoEndpoints
 {
     public const string DeviceHashHeader = "X-TodoX-Device";
 
-    public sealed record SessionStartRequest(string? Tool, string? AppVersion);
+    public sealed record SessionStartRequest(string? Tool, string? AppVersion, string? Client);
     public sealed record SessionLogsRequest(List<EditVideoLogEntry>? Entries);
     public sealed record SessionEndRequest(string? Status, JsonElement? Summary);
     public sealed record VoiceRequest(string? Text, string? VoiceCode, Guid? SessionId);
+    public sealed record SkillRunStartRequest(string? Skill, int? Version);
+    public sealed record SkillRunNextRequest(string? Run, bool Repeat = false);
 
     public static void MapEditVideoEndpoints(this WebApplication app)
     {
@@ -59,7 +61,7 @@ public static class EditVideoEndpoints
                 return ToResult(auth);
             }
 
-            var id = await usage.StartSessionAsync(auth.Value.License, auth.Value.Device, body.Tool, body.AppVersion, ct);
+            var id = await usage.StartSessionAsync(auth.Value.License, auth.Value.Device, body.Tool, body.AppVersion, body.Client, ct);
             return Results.Json(new { success = true, data = new { sessionId = id } });
         }).DisableAntiforgery();
 
@@ -94,7 +96,7 @@ public static class EditVideoEndpoints
             data = StyleCatalog.All.Select(s => new { s.Id, s.Name, s.Accent })
         }));
 
-        group.MapPost("/plan", async (HttpContext http, PlanRequest body, EditVideoLicenseService licenses, EditVideoPlanService plans, CancellationToken ct) =>
+        group.MapPost("/plan", async (HttpContext http, PlanRequest body, EditVideoLicenseService licenses, EditVideoPlanService plans, EditVideoSkillService skills, CancellationToken ct) =>
         {
             var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
             if (!auth.Ok)
@@ -102,10 +104,59 @@ public static class EditVideoEndpoints
                 return ToResult(auth);
             }
 
-            var result = plans.Create(body);
+            // A skill's fixed settings are looked up here and never sent to the tool.
+            var skill = string.IsNullOrWhiteSpace(body.Skill) ? null : await skills.FindVersionAsync(body.Skill, body.SkillVersion, ct);
+            var result = plans.Create(body, skill is null ? null : EditVideoSkillSettings.Parse(skill.SettingsJson));
             return result.Ok
                 ? Results.Json(new { success = true, data = new { document = result.Value!.Document, totalSeconds = result.Value.Plan.TotalSeconds } })
                 : ToResult(result);
+        }).DisableAntiforgery();
+
+        group.MapPost("/plan/edit", async (HttpContext http, PlanEditRequest body, EditVideoLicenseService licenses, EditVideoPlanService plans, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return ToResult(auth);
+            }
+
+            var result = plans.Edit(body);
+            return result.Ok
+                ? Results.Json(new { success = true, data = new { document = result.Value!.Document, totalSeconds = result.Value.Plan.TotalSeconds } })
+                : ToResult(result);
+        }).DisableAntiforgery();
+
+        // ---- TodoX skill library: the tool installs every active skill into Claude / Codex
+        group.MapGet("/skills", async (HttpContext http, EditVideoLicenseService licenses, EditVideoSkillService skills, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return ToResult(auth);
+            }
+
+            return Results.Json(new { success = true, data = new { skills = await skills.ListFilesAsync(ct) } });
+        });
+
+        // A skill runs one step at a time: its content is handed to Claude step by step, never as a whole file.
+        group.MapPost("/skills/run", async (HttpContext http, SkillRunStartRequest body, EditVideoLicenseService licenses, EditVideoSkillRunService runs, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await runs.StartAsync(body.Skill, body.Version, auth.Value!.License.Id, ct)) : ToResult(auth);
+        }).DisableAntiforgery();
+
+        group.MapPost("/skills/run/next", async (HttpContext http, SkillRunNextRequest body, EditVideoLicenseService licenses, EditVideoSkillRunService runs, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return ToResult(auth);
+            }
+
+            var next = await runs.NextAsync(body.Run, body.Repeat, auth.Value!.License.Id, ct);
+            return next.ErrorCode == "skill_done"
+                ? Results.Json(new { success = true, data = new { done = true, message = next.Message } })
+                : ToResult(next);
         }).DisableAntiforgery();
 
         // ---- voices (Vbee through TodoX's account)
@@ -162,7 +213,13 @@ public static class EditVideoEndpoints
                 ? Results.Json(new { success = true, data = manifest })
                 : Results.Json(new { success = false, code = "no_release", message = "No release published yet." }, statusCode: StatusCodes.Status404NotFound));
 
-        app.MapGet("/downloads/editvideo/{name}", (string name, EditVideoReleaseService releases) =>
+        // Stable public link for the landing page: always the newest installer, no sign-in.
+        app.MapGet("/downloads/editvideo/latest", (EditVideoReleaseService releases) =>
+            releases.GetLatest()?.Files.FirstOrDefault(f => f.Kind == "app") is { } setup
+                ? Results.Redirect($"/downloads/editvideo/{Uri.EscapeDataString(setup.Name)}")
+                : Results.NotFound());
+
+        app.MapGet("/downloads/editvideo/{name}",(string name, EditVideoReleaseService releases) =>
             releases.ResolveFile(name) is { } path
                 ? Results.File(path, name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? "application/vnd.microsoft.portable-executable" : "application/octet-stream", name, enableRangeProcessing: true)
                 : Results.NotFound());

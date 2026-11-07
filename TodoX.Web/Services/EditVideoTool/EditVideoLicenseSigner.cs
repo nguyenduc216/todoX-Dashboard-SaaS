@@ -109,15 +109,14 @@ public sealed class EditVideoLicenseSigner : IDisposable
     }
 
     /// <summary>Server-side mirror of the exe's check; used by tests and diagnostics.</summary>
-    public EditVideoLicensePayload? Verify(string document)
-    {
-        if (_key is null)
-        {
-            return null;
-        }
+    public EditVideoLicensePayload? Verify(string document) =>
+        VerifyBody(document) is { } body ? JsonSerializer.Deserialize<EditVideoLicensePayload>(body, PayloadJson) : null;
 
-        var parts = document.Split('.');
-        if (parts.Length != 2)
+    /// <summary>The signed bytes of a document this server issued (license, edit plan), or null.</summary>
+    public byte[]? VerifyBody(string? document)
+    {
+        var parts = document?.Split('.');
+        if (_key is null || parts is not { Length: 2 })
         {
             return null;
         }
@@ -125,10 +124,7 @@ public sealed class EditVideoLicenseSigner : IDisposable
         try
         {
             var body = FromBase64Url(parts[0]);
-            var signature = FromBase64Url(parts[1]);
-            return _key.VerifyData(body, signature, HashAlgorithmName.SHA256)
-                ? JsonSerializer.Deserialize<EditVideoLicensePayload>(body, PayloadJson)
-                : null;
+            return _key.VerifyData(body, FromBase64Url(parts[1]), HashAlgorithmName.SHA256) ? body : null;
         }
         catch (FormatException)
         {

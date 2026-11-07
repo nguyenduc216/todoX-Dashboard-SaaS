@@ -23,10 +23,12 @@ public sealed class Installer
     private readonly ComponentLocator _locator;
     private readonly RemotionRenderer _remotion;
     private readonly LicenseGuard _license;
+    private readonly SkillSync _skills;
     private readonly ClientRegistrar _clients = new();
 
-    public Installer(AgentPaths paths, TodoXServerClient server, ComponentLocator locator, RemotionRenderer remotion, LicenseGuard license)
+    public Installer(AgentPaths paths, TodoXServerClient server, ComponentLocator locator, RemotionRenderer remotion, LicenseGuard license, SkillSync skills)
     {
+        _skills = skills;
         _paths = paths;
         _components = new ComponentInstaller(server, paths);
         _locator = locator;
@@ -78,6 +80,16 @@ public sealed class Installer
             ? $"Đã kết nối với: {string.Join(", ", registered)}. Hãy khởi động lại các ứng dụng này."
             : "Chưa thấy Claude Desktop / Claude Code / Codex trên máy. Cài một trong số đó rồi bấm \"Kết nối\" trong cửa sổ TodoX.");
 
+        var resources = UserSettings.Load(_paths).EffectiveResourceRoot;
+        Directory.CreateDirectory(resources);
+        status.Report($"Thư mục tư liệu dự án: {resources}");
+
+        if (registered.Count > 0)
+        {
+            status.Report("Đang cài bộ skill TodoX vào Claude / Codex...");
+            status.Report((await _skills.SyncAsync(notify: false, ct)).Describe());
+        }
+
         CreateShortcuts();
         WriteUninstallEntry(manifest.Version);
         status.Report("Cài đặt hoàn tất.");
@@ -97,6 +109,7 @@ public sealed class Installer
             // Offline uninstall still removes local files; the slot can be freed from the dashboard.
         }
 
+        _skills.RemoveAll();
         _clients.UnregisterAll();
         foreach (var lnk in ShortcutPaths())
         {

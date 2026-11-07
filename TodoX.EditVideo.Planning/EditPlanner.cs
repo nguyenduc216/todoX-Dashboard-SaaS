@@ -31,8 +31,9 @@ public static partial class EditPlanner
             throw new ArgumentException("Không có clip video nào dùng được (cần ít nhất 1 clip dài trên 1 giây).");
         }
 
-        var (width, height) = Resolution(req.Aspect);
-        var target = Math.Clamp(req.VoiceoverSeconds is > 0 ? Math.Max(req.TargetSeconds, req.VoiceoverSeconds.Value + 1) : req.TargetSeconds, 5, 600);
+        var (width, height) = Resolution(req.Aspect ?? "9:16");
+        var wanted = req.TargetSeconds ?? 30;
+        var target = Math.Clamp(req.VoiceoverSeconds is > 0 ? Math.Max(wanted, req.VoiceoverSeconds.Value + 1) : wanted, 5, 600);
         var intro = string.IsNullOrWhiteSpace(req.Title) ? null : new PlanIntro(req.Title.Trim(), req.Subtitle?.Trim() ?? string.Empty, IntroSeconds);
         var outro = string.IsNullOrWhiteSpace(req.OutroText) ? null : new PlanOutro(req.OutroText.Trim(), OutroSeconds);
         double BudgetFor(int clipCount) =>

@@ -1,0 +1,420 @@
+@page "/admin/editvideo-skills"
+@using TodoX.Web.Services.EditVideoTool
+@inject EditVideoSkillService Skills
+@inject AuthStateService AuthState
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Skill TodoX EditVideo</PageTitle>
+
+@if (!_initialized)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else if (!_admin)
+{
+    <MudAlert Severity="Severity.Error">Chỉ quản trị viên mới quản lý được skill.</MudAlert>
+}
+else
+{
+    <MudStack Spacing="3">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+            <div>
+                <MudText Typo="Typo.h4" Class="todox-page-title">Skill TodoX EditVideo</MudText>
+                <MudText Class="todox-page-subtitle">
+                    Sửa skill là sửa bản nháp. Chỉ khi tạo <b>phiên bản mới</b> thì app TodoX EditVideo trên máy khách mới nhận
+                    (khi mở app và định kỳ mỗi vài giờ). Mọi phiên bản đều được giữ lại, không ghi đè: khách có thể chọn phiên bản
+                    họ ưng làm mặc định, và mỗi video được đánh dấu phiên bản skill đã dùng.
+                </MudText>
+            </div>
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="New">Thêm skill</MudButton>
+        </MudStack>
+
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudPaper Class="todox-card pa-2">
+                    @if (_skills.Count == 0)
+                    {
+                        <MudText Class="pa-3 todox-page-subtitle">Chưa có skill nào. Bấm "Thêm skill" để tạo skill đầu tiên.</MudText>
+                    }
+                    <MudList T="EditVideoSkillRow" Dense="true">
+                        @foreach (var s in _skills)
+                        {
+                            <MudListItem T="EditVideoSkillRow" OnClick="@(() => Edit(s))" Class="@(_editing?.Id == s.Id ? "mud-selected-item" : "")">
+                                <MudText Typo="Typo.body1" Style="@(s.IsActive ? "" : "opacity:.55")">@s.Title</MudText>
+                                <MudText Typo="Typo.caption" Style="display:block">
+                                    @s.Slug · @(s.LatestVersionNo is { } no ? $"v{no} – {s.LatestVersionName}" : "chưa phát hành")@(s.Category is null ? "" : $" · {s.Category}")@(s.IsActive ? "" : " · đang tắt")
+                                </MudText>
+                                @if (s.HasUnpublishedChanges && s.LatestVersionNo is not null)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Warning" Style="display:block">Có thay đổi chưa tạo phiên bản</MudText>
+                                }
+                            </MudListItem>
+                        }
+                    </MudList>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="8">
+                @if (_editing is not null)
+                {
+                    <MudStack Spacing="3">
+                        @if (_askPublish)
+                        {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                                <MudText Typo="Typo.subtitle1"><b>Tạo phiên bản mới v@(NextVersionNo) để gửi về máy khách?</b></MudText>
+                                <MudText Typo="Typo.body2" Class="mb-2">
+                                    Bản nháp đã lưu và đang khác @(_editing.LatestVersionNo is { } n ? $"phiên bản v{n}" : "phiên bản nào") đã phát hành.
+                                    Tạo phiên bản mới thì máy khách nhận thông báo cập nhật; các phiên bản cũ vẫn được giữ để khách chọn lại.
+                                </MudText>
+                                <MudStack Spacing="2">
+                                    <MudTextField @bind-Value="_versionName" Label="Tên phiên bản" Variant="Variant.Outlined" Immediate="true"
+                                                  HelperText="Ví dụ: Thêm bản đồ vị trí, Bản ngắn 15 giây, Giọng trẻ trung" />
+                                    <MudTextField @bind-Value="_versionNotes" Label="Thay đổi gì (không bắt buộc)" Variant="Variant.Outlined" Lines="2" />
+                                    <MudStack Row="true" Spacing="2">
+                                        <MudButton Class="todox-primary-btn" OnClick="Publish" Disabled="_saving">Có, tạo phiên bản v@(NextVersionNo)</MudButton>
+                                        <MudButton Variant="Variant.Outlined" OnClick="@(() => _askPublish = false)">Chưa, chỉ lưu nháp</MudButton>
+                                    </MudStack>
+                                </MudStack>
+                            </MudAlert>
+                        }
+
+                        <MudPaper Class="todox-card pa-4">
+                            <MudStack Spacing="2">
+                                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="flex-wrap">
+                                    <MudText Typo="Typo.h6">@(_editing.Id == Guid.Empty ? "Skill mới" : $"Bản nháp: {_editing.Title}")</MudText>
+                                    @if (_editing.LatestVersionNo is { } latest)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang phát hành: v@(latest) – @_editing.LatestVersionName</MudChip>
+                                    }
+                                </MudStack>
+                                <MudTextField @bind-Value="_editing.Title" Label="Tên skill" Variant="Variant.Outlined"
+                                              HelperText="Ví dụ: TodoX BĐS – giới thiệu nhà phố" Immediate="true" OnBlur="SuggestSlug" />
+                                <MudTextField @bind-Value="_editing.Slug" Label="Mã skill" Variant="Variant.Outlined" Disabled="@(_editing.LatestVersionNo is not null)"
+                                              HelperText="Luôn bắt đầu bằng todox-, chữ thường không dấu, ví dụ todox-bds-nha-pho. Là tên thư mục cài trong Claude; không đổi được sau khi phát hành." />
+                                <MudTextField @bind-Value="_editing.Description" Label="Khi nào Claude dùng skill này" Variant="Variant.Outlined" Lines="3"
+                                              HelperText="Claude đọc dòng này để tự chọn skill. Ghi rõ loại video, từ khoá khách hay nói (vd: video bất động sản, giới thiệu nhà phố)." />
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                    <MudTextField @bind-Value="_editing.Category" Label="Nhóm / loại hình" Variant="Variant.Outlined" HelperText="Ví dụ: Bất động sản" Style="min-width:220px" />
+                                    <MudNumericField @bind-Value="_editing.SortOrder" Label="Thứ tự" Variant="Variant.Outlined" Style="max-width:140px" />
+                                    <MudSwitch @bind-Value="_editing.IsActive" Color="Color.Warning" Label="Đang bật (máy khách sẽ cài)" />
+                                </MudStack>
+                                <MudTextField @bind-Value="_editing.Content" Label="Nội dung skill – chỉ server giữ (Markdown)" Variant="Variant.Outlined" Lines="22"
+                                              Style="font-family:Consolas,monospace;font-size:13px"
+                                              HelperText="Chia bước bằng tiêu đề '## Bước 1 …', '## Bước 2 …'. Máy khách chỉ có tên + mô tả; Claude nhận từng bước một khi chạy skill (todox_skill_start / todox_skill_next). Chỉ dùng công cụ todox_..." />
+                                <MudText Typo="Typo.subtitle2">Thiết lập cố định (server tự áp dụng, để trống = theo yêu cầu của khách)</MudText>
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                    <MudSelect T="string" @bind-Value="_sAspect" Label="Khung hình" Variant="Variant.Outlined" Style="min-width:150px">
+                                        <MudSelectItem Value="@("")">Theo khách</MudSelectItem>
+                                        @foreach (var a in new[] { "9:16", "16:9", "1:1", "4:5" })
+                                        {
+                                            <MudSelectItem Value="@a">@a</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudNumericField T="double?" @bind-Value="_sTarget" Label="Độ dài (giây)" Variant="Variant.Outlined" Min="5" Max="600" Style="max-width:150px" />
+                                    <MudSelect T="string" @bind-Value="_sStyle" Label="Style" Variant="Variant.Outlined" Style="min-width:180px">
+                                        <MudSelectItem Value="@("")">Theo khách</MudSelectItem>
+                                        @foreach (var st in TodoX.EditVideo.Planning.StyleCatalog.All)
+                                        {
+                                            <MudSelectItem Value="@st.Id">@st.Name</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudSelect T="string" @bind-Value="_sCaption" Label="Kiểu caption" Variant="Variant.Outlined" Style="min-width:150px">
+                                        <MudSelectItem Value="@("")">Theo style</MudSelectItem>
+                                        @foreach (var c in TodoX.EditVideo.Planning.PlanEditor.CaptionStyles)
+                                        {
+                                            <MudSelectItem Value="@c">@c</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudSelect T="string" @bind-Value="_sTransition" Label="Chuyển cảnh" Variant="Variant.Outlined" Style="min-width:150px">
+                                        <MudSelectItem Value="@("")">Theo style</MudSelectItem>
+                                        @foreach (var t in TodoX.EditVideo.Planning.PlanEditor.Transitions)
+                                        {
+                                            <MudSelectItem Value="@t">@t</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudNumericField T="double?" @bind-Value="_sTransitionSeconds" Label="Chuyển cảnh (giây)" Variant="Variant.Outlined" Min="0" Max="1.5" Step="0.1" Style="max-width:160px" />
+                                    <MudNumericField T="double?" @bind-Value="_sMusicVolume" Label="Âm lượng nhạc" Variant="Variant.Outlined" Min="0" Max="1.5" Step="0.1" Style="max-width:150px" />
+                                </MudStack>
+                                <MudStack Row="true" Spacing="2" Justify="Justify.SpaceBetween" Class="flex-wrap">
+                                    <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                        <MudButton Class="todox-primary-btn" OnClick="Save" Disabled="_saving">Lưu</MudButton>
+                                        @if (_editing.Id != Guid.Empty && _editing.HasUnpublishedChanges && !_askPublish)
+                                        {
+                                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="AskPublish">Tạo phiên bản mới…</MudButton>
+                                        }
+                                        <MudButton Variant="Variant.Outlined" OnClick="@(() => { SyncSettings(); _preview = _preview is null ? EditVideoSkillService.BuildDraftPreview(_editing) : null; })">
+                                            @(_preview is null ? "Xem" : "Ẩn") máy khách & các bước
+                                        </MudButton>
+                                    </MudStack>
+                                    @if (_editing.Id != Guid.Empty)
+                                    {
+                                        <MudButton Color="Color.Error" Variant="Variant.Text" OnClick="Delete">Xoá skill</MudButton>
+                                    }
+                                </MudStack>
+                                @if (_preview is not null)
+                                {
+                                    <pre style="white-space:pre-wrap;font-size:12px;background:rgba(0,0,0,.25);padding:12px;border-radius:6px">@_preview</pre>
+                                }
+                            </MudStack>
+                        </MudPaper>
+
+                        @if (_editing.Id != Guid.Empty)
+                        {
+                            <MudPaper Class="todox-card pa-4">
+                                <MudText Typo="Typo.h6" Class="mb-2">Các phiên bản đã phát hành</MudText>
+                                @if (_versions.Count == 0)
+                                {
+                                    <MudText Class="todox-page-subtitle">Chưa có phiên bản nào — máy khách chưa nhận skill này. Lưu rồi tạo phiên bản v1.</MudText>
+                                }
+                                @foreach (var v in _versions)
+                                {
+                                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="flex-wrap py-1" Style="border-bottom:1px solid rgba(255,255,255,.06)">
+                                        <div>
+                                            <MudText Typo="Typo.body1"><b>v@(v.VersionNo)</b> – @v.VersionName@(v.VersionNo == _editing.LatestVersionNo ? " (mới nhất)" : "")</MudText>
+                                            <MudText Typo="Typo.caption" Style="display:block">@v.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")@(v.Notes is null ? "" : $" · {v.Notes}")</MudText>
+                                        </div>
+                                        <MudStack Row="true" Spacing="1">
+                                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => _preview = EditVideoSkillService.BuildVersionPreview(_editing.Slug, v))">Xem</MudButton>
+                                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => CopyToDraft(v))">Chép vào bản nháp</MudButton>
+                                        </MudStack>
+                                    </MudStack>
+                                }
+                            </MudPaper>
+                        }
+                    </MudStack>
+                }
+                else
+                {
+                    <MudPaper Class="todox-card pa-4">
+                        <MudText Class="todox-page-subtitle">Chọn một skill bên trái để sửa, hoặc thêm skill mới.</MudText>
+                    </MudPaper>
+                }
+            </MudItem>
+        </MudGrid>
+    </MudStack>
+}
+
+@code {
+    private const string Template =
+        """
+        Chỉ dùng các công cụ `todox_...` của TodoX EditVideo (chạy trên máy khách, video không rời máy).
+
+        ## Bước 1 – Tư liệu
+        Nếu khách nhắc tới một dự án (vd "dự án An Đông"), gọi `todox_project_folder` với tên dự án để mở thư mục
+        tư liệu; nhờ khách chép ảnh/video vào đó rồi báo lại. Sau đó `todox_probe` thư mục để xem có gì.
+
+        ## Bước 2 – Dựng bản đầu
+        ... bố cục, thứ tự cảnh, lời thoại riêng của loại video này ...
+        Gọi `todox_edit_start` với các clip theo thứ tự câu chuyện, kèm `skill` và `skillVersion`.
+
+        ## Bước 3 – Chỉnh và xuất
+        Chỉnh bằng `todox_cut` / `todox_join` / `todox_caption` / `todox_titles` / `todox_audio`, rồi `todox_export`;
+        đưa khách đường dẫn file kết quả.
+        """;
+
+    private bool _initialized;
+    private bool _admin;
+    private bool _saving;
+    private bool _askPublish;
+    private string? _preview;
+    private string? _versionName;
+    private string? _versionNotes;
+    private IReadOnlyList<EditVideoSkillRow> _skills = [];
+    private IReadOnlyList<EditVideoSkillVersionRow> _versions = [];
+    private EditVideoSkillRow? _editing;
+    private string _sAspect = "", _sStyle = "", _sCaption = "", _sTransition = "";
+    private double? _sTarget, _sTransitionSeconds, _sMusicVolume;
+
+    private int NextVersionNo => (_editing?.LatestVersionNo ?? 0) + 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _admin = AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
+        if (_admin)
+        {
+            await Reload();
+        }
+
+        _initialized = true;
+    }
+
+    private async Task Reload()
+    {
+        try
+        {
+            _skills = await Skills.ListAsync(activeOnly: false);
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
+        {
+            _skills = [];
+            Snackbar.Add("Chưa có bảng skill — cần chạy migration editvideo skills / skill_versions.", Severity.Warning);
+        }
+    }
+
+    private void New()
+    {
+        _editing = new EditVideoSkillRow { Slug = EditVideoSkillService.SlugPrefix, Content = Template, IsActive = true, HasUnpublishedChanges = true };
+        _versions = [];
+        LoadSettings(null);
+        _preview = null;
+        _askPublish = false;
+    }
+
+    private async Task Edit(EditVideoSkillRow skill)
+    {
+        // Edit a copy so an unsaved change does not show in the list.
+        _editing = new EditVideoSkillRow
+        {
+            Id = skill.Id, Slug = skill.Slug, Title = skill.Title, Description = skill.Description, Category = skill.Category,
+            Content = skill.Content, SettingsJson = skill.SettingsJson, IsActive = skill.IsActive, SortOrder = skill.SortOrder, UpdatedAt = skill.UpdatedAt,
+            LatestVersionNo = skill.LatestVersionNo, LatestVersionName = skill.LatestVersionName, HasUnpublishedChanges = skill.HasUnpublishedChanges
+        };
+        _versions = await Skills.ListVersionsAsync(skill.Id);
+        LoadSettings(skill.SettingsJson);
+        _preview = null;
+        _askPublish = false;
+    }
+
+    private void SuggestSlug()
+    {
+        if (_editing is not null && _editing.Id == Guid.Empty && _editing.Slug.TrimEnd('-') is "todox" or "")
+        {
+            _editing.Slug = EditVideoSkillService.SuggestSlug(_editing.Title);
+        }
+    }
+
+    private async Task Save()
+    {
+        if (_editing is null)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            SyncSettings();
+            var result = await Skills.SaveAsync(_editing, AuthState.CurrentUser?.UserId);
+            if (!result.Ok)
+            {
+                Snackbar.Add(result.Message ?? "Không lưu được skill.", Severity.Error);
+                return;
+            }
+
+            await Reload();
+            await Edit(result.Value!);
+            if (result.Value!.HasUnpublishedChanges)
+            {
+                Snackbar.Add("Đã lưu bản nháp. Máy khách chưa nhận cho tới khi tạo phiên bản mới.", Severity.Info);
+                AskPublish();
+            }
+            else
+            {
+                Snackbar.Add("Đã lưu. Nội dung giống phiên bản đang phát hành nên không cần phiên bản mới.", Severity.Success);
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void LoadSettings(string? json)
+    {
+        var s = EditVideoSkillSettings.Parse(json);
+        _sAspect = s.Aspect ?? "";
+        _sTarget = s.TargetSeconds;
+        _sStyle = s.StyleId ?? "";
+        _sCaption = s.CaptionStyle ?? "";
+        _sTransition = s.Transition ?? "";
+        _sTransitionSeconds = s.TransitionSeconds;
+        _sMusicVolume = s.MusicVolume;
+    }
+
+    private void SyncSettings()
+    {
+        if (_editing is not null)
+        {
+            _editing.SettingsJson = new EditVideoSkillSettings(
+                Blank(_sAspect), _sTarget, Blank(_sStyle), Blank(_sCaption), Blank(_sTransition), _sTransitionSeconds, _sMusicVolume).ToJson();
+        }
+
+        static string? Blank(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
+    }
+
+    private void AskPublish()
+    {
+        _versionName = null;
+        _versionNotes = null;
+        _askPublish = true;
+    }
+
+    private async Task Publish()
+    {
+        if (_editing is null)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var result = await Skills.PublishVersionAsync(_editing.Id, _versionName, _versionNotes, AuthState.CurrentUser?.UserId);
+            if (!result.Ok)
+            {
+                Snackbar.Add(result.Message ?? "Không tạo được phiên bản.", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add($"Đã tạo phiên bản v{result.Value!.VersionNo} – {result.Value.VersionName}. Máy khách sẽ nhận thông báo cập nhật.", Severity.Success);
+            await Reload();
+            if (_skills.FirstOrDefault(s => s.Id == _editing.Id) is { } fresh)
+            {
+                await Edit(fresh);
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void CopyToDraft(EditVideoSkillVersionRow version)
+    {
+        if (_editing is null)
+        {
+            return;
+        }
+
+        _editing.Title = version.Title;
+        _editing.Description = version.Description;
+        _editing.Content = version.Content;
+        _editing.SettingsJson = version.SettingsJson;
+        LoadSettings(version.SettingsJson);
+        _preview = null;
+        Snackbar.Add($"Đã chép nội dung v{version.VersionNo} vào bản nháp. Bấm Lưu để giữ, rồi tạo phiên bản mới nếu muốn phát hành lại.", Severity.Info);
+    }
+
+    private async Task Delete()
+    {
+        if (_editing is null || _editing.Id == Guid.Empty)
+        {
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync("Xoá skill",
+            $"Xoá \"{_editing.Title}\" cùng toàn bộ {_versions.Count} phiên bản? Máy khách sẽ gỡ skill này ở lần kiểm tra kế tiếp. " +
+            "Muốn tạm ngừng thì tắt \"Đang bật\" thay vì xoá.",
+            yesText: "Xoá", cancelText: "Huỷ");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        await Skills.DeleteAsync(_editing.Id);
+        _editing = null;
+        Snackbar.Add("Đã xoá skill.", Severity.Success);
+        await Reload();
+    }
+}

@@ -88,7 +88,7 @@
                 @foreach (var s in _sessions.GetValueOrDefault(license.Id) ?? [])
                 {
                     <MudText Typo="Typo.caption" Style="display:block" Color="@(s.Status == "failed" || s.ErrorCount > 0 ? Color.Error : Color.Default)">
-                        @s.StartedAt.ToLocalTime().ToString("dd/MM HH:mm") · @ToolLabel(s.Tool) · @(s.Status == "failed" ? "lỗi" : s.Status == "running" ? "đang chạy" : "xong")@(s.DeviceName is null ? "" : $" · {s.DeviceName}")
+                        @s.StartedAt.ToLocalTime().ToString("dd/MM HH:mm") · @ToolLabel(s.Tool) · @SessionStatusLabel(s.Status)@SkillLabel(s)@(s.Client is null ? "" : $" · từ {ClientLabel(s.Client)}")@(s.DeviceName is null ? "" : $" · {s.DeviceName}")
                     </MudText>
                 }
             </MudPaper>
@@ -162,6 +162,36 @@
         "voice" => "Giọng đọc",
         "health" => "Kiểm tra hệ thống",
         "convert" => "Chuyển đổi video",
+        "voice_check" => "Nghe lại giọng đọc",
+        "transcribe" => "Nghe lời thoại",
         _ => tool
     };
+
+    internal static string SessionStatusLabel(string status) => status switch
+    {
+        "ok" => "xong",
+        "failed" => "lỗi",
+        "running" => "đang chạy",
+        "interrupted" => "bị ngắt giữa chừng",
+        _ => status
+    };
+
+    /// <summary>" · skill todox-bds-nha-pho v3 (Bản tối giản)" for videos made with a versioned TodoX skill.</summary>
+    internal static string SkillLabel(EditVideoSessionRow s) =>
+        s.Skill is null ? "" : $" · skill {s.Skill}{(s.SkillVersion is null ? "" : $" v{s.SkillVersion}")}{(s.SkillVersionName is null ? "" : $" ({s.SkillVersionName})")}";
+
+    /// <summary>Friendly name for the app that called the tool; unknown names are shown as reported.</summary>
+    internal static string ClientLabel(string client)
+    {
+        var name = client.Split(' ')[0].ToLowerInvariant();
+        return name switch
+        {
+            "claude-ai" => "Claude Desktop",
+            "claude-code" => "Claude Code",
+            "todox-window" => "cửa sổ TodoX EditVideo",
+            "todox-cli" => "dòng lệnh",
+            _ when name.StartsWith("codex") => "Codex",
+            _ => client
+        };
+    }
 }

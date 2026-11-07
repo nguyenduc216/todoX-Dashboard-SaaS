@@ -13,7 +13,13 @@ public sealed class EditVideoSessionRow
     public string? AppVersion { get; init; }
     public string Status { get; init; } = string.Empty;
     public string? DeviceName { get; init; }
+    /// <summary>Raw MCP client name the tool reported (e.g. claude-ai, claude-code, codex-mcp-client).</summary>
+    public string? Client { get; init; }
     public string? Summary { get; init; }
+    /// <summary>Skill and version the video was made with (todox_auto_edit's skill / skillVersion), when given.</summary>
+    public string? Skill { get; init; }
+    public string? SkillVersion { get; init; }
+    public string? SkillVersionName { get; init; }
     public DateTimeOffset StartedAt { get; init; }
     public DateTimeOffset? EndedAt { get; init; }
     public int ErrorCount { get; init; }
@@ -45,6 +51,10 @@ public sealed class EditVideoUsageService
     private static readonly HashSet<string> Levels = new(StringComparer.OrdinalIgnoreCase) { "info", "warn", "error" };
     private static readonly HashSet<string> Statuses = new(StringComparer.OrdinalIgnoreCase) { "ok", "failed" };
 
+    // A session still "running" after this long never reported its end: the tool was closed or the machine went
+    // off mid-work. Shown as interrupted; the row itself is left as recorded.
+    private const int StaleRunningHours = 3;
+
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly ILogger<EditVideoUsageService> _logger;
@@ -56,13 +66,16 @@ public sealed class EditVideoUsageService
         _logger = logger;
     }
 
-    public async Task<Guid> StartSessionAsync(EditVideoLicenseRow license, EditVideoDeviceRow device, string? tool, string? appVersion, CancellationToken ct = default)
+    public async Task<Guid> StartSessionAsync(EditVideoLicenseRow license, EditVideoDeviceRow device, string? tool, string? appVersion, string? client, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
+        // The calling app (Claude Desktop, Claude Code, Codex, the TodoX window) is kept in summary; the end summary
+        // is merged into it.
         return await conn.ExecuteScalarAsync<Guid>(
             """
-            INSERT INTO editvideo.usage_sessions (tenant_id, license_id, device_id, customer_id, tool, app_version)
-            VALUES (@tenantId, @licenseId, @deviceId, @customerId, @tool, @appVersion)
+            INSERT INTO editvideo.usage_sessions (tenant_id, license_id, device_id, customer_id, tool, app_version, summary)
+            VALUES (@tenantId, @licenseId, @deviceId, @customerId, @tool, @appVersion,
+                    CASE WHEN @client::text IS NULL THEN NULL ELSE jsonb_build_object('client', @client::text) END)
             RETURNING id;
             """,
             new
@@ -72,7 +85,8 @@ public sealed class EditVideoUsageService
                 deviceId = device.Id,
                 customerId = license.CustomerId,
                 tool = Clip(tool, 40) ?? "unknown",
-                appVersion = Clip(appVersion, 40)
+                appVersion = Clip(appVersion, 40),
+                client = Clip(client, 80)
             });
     }
 
@@ -118,7 +132,9 @@ public sealed class EditVideoUsageService
         await conn.ExecuteAsync(
             """
             UPDATE editvideo.usage_sessions
-               SET status = @status, summary = CAST(@summary AS jsonb), ended_at = now()
+               SET status = @status,
+                   summary = CASE WHEN @summary::text IS NULL THEN summary ELSE COALESCE(summary, '{}'::jsonb) || CAST(@summary AS jsonb) END,
+                   ended_at = now()
              WHERE id = @sessionId AND license_id = @licenseId AND ended_at IS NULL;
             """,
             new
@@ -171,7 +187,11 @@ public sealed class EditVideoUsageService
         using var conn = await _factory.OpenAsync(ct);
         return (await conn.QueryAsync<EditVideoSessionRow>(
             """
-            SELECT s.id AS Id, s.tool AS Tool, s.app_version AS AppVersion, s.status AS Status, d.device_name AS DeviceName,
+            SELECT s.id AS Id, s.tool AS Tool, s.app_version AS AppVersion,
+                   CASE WHEN s.status = 'running' AND s.started_at < now() - make_interval(hours => @staleHours)
+                        THEN 'interrupted' ELSE s.status END AS Status,
+                   d.device_name AS DeviceName, s.summary->>'client' AS Client,
+                   s.summary->>'skill' AS Skill, s.summary->>'skillVersion' AS SkillVersion, s.summary->>'skillVersionName' AS SkillVersionName,
                    s.summary::text AS Summary, s.started_at AS StartedAt, s.ended_at AS EndedAt,
                    (SELECT count(*) FROM editvideo.usage_logs l WHERE l.session_id = s.id AND l.level = 'error')::int AS ErrorCount
               FROM editvideo.usage_sessions s
@@ -180,7 +200,7 @@ public sealed class EditVideoUsageService
              ORDER BY s.started_at DESC
              LIMIT @limit;
             """,
-            new { licenseId, tenantId = _tenant.TenantId, limit = Math.Clamp(limit, 1, 200) })).ToList();
+            new { licenseId, tenantId = _tenant.TenantId, limit = Math.Clamp(limit, 1, 200), staleHours = StaleRunningHours })).ToList();
     }
 
     public async Task<IReadOnlyList<EditVideoUsageLogRow>> ListLogsAsync(Guid sessionId, CancellationToken ct = default)

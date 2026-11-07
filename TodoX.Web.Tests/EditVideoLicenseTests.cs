@@ -80,6 +80,28 @@ public sealed class EditVideoLicenseTests
     }
 
     [Fact]
+    public void Plan_edits_apply_only_to_plans_this_server_signed()
+    {
+        using var signer = new EditVideoLicenseSigner(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        var service = new EditVideoPlanService(signer);
+        TodoX.EditVideo.Planning.ClipInput[] clips = [new("c0", 12, 1920, 1080, true, true), new("c1", 8, 1920, 1080, true, true)];
+        var created = service.Create(new TodoX.EditVideo.Planning.PlanRequest(clips));
+
+        var edited = service.Edit(new TodoX.EditVideo.Planning.PlanEditRequest(created.Value!.Document, clips,
+            new TodoX.EditVideo.Planning.PlanEdit("arrange", Scenes: [new("c1", 0, 2)])));
+
+        Assert.True(edited.Ok);
+        Assert.Equal("c1", Assert.Single(edited.Value!.Plan.Clips).Src);
+        Assert.NotNull(signer.VerifyBody(edited.Value.Document));
+
+        using var other = new EditVideoLicenseSigner(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        var foreign = new EditVideoPlanService(other).Create(new TodoX.EditVideo.Planning.PlanRequest(clips)).Value!.Document;
+        Assert.False(service.Edit(new TodoX.EditVideo.Planning.PlanEditRequest(foreign, clips, new TodoX.EditVideo.Planning.PlanEdit("look", StyleId: "clean"))).Ok);
+        Assert.Equal("invalid_request", service.Edit(new TodoX.EditVideo.Planning.PlanEditRequest(created.Value.Document, clips,
+            new TodoX.EditVideo.Planning.PlanEdit("cut", Scene: 99))).ErrorCode);
+    }
+
+    [Fact]
     public void Hand_typed_key_with_lowercase_spaces_and_lookalikes_still_matches()
     {
         Assert.Equal("TDXV-01234-56789-ABCDE-FGH1K", EditVideoLicenseKeys.Normalize(" tdxv 0l234-56789 abcde fghik "));

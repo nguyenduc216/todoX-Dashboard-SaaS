@@ -666,6 +666,7 @@
 
         EnsureAiStudioItem(list, existingCodes, BuildAiStudioVoicesItem());
         EnsureAiStudioItem(list, existingCodes, BuildAiStudioMusicItem());
+        EnsureAiStudioItem(list, existingCodes, BuildEditVideoSkillsItem());
 
         // Ensure "AI Providers" is always reachable even if the DB menu has not been seeded with it.
         if (!existingCodes.Contains("ai_providers"))
@@ -829,6 +830,20 @@
             VisibilityPolicy = "admin_avatar_manager",
             MatchAll = false,
             SortOrder = 38
+        };
+
+    private static NavigationMenuItemDto BuildEditVideoSkillsItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "admin_editvideo_skills",
+            Title = "Skill EditVideo",
+            Href = "/admin/editvideo-skills",
+            IconKey = "AutoFixHigh",
+            ModuleKeys = Array.Empty<string>(),
+            VisibilityPolicy = "admin_job_monitor",
+            MatchAll = false,
+            SortOrder = 39
         };
 
     private static NavigationMenuItemDto BuildAiProvidersItem()

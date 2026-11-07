@@ -5,6 +5,8 @@
 @inject SystemImageStorage SystemImageStorage
 @inject AuthStateService AuthState
 @inject TokenSettingsService TokenSettings
+@inject EmailService Email
+@using TodoX.Web.Services.Email
 @inject ISnackbar Snackbar
 
 <PageTitle>Cài đặt hệ thống</PageTitle>
@@ -193,6 +195,71 @@
                     </MudStack>
                 </MudPaper>
             </MudItem>
+            <MudItem xs="12">
+                <MudPaper Class="todox-card pa-5" rounded="true">
+                    <MudStack Spacing="2">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudText Typo="Typo.h6">Email gửi đi (SMTP)</MudText>
+                            @if (_smtpLoaded)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="@(_smtpConfigured ? Color.Success : Color.Default)">
+                                    @(_smtpConfigured ? "Đã cấu hình" : "Chưa cấu hình")
+                                </MudChip>
+                            }
+                        </MudStack>
+                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">
+                            Dùng để gửi email chào mừng khi khách đăng ký và báo cho TodoX có khách mới.
+                            Gmail: máy chủ smtp.gmail.com, cổng 587, STARTTLS, mật khẩu là App Password.
+                        </MudText>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="6">
+                                <MudTextField T="string" @bind-Value="_smtpHost" Label="Máy chủ SMTP" Placeholder="smtp.gmail.com" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudNumericField T="int" @bind-Value="_smtpPort" Label="Cổng" Min="1" Max="65535" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudSelect T="string" @bind-Value="_smtpSecurity" Label="Bảo mật" Variant="Variant.Outlined">
+                                    <MudSelectItem Value="@("auto")">Tự chọn</MudSelectItem>
+                                    <MudSelectItem Value="@("starttls")">STARTTLS (587)</MudSelectItem>
+                                    <MudSelectItem Value="@("ssl")">SSL (465)</MudSelectItem>
+                                    <MudSelectItem Value="@("none")">Không mã hoá</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField T="string" @bind-Value="_smtpUsername" Label="Tài khoản đăng nhập" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField T="string" @bind-Value="_smtpPassword" Label="Mật khẩu" InputType="InputType.Password" Variant="Variant.Outlined"
+                                              Placeholder="@(_smtpHasPassword ? "Đã lưu – để trống để giữ nguyên" : "")" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField T="string" @bind-Value="_smtpFromEmail" Label="Email người gửi" Placeholder="no-reply@todox.vn" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField T="string" @bind-Value="_smtpFromName" Label="Tên người gửi" Placeholder="TodoX" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField T="string" @bind-Value="_smtpNotifyEmail" Label="Email nhận thông báo khách mới (không bắt buộc)" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6" Class="d-flex align-center">
+                                <MudSwitch T="bool" @bind-Value="_smtpWelcome" Color="Color.Warning">Gửi email chào mừng khi khách đăng ký</MudSwitch>
+                            </MudItem>
+                        </MudGrid>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-3">
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save"
+                                       Disabled="@(_smtpBusy || !_smtpLoaded)" OnClick="SaveSmtpAsync">Lưu cấu hình email</MudButton>
+                            <MudTextField T="string" @bind-Value="_smtpTestTo" Label="Gửi thử tới" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:260px" />
+                            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Send"
+                                       Disabled="@(_smtpBusy || !_smtpLoaded)" OnClick="TestSmtpAsync">Gửi thử</MudButton>
+                        </MudStack>
+                        @if (_smtpBusy)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
         }
     </MudGrid>
 </MudStack>
@@ -219,7 +286,70 @@
         {
             _chargeStaticImagePoints = await TokenSettings.GetChargeStaticImagePointsAsync();
             _settingsLoaded = true;
+            LoadSmtp(await Email.GetAsync());
+            _smtpTestTo = AuthState.CurrentUser?.Email;
         }
+    }
+
+    private string? _smtpHost, _smtpUsername, _smtpPassword, _smtpFromEmail, _smtpFromName, _smtpNotifyEmail, _smtpTestTo;
+    private string _smtpSecurity = "auto";
+    private int _smtpPort = 587;
+    private bool _smtpWelcome = true, _smtpHasPassword, _smtpConfigured, _smtpLoaded, _smtpBusy;
+
+    private void LoadSmtp(SmtpSettings s)
+    {
+        (_smtpHost, _smtpPort, _smtpSecurity, _smtpUsername) = (s.Host, s.Port, s.Security, s.Username);
+        (_smtpFromEmail, _smtpFromName, _smtpNotifyEmail, _smtpWelcome) = (s.FromEmail, s.FromName, s.NotifyEmail, s.WelcomeOnRegister);
+        _smtpPassword = null;
+        _smtpHasPassword = !string.IsNullOrEmpty(s.Password);
+        _smtpConfigured = s.IsConfigured;
+        _smtpLoaded = true;
+    }
+
+    private SmtpSettings SmtpForm() => new(_smtpHost?.Trim() ?? "", _smtpPort, _smtpSecurity, _smtpUsername?.Trim(), _smtpPassword,
+        _smtpFromEmail?.Trim() ?? "", _smtpFromName?.Trim(), _smtpNotifyEmail?.Trim(), _smtpWelcome);
+
+    private async Task SaveSmtpAsync()
+    {
+        if (!IsAdmin) return;
+        _smtpBusy = true;
+        try
+        {
+            var result = await Email.SaveAsync(SmtpForm());
+            Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+            if (result.Success)
+            {
+                LoadSmtp(await Email.GetAsync());
+            }
+        }
+        finally { _smtpBusy = false; }
+    }
+
+    /// <summary>Sends a test with what is in the form (a blank password uses the stored one), without saving.</summary>
+    private async Task TestSmtpAsync()
+    {
+        if (!IsAdmin) return;
+        var form = SmtpForm();
+        var error = EmailService.Validate(form);
+        if (error is not null)
+        {
+            Snackbar.Add(error, Severity.Error);
+            return;
+        }
+
+        _smtpBusy = true;
+        try
+        {
+            if (string.IsNullOrEmpty(form.Password))
+            {
+                form = form with { Password = (await Email.GetAsync()).Password };
+            }
+
+            var result = await Email.SendAsync(form, _smtpTestTo ?? "", "TodoX – email thử",
+                SignupEmails.Welcome(AuthState.CurrentUser?.DisplayName ?? "bạn", _smtpTestTo ?? ""));
+            Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+        }
+        finally { _smtpBusy = false; }
     }
 
     private async Task UploadMrTodoXAvatar(InputFileChangeEventArgs e)

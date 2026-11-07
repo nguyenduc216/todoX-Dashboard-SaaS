@@ -37,8 +37,8 @@ public sealed class TodoXServerClient
     public Task<ServerResult<JsonElement>> PingAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "ping", null, authenticated: false, ct, TimeSpan.FromSeconds(8));
 
-    public Task<ServerResult<JsonElement>> StartSessionAsync(string tool, string appVersion, CancellationToken ct = default) =>
-        SendAsync<JsonElement>(HttpMethod.Post, "sessions", new { tool, appVersion }, true, ct);
+    public Task<ServerResult<JsonElement>> StartSessionAsync(string tool, string appVersion, string? client, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "sessions", new { tool, appVersion, client }, true, ct);
 
     public Task<ServerResult<JsonElement>> SendLogsAsync(Guid sessionId, IEnumerable<object> entries, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Post, $"sessions/{sessionId}/logs", new { entries }, true, ct);
@@ -48,6 +48,15 @@ public sealed class TodoXServerClient
 
     public Task<ServerResult<JsonElement>> PlanAsync(object request, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Post, "plan", request, true, ct, TimeSpan.FromSeconds(30));
+
+    public Task<ServerResult<JsonElement>> PlanEditAsync(object request, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "plan/edit", request, true, ct, TimeSpan.FromSeconds(30));
+
+    public Task<ServerResult<JsonElement>> SkillRunStartAsync(string skill, int? version, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "skills/run", new { skill, version }, true, ct, TimeSpan.FromSeconds(30));
+
+    public Task<ServerResult<JsonElement>> SkillRunNextAsync(string run, bool repeat, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "skills/run/next", new { run, repeat }, true, ct, TimeSpan.FromSeconds(30));
 
     public Task<ServerResult<JsonElement>> StylesAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "styles", null, false, ct);
@@ -60,6 +69,9 @@ public sealed class TodoXServerClient
 
     public Task<ServerResult<JsonElement>> TtsStatusAsync(Guid jobId, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"tts/{jobId}", null, true, ct, TimeSpan.FromSeconds(60));
+
+    public Task<ServerResult<JsonElement>> SkillsAsync(CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, "skills", null, true, ct, TimeSpan.FromSeconds(30));
 
     public Task<ServerResult<JsonElement>> LatestReleaseAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "releases/latest", null, false, ct, TimeSpan.FromSeconds(15));

@@ -27,13 +27,14 @@ public sealed class SessionLogger : IAsyncDisposable
     {
         Directory.CreateDirectory(paths.LogsDir);
         var logger = new SessionLogger(server, Path.Combine(paths.LogsDir, $"{DateTime.Now:yyyyMMdd}.log"));
-        var started = await server.StartSessionAsync(tool, Status.StatusService.Version, ct);
+        var started = await server.StartSessionAsync(tool, Status.StatusService.Version, CallerApp.Current, ct);
         if (started.Ok && started.Value.TryGetProperty("sessionId", out var id) && id.TryGetGuid(out var sessionId))
         {
             logger._sessionId = sessionId;
         }
 
-        logger.Info("session_start", $"{tool} v{Status.StatusService.Version}", started.Ok ? null : new { server = started.ErrorCode });
+        logger.Info("session_start", $"{tool} v{Status.StatusService.Version}",
+            started.Ok ? new { client = CallerApp.Current } : new { client = CallerApp.Current, server = started.ErrorCode });
         return logger;
     }
 

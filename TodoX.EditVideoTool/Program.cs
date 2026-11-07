@@ -7,6 +7,7 @@ using TodoX.EditVideoTool.Components;
 using TodoX.EditVideoTool.Licensing;
 using TodoX.EditVideoTool.Mcp;
 using TodoX.EditVideoTool.Media;
+using TodoX.EditVideoTool.Projects;
 using TodoX.EditVideoTool.Server;
 using TodoX.EditVideoTool.Status;
 using TodoX.EditVideoTool.Setup;
@@ -18,6 +19,7 @@ if (command is not "mcp")
 {
     // CLI messages are Vietnamese; the default Windows console code page would mangle them.
     Console.OutputEncoding = System.Text.Encoding.UTF8;
+    CallerApp.Set(command == "app" ? "todox-window" : "todox-cli");
 }
 
 switch (command)
@@ -123,6 +125,10 @@ static void AddAgentServices(IServiceCollection services)
     services.AddSingleton<HealthCheck>();
     services.AddSingleton<Installer>();
     services.AddSingleton<Updater>();
+    services.AddSingleton<SkillSync>();
+    services.AddSingleton<ProjectFolders>();
+    services.AddSingleton<EditStore>();
+    services.AddSingleton<SkillRunStore>();
 }
 
 static ServiceProvider BuildServices()
@@ -143,9 +149,19 @@ static async Task RunMcpServerAsync(string[] args)
     AddAgentServices(builder.Services);
 
     builder.Services
-        .AddMcpServer(o => o.ServerInfo = new() { Name = "todox-editvideo", Version = StatusService.Version })
+        .AddMcpServer(o =>
+        {
+            o.ServerInfo = new() { Name = "todox-editvideo", Version = StatusService.Version };
+            o.ServerInstructions = ServerGuide.Instructions;
+        })
         .WithStdioServerTransport()
-        .WithToolsFromAssembly();
+        .WithToolsFromAssembly()
+        .WithRequestFilters(f => f.AddCallToolFilter(next => (context, ct) =>
+        {
+            // Claude Desktop, Claude Code and Codex each send their own name when they connect.
+            CallerApp.Set(context.Server.ClientInfo?.Name ?? "mcp", context.Server.ClientInfo?.Version);
+            return next(context, ct);
+        }));
 
     var host = builder.Build();
     // Pull a newer version in the background; it is switched in on the next start, never mid-session.
@@ -160,5 +176,8 @@ static async Task RunMcpServerAsync(string[] args)
             // Updates must never break the MCP session.
         }
     });
+    // Skill library: install/refresh TodoX skills now and every few hours while Claude/Codex keeps us running.
+    var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+    _ = Task.Run(() => host.Services.GetRequiredService<SkillSync>().RunPeriodicallyAsync(lifetime.ApplicationStopping));
     await host.RunAsync();
 }

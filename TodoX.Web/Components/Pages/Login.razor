@@ -57,8 +57,15 @@
             await AuthState.SignInAsync(user, _rememberMe);
             await Audit.LogAsync(user, "auth", "login", entityDisplay: user.Email, message: "Đăng nhập thành công");
             Snackbar.Add("Đăng nhập thành công.", Severity.Success);
-            Navigation.NavigateTo("/");
+            Navigation.NavigateTo(LocalReturnUrl(ReturnUrl));
         }
         finally { _busy = false; }
     }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    /// <summary>Only same-site paths, so the login page can't be used to bounce users to another site.</summary>
+    public static string LocalReturnUrl(string? url) =>
+        url is { Length: > 1 } && url[0] == '/' && url[1] is not ('/' or '\\') ? url : "/";
 }
