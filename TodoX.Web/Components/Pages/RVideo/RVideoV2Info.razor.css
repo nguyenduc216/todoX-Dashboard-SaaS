@@ -27,3 +27,4 @@
 @media(max-width:700px){.rv2-info-cta ::deep .rv2-info-primary{flex:1 1 100%;min-height:44px}}
 .rv2-info-creative{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px}
 .rv2-info-creative ::deep .rv2-info-creative-dur{max-width:220px}
+.rv2-info-linked{margin-top:2px}

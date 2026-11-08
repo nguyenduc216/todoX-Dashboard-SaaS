@@ -5,6 +5,7 @@
 @inject TodoX.Web.Services.IAiStudioCatalogService Catalog
 @inject IRVideoJobService RVideoJobs
 @inject IRVideoSceneLinkService SceneLinks
+@inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
 @inject IRVideoPromptGenerationAction PromptAction
 @inject IServicePromptAssistantService PromptAssistant
 @inject IAiCharacterService Characters
@@ -42,6 +43,14 @@
         @if (_creativeMode)
         {
           <MudNumericField T="int" @bind-Value="_creativeDuration" Label="Thời lượng mục tiêu (giây)" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="600" Disabled="@_generating" Class="rv2-info-creative-dur" />
+        }
+      </div>
+      <div class="rv2-info-linked">
+        <MudSwitch T="bool" Value="_linkedVideo" ValueChanged="HandleLinkedVideoChangedAsync" Color="Color.Warning" Disabled="@(_advSaving || _generating || JobView is null)"
+                   Label="Video liên kết (cảnh sau bắt đầu từ khung cuối của cảnh trước)" />
+        @if ((JobView?.Project.Scenes.Count ?? 0) < 2)
+        {
+          <MudText Typo="Typo.caption" Class="rv2-adv-label">Áp dụng cho các scene khi tạo Prompt AI.</MudText>
         }
       </div>
       @if (_generating) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" /> }
@@ -123,12 +132,6 @@
             <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning" Size="Size.Small">Duyệt từng bước</MudRadio>
             <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning" Size="Size.Small">Tự động thực hiện</MudRadio>
           </MudRadioGroup>
-          <MudSwitch T="bool" Value="_linkedVideo" ValueChanged="HandleLinkedVideoChangedAsync" Color="Color.Warning" Disabled="@(_advSaving || (JobView?.Project.Scenes.Count ?? 0) < 2)"
-                     Label="Video liên kết (cảnh sau bắt đầu từ khung cuối của cảnh trước)" />
-          @if ((JobView?.Project.Scenes.Count ?? 0) < 2)
-          {
-            <MudText Typo="Typo.caption" Class="rv2-adv-label">Cần ít nhất 2 scene (tạo Prompt AI trước).</MudText>
-          }
         </MudItem>
         <MudItem xs="12" sm="4">
           <MudText Typo="Typo.caption" Class="rv2-adv-label">Chế độ giọng đọc</MudText>
@@ -209,6 +212,7 @@
   private object? _pendingMusicSnapshot; // freshly uploaded MP3 snapshot, until the reload confirms it
   private bool _advUseRefAll;
   private bool _linkedVideo;
+  private bool? _linkedPending; // choice made before the project had scenes; seeded from the service default
   private bool _creativeMode;
   private int _creativeDuration = 30;
   private bool _creativeDurationSeeded;
@@ -225,6 +229,17 @@
     try{ _voices.AddRange(await Catalog.ListVoicesAsync(activeOnly:true)); }catch{}
     try{ _music.AddRange(await Catalog.ListMusicAsync(activeOnly:true)); }catch{}
   }
+  private bool _linkedSeeded;
+  private async Task SeedLinkedDefaultAsync(){
+    if(_linkedSeeded || JobView is null) return;
+    _linkedSeeded = true;
+    if(JobView.Project.Scenes.Count >= 2 || JobView.CoreJob.ServiceId is not Guid sid) return;
+    try{
+      var service=(await CoreCatalog.ListAsync()).FirstOrDefault(x=>x.Id==sid);
+      if(service is not null && service.JobDefaults.ValueKind!=System.Text.Json.JsonValueKind.Undefined)
+        _linkedPending = TodoX.Web.Models.Catalog.ServiceJobDefaultsCodec.FromJson(service.JobDefaults.ToString()).LinkedScenes == true;
+    }catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_LINKED_DEFAULT_UNAVAILABLE"); }
+  }
   private static string CharacterLabel(string mode)=> mode switch{
     RVideoCharacterModes.Upload=>"Upload ảnh",
     RVideoCharacterModes.Library=>"Character Library",
@@ -232,6 +247,7 @@
   };
   protected override async Task OnParametersSetAsync(){
     await LoadCatalogsAsync();
+    await SeedLinkedDefaultAsync();
     var t = JobView?.Project.Title ?? string.Empty;
     if(_prevTitle != t){ _prevTitle=t; _titleWorking=t; }
     if(JobView!=null && (_lastWorkingProjectId != JobView.Project.Id || _lastWorkingActiveId != JobView.Project.ActivePromptGenerationId)){
@@ -300,6 +316,7 @@
     var sid=JobView.CoreJob.ServiceId; if(sid==null||sid==Guid.Empty){ Snackbar.Add("Thiếu ServiceId.",Severity.Warning); return; }
     var ok=await JS.InvokeAsync<bool>("confirm","Tạo prompt AI sẽ ghi đè nội dung hiện tại. Tiếp tục?");
     if(!ok) return; if(_generating) return;
+    var wantLinked=_linkedVideo;
     _generating=true; _status="Đang tạo prompt..."; StateHasChanged();
     try{
       var outcome=await PromptAction.GenerateAsync(new RVideoPromptGenerationRequest(sid.Value,_workingInput,AuthState.CurrentUser,JobView.Project.Id,
@@ -312,6 +329,12 @@
       // Confirm the new generation is active, then advance baseline to the persisted user_input.
       if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
       var reloaded = await WaitForActiveGenerationAsync(outcome.Result.GenerationId);
+      // New scenes replace the old ones: keep "Video liên kết" as the user had it.
+      if(wantLinked && JobView is not null){
+        try{ await SceneLinks.SetProjectLinkedAsync(JobView.Project.Id, true, AuthState.CurrentUser); _linkedPending=null;
+             if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }
+        catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_APPLY_LINKED_FAILED"); }
+      }
       if(reloaded is not null){
         _workingInput = ResolveRawUserInput(reloaded.UserInput, fallback:_workingInput);
         _baselineInput = _workingInput; _hasBaseline = true;
@@ -360,7 +383,8 @@
       if(musicMode!=RVideoMusicModes.None || _advMusicMode==RVideoMusicModes.None) _advMusicMode=musicMode;
       if(musicMode==RVideoMusicModes.Upload) _pendingMusicSnapshot=null; }
     if(!_creativeDurationSeeded && JobView.Project.TotalSeconds>0){ _creativeDuration=JobView.Project.TotalSeconds; _creativeDurationSeeded=true; }
-    _linkedVideo = JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).Skip(1).Any(scene=>{
+    if(JobView.Project.Scenes.Count < 2) _linkedVideo = _linkedPending ?? false;
+    else _linkedVideo = JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).Skip(1).Any(scene=>{
       var m=ScenePromptMetadata.FromScene(scene);
       return RVideoSceneLink.GetMode(m) is not null && !m.Extra.ContainsKey(RVideoSceneSplit.SplitFromKey); });
     try{ var u=RVideoJobUpdateHelper.BuildSafeUpdate(JobView); _advAspect=u.AspectRatio; _advResolution=u.Resolution; }catch{} }
@@ -436,6 +460,8 @@
   private async Task HandleCreativeModeChangedAsync(bool v){ if(v==_creativeMode) return; _creativeMode=v; await SaveSettingsAsync(); }
   private async Task HandleLinkedVideoChangedAsync(bool v){
     if(JobView is null || AuthState.CurrentUser is null || v==_linkedVideo) return;
+    // No scenes yet: remember the choice and apply it right after "Tạo Prompt AI" creates the scenes.
+    if(JobView.Project.Scenes.Count < 2){ _linkedPending=v; _linkedVideo=v; return; }
     _advSaving=true;
     try{
       var result=await SceneLinks.SetProjectLinkedAsync(JobView.Project.Id, v, AuthState.CurrentUser);

@@ -11,7 +11,7 @@
 <div class="rv2-shell">
     <header class="rv2-header">
         <div class="rv2-title-row">
-            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="GoBackLegacy" aria-label="Quay lại giao diện cũ" title="Quay lại giao diện cũ" />
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="GoBack" aria-label="Quay lại danh sách video" title="Quay lại danh sách video" />
             <div class="rv2-title">
                 <span class="rv2-title-text">@(_jobView?.Project.Title is { Length: > 0 } t ? t : "RVideo")</span>
                 @if (_jobView is not null)
@@ -145,11 +145,5 @@
         catch { return ("—", "—"); }
     }
 
-    private void GoBackLegacy()
-    {
-        if (JobId is not null)
-            Navigation.NavigateTo($"/render-job?jobId={JobId}");
-        else
-            Navigation.NavigateTo("/render-job");
-    }
+    private void GoBack() => Navigation.NavigateTo("/jobs");
 }

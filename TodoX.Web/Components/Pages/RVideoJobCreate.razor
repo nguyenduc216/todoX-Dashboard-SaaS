@@ -1,17 +1,34 @@
 @page "/jobs/rvideo/new"
-@using TodoX.Web.Components.Pages
 @using TodoX.Web.Models.Catalog
+@using TodoX.Web.Services.VideoRender
+@implements IDisposable
 @inject AuthStateService AuthState
+@inject NavigationManager Navigation
+@inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
+@inject IAiStudioCatalogService Catalog
+@inject IRVideoJobService RVideoJobs
+@inject Microsoft.Extensions.Options.IOptionsMonitor<VideoRenderOptions> VideoOptions
+@inject ILogger<RVideoJobCreate> Logger
 
 <PageTitle>RVIDEO</PageTitle>
 
-@if (!AuthState.IsInitialized)
+@* RVideo V2 is the only job UI: create an empty draft with the service defaults, then open it in V2. *@
+@if (_error is null)
 {
-    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    <MudPaper Class="pa-6 ma-4" Outlined="true" role="status" aria-live="polite">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+            <MudText>Đang tạo video mới...</MudText>
+        </MudStack>
+    </MudPaper>
 }
 else
 {
-    <RenderVideoJobs Embedded="true" ServiceId="@ServiceId" ServiceCode="@ServiceCode" />
+    <MudAlert Severity="Severity.Error" Class="ma-4">@_error</MudAlert>
+    <MudStack Row="true" Class="mx-4">
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="CreateAsync" Disabled="@_creating">Thử lại</MudButton>
+        <MudButton Variant="Variant.Text" OnClick="@(() => Navigation.NavigateTo("/create"))">Quay lại</MudButton>
+    </MudStack>
 }
 
 @code {
@@ -20,4 +37,77 @@ else
 
     [SupplyParameterFromQuery(Name = "serviceCode")]
     public string? ServiceCode { get; set; }
+
+    private string? _error;
+    private bool _creating;
+    private bool _started;
+    // One logical request per page visit, so a double trigger never creates two drafts.
+    private readonly string _logicalRequestId = $"rvideo-v2-new:{Guid.NewGuid():N}";
+
+    protected override void OnInitialized() => AuthState.OnChange += HandleAuthChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_started && AuthState.IsInitialized)
+        {
+            _started = true;
+            await CreateAsync();
+        }
+    }
+
+    private void HandleAuthChanged() => _ = InvokeAsync(async () =>
+    {
+        if (!_started && AuthState.IsInitialized)
+        {
+            _started = true;
+            await CreateAsync();
+        }
+    });
+
+    private async Task CreateAsync()
+    {
+        if (_creating) return;
+        if (AuthState.CurrentUser is not { IsCustomer: true } user)
+        {
+            _error = "Vui lòng đăng nhập bằng tài khoản khách hàng để tạo video.";
+            StateHasChanged();
+            return;
+        }
+        _creating = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            var services = await CoreCatalog.ListAsync();
+            var service = services.FirstOrDefault(x => ServiceId.HasValue && x.Id == ServiceId.Value)
+                          ?? services.FirstOrDefault(x => !string.IsNullOrWhiteSpace(ServiceCode)
+                                                          && string.Equals(x.ServiceCode, ServiceCode, StringComparison.OrdinalIgnoreCase));
+            if (service is null)
+            {
+                _error = "Không tìm thấy dịch vụ video.";
+                return;
+            }
+            var defaults = ServiceJobDefaultsCodec.FromJson(service.JobDefaults.ValueKind == System.Text.Json.JsonValueKind.Undefined ? null : service.JobDefaults.ToString());
+            IReadOnlyList<AiStudioVoiceDto> voices = Array.Empty<AiStudioVoiceDto>();
+            IReadOnlyList<AiStudioMusicDto> music = Array.Empty<AiStudioMusicDto>();
+            try { voices = await Catalog.ListVoicesAsync(activeOnly: true); } catch (Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_NEW_VOICES_UNAVAILABLE"); }
+            try { music = await Catalog.ListMusicAsync(activeOnly: true); } catch (Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_NEW_MUSIC_UNAVAILABLE"); }
+            var request = RVideoDraftDefaults.Build(service.Id, service.ServiceCode, defaults, voices, music, _logicalRequestId);
+            var created = await RVideoJobs.CreateDraftAsync(request, user,
+                VideoOptions.CurrentValue.StorageRoot, VideoOptions.CurrentValue.PublicBase, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+            Navigation.NavigateTo($"/jobs/rvideo/{created.JobId}", replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "RVIDEO_V2_NEW_DRAFT_FAILED serviceId={ServiceId} serviceCode={ServiceCode}", ServiceId, ServiceCode);
+            _error = "Không tạo được video mới. Vui lòng thử lại.";
+        }
+        finally
+        {
+            _creating = false;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose() => AuthState.OnChange -= HandleAuthChanged;
 }

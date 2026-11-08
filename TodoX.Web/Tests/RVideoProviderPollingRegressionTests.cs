@@ -409,13 +409,12 @@ public sealed class RVideoProviderPollingRegressionTests
     [Fact]
     public void RVideoJobDetailWaitsForAuthBeforeLoadingOnHardReload()
     {
+        // V2 is the job UI: the detail route renders the V2 shell only once auth is initialized.
         var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
 
-        Assert.Contains("RVideoDetailBootstrapState.WaitingForAuth", source);
-        Assert.Contains("if (!AuthState.IsInitialized)", source);
-        Assert.Contains("return;", source);
-        Assert.DoesNotContain("!AuthState.IsInitialized || _loading", source);
-        Assert.Contains("RVIDEO_DETAIL_WAITING_AUTH", source);
+        Assert.Contains("@if (!AuthState.IsInitialized)", source);
+        Assert.Contains("<RVideoV2Shell JobId=\"@JobId\" />", source);
+        Assert.DoesNotContain("<RenderVideoJobs", source);
     }
 
     [Fact]
@@ -423,11 +422,8 @@ public sealed class RVideoProviderPollingRegressionTests
     {
         var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
 
-        Assert.Contains("AuthState.OnChange += HandleAuthStateChanged", source);
-        Assert.Contains("private void HandleAuthStateChanged()", source);
-        Assert.Contains("await LoadJobAsync();", source);
-        Assert.Contains("_loadInProgress || _loadedJobId == JobId", source);
-        Assert.Contains("RVIDEO_DETAIL_AUTH_READY", source);
+        Assert.Contains("AuthState.OnChange += HandleAuthChanged", source);
+        Assert.Contains("private void HandleAuthChanged()", source);
     }
 
     [Fact]
@@ -478,9 +474,11 @@ public sealed class RVideoProviderPollingRegressionTests
     {
         var source = ReadRepoFile("Components", "Pages", "RVideoJobCreate.razor");
 
-        Assert.Contains("<RenderVideoJobs Embedded=\"true\" ServiceId=\"@ServiceId\" ServiceCode=\"@ServiceCode\" />", source);
         Assert.Contains("[SupplyParameterFromQuery(Name = \"serviceId\")]", source);
         Assert.Contains("[SupplyParameterFromQuery(Name = \"serviceCode\")]", source);
+        Assert.Contains("RVideoDraftDefaults.Build(service.Id, service.ServiceCode", source);
+        Assert.Contains("Navigation.NavigateTo($\"/jobs/rvideo/{created.JobId}\", replace: true)", source);
+        Assert.DoesNotContain("<RenderVideoJobs", source);
     }
 
     [Fact]
@@ -514,7 +512,7 @@ public sealed class RVideoProviderPollingRegressionTests
 
         Assert.Contains("@implements IDisposable", source);
         Assert.Contains("public void Dispose()", source);
-        Assert.Contains("AuthState.OnChange -= HandleAuthStateChanged", source);
+        Assert.Contains("AuthState.OnChange -= HandleAuthChanged", source);
     }
 
     [Fact]
