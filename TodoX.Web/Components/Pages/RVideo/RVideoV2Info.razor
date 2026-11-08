@@ -166,13 +166,12 @@
         else if (_advMusicMode == RVideoMusicModes.Upload)
         {
           <MudItem xs="12" sm="4">
-            <MudFileUpload T="IBrowserFile" Accept=".mp3,audio/mpeg" FilesChanged="UploadMusicAsync" Disabled="@_advSaving">
-              <ActivatorContent>
-                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MusicNote" Disabled="@_advSaving">
-                  @(string.IsNullOrWhiteSpace(UploadedMusicName) ? "Chọn file MP3" : "Đổi file MP3")
-                </MudButton>
-              </ActivatorContent>
-            </MudFileUpload>
+            @* Hidden native input (same pattern as the reference upload), opened by the button below. *@
+            <InputFile Class="rv2-music-file" OnChange="UploadMusicAsync" accept="audio/mpeg,.mp3" disabled="@_advSaving" aria-hidden="true" tabindex="-1"
+                       style="position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none" />
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MusicNote" Disabled="@_advSaving" OnClick="TriggerMusicPickerAsync">
+              @(string.IsNullOrWhiteSpace(UploadedMusicName) ? "Chọn file MP3" : "Đổi file MP3")
+            </MudButton>
             @if (!string.IsNullOrWhiteSpace(UploadedMusicName)) { <MudText Typo="Typo.caption">Đang dùng: @UploadedMusicName</MudText> }
           </MudItem>
         }
@@ -408,7 +407,12 @@
     // Library/Upload are saved once a track or file is chosen; switching to None clears music now.
     if(v==RVideoMusicModes.None) await SaveSettingsAsync();
   }
-  private async Task UploadMusicAsync(IBrowserFile? file){
+  private async Task TriggerMusicPickerAsync(){
+    try{ var m=await GetModuleAsync(); if(m is not null) await m.InvokeVoidAsync("triggerFileInput", ".rv2-music-file"); }
+    catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_MUSIC_TRIGGER_FAILED"); }
+  }
+  private async Task UploadMusicAsync(InputFileChangeEventArgs args){
+    var file=args.File;
     if(file is null || JobView is null || AuthState.CurrentUser is null) return;
     _advSaving=true; StateHasChanged();
     try{
