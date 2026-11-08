@@ -112,7 +112,8 @@ else
         </div>
 
         <div class="rv2-pv-form">
-        <MudTextField T="string" Class="rv2-pv-content" Value="@UserSceneText(a)" ValueChanged="@(v=>HandleContentChangedAsync(a,v))" Label="Nội dung scene" Variant="Variant.Outlined" Lines="3" Placeholder="Nội dung scene..." FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
+        <MudTextField T="string" Class="rv2-pv-content" Value="@SceneVoiceText(a)" ValueChanged="@(v=>HandleVoiceChangedAsync(a,v))" Label="Lời thoại" Variant="Variant.Outlined" Lines="3" Placeholder="Scene này không có lời thoại" FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
+        <MudTextField T="string" Class="rv2-pv-content" Value="@SceneMotionText(a)" ValueChanged="@(v=>HandleContentChangedAsync(a,v))" Label="Nội dung tạo video" Variant="Variant.Outlined" Lines="4" Placeholder="Mô tả hành động, chuyển động của scene..." FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
 
         <div class="rv2-pv-settings">
           @if(_optsReady)
@@ -332,17 +333,36 @@ bool IsLast=> OrderedScenes.LastOrDefault()?.Id==SelectedSceneId;
 void PrevScene(){var o=OrderedScenes.ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>0) SelectScene(o[i-1].Id);}
 void NextScene(){var o=OrderedScenes.ToList(); var i=o.FindIndex(x=>x.Id==SelectedSceneId); if(i>=0&&i<o.Count-1) SelectScene(o[i+1].Id);}
 void OpenRef(string u){if(!string.IsNullOrWhiteSpace(u)) _showRef=u;}
+// Scene list text: what is said in the scene, else what the video shows (the purpose tag alone says little).
 string UserSceneText(VideoProjectSceneDto s){
   try{
-    var meta=ReadMeta(s);
-    return meta.ScenePurpose ?? s.Title ?? string.Empty;
+    var voice=SceneVoiceText(s);
+    if(!string.IsNullOrWhiteSpace(voice)) return voice;
+    var motion=SceneMotionText(s);
+    return !string.IsNullOrWhiteSpace(motion) ? motion : ReadMeta(s).ScenePurpose ?? s.Title ?? string.Empty;
   }catch{ return s.Title ?? string.Empty; }
+}
+string SceneVoiceText(VideoProjectSceneDto s){
+  try{ var m=ReadMeta(s); return (string.IsNullOrWhiteSpace(m.Voice) ? s.VoiceText : m.Voice) ?? string.Empty; }catch{ return s.VoiceText ?? string.Empty; }
+}
+string SceneMotionText(VideoProjectSceneDto s){
+  try{ var m=ReadMeta(s); return (string.IsNullOrWhiteSpace(m.MotionPrompt) ? s.VideoPrompt : m.MotionPrompt) ?? string.Empty; }catch{ return s.VideoPrompt ?? string.Empty; }
+}
+async Task HandleVoiceChangedAsync(VideoProjectSceneDto scene,string v){
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  var text=(v??string.Empty).Trim();
+  if(string.Equals(text,SceneVoiceText(scene).Trim(),StringComparison.Ordinal)) return;
+  var metadata=ScenePromptMetadata.FromScene(scene);
+  metadata.Voice=text.Length==0?null:text;
+  await DoSaveAsync(scene,metadata,scene.DurationSeconds);
 }
 async Task HandleContentChangedAsync(VideoProjectSceneDto scene,string v){
   if(JobView is null || AuthState.CurrentUser is null) return;
-  if(string.Equals(v?.Trim(),UserSceneText(scene),StringComparison.Ordinal)) return;
+  var text=(v??string.Empty).Trim();
+  if(string.Equals(text,SceneMotionText(scene).Trim(),StringComparison.Ordinal)) return;
+  if(text.Length==0){ Snackbar.Add("Nội dung tạo video không được để trống.", Severity.Warning); return; }
   var metadata=ScenePromptMetadata.FromScene(scene);
-  metadata.ScenePurpose=string.IsNullOrWhiteSpace(v)?null:v.Trim();
+  metadata.MotionPrompt=text;
   await DoSaveAsync(scene,metadata,scene.DurationSeconds);
 }
 async Task HandleEditAsync(VideoProjectSceneDto scene){
