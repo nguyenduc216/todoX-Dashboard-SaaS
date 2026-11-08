@@ -111,6 +111,7 @@ else
           }
         </div>
 
+        <div class="rv2-pv-form">
         <MudTextField T="string" Class="rv2-pv-content" Value="@UserSceneText(a)" ValueChanged="@(v=>HandleContentChangedAsync(a,v))" Label="Nội dung scene" Variant="Variant.Outlined" Lines="3" Placeholder="Nội dung scene..." FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
 
         <div class="rv2-pv-settings">
@@ -124,14 +125,21 @@ else
             <div class="rv2-skel rv2-skel-field"></div><div class="rv2-skel rv2-skel-field"></div>
           }
         </div>
+        @if(_optsReady && UsedModelLabel(a) is { } usedLabel)
+        {
+          <div class="rv2-pv-used-model">Video hiện tại tạo bằng: <b>@usedLabel</b>@(HasExplicitModel(a) ? " · lượt mới dùng model đang chọn ở trên" : null)</div>
+        }
 
         <div class="rv2-pv-actions">
           <MudButton Variant="Variant.Outlined" Size="Size.Medium" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="@(()=>HandleRerenderImageAsync(a))" Disabled="@ImageBlocked(a)">@(string.IsNullOrWhiteSpace(a.StaticImageUrl) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton>
           <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Medium" StartIcon="@Icons.Material.Filled.Movie" OnClick="@(()=>HandleRerenderVideoAsync(a))" Disabled="@(NeedsExplicitOperation(a) ? _busy || VideoInFlight(a) : VideoBlocked(a))">@(VideoInFlight(a) ? "Đang tạo video…" : NeedsExplicitOperation(a) ? "Tạo lượt video mới" : "Render lại video")</MudButton>
           @* Hidden trigger: the primary video button routes to it when a new explicit operation is required. *@
-          <RVideoSupersedeButton @ref="_supersedeButtons[a.Id]" ProjectId="@JobView.Project.Id" Scene="@a" ServiceId="@JobView.CoreJob.ServiceId" HideTrigger="true"
+          <RVideoSupersedeButton @ref="_supersedeButtons[a.Id]" ProjectId="@JobView.Project.Id" Scene="@RenderScene(a)" ServiceId="@JobView.CoreJob.ServiceId" HideTrigger="true"
             Visible="@NeedsExplicitOperation(a)" Disabled="@_busy" CurrentJobId="@VideoState(a)?.LatestJob?.Id" Generation="@VideoState(a)?.Generation"
             OutcomeUnknown="@(VideoState(a)?.HasProviderIdentity == true || VideoState(a)?.HasActiveJob == true || VideoState(a)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
+        </div>
+
+        <RVideoSceneLinkPanel ProjectId="@JobView.Project.Id" Scene="@a" Scenes="@JobView.Project.Scenes" OnChanged="@(()=>OnReloadRequested.InvokeAsync())" OnSplit="@(_=>OnReloadRequested.InvokeAsync())" />
         </div>
       </section>
     }
@@ -394,14 +402,47 @@ async Task HandleAddSceneAsync(){
    if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
  } finally { _busy=false; _gate.Release(); }
 }
-string ResolveModelKey(VideoProjectSceneDto scene){
+SceneVideoModelOption? ExplicitOption(VideoProjectSceneDto scene){
  var meta = ReadMeta(scene);
- if(meta.Extra.TryGetValue("video_model", out var k) && !string.IsNullOrWhiteSpace(k))
+ if(!meta.Extra.TryGetValue("video_model", out var k) || string.IsNullOrWhiteSpace(k)) return null;
+ return _opts.FirstOrDefault(x=>string.Equals(x.Key,k,StringComparison.OrdinalIgnoreCase)
+   || string.Equals(x.Key.Replace('|','/'),k,StringComparison.OrdinalIgnoreCase));
+}
+bool HasExplicitModel(VideoProjectSceneDto scene) => ExplicitOption(scene) is not null;
+// Model that produced the scene's selected (playing) video, read from that version's render config.
+(string Model, string? Mode, SceneVideoModelOption? Option)? UsedModel(VideoProjectSceneDto scene){
+ if(!_videoStates.TryGetValue(scene.Id, out var st) || st.SelectedVersion is not { } v || !RVideoSceneLink.IsCompleted(v)) return null;
+ string? provider=v.ProviderCode, model=v.ModelName, mode=null;
+ if(!string.IsNullOrWhiteSpace(v.RenderConfigJson))
  {
-   var selected=_opts.FirstOrDefault(x=>string.Equals(x.Key,k,StringComparison.OrdinalIgnoreCase)
-     || string.Equals(x.Key.Replace('|','/'),k,StringComparison.OrdinalIgnoreCase));
-   if(selected is not null) return selected.Key;
+   try{
+     using var doc=System.Text.Json.JsonDocument.Parse(v.RenderConfigJson);
+     string? Str(string name)=>doc.RootElement.ValueKind==System.Text.Json.JsonValueKind.Object && doc.RootElement.TryGetProperty(name, out var e) && e.ValueKind==System.Text.Json.JsonValueKind.String ? e.GetString() : null;
+     provider=Str("provider") ?? provider;
+     model=Str("actualModel") ?? Str("model") ?? Str("requestedModel") ?? model;
+     mode=Str("mode") ?? Str("requestedMode");
+   }catch{ }
  }
+ if(string.IsNullOrWhiteSpace(model)) return null;
+ bool Same(string? a, string? b)=>string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
+ var candidates=_opts.Where(o=>Same(o.ModelCode, model) && (string.IsNullOrWhiteSpace(provider) || Same(o.ProviderCode, provider))).ToList();
+ var option=candidates.FirstOrDefault(o=>Same(o.Mode, mode)) ?? candidates.FirstOrDefault();
+ return (model!, mode, option);
+}
+string? UsedModelLabel(VideoProjectSceneDto scene){
+ if(UsedModel(scene) is not { } used) return null;
+ var explicitOpt=ExplicitOption(scene);
+ if(used.Option is null) return string.IsNullOrWhiteSpace(used.Mode) ? used.Model : $"{used.Model} / {used.Mode}";
+ // Only worth a line when the dropdown shows something else than what is playing.
+ return explicitOpt is not null && !string.Equals(explicitOpt.Key, used.Option.Key, StringComparison.OrdinalIgnoreCase) ? used.Option.Label : null;
+}
+// Without an explicit choice, a scene that already has a video keeps the model it was made with,
+// so the dropdown shows (and a new attempt uses) that model instead of today's service default.
+string? ImplicitUsedKey(VideoProjectSceneDto scene)
+ => ExplicitOption(scene) is null && UsedModel(scene)?.Option is { } o ? o.Key : null;
+string ResolveModelKey(VideoProjectSceneDto scene){
+ if(ExplicitOption(scene) is { } selected) return selected.Key;
+ if(ImplicitUsedKey(scene) is { } usedKey) return usedKey;
  // Default: first model (service priority order) that offers the scene's exact duration.
  return (_opts.FirstOrDefault(x=>x.Durations.Contains(scene.DurationSeconds)) ?? _opts.FirstOrDefault())?.Key ?? string.Empty;
 }
@@ -455,7 +496,8 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
   if(versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault()?.Status == "pending_reconciliation")
   { Snackbar.Add("Chưa thể thử lại", Severity.Warning); return; }
   var latest = versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault();
-  var request = new RVideoSceneVideoRenderRequest(JobView.Project.Id, scene, WithRenderSettings(ScenePromptMetadata.FromScene(scene)), JobView.CoreJob.ServiceId,
+  var renderScene = RenderScene(scene);
+  var request = new RVideoSceneVideoRenderRequest(JobView.Project.Id, renderScene, WithRenderSettings(ScenePromptMetadata.FromScene(renderScene)), JobView.CoreJob.ServiceId,
    latest?.Id, latest?.RenderJobId);
   var estimate = await SceneVideoRender.EstimateAsync(request);
   if(!estimate.CanStart)
@@ -501,6 +543,19 @@ async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
 // RVID-UI-V2-SCENE-RERENDER-HISTORY: per-scene media history and version selection (from production line).
 
 // TODOX-20261028-RVIDEO-RERENDER-RESTORE-001: rerender with the project's saved aspect ratio/resolution, not provider defaults.
+// Scene as sent to a render: pins the implicitly shown model (see ImplicitUsedKey) into its metadata.
+(long Id, string? Prompt, string Key, VideoProjectSceneDto Scene)? _renderSceneCache;
+VideoProjectSceneDto RenderScene(VideoProjectSceneDto scene)
+{
+  if(ImplicitUsedKey(scene) is not { } key) return scene;
+  if(_renderSceneCache is { } c && c.Id==scene.Id && c.Key==key && string.Equals(c.Prompt, scene.ScenePrompt, StringComparison.Ordinal)) return c.Scene;
+  var copy = System.Text.Json.JsonSerializer.Deserialize<VideoProjectSceneDto>(System.Text.Json.JsonSerializer.Serialize(scene))!;
+  var meta = ScenePromptMetadata.FromScene(copy);
+  meta.Extra["video_model"] = key;
+  copy.ScenePrompt = meta.Serialize();
+  _renderSceneCache = (scene.Id, scene.ScenePrompt, key, copy);
+  return copy;
+}
 ScenePromptMetadata WithRenderSettings(ScenePromptMetadata metadata)
 {
   var settings = RVideoRules.ResolveRenderSettings(JobView!.Project.OriginalPrompt);

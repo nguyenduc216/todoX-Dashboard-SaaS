@@ -4,6 +4,7 @@
 @using TodoX.Web.Components.Dialogs
 @inject TodoX.Web.Services.IAiStudioCatalogService Catalog
 @inject IRVideoJobService RVideoJobs
+@inject IRVideoSceneLinkService SceneLinks
 @inject IRVideoPromptGenerationAction PromptAction
 @inject IServicePromptAssistantService PromptAssistant
 @inject IAiCharacterService Characters
@@ -35,6 +36,13 @@
         <MudButton Class="rv2-info-primary" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@(!CanGenerate)" OnClick="HandleGenerateAsync">Tạo Prompt AI</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="HandleReloadAsync" Disabled="@_generating">Làm mới</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.History" OnClick="HandleHistoryAsync" Disabled="@_generating">Lịch sử</MudButton>
+      </div>
+      <div class="rv2-info-creative">
+        <MudCheckBox T="bool" Value="_creativeMode" ValueChanged="HandleCreativeModeChangedAsync" Color="Color.Warning" Dense="true" Disabled="@(_generating || _advSaving)" Label="TodoX sáng tạo nội dung" />
+        @if (_creativeMode)
+        {
+          <MudNumericField T="int" @bind-Value="_creativeDuration" Label="Thời lượng mục tiêu (giây)" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="600" Disabled="@_generating" Class="rv2-info-creative-dur" />
+        }
       </div>
       @if (_generating) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" /> }
       @if (!string.IsNullOrWhiteSpace(_status)) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@_status</MudAlert> }
@@ -97,6 +105,8 @@
           }
         </div>
       }
+      <MudCheckBox T="bool" Value="_advUseRefAll" ValueChanged="HandleUseRefAllChangedAsync" Dense="true" Class="mt-2" Disabled="@(_advSaving || JobView is null)"
+                   Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" />
     </section>
   </div>
   <MudExpansionPanels Elevation="0" Dense="true" Class="rv2-advanced">
@@ -113,6 +123,12 @@
             <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning" Size="Size.Small">Duyệt từng bước</MudRadio>
             <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning" Size="Size.Small">Tự động thực hiện</MudRadio>
           </MudRadioGroup>
+          <MudSwitch T="bool" Value="_linkedVideo" ValueChanged="HandleLinkedVideoChangedAsync" Color="Color.Warning" Disabled="@(_advSaving || (JobView?.Project.Scenes.Count ?? 0) < 2)"
+                     Label="Video liên kết (cảnh sau bắt đầu từ khung cuối của cảnh trước)" />
+          @if ((JobView?.Project.Scenes.Count ?? 0) < 2)
+          {
+            <MudText Typo="Typo.caption" Class="rv2-adv-label">Cần ít nhất 2 scene (tạo Prompt AI trước).</MudText>
+          }
         </MudItem>
         <MudItem xs="12" sm="4">
           <MudText Typo="Typo.caption" Class="rv2-adv-label">Chế độ giọng đọc</MudText>
@@ -132,11 +148,35 @@
           <MudItem xs="12" sm="4"><MudNumericField T="decimal" Value="_advTtsRate" ValueChanged="@(async v=>await HandleAdvancedTtsRateChangedAsync(v))" Label="Tốc độ đọc" Variant="Variant.Outlined" Min="0.5m" Max="2.0m" Step="0.1m" Disabled="@_advSaving"/></MudItem>
         }
         <MudItem xs="12" sm="4">
-          <MudSelect T="string" Value="_advMusicCode" ValueChanged="@(async v=>await HandleAdvancedMusicCodeChangedAsync(v))" Label="Nhạc nền" Variant="Variant.Outlined" Dense="true" Disabled="@_advSaving" Clearable="true">
-            @foreach (var m in _music) { <MudSelectItem Value="@m.Code">@m.Name (@m.Code)</MudSelectItem> }
-          </MudSelect>
+          <MudText Typo="Typo.caption" Class="rv2-adv-label">Nhạc nền</MudText>
+          <MudRadioGroup T="string" Value="_advMusicMode" ValueChanged="@(async v=>await HandleMusicModeChangedAsync(v))">
+            <MudRadio T="string" Value="@RVideoMusicModes.None" Size="Size.Small">Không dùng</MudRadio>
+            <MudRadio T="string" Value="@RVideoMusicModes.Library" Size="Size.Small">Chọn từ Music Library</MudRadio>
+            <MudRadio T="string" Value="@RVideoMusicModes.Upload" Size="Size.Small">Tải lên file MP3</MudRadio>
+          </MudRadioGroup>
         </MudItem>
-        @if (!string.IsNullOrWhiteSpace(_advMusicCode))
+        @if (_advMusicMode == RVideoMusicModes.Library)
+        {
+          <MudItem xs="12" sm="4">
+            <MudSelect T="string" Value="_advMusicCode" ValueChanged="@(async v=>await HandleAdvancedMusicCodeChangedAsync(v))" Label="Music" Variant="Variant.Outlined" Dense="true" Disabled="@_advSaving">
+              @foreach (var m in _music) { <MudSelectItem Value="@m.Code">@m.Name (@m.Code)</MudSelectItem> }
+            </MudSelect>
+          </MudItem>
+        }
+        else if (_advMusicMode == RVideoMusicModes.Upload)
+        {
+          <MudItem xs="12" sm="4">
+            <MudFileUpload T="IBrowserFile" Accept=".mp3,audio/mpeg" FilesChanged="UploadMusicAsync" Disabled="@_advSaving">
+              <ActivatorContent>
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MusicNote" Disabled="@_advSaving">
+                  @(string.IsNullOrWhiteSpace(UploadedMusicName) ? "Chọn file MP3" : "Đổi file MP3")
+                </MudButton>
+              </ActivatorContent>
+            </MudFileUpload>
+            @if (!string.IsNullOrWhiteSpace(UploadedMusicName)) { <MudText Typo="Typo.caption">Đang dùng: @UploadedMusicName</MudText> }
+          </MudItem>
+        }
+        @if (_advMusicMode != RVideoMusicModes.None)
         {
           <MudItem xs="12" sm="4"><MudNumericField T="decimal" Value="_advMusicVolume" ValueChanged="@(async v=>await HandleAdvancedMusicVolumeChangedAsync(v))" Label="Âm lượng nhạc" Variant="Variant.Outlined" Min="0m" Max="1m" Step="0.1m" Disabled="@_advSaving"/></MudItem>
         }
@@ -166,6 +206,13 @@
   private decimal _advTtsRate = 1.0m;
   private string? _advMusicCode;
   private decimal _advMusicVolume = 0.8m;
+  private string _advMusicMode = RVideoMusicModes.None;
+  private object? _pendingMusicSnapshot; // freshly uploaded MP3 snapshot, until the reload confirms it
+  private bool _advUseRefAll;
+  private bool _linkedVideo;
+  private bool _creativeMode;
+  private int _creativeDuration = 30;
+  private bool _creativeDurationSeeded;
   protected override async Task OnInitializedAsync(){
     _speech = new PromptSpeechHandler(JS, "rvideo-v2-info", async t=>{ _workingInput = QuickPromptTranscriptMerger.AppendTranscript(_workingInput,t); await InvokeAsync(StateHasChanged); }, async ()=> await InvokeAsync(StateHasChanged));
     await _speech.InitializeAsync(); _speechSupported = _speech.IsSupported;
@@ -256,7 +303,10 @@
     if(!ok) return; if(_generating) return;
     _generating=true; _status="Đang tạo prompt..."; StateHasChanged();
     try{
-      var outcome=await PromptAction.GenerateAsync(new RVideoPromptGenerationRequest(sid.Value,_workingInput,AuthState.CurrentUser,JobView.Project.Id),CancellationToken.None);
+      var outcome=await PromptAction.GenerateAsync(new RVideoPromptGenerationRequest(sid.Value,_workingInput,AuthState.CurrentUser,JobView.Project.Id,
+        CharacterReference:BuildPromptCharacterReference(),
+        DurationSeconds:_creativeMode && _creativeDuration>0 ? _creativeDuration : null,
+        CreativeMode:_creativeMode),CancellationToken.None);
       if(!outcome.Result.ValidationPassed || string.IsNullOrWhiteSpace(outcome.Result.GeneratedJson)){ Snackbar.Add("Tạo prompt thất bại.",Severity.Error); return; }
       var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, promptOverride:outcome.Result.GeneratedJson!);
       await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
@@ -304,7 +354,16 @@
   }
   private int _advTotalSeconds; private int _advSceneSeconds; private string _advAspect="9:16"; private string _advResolution="720p"; private bool _advThinkScenes; private bool _advSaving;
   protected void SyncAdvFromView(){ if(JobView==null) return; _advTotalSeconds=JobView.Project.TotalSeconds; _advSceneSeconds=JobView.Project.SceneSeconds; _advThinkScenes=JobView.Project.ThinkScenes;
-    var s=JobView.Settings; if(s!=null){ _advExecutionMode=s.ExecutionMode; _advVoiceMode=s.VoiceMode; _advVoiceCode=s.VoiceCatalogCode; _advTtsRate=s.DefaultTtsRate; _advMusicCode=s.MusicCatalogCode; _advMusicVolume=s.MusicVolume; }
+    var s=JobView.Settings; if(s!=null){ _advExecutionMode=s.ExecutionMode; _advVoiceMode=s.VoiceMode; _advVoiceCode=s.VoiceCatalogCode; _advTtsRate=s.DefaultTtsRate; _advMusicCode=s.MusicCatalogCode; _advMusicVolume=s.MusicVolume;
+      _advUseRefAll=s.UseReferenceImageForAllScenes; _creativeMode=s.CreativeMode;
+      var musicMode=RVideoRules.NormalizeMusicMode(null, s.MusicCatalogCode, s.MusicSnapshotJson);
+      // Keep a just-picked "Library"/"Upload" choice while nothing is saved for it yet.
+      if(musicMode!=RVideoMusicModes.None || _advMusicMode==RVideoMusicModes.None) _advMusicMode=musicMode;
+      if(musicMode==RVideoMusicModes.Upload) _pendingMusicSnapshot=null; }
+    if(!_creativeDurationSeeded && JobView.Project.TotalSeconds>0){ _creativeDuration=JobView.Project.TotalSeconds; _creativeDurationSeeded=true; }
+    _linkedVideo = JobView.Project.Scenes.OrderBy(x=>x.SceneIndex).Skip(1).Any(scene=>{
+      var m=ScenePromptMetadata.FromScene(scene);
+      return RVideoSceneLink.GetMode(m) is not null && !m.Extra.ContainsKey(RVideoSceneSplit.SplitFromKey); });
     try{ var u=RVideoJobUpdateHelper.BuildSafeUpdate(JobView); _advAspect=u.AspectRatio; _advResolution=u.Resolution; }catch{} }
   private async Task HandleAdvancedTotalSecondsChangedAsync(int v){ if(JobView==null||JobId==null||AuthState.CurrentUser==null) return; _advSaving=true; try{ var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, totalSecondsOverride:v); await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }finally{ _advSaving=false; } }
   private async Task HandleAdvancedSceneSecondsChangedAsync(int v){ if(JobView==null||JobId==null||AuthState.CurrentUser==null) return; _advSaving=true; try{ var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, sceneSecondsOverride:v); await RVideoJobs.UpdateAsync(JobId.Value,req,AuthState.CurrentUser); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }finally{ _advSaving=false; } }
@@ -314,20 +373,80 @@
   private RVideoJobSettingsRequest BuildSettingsOverride(){
     var s=JobView?.Settings;
     return new RVideoJobSettingsRequest{
+      CreativeMode=_creativeMode,
       ExecutionMode=_advExecutionMode,
       SkipCharacter=s?.SkipCharacter??false,
-      UseReferenceImageForAllScenes=s?.UseReferenceImageForAllScenes??false,
+      UseReferenceImageForAllScenes=_advUseRefAll,
       CharacterMode=s?.CharacterMode??RVideoCharacterModes.None,
       SelectedCharacterId=s?.SelectedCharacterId,
       CharacterSnapshot=string.IsNullOrWhiteSpace(s?.CharacterSnapshotJson)?null:System.Text.Json.JsonSerializer.Deserialize<object>(s!.CharacterSnapshotJson!),
       VoiceMode=_advVoiceMode,
       VoiceCatalogCode=_advVoiceMode==RVideoVoiceModes.Library?_advVoiceCode:null,
-      VoiceSnapshot=s?.VoiceSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s!.VoiceSnapshotJson!):null,
+      // Library choices carry the catalog item as snapshot (same as the legacy page); never a stale one.
+      VoiceSnapshot=_advVoiceMode!=RVideoVoiceModes.Library ? null
+        : (object?)_voices.FirstOrDefault(x=>string.Equals(x.Code,_advVoiceCode,StringComparison.OrdinalIgnoreCase))
+          ?? (s?.VoiceSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s!.VoiceSnapshotJson!):null),
       DefaultTtsRate=_advTtsRate,
-      MusicCatalogCode=string.IsNullOrWhiteSpace(_advMusicCode)?null:_advMusicCode,
-      MusicSnapshot=s?.MusicSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s!.MusicSnapshotJson!):null,
+      MusicCatalogCode=_advMusicMode==RVideoMusicModes.Library && !string.IsNullOrWhiteSpace(_advMusicCode)?_advMusicCode:null,
+      MusicSnapshot=_advMusicMode==RVideoMusicModes.None ? null
+        : _advMusicMode==RVideoMusicModes.Library ? (object?)_music.FirstOrDefault(x=>string.Equals(x.Code,_advMusicCode,StringComparison.OrdinalIgnoreCase))
+        : _pendingMusicSnapshot ?? (s?.MusicSnapshotJson is { Length:>0 }?System.Text.Json.JsonSerializer.Deserialize<object>(s!.MusicSnapshotJson!):null),
       MusicVolume=_advMusicVolume
     };
+  }
+  private string? UploadedMusicName{ get{
+    if(_pendingMusicSnapshot is UploadedMusicSnapshot p) return p.FileName;
+    var s=JobView?.Settings;
+    if(s is null || !string.IsNullOrWhiteSpace(s.MusicCatalogCode)) return null;
+    return ReadSnapshot(ParseCharacterSnapshot(s.MusicSnapshotJson),"fileName","FileName");
+  }}
+  private async Task HandleMusicModeChangedAsync(string v){
+    if(string.Equals(v,_advMusicMode)) return;
+    _advMusicMode=v;
+    if(v!=RVideoMusicModes.Library) _advMusicCode=null;
+    if(v!=RVideoMusicModes.Upload) _pendingMusicSnapshot=null;
+    // Library/Upload are saved once a track or file is chosen; switching to None clears music now.
+    if(v==RVideoMusicModes.None) await SaveSettingsAsync();
+  }
+  private async Task UploadMusicAsync(IBrowserFile? file){
+    if(file is null || JobView is null || AuthState.CurrentUser is null) return;
+    _advSaving=true; StateHasChanged();
+    try{
+      AiStudioCatalogRules.ValidateMusicMp3Upload(file.Name, file.ContentType, file.Size);
+      await using var stream=file.OpenReadStream(AiStudioCatalogRules.MaxAudioBytes);
+      using var memory=new MemoryStream(); await stream.CopyToAsync(memory);
+      await Tenant.EnsureLoadedAsync();
+      var media=await MediaFiles.SaveAsync(memory.ToArray(), file.Name, "audio/mpeg", "rvideo_music",
+        AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, Tenant.TenantId);
+      _pendingMusicSnapshot=new UploadedMusicSnapshot("UPLOAD", file.Name, media.ObjectKey ?? string.Empty, media.PublicUrl ?? media.FileUrl ?? string.Empty, "audio/mpeg", file.Size);
+      _advMusicMode=RVideoMusicModes.Upload; _advMusicCode=null;
+    }catch(Exception ex){
+      Logger.LogWarning(ex,"RVIDEO_V2_INFO_UPLOAD_MUSIC_FAILED");
+      Snackbar.Add(RVideoUserText.Error(ex.Message) ?? "Không tải được file nhạc.",Severity.Error);
+      return;
+    }finally{ _advSaving=false; }
+    await SaveSettingsAsync();
+    Snackbar.Add("Đã tải file nhạc nền.",Severity.Success);
+  }
+  private async Task HandleUseRefAllChangedAsync(bool v){ if(v==_advUseRefAll) return; _advUseRefAll=v; await SaveSettingsAsync(); }
+  private async Task HandleCreativeModeChangedAsync(bool v){ if(v==_creativeMode) return; _creativeMode=v; await SaveSettingsAsync(); }
+  private async Task HandleLinkedVideoChangedAsync(bool v){
+    if(JobView is null || AuthState.CurrentUser is null || v==_linkedVideo) return;
+    _advSaving=true;
+    try{
+      var result=await SceneLinks.SetProjectLinkedAsync(JobView.Project.Id, v, AuthState.CurrentUser);
+      Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+      if(result.Started) _linkedVideo=v;
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+    }finally{ _advSaving=false; }
+  }
+  // Same reference the legacy page sends: the active Upload/Character image steers the generated prompt.
+  private PromptAssistantCharacterReference BuildPromptCharacterReference(){
+    var s=JobView?.Settings; var r=InputReferences.FirstOrDefault();
+    if(r is null) return PromptAssistantCharacterReference.None;
+    var mode = s is not null && string.Equals(s.CharacterMode,RVideoCharacterModes.Library,StringComparison.OrdinalIgnoreCase)
+      ? RVideoCharacterModes.Library : RVideoCharacterModes.Upload;
+    return new PromptAssistantCharacterReference(mode, r.Url, r.Label, mode);
   }
   private async Task SaveSettingsAsync(){
     if(JobView==null||JobId==null||AuthState.CurrentUser==null) return;

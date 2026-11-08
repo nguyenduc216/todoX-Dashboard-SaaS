@@ -98,3 +98,14 @@
 .rv2-pv-thumb-busy .rv2-spin { width:18px; height:18px; }
 .rv2-pv-media-busy { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; background:rgba(0,0,0,.45); color:#fff; font-size:.85rem; font-weight:600; text-shadow:0 1px 2px #000; pointer-events:none; }
 @media (prefers-reduced-motion:reduce) { .rv2-spin { animation-duration:2.4s; } }
+.rv2-pv-form { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.rv2-pv-used-model { font-size:.75rem; opacity:.75; }
+/* Wide screens: media left, scene form right, so the page uses the full width. */
+@media (min-width:1400px) {
+  .rv2-pv-layout { grid-template-columns:minmax(280px,340px) 1fr; }
+  .rv2-pv-detail { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(360px,1fr); column-gap:16px; row-gap:10px; align-items:start; }
+  .rv2-pv-detail-head { grid-column:1 / -1; }
+  .rv2-pv-media { grid-column:1; max-height:calc(100dvh - 230px); }
+  .rv2-pv-form { grid-column:2; }
+  .rv2-pv-actions { justify-content:flex-start; flex-wrap:wrap; }
+}

@@ -25,3 +25,5 @@
 .rv2-info-side{border:1px solid var(--mud-palette-lines-default,#333);border-radius:12px;padding:12px}
 @media(max-width:900px){.rv2-info-grid{grid-template-columns:1fr;gap:12px}.rv2-ref-btn{min-width:40px;min-height:40px}.rv2-ref-grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}}
 @media(max-width:700px){.rv2-info-cta ::deep .rv2-info-primary{flex:1 1 100%;min-height:44px}}
+.rv2-info-creative{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px}
+.rv2-info-creative ::deep .rv2-info-creative-dur{max-width:220px}

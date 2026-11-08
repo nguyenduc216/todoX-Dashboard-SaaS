@@ -10,7 +10,7 @@
 .rv2-refresh-bar { position:absolute; left:0; right:0; bottom:-1px; height:2px; overflow:hidden; opacity:0; transition:opacity .2s ease; pointer-events:none; }
 .rv2-refresh-bar--on { opacity:1; background:linear-gradient(90deg,transparent,var(--mud-palette-warning,#ffb300),transparent); background-size:50% 100%; background-repeat:no-repeat; animation:rv2-refresh 1s linear infinite; }
 @keyframes rv2-refresh { from { background-position:-50% 0; } to { background-position:150% 0; } }
-.rv2-body { flex:1 1 auto; min-height:0; padding:16px; max-width:1400px; width:100%; margin:0 auto; box-sizing:border-box; }
+.rv2-body { flex:1 1 auto; min-height:0; padding:16px 24px; width:100%; box-sizing:border-box; }
 .rv2-tab-pane[hidden] { display:none !important; }
 @media (max-width:700px) {
   .rv2-header { padding:6px 8px 0; }
