@@ -14,8 +14,10 @@ public sealed class RVideoLifecycleWorker : BackgroundService
     private readonly ILogger<RVideoLifecycleWorker> _logger;
     private static readonly TimeSpan ProjectEvaluationTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan ActiveWindow = TimeSpan.FromHours(6);
-    private const int SweepSliceSize = 10;
+    private const int SweepSliceSize = 1;
+    private const int SweepEveryCycles = 3;
     private int _sweepOffset;
+    private long _cycle;
 
     public RVideoLifecycleWorker(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<RVideoLifecycleWorker> logger)
     {
@@ -48,7 +50,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var activeIds = active.Select(x => x.ProjectId).ToHashSet();
                 var others = all.Where(x => !activeIds.Contains(x.ProjectId)).OrderBy(x => x.ProjectId).ToList();
                 if (_sweepOffset >= others.Count) _sweepOffset = 0;
-                var slice = others.Skip(_sweepOffset).Take(SweepSliceSize).ToList();
+                // Old projects are visited one at a time every few cycles, so active jobs keep a short cycle.
+                var slice = ++_cycle % SweepEveryCycles == 0 ? others.Skip(_sweepOffset).Take(SweepSliceSize).ToList() : new List<RVideoJobSettingsDto>();
                 _sweepOffset += slice.Count;
                 var settings = active.Concat(slice).ToList();
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
