@@ -38,6 +38,10 @@ public sealed class RVideoScenePipelineService : IRVideoScenePipelineService
             catch { return false; }
         });
 
+    // Progress counts for the V2 step guide (scene outputs, not the input reference images).
+    public static int CountScenesWithImage(VideoProjectDto project) => project.Scenes.Count(x => !string.IsNullOrWhiteSpace(x.StaticImageUrl));
+    public static int CountScenesWithVideo(VideoProjectDto project) => project.Scenes.Count(x => !string.IsNullOrWhiteSpace(x.SceneVideoUrl));
+
     /// <summary>Scenes exactly as the legacy page built them from the prompt JSON (fallback: evenly split placeholders).</summary>
     public static List<VideoProjectSceneDto> BuildScenes(string? prompt, int totalSeconds, int sceneSeconds)
     {

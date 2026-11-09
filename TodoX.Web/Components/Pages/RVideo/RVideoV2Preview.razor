@@ -29,7 +29,9 @@ else
     <span class="rv2-pv-progress"><strong>@scenes.Count(x=>x.Status==VideoSceneStatuses.VideoReady)/@scenes.Count</strong> scene xong · @JobView.Project.TotalSeconds s</span>
     <div class="d-flex gap-2">
       <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="HandleAddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
-      <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Autorenew" OnClick="OpenBulkRerenderDialogAsync" Disabled="@(_busy || scenes.Count == 0)">Render job</MudButton>
+      <MudTooltip Text="Tạo video cho các scene (chọn tất cả hoặc chỉ scene chưa xong, xem trước số điểm)">
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" OnClick="OpenBulkRerenderDialogAsync" Disabled="@(_busy || scenes.Count == 0)" data-testid="rv2-create-videos">Tạo video</MudButton>
+      </MudTooltip>
     </div>
   </div>
   @if(JobView.Settings?.UseReferenceImageForAllScenes == true)
@@ -131,9 +133,13 @@ else
           <div class="rv2-pv-used-model">Video hiện tại tạo bằng: <b>@usedLabel</b>@(HasExplicitModel(a) ? " · lượt mới dùng model đang chọn ở trên" : null)</div>
         }
 
+        @if(!HasSceneImage(a) && !VideoInFlight(a))
+        {
+          <div class="rv2-pv-used-model">Scene chưa có ảnh: bấm "Tạo ảnh" trước, video được tạo từ ảnh của scene.</div>
+        }
         <div class="rv2-pv-actions">
           <MudButton Variant="Variant.Outlined" Size="Size.Medium" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="@(()=>HandleRerenderImageAsync(a))" Disabled="@ImageBlocked(a)">@(string.IsNullOrWhiteSpace(a.StaticImageUrl) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton>
-          <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Medium" StartIcon="@Icons.Material.Filled.Movie" OnClick="@(()=>HandleRerenderVideoAsync(a))" Disabled="@(NeedsExplicitOperation(a) ? _busy || VideoInFlight(a) : VideoBlocked(a))">@(VideoInFlight(a) ? "Đang tạo video…" : NeedsExplicitOperation(a) ? "Tạo lượt video mới" : "Render lại video")</MudButton>
+          <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Medium" StartIcon="@Icons.Material.Filled.Movie" OnClick="@(()=>HandleRerenderVideoAsync(a))" Disabled="@(NeedsExplicitOperation(a) ? _busy || VideoInFlight(a) : VideoBlocked(a))">@(VideoInFlight(a) ? "Đang tạo video…" : NeedsExplicitOperation(a) ? "Tạo lượt video mới" : HasSceneVideo(a) ? "Render lại video" : "Tạo video")</MudButton>
           @* Hidden trigger: the primary video button routes to it when a new explicit operation is required. *@
           <RVideoSupersedeButton @ref="_supersedeButtons[a.Id]" ProjectId="@JobView.Project.Id" Scene="@RenderScene(a)" ServiceId="@JobView.CoreJob.ServiceId" HideTrigger="true"
             Visible="@NeedsExplicitOperation(a)" Disabled="@_busy" CurrentJobId="@VideoState(a)?.LatestJob?.Id" Generation="@VideoState(a)?.Generation"
@@ -233,6 +239,9 @@ bool IsSceneBusy(VideoProjectSceneDto scene)
   => _activeImageScenes.Contains(scene.Id)
   || (_videoStates.TryGetValue(scene.Id, out var st) && st.HasActiveJob)
   || scene.Status is VideoSceneStatuses.VideoRendering or VideoSceneStatuses.VideoQueued;
+bool HasSceneVideo(VideoProjectSceneDto scene) => !string.IsNullOrWhiteSpace(scene.SceneVideoUrl);
+bool HasSceneImage(VideoProjectSceneDto scene) => !string.IsNullOrWhiteSpace(scene.StaticImageUrl)
+  || JobView?.Settings?.UseReferenceImageForAllScenes == true;
 bool VideoBlocked(VideoProjectSceneDto scene) => _busy
   || !_videoStates.TryGetValue(scene.Id, out var state) || state.HasActiveJob
   || state.SubmitBlockReason != SceneVideoSubmitBlockReason.None;
@@ -500,6 +509,8 @@ async Task HandleDurationChangedAsync(VideoProjectSceneDto scene, int dur){
 async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
 {
  if(VideoInFlight(scene)) return;
+ if(!HasSceneImage(scene))
+ { Snackbar.Add("Scene chưa có ảnh. Bấm \"Tạo ảnh\" trước, video được tạo từ ảnh của scene.", Severity.Warning); return; }
  if(NeedsExplicitOperation(scene) && _supersedeButtons.TryGetValue(scene.Id,out var button))
  { await button.RunAsync(); return; }
 

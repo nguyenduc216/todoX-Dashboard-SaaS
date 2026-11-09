@@ -70,31 +70,53 @@
           <MudText Typo="Typo.caption" Class="rv2-adv-label">Áp dụng cho các scene khi tạo Prompt AI.</MudText>
         }
       </div>
-      @if (JobView is not null && (SceneCount > 0 || PromptHasScenes))
+      @if (JobView is not null)
       {
         <div class="rv2-next" data-testid="rv2-next-step">
-          @if (SceneCount == 0)
-          {
-            <MudText Typo="Typo.body2">Prompt đã sẵn sàng. Bước tiếp theo: tạo các scene từ prompt.</MudText>
-            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ViewCarousel" Disabled="@_pipelineBusy" OnClick="CreateScenesAsync">Tạo scene từ prompt</MudButton>
-          }
-          else if (IsAuto)
-          {
-            <MudText Typo="Typo.body2">Đã có @SceneCount scene. Chế độ tự động: hệ thống tự tạo ảnh → video → video hoàn chỉnh.</MudText>
-            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayCircle" OnClick="OpenPreviewAsync">Xem tiến trình</MudButton>
-          }
-          else
-          {
-            <MudText Typo="Typo.body2">Đã có @SceneCount scene. Tạo ảnh cho các scene, rồi tạo video ở tab Xem trước (nút Render job).</MudText>
-            <div class="rv2-next-actions">
-              <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@_pipelineBusy" OnClick="CreateImagesAsync">Tạo ảnh các scene</MudButton>
-              <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" OnClick="OpenPreviewAsync">Tạo video</MudButton>
-            </div>
-          }
-          @if (SceneCount > 0 && PromptHasScenes)
-          {
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_pipelineBusy" OnClick="RecreateScenesAsync">Tạo lại scene từ prompt</MudButton>
-          }
+          <MudText Typo="Typo.subtitle2">Các bước tạo video@(IsAuto ? " (chế độ tự động: sau bước 2 hệ thống tự chạy ảnh → video)" : null)</MudText>
+          <ol class="rv2-steps">
+            <li class="@StepClass(PromptHasScenes, true)">
+              <span class="rv2-step-no">1</span>
+              <div class="rv2-step-body">
+                <b>Nhập nội dung → Tạo Prompt AI</b>
+                <span class="rv2-step-note">@(PromptHasScenes ? "Đã có prompt." : "Nhập mô tả video ở ô trên (hoặc bấm micro để nói), rồi bấm Tạo Prompt AI.")</span>
+              </div>
+            </li>
+            <li class="@StepClass(SceneCount > 0, PromptHasScenes)">
+              <span class="rv2-step-no">2</span>
+              <div class="rv2-step-body">
+                <b>Tạo scene</b>
+                <span class="rv2-step-note">@(SceneCount > 0 ? $"Đã có {SceneCount} scene." : "Chia prompt thành các scene.")</span>
+              </div>
+              @if (SceneCount == 0)
+              {
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ViewCarousel" Disabled="@(_pipelineBusy || !PromptHasScenes)" OnClick="CreateScenesAsync">Tạo scene</MudButton>
+              }
+              else if (PromptHasScenes)
+              {
+                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_pipelineBusy" OnClick="RecreateScenesAsync">Tạo lại scene</MudButton>
+              }
+            </li>
+            <li class="@StepClass(SceneCount > 0 && ImagesReady == SceneCount, SceneCount > 0)">
+              <span class="rv2-step-no">3</span>
+              <div class="rv2-step-body">
+                <b>Tạo ảnh</b>
+                <span class="rv2-step-note">@(JobView.Settings?.UseReferenceImageForAllScenes == true ? "Dùng ảnh tham chiếu chung cho mọi scene, không cần tạo ảnh." : SceneCount == 0 ? "Sau khi có scene." : $"{ImagesReady}/{SceneCount} scene đã có ảnh.")</span>
+              </div>
+              @if (!IsAuto && JobView.Settings?.UseReferenceImageForAllScenes != true)
+              {
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_pipelineBusy || SceneCount == 0 || ImagesReady == SceneCount)" OnClick="CreateImagesAsync">Tạo ảnh</MudButton>
+              }
+            </li>
+            <li class="@StepClass(SceneCount > 0 && VideosReady == SceneCount, SceneCount > 0)">
+              <span class="rv2-step-no">4</span>
+              <div class="rv2-step-body">
+                <b>Tạo video</b>
+                <span class="rv2-step-note">@(SceneCount == 0 ? "Sau khi có scene và ảnh." : $"{VideosReady}/{SceneCount} scene đã có video. Xem trước số điểm trước khi tạo.")</span>
+              </div>
+              <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" Disabled="@(SceneCount == 0)" OnClick="OpenPreviewAsync" data-testid="rv2-step-create-video">@(IsAuto ? "Xem tiến trình" : "Tạo video")</MudButton>
+            </li>
+          </ol>
           @if (_pipelineBusy) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" /> }
         </div>
       }
@@ -105,29 +127,31 @@
     <section class="rv2-info-side">
       <div class="rv2-section-head mb-2">
         <MudText Typo="Typo.subtitle2">Hình ảnh tham chiếu (@InputReferences.Count)</MudText>
-        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-          @* Compact reference-source controls: exactly two icon-only buttons (Upload + Character).
-             Upload uses a hidden native <input type=file> triggered via JS; the input is fully
-             clipped so no native file-input chrome ever renders. Character opens the picker dialog. *@
-          <MudTooltip Text="Tải ảnh tham chiếu">
-            <span class="rv2-ref-btn @(ActiveReferenceSource=="upload" ? "rv2-ref-btn--active" : null) @(_uploading || JobView is null ? "rv2-ref-btn--disabled" : null)"
-                  role="button" tabindex="@(_uploading || JobView is null ? -1 : 0)"
-                  aria-label="Tải ảnh tham chiếu" aria-pressed="@(ActiveReferenceSource=="upload")"
-                  title="Tải ảnh tham chiếu"
-                  @onclick="TriggerUploadPickerAsync" @onkeydown="HandleUploadKeyDownAsync">
-              <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-            </span>
-          </MudTooltip>
-          <MudTooltip Text="Chọn từ Character">
-            <span class="rv2-ref-btn @(ActiveReferenceSource=="character" ? "rv2-ref-btn--active" : null) @(_uploading || JobView is null ? "rv2-ref-btn--disabled" : null)"
-                  role="button" tabindex="@(_uploading || JobView is null ? -1 : 0)"
-                  aria-label="Chọn từ Character" aria-pressed="@(ActiveReferenceSource=="character")"
-                  title="Chọn từ Character"
-                  @onclick="OpenCharacterPickerAsync">
-              <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Size="Size.Small" />
-            </span>
-          </MudTooltip>
-        </MudStack>
+      </div>
+      @* Reference-source controls: two large labelled buttons (Upload + Character library).
+         Upload uses a hidden native <input type=file> triggered via JS; the input is fully
+         clipped so no native file-input chrome ever renders. Character opens the picker dialog. *@
+      <div class="rv2-ref-actions">
+        <MudTooltip Text="Tải ảnh tham chiếu (PNG, JPG, WEBP)">
+          <span class="rv2-ref-btn rv2-ref-btn--big @(ActiveReferenceSource=="upload" ? "rv2-ref-btn--active" : null) @(_uploading || JobView is null ? "rv2-ref-btn--disabled" : null)"
+                role="button" tabindex="@(_uploading || JobView is null ? -1 : 0)"
+                aria-label="Tải ảnh tham chiếu" aria-pressed="@(ActiveReferenceSource=="upload")"
+                title="Tải ảnh tham chiếu"
+                @onclick="TriggerUploadPickerAsync" @onkeydown="HandleUploadKeyDownAsync">
+            <MudIcon Icon="@Icons.Material.Filled.Upload" />
+            <span class="rv2-ref-btn-text">Tải ảnh lên</span>
+          </span>
+        </MudTooltip>
+        <MudTooltip Text="Chọn từ Character">
+          <span class="rv2-ref-btn rv2-ref-btn--big @(ActiveReferenceSource=="character" ? "rv2-ref-btn--active" : null) @(_uploading || JobView is null ? "rv2-ref-btn--disabled" : null)"
+                role="button" tabindex="@(_uploading || JobView is null ? -1 : 0)"
+                aria-label="Chọn từ Character" aria-pressed="@(ActiveReferenceSource=="character")"
+                title="Chọn từ Character"
+                @onclick="OpenCharacterPickerAsync">
+            <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" />
+            <span class="rv2-ref-btn-text">Chọn từ thư viện Character</span>
+          </span>
+        </MudTooltip>
       </div>
       @* Hidden native file input — lives outside any visible button so the browser never renders
          its filename chrome. JS triggers it via the .rv2-ref-file class selector.
@@ -138,7 +162,7 @@
       @if (_uploading) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mb-2" /> }
       @if (InputReferences.Count == 0)
       {
-        <MudText Typo="Typo.caption" Class="rv2-ref-empty">Chưa có ảnh tham chiếu.</MudText>
+        <MudText Typo="Typo.caption" Class="rv2-ref-empty">Chưa có ảnh tham chiếu. Thêm ảnh nhân vật/sản phẩm để video giữ đúng gương mặt, trang phục.</MudText>
       }
       else
       {
@@ -240,6 +264,9 @@
   private bool _pipelineBusy;
   private int SceneCount => JobView?.Project.Scenes.Count ?? 0;
   private bool IsAuto => string.Equals(JobView?.Settings?.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase);
+  private int ImagesReady => JobView is null ? 0 : RVideoScenePipelineService.CountScenesWithImage(JobView.Project);
+  private int VideosReady => JobView is null ? 0 : RVideoScenePipelineService.CountScenesWithVideo(JobView.Project);
+  private static string StepClass(bool done, bool available) => done ? "rv2-step rv2-step--done" : available ? "rv2-step rv2-step--current" : "rv2-step";
   private bool PromptHasScenes => JobView is not null && RVideoScenePipelineService.PromptHasScenes(JobView.Project);
   private async Task OpenPreviewAsync(){ if(OnOpenPreview.HasDelegate) await OnOpenPreview.InvokeAsync(); }
   private async Task CreateScenesAsync(){
