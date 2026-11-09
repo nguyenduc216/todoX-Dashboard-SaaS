@@ -50,3 +50,4 @@
 @media(max-width:600px){.rv2-step{flex-wrap:wrap}}
 .rv2-ref-actions ::deep .mud-tooltip-root{display:block;width:100%}
 .rv2-ref-actions .rv2-ref-btn--big{width:100%;display:flex}
+.rv2-info > .rv2-next{margin-top:16px;align-items:stretch}

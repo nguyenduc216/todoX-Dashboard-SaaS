@@ -70,56 +70,6 @@
           <MudText Typo="Typo.caption" Class="rv2-adv-label">Áp dụng cho các scene khi tạo Prompt AI.</MudText>
         }
       </div>
-      @if (JobView is not null)
-      {
-        <div class="rv2-next" data-testid="rv2-next-step">
-          <MudText Typo="Typo.subtitle2">Các bước tạo video@(IsAuto ? " (chế độ tự động: sau bước 2 hệ thống tự chạy ảnh → video)" : null)</MudText>
-          <ol class="rv2-steps">
-            <li class="@StepClass(PromptHasScenes, true)">
-              <span class="rv2-step-no">1</span>
-              <div class="rv2-step-body">
-                <b>Nhập nội dung → Tạo Prompt AI</b>
-                <span class="rv2-step-note">@(PromptHasScenes ? "Đã có prompt." : "Nhập mô tả video ở ô trên (hoặc bấm micro để nói), rồi bấm Tạo Prompt AI.")</span>
-              </div>
-            </li>
-            <li class="@StepClass(SceneCount > 0, PromptHasScenes)">
-              <span class="rv2-step-no">2</span>
-              <div class="rv2-step-body">
-                <b>Tạo scene</b>
-                <span class="rv2-step-note">@(SceneCount > 0 ? $"Đã có {SceneCount} scene." : "Chia prompt thành các scene.")</span>
-              </div>
-              @if (SceneCount == 0)
-              {
-                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ViewCarousel" Disabled="@(_pipelineBusy || !PromptHasScenes)" OnClick="CreateScenesAsync">Tạo scene</MudButton>
-              }
-              else if (PromptHasScenes)
-              {
-                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_pipelineBusy" OnClick="RecreateScenesAsync">Tạo lại scene</MudButton>
-              }
-            </li>
-            <li class="@StepClass(SceneCount > 0 && ImagesReady == SceneCount, SceneCount > 0)">
-              <span class="rv2-step-no">3</span>
-              <div class="rv2-step-body">
-                <b>Tạo ảnh</b>
-                <span class="rv2-step-note">@(JobView.Settings?.UseReferenceImageForAllScenes == true ? "Dùng ảnh tham chiếu chung cho mọi scene, không cần tạo ảnh." : SceneCount == 0 ? "Sau khi có scene." : $"{ImagesReady}/{SceneCount} scene đã có ảnh.")</span>
-              </div>
-              @if (!IsAuto && JobView.Settings?.UseReferenceImageForAllScenes != true)
-              {
-                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_pipelineBusy || SceneCount == 0 || ImagesReady == SceneCount)" OnClick="CreateImagesAsync">Tạo ảnh</MudButton>
-              }
-            </li>
-            <li class="@StepClass(SceneCount > 0 && VideosReady == SceneCount, SceneCount > 0)">
-              <span class="rv2-step-no">4</span>
-              <div class="rv2-step-body">
-                <b>Tạo video</b>
-                <span class="rv2-step-note">@(SceneCount == 0 ? "Sau khi có scene và ảnh." : $"{VideosReady}/{SceneCount} scene đã có video. Xem trước số điểm trước khi tạo.")</span>
-              </div>
-              <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" Disabled="@(SceneCount == 0)" OnClick="OpenPreviewAsync" data-testid="rv2-step-create-video">@(IsAuto ? "Xem tiến trình" : "Tạo video")</MudButton>
-            </li>
-          </ol>
-          @if (_pipelineBusy) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" /> }
-        </div>
-      }
       @if (_generating) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" /> }
       @if (!string.IsNullOrWhiteSpace(_status)) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@_status</MudAlert> }
       @if (JobView is null && JobId is null) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Chưa chọn job.</MudAlert> }
@@ -187,6 +137,56 @@
                    Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" />
     </section>
   </div>
+  @if (JobView is not null)
+  {
+    <div class="rv2-next" data-testid="rv2-next-step">
+      <MudText Typo="Typo.subtitle2">Các bước tạo video@(IsAuto ? " (chế độ tự động: sau bước 2 hệ thống tự chạy ảnh → video)" : null)</MudText>
+      <ol class="rv2-steps">
+        <li class="@StepClass(PromptHasScenes, true)">
+          <span class="rv2-step-no">1</span>
+          <div class="rv2-step-body">
+            <b>Nhập nội dung → Tạo Prompt AI</b>
+            <span class="rv2-step-note">@(PromptHasScenes ? "Đã có prompt." : "Nhập mô tả video ở ô trên (hoặc bấm micro để nói), rồi bấm Tạo Prompt AI.")</span>
+          </div>
+        </li>
+        <li class="@StepClass(SceneCount > 0, PromptHasScenes)">
+          <span class="rv2-step-no">2</span>
+          <div class="rv2-step-body">
+            <b>Tạo scene</b>
+            <span class="rv2-step-note">@(SceneCount > 0 ? $"Đã có {SceneCount} scene." : "Chia prompt thành các scene.")</span>
+          </div>
+          @if (SceneCount == 0)
+          {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ViewCarousel" Disabled="@(_pipelineBusy || !PromptHasScenes)" OnClick="CreateScenesAsync">Tạo scene</MudButton>
+          }
+          else if (PromptHasScenes)
+          {
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_pipelineBusy" OnClick="RecreateScenesAsync">Tạo lại scene</MudButton>
+          }
+        </li>
+        <li class="@StepClass(SceneCount > 0 && ImagesReady == SceneCount, SceneCount > 0)">
+          <span class="rv2-step-no">3</span>
+          <div class="rv2-step-body">
+            <b>Tạo ảnh</b>
+            <span class="rv2-step-note">@(JobView.Settings?.UseReferenceImageForAllScenes == true ? "Dùng ảnh tham chiếu chung cho mọi scene, không cần tạo ảnh." : SceneCount == 0 ? "Sau khi có scene." : $"{ImagesReady}/{SceneCount} scene đã có ảnh.")</span>
+          </div>
+          @if (!IsAuto && JobView.Settings?.UseReferenceImageForAllScenes != true)
+          {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_pipelineBusy || SceneCount == 0 || ImagesReady == SceneCount)" OnClick="CreateImagesAsync">Tạo ảnh</MudButton>
+          }
+        </li>
+        <li class="@StepClass(SceneCount > 0 && VideosReady == SceneCount, SceneCount > 0)">
+          <span class="rv2-step-no">4</span>
+          <div class="rv2-step-body">
+            <b>Tạo video</b>
+            <span class="rv2-step-note">@(SceneCount == 0 ? "Sau khi có scene và ảnh." : $"{VideosReady}/{SceneCount} scene đã có video. Xem trước số điểm trước khi tạo.")</span>
+          </div>
+          <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" Disabled="@(SceneCount == 0)" OnClick="OpenPreviewAsync" data-testid="rv2-step-create-video">@(IsAuto ? "Xem tiến trình" : "Tạo video")</MudButton>
+        </li>
+      </ol>
+      @if (_pipelineBusy) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" /> }
+    </div>
+  }
   <MudExpansionPanels Elevation="0" Dense="true" Class="rv2-advanced">
     <MudExpansionPanel Text="Cài đặt nâng cao" Expanded="@_adv" ExpandedChanged="@(v=>_adv=v)">
       <MudGrid Class="mt-2">
