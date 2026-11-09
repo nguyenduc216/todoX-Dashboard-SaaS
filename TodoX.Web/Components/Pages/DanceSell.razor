@@ -9,6 +9,7 @@
 @inject IDanceSellRepository DanceRepo
 @inject ISnackbar Snackbar
 @implements IDisposable
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
 
 <PageTitle>Nhảy bán hàng</PageTitle>
 
@@ -160,7 +161,7 @@
                         @if (!string.IsNullOrWhiteSpace(_job?.ResultVideoUrl))
                         {
                             @PreviewVideo("Kết quả", _job.ResultVideoUrl)
-                            <MudButton Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@_job.ResultVideoUrl" Target="_blank">Mở video</MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => DownloadVideoAsync(_job.ResultVideoUrl))">Tải video</MudButton>
                         }
                         @if (!string.IsNullOrWhiteSpace(_job?.ErrorMessage))
                         {
@@ -710,6 +711,19 @@
             _ => string.Empty
         };
         return $"{DefaultPrompt()} {extra}".Trim();
+    }
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadVideoAsync(string? url, string? fileName = null)
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(url, fileName);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
     }
 }
 

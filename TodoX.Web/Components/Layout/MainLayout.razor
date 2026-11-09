@@ -11,6 +11,7 @@
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 @inject ILogger<MainLayout> Logger
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaAccess
 
 <MudThemeProvider Theme="_theme" IsDarkMode="true" />
 <MudPopoverProvider />
@@ -223,9 +224,23 @@
     {
         if (firstRender && AuthState.IsInitialized)
         {
+            await SyncMediaSessionAsync();
             await LoadNavigationMenuAsync();
             await LoadBalanceAsync();
             StateHasChanged();
+        }
+    }
+
+    // Video files only play for a signed-in user: keep the media cookie in step with the account in this tab.
+    private async Task SyncMediaSessionAsync()
+    {
+        try
+        {
+            await MediaAccess.SyncSessionAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException or TaskCanceledException)
+        {
+            Logger.LogDebug(ex, "MEDIA_SESSION_SYNC_SKIPPED");
         }
     }
 
@@ -257,6 +272,7 @@
             }
 
             _menuLoaded = false;
+            await SyncMediaSessionAsync();
             await LoadNavigationMenuAsync();
             await LoadBalanceAsync();
             if (!_disposed)

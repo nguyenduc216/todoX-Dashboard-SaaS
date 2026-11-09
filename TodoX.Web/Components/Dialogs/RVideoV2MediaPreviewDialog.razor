@@ -1,3 +1,5 @@
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
+@inject ISnackbar Snackbar
 <MudDialog>
     <DialogContent>
         @if (!string.IsNullOrWhiteSpace(VideoUrl))
@@ -16,7 +18,7 @@
     <DialogActions>
         @if (!string.IsNullOrWhiteSpace(VideoUrl))
         {
-            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download" Href="@VideoUrl" Target="_blank">Mở video</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => DownloadVideoAsync(VideoUrl))">Tải video</MudButton>
         }
         <MudButton Variant="Variant.Text" OnClick="Cancel">Đóng</MudButton>
     </DialogActions>
@@ -35,4 +37,17 @@
     [Parameter] public string? ImageUrl { get; set; }
 
     private void Cancel() => MudDialog.Cancel();
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadVideoAsync(string? url, string? fileName = null)
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(url, fileName);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
 }

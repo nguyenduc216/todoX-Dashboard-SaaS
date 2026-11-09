@@ -19,6 +19,7 @@
     <Compile Include="..\..\TodoX.Web.Tests\RVideoFinalMergeMediaTests.cs" Link="RVideoFinalMergeMediaTests.cs" />
     <Compile Include="..\..\TodoX.Web.Tests\RVideoManualRecomposeTests.cs" Link="RVideoManualRecomposeTests.cs" />
     <Compile Include="..\..\TodoX.Web.Tests\RVideoFinalPublicationContractTests.cs" Link="RVideoFinalPublicationContractTests.cs" />
+    <Compile Include="..\..\TodoX.Landing\Services\LandingMediaGuard.cs" Link="LandingMediaGuard.cs" />
   </ItemGroup>
 
   <ItemGroup>

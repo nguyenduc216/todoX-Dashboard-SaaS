@@ -3,6 +3,7 @@
 @inject IRVideoProjectFinalizationService RVideoFinalization
 @inject ISnackbar Snackbar
 @inject AuthStateService AuthState
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
 <div class="rv2-result">
 @if(JobView is null)
 {
@@ -43,7 +44,7 @@ else
       <RVideoRecomposeAction @key="JobView.Project.Id" @ref="_recompose" Project="JobView.Project" OnReloadRequested="OnReloadRequested" OnSubmitRequested="ReMergeAsync" />
       @if(!string.IsNullOrWhiteSpace(p.FinalVideoUrl))
       {
-        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download" Href="@p.FinalVideoUrl" Target="_blank">Tải video</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => DownloadVideoAsync(p.FinalVideoUrl, $"todox-video-{JobView.Project.Id}.mp4"))">Tải video</MudButton>
       }
     </div>
   </section>
@@ -58,4 +59,17 @@ async Task ReMergeAsync()
 {
     if (_recompose is not null) await _recompose.SubmitAsync();
 }
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadVideoAsync(string? url, string? fileName = null)
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(url, fileName);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
 }

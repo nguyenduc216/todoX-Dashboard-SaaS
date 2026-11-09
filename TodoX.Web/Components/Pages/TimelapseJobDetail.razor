@@ -13,6 +13,7 @@
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
 
 <PageTitle>@(_job?.Snapshot.Title ?? "Công việc Timelapse")</PageTitle>
 
@@ -617,7 +618,7 @@
                             <video src="@_job.Workflow.FinalOutput.PublicUrl" controls playsinline class="final-video"></video>
                             <MudText Typo="Typo.h6">@_job.Snapshot.Title</MudText>
                             <MudText Typo="Typo.caption" Color="Color.Secondary">Phiên bản @_job.Workflow.FinalOutput.Version · @_job.Workflow.FinalOutput.CompletedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
-                            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Href="@_job.Workflow.FinalOutput.PublicUrl" Target="_blank">
+                            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => DownloadVideoAsync(_job.Workflow.FinalOutput.PublicUrl))">
                                 Tải video
                             </MudButton>
                             <MudButton Variant="Variant.Outlined"
@@ -1720,4 +1721,17 @@
             ? "9:16"
             : "16:9";
 
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadVideoAsync(string? url, string? fileName = null)
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(url, fileName);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
 }

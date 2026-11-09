@@ -4,6 +4,7 @@
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
 
 <PageTitle>Video Sức Khoẻ</PageTitle>
 
@@ -303,7 +304,7 @@
                                             }
                                         </div>
                                         <MudStack Row="true" Class="flex-wrap gap-2">
-                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="OpenResultAsync">Xem video</MudButton>
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" OnClick="OpenResultAsync">Tải video</MudButton>
                                             <a href="@ResultVideoUrl" download="health-video-result.mp4" class="health-video-download-link">
                                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download">Tải video</MudButton>
                                             </a>
@@ -504,7 +505,7 @@
         _loadingMessage = string.Empty;
     }
 
-    private Task OpenResultAsync() => JS.InvokeVoidAsync("open", ResultVideoUrl).AsTask();
+    private Task OpenResultAsync() => DownloadVideoAsync(ResultVideoUrl);
 
     private void CreateNewAsync()
     {
@@ -529,5 +530,18 @@
 
         var relativePath = url.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
         return File.Exists(Path.Combine(Env.WebRootPath, relativePath));
+    }
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadVideoAsync(string? url, string? fileName = null)
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(url, fileName);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
     }
 }

@@ -20,6 +20,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
+builder.Services.AddDataProtection();
 builder.Services.AddSingleton<LandingConnectionFactory>();
 builder.Services.AddScoped<LandingContactRepository>();
 builder.Services.AddScoped<IndustrySolutionRepository>();
@@ -71,6 +72,8 @@ app.Use(async (context, next) =>
 
 app.UseForwardedHeaders();
 app.UseRateLimiter();
+// Video files under /media play only inside todox.vn pages (no direct links, downloads or hotlinking).
+app.UseLandingMediaGuard(app.Configuration, app.Configuration["SharedMedia:RequestPath"] ?? "/media");
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {

@@ -1,3 +1,5 @@
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
+@inject ISnackbar Snackbar
 @namespace TodoX.Web.Components.Dialogs
 
 <MudDialog>
@@ -53,8 +55,15 @@
                             <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                 @if (!string.IsNullOrWhiteSpace(item.MediaUrl))
                                 {
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@item.MediaUrl" Target="_blank">Xem</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Href="@item.MediaUrl" Target="_blank">Tải xuống</MudButton>
+                                    @if (item.IsVideo)
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => DownloadVideoAsync(item.MediaUrl))">Tải xuống</MudButton>
+                                    }
+                                    else
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@item.MediaUrl" Target="_blank">Xem</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Href="@item.MediaUrl" Target="_blank">Tải xuống</MudButton>
+                                    }
                                 }
                                 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Disabled="@(item.IsSelected || !item.CanSelect)" StartIcon="@Icons.Material.Filled.Check" OnClick="@(() => SelectAsync(item))">Dùng làm hiện tại</MudButton>
                             </MudStack>
@@ -76,4 +85,17 @@
 
     private void Close() => MudDialog.Cancel();
     private void SelectAsync(MediaHistoryItem item) => MudDialog.Close(DialogResult.Ok(item.Key));
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadVideoAsync(string? url, string? fileName = null)
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(url, fileName);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
 }

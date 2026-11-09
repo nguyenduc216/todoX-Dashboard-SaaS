@@ -245,6 +245,9 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoRenderEligibilit
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
 builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
 builder.Services.AddScoped<IRDanceDownloadTicketService, RDanceDownloadTicketService>();
+builder.Services.AddSingleton<TodoX.Web.Services.Media.MediaAccessTokens>();
+builder.Services.AddSingleton<TodoX.Web.Services.Media.MediaFileLocator>();
+builder.Services.AddScoped<TodoX.Web.Services.Media.MediaDownloadService>();
 builder.Services.AddScoped<IDanceSellCompletionService, DanceSellCompletionService>();
 builder.Services.AddScoped<IDanceSellMotionSourceService, DanceSellMotionSourceService>();
 builder.Services.AddScoped<IRDanceFeatureService, RDanceFeatureService>();
@@ -379,6 +382,9 @@ if (!app.Environment.IsDevelopment())
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
 app.UseCors();
+
+// Video files are only served to a signed-in TodoX page's <video> element; downloads go through /api/media/download.
+TodoX.Web.Services.Media.MediaAccessEndpoints.UseProtectedMedia(app, app.Configuration);
 
 // Serve runtime-uploaded files (avatars, chibi, references) from wwwroot/uploads.
 app.UseStaticFiles();
@@ -594,6 +600,8 @@ if (app.Configuration.GetValue("CoreApi:Enabled", false))
 {
     app.MapTodoXCoreApiV1();
 }
+
+TodoX.Web.Services.Media.MediaAccessEndpoints.MapMediaAccessEndpoints(app);
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
