@@ -48,3 +48,5 @@
 .rv2-step-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
 .rv2-step-note{font-size:.78rem;opacity:.75}
 @media(max-width:600px){.rv2-step{flex-wrap:wrap}}
+.rv2-ref-actions ::deep .mud-tooltip-root{display:block;width:100%}
+.rv2-ref-actions .rv2-ref-btn--big{width:100%;display:flex}
