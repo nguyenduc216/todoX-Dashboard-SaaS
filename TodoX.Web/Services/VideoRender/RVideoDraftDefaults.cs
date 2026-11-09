@@ -48,9 +48,11 @@ public static class RVideoDraftDefaults
             {
                 CreativeMode = false,
                 ExecutionMode = Pick(defaults.ExecutionMode, RVideoExecutionModes.Manual, RVideoExecutionModes.Manual, RVideoExecutionModes.Auto),
-                SkipCharacter = string.Equals(defaults.CharacterMode, RVideoCharacterModes.None, StringComparison.OrdinalIgnoreCase),
+                // No reference yet (picked later in V2's Info tab): the settings contract requires
+                // SkipCharacter whenever CharacterMode is NONE, otherwise RVVIDEO_CHARACTER_MODE_REQUIRED.
+                SkipCharacter = true,
                 UseReferenceImageForAllScenes = defaults.UseReferenceImageForAllScenes ?? false,
-                CharacterMode = RVideoCharacterModes.None, // the reference image is picked in V2's Info tab
+                CharacterMode = RVideoCharacterModes.None,
                 VoiceMode = voiceMode,
                 VoiceCatalogCode = voice?.Code,
                 VoiceSnapshot = voice,

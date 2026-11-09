@@ -30,6 +30,8 @@ public sealed class RVideoBootstrapBehaviorTests
         Assert.Equal(0.4m, request.Settings.MusicVolume);
         Assert.Contains("\"aspect_ratio\":\"16:9\"", request.Prompt);
         Assert.Equal("req-1", request.LogicalRequestId);
+        RVideoRules.ValidateSettings(request.Settings); // must pass the create contract (no reference yet)
+        Assert.True(request.Settings.SkipCharacter);
     }
 
     [Fact]
