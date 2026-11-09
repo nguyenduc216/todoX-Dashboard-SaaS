@@ -97,6 +97,17 @@ public sealed class LandingIntroVideoTests
     }
 
     [Fact]
+    public void Video_sample_dialog_can_reuse_uploaded_files()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var dialog = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Dialogs", "LandingVideoSampleDialog.razor"));
+        Assert.Contains("Chọn từ thư viện", dialog);
+        Assert.Contains("Media.ListUploads(LandingVideoSampleRepository.MediaArea", dialog);
+        foreach (var slot in new[] { "ImageSlot.Video", "ImageSlot.Portrait", "ImageSlot.Landscape", "ImageSlot.Share" })
+            Assert.Contains($"@LibraryButton({slot})", dialog);
+    }
+
+    [Fact]
     public void Image_format_comes_from_its_bytes_not_its_name()
     {
         byte[] jpeg = [0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

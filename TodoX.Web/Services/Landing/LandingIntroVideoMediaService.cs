@@ -45,6 +45,8 @@ public static class IntroUploadDiagnostics
             : !storageAvailable ? IntroUploadError.StorageUnavailable : Classify(ex);
 }
 
+public sealed record LandingMediaFile(string Url, string FileName, long Size, DateTime UploadedAtUtc);
+
 public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, IOptions<SharedMediaOptions> options, AuthStateService auth)
 {
     public Task<string> UploadAsync(IBrowserFile file, bool video, CancellationToken ct = default)
@@ -95,6 +97,22 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
             if (File.Exists(source)) File.Delete(source);
             if (optimized is not null && File.Exists(optimized)) File.Delete(optimized);
         }
+    }
+
+    /// <summary>Files already uploaded to a landing media area, newest first, so an admin can reuse one instead of uploading again.</summary>
+    public IReadOnlyList<LandingMediaFile> ListUploads(string area, bool video, int take = 60)
+    {
+        LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
+        var folder = video ? "videos" : "posters";
+        var physical = paths.GetLandingMediaPhysicalFolder(area, folder);
+        if (!Directory.Exists(physical)) return [];
+        string[] allowed = video ? [".mp4", ".webm"] : [".jpg", ".jpeg", ".png", ".webp"];
+        return new DirectoryInfo(physical).EnumerateFiles()
+            .Where(f => allowed.Contains(f.Extension.ToLowerInvariant()) && f.Length > 0)
+            .OrderByDescending(f => f.LastWriteTimeUtc)
+            .Take(take)
+            .Select(f => new LandingMediaFile(paths.GetLandingMediaPublicUrl(area, folder, f.Name), f.Name, f.Length, f.LastWriteTimeUtc))
+            .ToList();
     }
 
     public static long MaxBytes(SharedMediaOptions options, string area, bool video)

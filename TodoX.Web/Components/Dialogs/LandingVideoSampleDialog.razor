@@ -43,6 +43,7 @@
                     <MudStack Spacing="2">
                         <MudText>Video MP4/WebM (tối đa @(LandingIntroVideoMediaService.MaxBytes(MediaOptions.Value, LandingVideoSampleRepository.MediaArea, true) / (1024 * 1024)) MB):</MudText>
                         <InputFile OnChange="UploadVideoAsync" accept=".mp4,.webm,video/mp4,video/webm" disabled="@_busy" />
+                        @LibraryButton(ImageSlot.Video)
                         @if (_uploadingVideo)
                         {
                             <MudText Typo="Typo.caption" Color="Color.Warning">Đang tải lên và tối ưu video cho web (720p), có thể mất 1–2 phút...</MudText>
@@ -57,6 +58,7 @@
                     <MudStack Spacing="2">
                         <MudText>Thumbnail 9:16 (dọc, khuyên dùng 1080×1920):</MudText>
                         <InputFile OnChange="@(args => UploadAsync(args, ImageSlot.Portrait))" accept="@ImageAccept" disabled="@_busy" />
+                        @LibraryButton(ImageSlot.Portrait)
                         @if (!string.IsNullOrWhiteSpace(_model.ThumbnailPortraitUrl)) { <img src="@_model.ThumbnailPortraitUrl" alt="Thumbnail 9:16" style="max-width:100%;max-height:300px;aspect-ratio:9/16;object-fit:cover" /> }
                     </MudStack>
                 </MudItem>
@@ -72,6 +74,7 @@
                     <MudStack Spacing="2">
                         <MudText>Thumbnail 16:9 (ngang, khuyên dùng 1920×1080):</MudText>
                         <InputFile OnChange="@(args => UploadAsync(args, ImageSlot.Landscape))" accept="@ImageAccept" disabled="@_busy" />
+                        @LibraryButton(ImageSlot.Landscape)
                         @if (!string.IsNullOrWhiteSpace(_model.ThumbnailLandscapeUrl)) { <img src="@_model.ThumbnailLandscapeUrl" alt="Thumbnail 16:9" style="max-width:100%;max-height:200px;aspect-ratio:16/9;object-fit:cover" /> }
                     </MudStack>
                 </MudItem>
@@ -79,10 +82,45 @@
                     <MudStack Spacing="2">
                         <MudText>Ảnh chia sẻ Zalo/Facebook (1200×630):</MudText>
                         <InputFile OnChange="@(args => UploadAsync(args, ImageSlot.Share))" accept="@ImageAccept" disabled="@(_busy || !_thumbnailsReady)" />
+                        @if (_thumbnailsReady) { @LibraryButton(ImageSlot.Share) }
                         @if (!string.IsNullOrWhiteSpace(_model.ShareImageUrl)) { <img src="@_model.ShareImageUrl" alt="Ảnh chia sẻ" style="max-width:100%;max-height:200px;aspect-ratio:1200/630;object-fit:cover" /> }
                     </MudStack>
                 </MudItem>
             </MudGrid>
+            @if (_librarySlot is { } openSlot)
+            {
+                <MudPaper Outlined="true" Class="pa-3">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                        <MudText Typo="Typo.subtitle2">Thư viện @(openSlot == ImageSlot.Video ? "video" : "ảnh") đã tải lên — chọn cho: @SlotName(openSlot)</MudText>
+                        <MudButton Size="Size.Small" OnClick="CloseLibrary">Đóng</MudButton>
+                    </MudStack>
+                    @if (_library.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption">Chưa có tệp nào trong thư viện.</MudText>
+                    }
+                    else
+                    {
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;max-height:420px;overflow:auto;margin-top:8px">
+                            @foreach (var file in _library)
+                            {
+                                var picked = file.Url == CurrentUrl(openSlot);
+                                <div style="border:2px solid @(picked ? "var(--mud-palette-warning)" : "var(--mud-palette-lines-default)");border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px">
+                                    @if (openSlot == ImageSlot.Video)
+                                    {
+                                        <video src="@file.Url" preload="metadata" muted playsinline controls style="width:100%;height:180px;object-fit:contain;background:#000"></video>
+                                    }
+                                    else
+                                    {
+                                        <img src="@file.Url" alt="@file.FileName" loading="lazy" style="width:100%;height:180px;object-fit:contain;background:#111;cursor:pointer" @onclick="() => PickFromLibrary(file)" />
+                                    }
+                                    <MudText Typo="Typo.caption">@file.UploadedAtUtc.AddHours(7).ToString("dd/MM HH:mm") · @FormatSize(file.Size)</MudText>
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" Disabled="@picked" OnClick="() => PickFromLibrary(file)">@(picked ? "Đang dùng" : "Chọn")</MudButton>
+                                </div>
+                            }
+                        </div>
+                    }
+                </MudPaper>
+            }
             @if (_busy) { <MudProgressLinear Indeterminate="true" /> }
         </MudStack>
     </DialogContent>
@@ -141,6 +179,64 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    // Library: reuse a file uploaded earlier (e.g. the dialog was closed after the video upload) instead of uploading again.
+    private ImageSlot? _librarySlot;
+    private IReadOnlyList<LandingMediaFile> _library = [];
+
+    private RenderFragment LibraryButton(ImageSlot slot) => @<MudButton Size="Size.Small" Variant="Variant.Outlined"
+        StartIcon="@Icons.Material.Filled.PhotoLibrary" Disabled="@_busy" OnClick="() => OpenLibrary(slot)"
+        Style="align-self:flex-start">Chọn từ thư viện</MudButton>;
+
+    private void OpenLibrary(ImageSlot slot)
+    {
+        _error = null;
+        try
+        {
+            _library = Media.ListUploads(LandingVideoSampleRepository.MediaArea, slot == ImageSlot.Video);
+            _librarySlot = slot;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video sample library listing failed. Slot={Slot}", slot);
+            _error = "Không mở được thư viện tệp. Vui lòng thử lại.";
+        }
+    }
+
+    private void CloseLibrary() => _librarySlot = null;
+
+    private void PickFromLibrary(LandingMediaFile file)
+    {
+        switch (_librarySlot)
+        {
+            case ImageSlot.Video: _model.VideoUrl = file.Url; break;
+            case ImageSlot.Portrait: _model.ThumbnailPortraitUrl = file.Url; break;
+            case ImageSlot.Landscape: _model.ThumbnailLandscapeUrl = file.Url; break;
+            case ImageSlot.Share: _model.ShareImageUrl = file.Url; break;
+            default: return;
+        }
+        Snackbar.Add($"Đã chọn {SlotName(_librarySlot.Value)} từ thư viện. Nhấn Lưu video mẫu để áp dụng.", Severity.Success);
+        _librarySlot = null;
+    }
+
+    private string? CurrentUrl(ImageSlot slot) => slot switch
+    {
+        ImageSlot.Video => _model.VideoUrl,
+        ImageSlot.Portrait => _model.ThumbnailPortraitUrl,
+        ImageSlot.Landscape => _model.ThumbnailLandscapeUrl,
+        _ => _model.ShareImageUrl
+    };
+
+    private static string SlotName(ImageSlot slot) => slot switch
+    {
+        ImageSlot.Video => "video",
+        ImageSlot.Portrait => "thumbnail 9:16",
+        ImageSlot.Landscape => "thumbnail 16:9",
+        _ => "ảnh chia sẻ"
+    };
+
+    private static string FormatSize(long bytes)
+        => bytes >= 1024 * 1024 ? $"{bytes / (1024d * 1024):0.#} MB" : $"{Math.Max(1, bytes / 1024)} KB";
 
     private Task UploadVideoAsync(InputFileChangeEventArgs args) => UploadAsync(args, ImageSlot.Video);
     private async Task UploadAsync(InputFileChangeEventArgs args, ImageSlot slot)
