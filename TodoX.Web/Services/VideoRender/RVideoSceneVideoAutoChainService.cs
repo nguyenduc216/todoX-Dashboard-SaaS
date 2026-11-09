@@ -53,6 +53,16 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
             return false;
         }
 
+        // "Duyệt từng bước" (MANUAL): a finished image never starts a video on its own; the user decides.
+        var executionMode = (await _settings.GetAsync(projectId, ct))?.ExecutionMode;
+        if (string.Equals(executionMode, RVideoExecutionModes.Manual, StringComparison.OrdinalIgnoreCase))
+        {
+            await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_AUTO_ENQUEUE_SKIPPED", "info",
+                $"Scene {scene.SceneIndex}: image ready; video not started automatically (manual mode).",
+                new { sceneId, triggerSource, reason = "manual_mode" }, ct);
+            return false;
+        }
+
         if (await _repo.HasVideoOperationHeadAsync(sceneId, ct)) return false; // Only explicit user action advances generation.
         // Linked scene: wait until its start image was built from the previous scene's current video.
         var orderedScenes = project.Scenes.OrderBy(x => x.SceneIndex).ToList();
