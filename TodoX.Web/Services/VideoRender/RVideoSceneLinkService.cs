@@ -129,8 +129,16 @@ public sealed class RVideoSceneLinkService : IRVideoSceneLinkService
             if (!RVideoSceneLink.IsCompleted(previousVideo)) continue;             // wait for the previous clip
             if (RVideoSceneLink.IsLinkCurrent(scene, previousVideo)) continue;     // already linked
             if (RVideoSceneLink.IsCompleted(await _versions.GetSelectedVideoVersionAsync(scene.Id, ct)))
+            {
+                _logger.LogWarning("RVIDEO_SCENE_LINK_SKIPPED projectId={ProjectId} sceneId={SceneId} reason=scene_has_completed_video", project.Id, scene.Id);
                 continue;                                                          // ask the user (UI), never auto-rerender
-            if (await _versions.HasActiveImageVersionAsync(scene.Id, ct)) continue;
+            }
+            if (await _versions.HasActiveImageVersionAsync(scene.Id, ct))
+            {
+                _logger.LogWarning("RVIDEO_SCENE_LINK_SKIPPED projectId={ProjectId} sceneId={SceneId} reason=image_in_progress", project.Id, scene.Id);
+                continue;
+            }
+            _logger.LogWarning("RVIDEO_SCENE_LINK_ATTEMPT projectId={ProjectId} sceneId={SceneId} previousVideoVersionId={VideoId}", project.Id, scene.Id, previousVideo!.Id);
             try
             {
                 await LinkAsync(project, setting, scene, previousVideo!, "RVIDEO_LIFECYCLE", ct);

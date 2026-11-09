@@ -591,7 +591,9 @@ async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
 // exactly (the supersede quote rejects an unsaved, modified scene with "Scene đã thay đổi").
 async Task<VideoProjectSceneDto?> PinShownModelAsync(VideoProjectSceneDto scene, CurrentUserSession user)
 {
-  if(ImplicitUsedKey(scene) is not { } key || JobView is null) return scene;
+  if(JobView is null) return scene;
+  // Always quote what is saved: the page copy can be older than the row (e.g. right after "Tạo lại ảnh").
+  if(ImplicitUsedKey(scene) is not { } key) return await ScenePipeline.GetSavedSceneAsync(JobView.Project.Id, scene.Id, user);
   var meta = ScenePromptMetadata.FromScene(scene);
   meta.Extra["video_model"] = key;
   var req = new VideoProjectSaveSceneDraftRequest{ SceneId=scene.Id, Status=scene.Status, Title=scene.Title, SceneIndex=scene.SceneIndex, ScenePrompt=meta.Serialize(), ImagePrompt=meta.ImagePrompt, VideoPrompt=meta.MotionPrompt, ImageUrl=scene.StaticImageUrl, ImagePath=scene.StaticImagePath, VideoUrl=scene.SceneVideoUrl, VideoPath=scene.SceneVideoPath, DurationSeconds=scene.DurationSeconds, ErrorMessage=scene.ErrorMessage };
