@@ -226,5 +226,25 @@ public sealed class QuickPromptTranscriptMergerTests
             "Nội dung gốc",
             QuickPromptTranscriptMerger.AppendTranscript("Nội dung gốc", "   "));
     }
-}
 
+    [Theory]
+    [InlineData("kiểm tra lần hai phẩy kiểm tra lần ba", "Kiểm tra lần hai, kiểm tra lần ba")]
+    [InlineData("tôi đang nghe dấu phẩy tôi đang nghe dấu chấm", "Tôi đang nghe, tôi đang nghe.")]
+    [InlineData("bạn có khỏe không dấu chấm hỏi tuyệt vời chấm than", "Bạn có khỏe không? Tuyệt vời!")]
+    [InlineData("gồm ba bước dấu hai chấm chuẩn bị chấm phẩy quay chấm phẩy dựng", "Gồm ba bước: chuẩn bị; quay; dựng")]
+    [InlineData("dòng một xuống dòng dòng hai", "Dòng một\nDòng hai")]
+    [InlineData("giá 3 ,7 triệu", "Giá 3,7 triệu")]
+    [InlineData("giáo viên chấm bài cho học sinh", "Giáo viên chấm bài cho học sinh")]
+    [InlineData("kết thúc câu chấm", "Kết thúc câu.")]
+    public void AppendTranscriptTurnsSpokenPunctuationIntoMarks(string spoken, string expected)
+    {
+        Assert.Equal(expected, QuickPromptTranscriptMerger.AppendTranscript(null, spoken));
+    }
+
+    [Fact]
+    public void AppendTranscriptAttachesLeadingMarkAndCapitalizesNewSentence()
+    {
+        Assert.Equal("Xin chào, bạn", QuickPromptTranscriptMerger.AppendTranscript("Xin chào", "dấu phẩy bạn"));
+        Assert.Equal("Xong rồi. Câu mới", QuickPromptTranscriptMerger.AppendTranscript("Xong rồi.", "câu mới"));
+    }
+}

@@ -102,7 +102,7 @@ public sealed class PromptSpeechHandler : IAsyncDisposable
     [JSInvokable]
     public async Task OnSpeechInterimAsync(string transcript)
     {
-        InterimTranscript = transcript?.Trim() ?? string.Empty;
+        InterimTranscript = SpokenPunctuation.Apply(transcript?.Trim());
         if (_onStateChanged is not null) await _onStateChanged();
     }
 

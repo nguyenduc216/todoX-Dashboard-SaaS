@@ -14,7 +14,8 @@ public static class QuickPromptTranscriptMerger
     /// </summary>
     public static string AppendTranscript(string? existing, string transcript)
     {
-        var trimmedTranscript = transcript.Trim();
+        // Spoken punctuation ("dấu phẩy", "chấm hỏi"...) becomes the mark itself.
+        var trimmedTranscript = SpokenPunctuation.Apply(transcript).Trim(' ', '\t');
         if (string.IsNullOrEmpty(trimmedTranscript))
         {
             return existing ?? string.Empty;
@@ -22,12 +23,19 @@ public static class QuickPromptTranscriptMerger
 
         if (string.IsNullOrWhiteSpace(existing))
         {
-            return trimmedTranscript;
+            return SpokenPunctuation.CapitalizeFirst(trimmedTranscript);
         }
 
-        var trimmedExisting = existing.TrimEnd();
+        var trimmedExisting = existing.TrimEnd(' ', '\t');
+        if (SpokenPunctuation.EndsSentence(trimmedExisting))
+        {
+            trimmedTranscript = SpokenPunctuation.CapitalizeFirst(trimmedTranscript);
+        }
+        // A piece that starts with a mark (",", "?", new line...) attaches without a space.
+        var startsWithMark = trimmedTranscript[0] is ',' or '.' or ';' or ':' or '!' or '?' or ')' or '\n' or '…';
         var needsSeparator = trimmedExisting.Length > 0
-            && !char.IsWhiteSpace(trimmedExisting[^1]);
+            && !char.IsWhiteSpace(trimmedExisting[^1])
+            && !startsWithMark;
         return needsSeparator
             ? $"{trimmedExisting} {trimmedTranscript}"
             : $"{trimmedExisting}{trimmedTranscript}";
