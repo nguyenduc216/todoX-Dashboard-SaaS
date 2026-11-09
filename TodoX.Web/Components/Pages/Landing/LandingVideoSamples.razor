@@ -50,7 +50,7 @@
                         <RowTemplate>
                             <MudTd><img src="@context.PosterUrl" alt="" style="max-width:64px;max-height:64px;object-fit:cover" /></MudTd>
                             <MudTd>@context.Title</MudTd>
-                            <MudTd>@(context.ServiceName ?? LandingVideoSampleRepository.OtherServiceName)</MudTd>
+                            <MudTd>@context.GroupName</MudTd>
                             <MudTd>@context.AspectRatio</MudTd>
                             <MudTd Style="text-align:right;white-space:nowrap">
                                 <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => EditAsync(context))">Sửa</MudButton>

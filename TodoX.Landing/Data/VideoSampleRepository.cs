@@ -31,15 +31,20 @@ public sealed record VideoSampleGroup(string Code, string Name, int Count);
 
 public sealed class VideoSampleCatalog
 {
-    // Only groups that have at least one published video, in the service list's order, "Dịch vụ khác" last.
+    // Only groups that have at least one published video, in the service list's order, then "Video TVC doanh nghiệp", "Video truyền thông" last.
+    // Videos are newest first.
     public List<VideoSampleGroup> Groups { get; set; } = [];
     public List<VideoSample> Videos { get; set; } = [];
 }
 
 public sealed partial class VideoSampleRepository(LandingConnectionFactory db, ILogger<VideoSampleRepository> logger, IOptions<SharedMediaOptions> media)
 {
+    // Samples without a service: built-in groups (landing.video_samples.sample_group). The code stays
+    // "dich-vu-khac" so links shared before the rename keep working.
     private const string OtherGroupCode = "dich-vu-khac";
-    private const string OtherGroupName = "Dịch vụ khác";
+    private const string OtherGroupName = "Video truyền thông";
+    private const string TvcGroupCode = "video-tvc-doanh-nghiep";
+    private const string TvcGroupName = "Video TVC doanh nghiệp";
 
     public async Task<VideoSampleCatalog> GetPublicAsync(CancellationToken ct = default)
     {
@@ -57,14 +62,23 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
             var thumbnails = thumbnailColumns
                 ? "s.thumbnail_portrait_url as ThumbnailPortraitUrl, s.thumbnail_landscape_url as ThumbnailLandscapeUrl, s.share_image_url as ShareImageUrl,"
                 : "";
+            // sample_group comes from database/manual/landing/20261109_landing_video_samples_group.sql; work without it.
+            var groupColumn = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+                select count(*) from information_schema.columns
+                where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'sample_group'
+                """, cancellationToken: ct)) == 1;
+            var sampleGroup = groupColumn ? "s.sample_group" : "null::text";
+            // Rows come in group order (services, then TVC, then "Video truyền thông"); videos are re-sorted newest first below.
             var rows = await connection.QueryAsync<VideoSample>(new CommandDefinition($"""
                 select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
                        s.video_url as VideoUrl, s.poster_url as PosterUrl, {thumbnails}
-                       sv.service_code as GroupCode, sv.service_name as GroupName, s.created_at as CreatedAt
+                       coalesce(sv.service_code, case when {sampleGroup} = 'tvc' then '{TvcGroupCode}' end) as GroupCode,
+                       coalesce(sv.service_name, case when {sampleGroup} = 'tvc' then '{TvcGroupName}' end) as GroupName,
+                       s.created_at as CreatedAt
                 from landing.video_samples s
                 left join catalog.services sv on sv.id = s.service_id
                 where sv.id is null or sv.status = 'active'
-                order by sv.id is null, sv.sort_order, sv.service_name, s.created_at desc
+                order by sv.id is null, {sampleGroup} is null, sv.sort_order, sv.service_name, s.created_at desc
                 """, cancellationToken: ct));
             var videos = rows.Where(video => IsPublishable(video, root)).ToList();
             foreach (var video in videos)
@@ -84,11 +98,13 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
                 video.Slug = slugs[video.Id];
                 video.SharePath = VideoSlug.SampleRoutePrefix + video.Slug;
             }
+            // Group chips keep the service order; the videos themselves show newest first.
+            var groups = videos.GroupBy(video => video.GroupCode)
+                .Select(group => new VideoSampleGroup(group.Key!, group.First().GroupName!, group.Count())).ToList();
             return new VideoSampleCatalog
             {
-                Videos = videos,
-                Groups = videos.GroupBy(video => video.GroupCode)
-                    .Select(group => new VideoSampleGroup(group.Key!, group.First().GroupName!, group.Count())).ToList()
+                Videos = videos.OrderByDescending(video => video.CreatedAt ?? DateTimeOffset.MinValue).ToList(),
+                Groups = groups
             };
         }
         catch (Exception ex)

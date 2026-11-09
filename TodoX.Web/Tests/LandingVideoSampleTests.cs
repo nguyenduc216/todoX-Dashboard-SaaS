@@ -74,7 +74,23 @@ public sealed class LandingVideoSampleTests
 
         LandingVideoSampleRepository.ApplyServiceChoice(sample, LandingVideoSampleRepository.OtherServiceChoice);
         Assert.Null(sample.ServiceId);
+        Assert.Null(sample.SampleGroup);
+        Assert.Equal("Video truyền thông", sample.GroupName);
         LandingVideoSampleRepository.Validate(sample);
+
+        LandingVideoSampleRepository.ApplyServiceChoice(sample, LandingVideoSampleRepository.TvcServiceChoice);
+        Assert.Null(sample.ServiceId);
+        Assert.Equal("tvc", sample.SampleGroup);
+        Assert.Equal("Video TVC doanh nghiệp", sample.GroupName);
+        Assert.Equal(LandingVideoSampleRepository.TvcServiceChoice, LandingVideoSampleRepository.ServiceChoiceOf(sample));
+        LandingVideoSampleRepository.Validate(sample);
+
+        // Switching back to a service clears the built-in group.
+        LandingVideoSampleRepository.ApplyServiceChoice(sample, id.ToString());
+        Assert.Null(sample.SampleGroup);
+
+        sample.SampleGroup = "other";
+        Assert.Throws<ArgumentException>(() => LandingVideoSampleRepository.Validate(sample));
     }
 
     [Theory]
@@ -156,7 +172,8 @@ public sealed class LandingVideoSampleTests
 
         var dialog = File.ReadAllText(Path.Combine(web, "Components", "Dialogs", "LandingVideoSampleDialog.razor"));
         Assert.Contains("Nhóm dịch vụ video", dialog);
-        Assert.Contains("OtherServiceChoice", dialog);
+        Assert.Contains("LandingVideoSampleRepository.BuiltInChoices", dialog);
+        Assert.Contains("ServiceChoiceOf(Source)", dialog);
         Assert.Contains("Thumbnail 9:16", dialog);
         Assert.Contains("Thumbnail 16:9", dialog);
         Assert.Contains("Ảnh chia sẻ Zalo/Facebook", dialog);

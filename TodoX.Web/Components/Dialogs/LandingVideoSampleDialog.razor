@@ -36,7 +36,10 @@
                         {
                             <MudSelectItem Value="@service.Id.ToString()">@service.ServiceName</MudSelectItem>
                         }
-                        <MudSelectItem Value="@LandingVideoSampleRepository.OtherServiceChoice">@LandingVideoSampleRepository.OtherServiceName</MudSelectItem>
+                        @foreach (var builtIn in LandingVideoSampleRepository.BuiltInChoices)
+                        {
+                            <MudSelectItem Value="@builtIn.Choice">@builtIn.Name</MudSelectItem>
+                        }
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
@@ -161,7 +164,7 @@
             _model = new LandingVideoSample
             {
                 Id = Source.Id, Title = Source.Title, Description = Source.Description, AspectRatio = Source.AspectRatio,
-                VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, ServiceId = Source.ServiceId,
+                VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, ServiceId = Source.ServiceId, SampleGroup = Source.SampleGroup,
                 ThumbnailLandscapeUrl = Source.ThumbnailLandscapeUrl, ShareImageUrl = Source.ShareImageUrl,
                 ThumbnailPortraitUrl = Source.ThumbnailPortraitUrl
             };
@@ -171,7 +174,7 @@
                 if (_model.AspectRatio == LandingVideoSampleRepository.Landscape) _model.ThumbnailLandscapeUrl = _model.PosterUrl;
                 else _model.ThumbnailPortraitUrl = _model.PosterUrl;
             }
-            _serviceChoice = Source.ServiceId?.ToString() ?? LandingVideoSampleRepository.OtherServiceChoice;
+            _serviceChoice = LandingVideoSampleRepository.ServiceChoiceOf(Source);
         }
 
         // Keep the current service selectable when editing a sample whose service has been paused.
