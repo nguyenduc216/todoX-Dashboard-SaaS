@@ -23,7 +23,11 @@ public static class RVideoJobUpdateHelper
         return new RVideoJobUpdateRequest
         {
             Title = titleOverride ?? view.Project.Title ?? "RVIDEO",
-            Prompt = promptOverride ?? view.Project.OriginalPrompt ?? string.Empty,
+            // A new prompt or a changed ratio/resolution must carry the render settings inside the prompt JSON:
+            // that is where the pipeline (and this helper) read them back from.
+            Prompt = promptOverride is not null || aspectRatioOverride is not null || resolutionOverride is not null
+                ? WithRenderSettings(promptOverride ?? view.Project.OriginalPrompt ?? string.Empty, aspect, resolution)
+                : view.Project.OriginalPrompt ?? string.Empty,
             AspectRatio = aspect,
             Resolution = resolution,
             TotalSeconds = totalSecondsOverride ?? view.Project.TotalSeconds,
@@ -83,6 +87,28 @@ public static class RVideoJobUpdateHelper
             return parser.Parse(view.Project.OriginalPrompt).Model.Resolution;
         }
         catch { return null; }
+    }
+
+    /// <summary>Writes aspect_ratio/resolution into the prompt JSON (or appends a small settings object).</summary>
+    public static string WithRenderSettings(string prompt, string aspectRatio, string resolution)
+    {
+        var source = prompt ?? string.Empty;
+        var trimmed = source.Trim();
+        if (trimmed.StartsWith('{'))
+        {
+            try
+            {
+                if (System.Text.Json.Nodes.JsonNode.Parse(trimmed) is System.Text.Json.Nodes.JsonObject obj)
+                {
+                    obj["aspect_ratio"] = aspectRatio;
+                    obj["resolution"] = resolution;
+                    return obj.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+                }
+            }
+            catch (JsonException) { }
+        }
+        var metadata = new System.Text.Json.Nodes.JsonObject { ["aspect_ratio"] = aspectRatio, ["resolution"] = resolution }.ToJsonString();
+        return string.IsNullOrWhiteSpace(source) ? metadata : $"{source.TrimEnd()}{Environment.NewLine}{metadata}";
     }
 
     private static RVideoJobSettingsRequest BuildSettingsFromView(RVideoJobView view)

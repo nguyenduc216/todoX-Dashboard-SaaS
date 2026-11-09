@@ -11,6 +11,8 @@ public interface IRVideoScenePipelineService
 {
     Task<RVideoSceneLinkResult> CreateScenesFromPromptAsync(long projectId, bool linked, CurrentUserSession user, CancellationToken ct = default);
     Task<RVideoSceneLinkResult> EnqueueMissingImagesAsync(long projectId, CurrentUserSession user, CancellationToken ct = default);
+    /// <summary>The scene exactly as saved (access-checked), e.g. to quote a render after a save.</summary>
+    Task<VideoProjectSceneDto?> GetSavedSceneAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default);
 }
 
 public sealed class RVideoScenePipelineService : IRVideoScenePipelineService
@@ -96,6 +98,9 @@ public sealed class RVideoScenePipelineService : IRVideoScenePipelineService
             return new(false, RVideoUserText.Error(ex.Message) ?? "Chưa tạo được scene. Vui lòng thử lại.");
         }
     }
+
+    public async Task<VideoProjectSceneDto?> GetSavedSceneAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default)
+        => (await _repo.GetProjectAsync(projectId, user, ct))?.Scenes.FirstOrDefault(x => x.Id == sceneId);
 
     public async Task<RVideoSceneLinkResult> EnqueueMissingImagesAsync(long projectId, CurrentUserSession user, CancellationToken ct = default)
     {

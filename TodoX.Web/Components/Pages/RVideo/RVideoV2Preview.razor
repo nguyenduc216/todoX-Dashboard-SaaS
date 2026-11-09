@@ -9,6 +9,7 @@
 @inject IRVideoSceneVideoRenderAction SceneVideoRender
 @inject IRVideoSceneImageRenderAction SceneImageRender
 @inject ISceneMediaVersioningService SceneVersions
+@inject IRVideoScenePipelineService ScenePipeline
 @inject ILogger<RVideoV2Preview> Logger
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -34,6 +35,10 @@ else
       </MudTooltip>
     </div>
   </div>
+  @if(RVideoPipelineIssue.Latest(JobView.Project) is { } issue)
+  {
+    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="rv2-pipeline-issue">@issue</MudAlert>
+  }
   @if(JobView.Settings?.UseReferenceImageForAllScenes == true)
   {
     <div class="rv2-pv-note">Đang dùng ảnh tham chiếu chung cho mọi scene. Tắt trong Cài đặt nâng cao để tạo ảnh riêng.</div>
@@ -141,7 +146,7 @@ else
           <MudButton Variant="Variant.Outlined" Size="Size.Medium" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="@(()=>HandleRerenderImageAsync(a))" Disabled="@ImageBlocked(a)">@(string.IsNullOrWhiteSpace(a.StaticImageUrl) ? "Tạo ảnh" : "Tạo lại ảnh")</MudButton>
           <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Medium" StartIcon="@Icons.Material.Filled.Movie" OnClick="@(()=>HandleRerenderVideoAsync(a))" Disabled="@(NeedsExplicitOperation(a) ? _busy || VideoInFlight(a) : VideoBlocked(a))">@(VideoInFlight(a) ? "Đang tạo video…" : NeedsExplicitOperation(a) ? "Tạo lượt video mới" : HasSceneVideo(a) ? "Render lại video" : "Tạo video")</MudButton>
           @* Hidden trigger: the primary video button routes to it when a new explicit operation is required. *@
-          <RVideoSupersedeButton @ref="_supersedeButtons[a.Id]" ProjectId="@JobView.Project.Id" Scene="@RenderScene(a)" ServiceId="@JobView.CoreJob.ServiceId" HideTrigger="true"
+          <RVideoSupersedeButton @ref="_supersedeButtons[a.Id]" ProjectId="@JobView.Project.Id" Scene="@a" ServiceId="@JobView.CoreJob.ServiceId" HideTrigger="true" PrepareRequest="@(() => PrepareSupersedeRequestAsync(a))"
             Visible="@NeedsExplicitOperation(a)" Disabled="@_busy" CurrentJobId="@VideoState(a)?.LatestJob?.Id" Generation="@VideoState(a)?.Generation"
             OutcomeUnknown="@(VideoState(a)?.HasProviderIdentity == true || VideoState(a)?.HasActiveJob == true || VideoState(a)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
         </div>
@@ -252,6 +257,12 @@ string VideoStatus(VideoProjectSceneDto scene)
   if(state.HasActiveJob) return "Đang tạo video";
   if(_activeImageScenes.Contains(scene.Id)) return "Đang tạo ảnh";
   if(state.SubmitBlockReason != SceneVideoSubmitBlockReason.None) return "Chưa thể thử lại";
+  if(state.LatestJob is null && !HasSceneVideo(scene))
+  {
+    var ordered = OrderedScenes;
+    if(RVideoSceneLink.IsLinked(scene, ordered) && !HasSceneImage(scene)) return "Chờ cảnh trước";
+    return HasSceneImage(scene) ? "Đã có ảnh" : "Chưa có ảnh";
+  }
   return RVideoUserText.Status(state.LatestJob?.Status ?? scene.Status);
 }
 
@@ -527,7 +538,8 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
   if(versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault()?.Status == "pending_reconciliation")
   { Snackbar.Add("Chưa thể thử lại", Severity.Warning); return; }
   var latest = versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault();
-  var renderScene = RenderScene(scene);
+  var renderScene = await PinShownModelAsync(scene, user);
+  if(renderScene is null) { Snackbar.Add("Không lưu được model của scene. Vui lòng thử lại.", Severity.Error); return; }
   var request = new RVideoSceneVideoRenderRequest(JobView.Project.Id, renderScene, WithRenderSettings(ScenePromptMetadata.FromScene(renderScene)), JobView.CoreJob.ServiceId,
    latest?.Id, latest?.RenderJobId);
   var estimate = await SceneVideoRender.EstimateAsync(request);
@@ -574,18 +586,25 @@ async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
 // RVID-UI-V2-SCENE-RERENDER-HISTORY: per-scene media history and version selection (from production line).
 
 // TODOX-20261028-RVIDEO-RERENDER-RESTORE-001: rerender with the project's saved aspect ratio/resolution, not provider defaults.
-// Scene as sent to a render: pins the implicitly shown model (see ImplicitUsedKey) into its metadata.
-(long Id, string? Prompt, string Key, VideoProjectSceneDto Scene)? _renderSceneCache;
-VideoProjectSceneDto RenderScene(VideoProjectSceneDto scene)
+// A scene without an explicit model shows the model of its playing video (see ImplicitUsedKey). Before a new
+// attempt that choice is saved to the scene, and the scene is re-read, so the request matches the saved row
+// exactly (the supersede quote rejects an unsaved, modified scene with "Scene đã thay đổi").
+async Task<VideoProjectSceneDto?> PinShownModelAsync(VideoProjectSceneDto scene, CurrentUserSession user)
 {
-  if(ImplicitUsedKey(scene) is not { } key) return scene;
-  if(_renderSceneCache is { } c && c.Id==scene.Id && c.Key==key && string.Equals(c.Prompt, scene.ScenePrompt, StringComparison.Ordinal)) return c.Scene;
-  var copy = System.Text.Json.JsonSerializer.Deserialize<VideoProjectSceneDto>(System.Text.Json.JsonSerializer.Serialize(scene))!;
-  var meta = ScenePromptMetadata.FromScene(copy);
+  if(ImplicitUsedKey(scene) is not { } key || JobView is null) return scene;
+  var meta = ScenePromptMetadata.FromScene(scene);
   meta.Extra["video_model"] = key;
-  copy.ScenePrompt = meta.Serialize();
-  _renderSceneCache = (scene.Id, scene.ScenePrompt, key, copy);
-  return copy;
+  var req = new VideoProjectSaveSceneDraftRequest{ SceneId=scene.Id, Status=scene.Status, Title=scene.Title, SceneIndex=scene.SceneIndex, ScenePrompt=meta.Serialize(), ImagePrompt=meta.ImagePrompt, VideoPrompt=meta.MotionPrompt, ImageUrl=scene.StaticImageUrl, ImagePath=scene.StaticImagePath, VideoUrl=scene.SceneVideoUrl, VideoPath=scene.SceneVideoPath, DurationSeconds=scene.DurationSeconds, ErrorMessage=scene.ErrorMessage };
+  var res = await SceneDraftSave.SaveAsync(req, user.UserId, meta);
+  if(!res.Success) return null;
+  return await ScenePipeline.GetSavedSceneAsync(JobView.Project.Id, scene.Id, user);
+}
+async Task<RVideoSceneVideoRenderRequest?> PrepareSupersedeRequestAsync(VideoProjectSceneDto scene)
+{
+  if(AuthState.CurrentUser is not { } user || JobView is null) return null;
+  var saved = await PinShownModelAsync(scene, user);
+  if(saved is null) { Snackbar.Add("Không lưu được model của scene. Vui lòng thử lại.", Severity.Error); return null; }
+  return new RVideoSceneVideoRenderRequest(JobView.Project.Id, saved, ScenePromptMetadata.FromScene(saved), JobView.CoreJob.ServiceId);
 }
 ScenePromptMetadata WithRenderSettings(ScenePromptMetadata metadata)
 {
