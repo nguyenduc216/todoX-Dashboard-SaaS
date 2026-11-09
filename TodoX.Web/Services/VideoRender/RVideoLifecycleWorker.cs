@@ -13,6 +13,9 @@ public sealed class RVideoLifecycleWorker : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly ILogger<RVideoLifecycleWorker> _logger;
     private static readonly TimeSpan ProjectEvaluationTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan ActiveWindow = TimeSpan.FromHours(6);
+    private const int SweepSliceSize = 10;
+    private int _sweepOffset;
 
     public RVideoLifecycleWorker(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<RVideoLifecycleWorker> logger)
     {
@@ -38,7 +41,16 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
                 await tenant.EnsureLoadedAsync(stoppingToken);
                 var factory = scope.ServiceProvider.GetRequiredService<TodoXConnectionFactory>();
-                var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
+                // Each cycle evaluates every project with recent activity plus a rotating slice of the older ones,
+                // so a new job starts within seconds although hundreds of old projects exist (each still gets visited).
+                var active = await ListAutoSettingsAsync(factory, tenant, stoppingToken, ActiveWindow);
+                var all = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
+                var activeIds = active.Select(x => x.ProjectId).ToHashSet();
+                var others = all.Where(x => !activeIds.Contains(x.ProjectId)).OrderBy(x => x.ProjectId).ToList();
+                if (_sweepOffset >= others.Count) _sweepOffset = 0;
+                var slice = others.Skip(_sweepOffset).Take(SweepSliceSize).ToList();
+                _sweepOffset += slice.Count;
+                var settings = active.Concat(slice).ToList();
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var rvideoJobs = scope.ServiceProvider.GetRequiredService<IRVideoJobService>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
@@ -389,7 +401,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         public string InputJson { get; set; } = "{}";
     }
 
-    private static async Task<IReadOnlyList<RVideoJobSettingsDto>> ListAutoSettingsAsync(TodoXConnectionFactory factory, TenantContext tenant, CancellationToken ct)
+    private static async Task<IReadOnlyList<RVideoJobSettingsDto>> ListAutoSettingsAsync(TodoXConnectionFactory factory, TenantContext tenant, CancellationToken ct, TimeSpan? activeWithin = null)
     {
         using var conn = await factory.OpenAsync(ct);
         var rows = await conn.QueryAsync<RVideoJobSettingsDto>(
@@ -404,8 +416,20 @@ public sealed class RVideoLifecycleWorker : BackgroundService
               FROM video_render.rvideo_job_settings
              WHERE tenant_id=@tenant
                AND execution_mode IN ('AUTO', 'MANUAL')
+               -- "Active" = real activity only (the worker itself touches updated_at/events every cycle):
+               -- settings changed, project/scenes created, or a new image/video version.
+               AND (@activeSince::timestamptz IS NULL
+                    OR updated_at >= @activeSince
+                    OR EXISTS (SELECT 1 FROM video_render.video_projects p
+                                WHERE p.id = video_render.rvideo_job_settings.project_id AND p.created_at >= @activeSince)
+                    OR EXISTS (SELECT 1 FROM video_render.video_project_scenes sc
+                                WHERE sc.project_id = video_render.rvideo_job_settings.project_id AND sc.created_at >= @activeSince)
+                    OR EXISTS (SELECT 1 FROM video_render.scene_image_versions i
+                                WHERE i.project_id = video_render.rvideo_job_settings.project_id AND i.created_at >= @activeSince)
+                    OR EXISTS (SELECT 1 FROM video_render.scene_video_versions v
+                                WHERE v.project_id = video_render.rvideo_job_settings.project_id AND v.created_at >= @activeSince))
              ORDER BY updated_at DESC, project_id DESC;
-            """, new { tenant = tenant.TenantId });
+            """, new { tenant = tenant.TenantId, activeSince = activeWithin is { } window ? DateTime.UtcNow - window : (DateTime?)null });
         return rows.ToList();
     }
 
