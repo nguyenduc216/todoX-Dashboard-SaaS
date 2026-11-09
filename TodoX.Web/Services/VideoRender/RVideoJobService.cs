@@ -18,6 +18,25 @@ public interface IRVideoJobService
     Task<long?> ResolveProjectIdAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task SyncLifecycleAsync(long projectId, string stage, string projectStatus, CancellationToken ct = default);
     Task<IReadOnlyDictionary<Guid, RVideoJobListSummary>> GetListSummariesAsync(IReadOnlyCollection<Guid> jobIds, CurrentUserSession user, CancellationToken ct = default);
+    /// <summary>Saves the unsent "Nội dung video mong muốn" text of the job (V2 draft); returns the save time.</summary>
+    Task<DateTimeOffset> SaveDraftInputAsync(Guid jobId, string text, CurrentUserSession user, CancellationToken ct = default);
+}
+
+/// <summary>The V2 description draft kept in the core job input (keys draftInput / draftSavedAt).</summary>
+public static class RVideoDraftInput
+{
+    public const string TextKey = "draftInput";
+    public const string SavedAtKey = "draftSavedAt";
+
+    public static (string? Text, DateTimeOffset? SavedAt) Read(JsonElement input)
+    {
+        if (input.ValueKind != JsonValueKind.Object) return (null, null);
+        var text = input.TryGetProperty(TextKey, out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+        DateTimeOffset? at = input.TryGetProperty(SavedAtKey, out var a) && a.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(a.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
+        return (text, at);
+    }
 }
 
 /// <summary>Read-only list projection: project status and points actually charged for completed scene versions.</summary>
@@ -426,7 +445,9 @@ public sealed class RVideoJobService : IRVideoJobService
         await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
-               SET input_json=CAST(@snapshot AS jsonb),
+               -- keep the V2 description draft (saved separately, possibly after this page loaded)
+               SET input_json=CAST(@snapshot AS jsonb) || jsonb_strip_nulls(jsonb_build_object(
+                       'draftInput', input_json->'draftInput', 'draftSavedAt', input_json->'draftSavedAt')),
                    prompt_json=jsonb_build_object('text', @prompt),
                    updated_at=now()
              WHERE id=@jobId AND tenant_id=@tenant AND customer_id=@customer AND job_type=@jobType;
@@ -470,6 +491,33 @@ public sealed class RVideoJobService : IRVideoJobService
         if (view.Settings is { } persisted)
             RVideoRules.PreserveValidUploadedCharacterSnapshot(request.Settings, persisted);
         await _settings.SaveAsync(view.Project.Id, request.Settings, ct);
+    }
+
+    public async Task<DateTimeOffset> SaveDraftInputAsync(Guid jobId, string text, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureCustomer(user);
+        await _tenant.EnsureLoadedAsync(ct);
+        var savedAt = DateTimeOffset.UtcNow;
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET input_json = jsonb_set(jsonb_set(COALESCE(input_json, '{}'::jsonb), '{draftInput}', to_jsonb(@text::text)),
+                                          '{draftSavedAt}', to_jsonb(@savedAt::text)),
+                   updated_at = now()
+             WHERE id=@jobId AND tenant_id=@tenant AND customer_id=@customer AND job_type=@jobType;
+            """,
+            new
+            {
+                text = text ?? string.Empty,
+                savedAt = savedAt.ToString("O"),
+                jobId,
+                tenant = _tenant.TenantId,
+                customer = user.CustomerId,
+                jobType = RenderJobTypes.CoreService
+            });
+        if (rows == 0) throw new InvalidOperationException("RVIDEO_JOB_NOT_FOUND");
+        return savedAt;
     }
 
     public async Task SyncLifecycleAsync(long projectId, string stage, string projectStatus, CancellationToken ct = default)

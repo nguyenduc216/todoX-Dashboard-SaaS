@@ -35,6 +35,10 @@
         </MudStack>
       </div>
       <MudTextField T="string" Value="_workingInput" ValueChanged="HandleWorkingInputChanged" Immediate="true" Variant="Variant.Outlined" Lines="6" Placeholder="Hãy mô tả video..." />
+      <div class="rv2-draft-status" data-testid="rv2-draft-status">
+        <span>@DraftStatusText</span>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_draftSaving || JobId is null || !_draftDirty)" OnClick="SaveDraftNowAsync">Lưu nháp</MudButton>
+      </div>
       @if (Listening)
       {
         <div class="rv2-speech-live" role="status" aria-live="polite">
@@ -386,10 +390,11 @@
       // exactly as the legacy RVideo route does. Never surface the wrapper or generated JSON here.
       _workingInput = ResolveRawUserInput(ag.UserInput);
       _baselineInput = _workingInput; _hasBaseline = true;
+      ApplyNewerDraft(new DateTimeOffset(DateTime.SpecifyKind(ag.CreatedAt, ag.CreatedAt.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : ag.CreatedAt.Kind)));
       return;
     }
     // No active generation yet: keep any in-progress edit; otherwise start empty without reconstructing from generated JSON.
-    if(!_hasBaseline && string.IsNullOrWhiteSpace(_workingInput)){ _workingInput = string.Empty; _baselineInput = string.Empty; _hasBaseline = true; }
+    if(!_hasBaseline && string.IsNullOrWhiteSpace(_workingInput)){ _workingInput = string.Empty; _baselineInput = string.Empty; _hasBaseline = true; ApplyNewerDraft(null); }
   }
   // Recovers the raw user-entered source from a persisted generation user_input.
   // Older generations stored the assembled agent input (BuildAgentInput wrapper); we unwrap it with the
@@ -407,10 +412,48 @@
   }
   private void HandleWorkingInputChanged(string v){
     _workingInput = v ?? string.Empty; _status = null;
+    _draftDirty = true;
+    ScheduleDraftSave();
+  }
+  // --- Draft of "Nội dung video mong muốn": saved 2s after typing stops, or with "Lưu nháp".
+  private bool _draftDirty; private bool _draftSaving; private DateTimeOffset? _draftSavedAt; private string? _draftError;
+  private CancellationTokenSource? _draftDebounce;
+  private string DraftStatusText => _draftSaving ? "Đang lưu nháp…"
+    : _draftError is not null ? _draftError
+    : _draftDirty ? "Có thay đổi chưa lưu"
+    : _draftSavedAt is { } at ? $"Đã lưu nháp lúc {at.ToLocalTime():HH:mm:ss}" : "Nội dung được tự động lưu khi bạn gõ";
+  private void ScheduleDraftSave(){
+    _draftDebounce?.Cancel();
+    var cts = _draftDebounce = new CancellationTokenSource();
+    _ = Task.Run(async () => {
+      try{ await Task.Delay(2000, cts.Token); }catch(TaskCanceledException){ return; }
+      await InvokeAsync(SaveDraftNowAsync);
+    });
+  }
+  private async Task SaveDraftNowAsync(){
+    if(JobId is null || AuthState.CurrentUser is null || _draftSaving || !_draftDirty) return;
+    _draftDebounce?.Cancel();
+    var text = _workingInput;
+    _draftSaving = true; _draftError = null; StateHasChanged();
+    try{
+      _draftSavedAt = await RVideoJobs.SaveDraftInputAsync(JobId.Value, text, AuthState.CurrentUser);
+      if(string.Equals(text, _workingInput, StringComparison.Ordinal)) _draftDirty = false;
+    }catch(Exception ex){
+      Logger.LogWarning(ex, "RVIDEO_V2_DRAFT_SAVE_FAILED jobId={JobId}", JobId);
+      _draftError = "Chưa lưu được nháp, sẽ thử lại khi bạn gõ tiếp.";
+    }finally{ _draftSaving = false; StateHasChanged(); }
+  }
+  // A draft typed after the active prompt was generated wins over the generation's input when the page opens.
+  private void ApplyNewerDraft(DateTimeOffset? generatedAt){
+    if(JobView is null) return;
+    var (text, savedAt) = RVideoDraftInput.Read(JobView.CoreJob.Input);
+    if(string.IsNullOrWhiteSpace(text) || savedAt is null) return;
+    if(generatedAt is { } g && savedAt <= g) return;
+    _workingInput = text!; _draftSavedAt = savedAt; _draftDirty = false;
   }
   private bool CanGenerate => !_generating && RVideoPromptBaseline.IsDirty(_workingInput, _baselineInput, _hasBaseline);
   private bool CanGenerateFirstTime => !_generating && !RVideoPromptBaseline.IsEmpty(_workingInput);
-  public async ValueTask DisposeAsync(){ if(_speech!=null) await _speech.DisposeAsync(); if(_module is not null){ try{ await _module.DisposeAsync(); }catch{} } }
+  public async ValueTask DisposeAsync(){ _draftDebounce?.Cancel(); if(_speech!=null) await _speech.DisposeAsync(); if(_module is not null){ try{ await _module.DisposeAsync(); }catch{} } }
 
 
   private async Task HandleTitleBlurAsync(){

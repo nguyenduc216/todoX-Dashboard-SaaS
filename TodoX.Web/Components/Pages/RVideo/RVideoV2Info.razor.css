@@ -51,3 +51,4 @@
 .rv2-ref-actions ::deep .mud-tooltip-root{display:block;width:100%}
 .rv2-ref-actions .rv2-ref-btn--big{width:100%;display:flex}
 .rv2-info > .rv2-next{margin-top:16px;align-items:stretch}
+.rv2-draft-status{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.75rem;opacity:.75;margin-top:2px}
