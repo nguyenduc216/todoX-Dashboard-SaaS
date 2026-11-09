@@ -463,6 +463,13 @@ public sealed class RVideoJobService : IRVideoJobService
                 sceneSeconds = Math.Max(1, request.SceneSeconds),
                 thinkScenes = request.ThinkScenes
             });
+
+        // The settings row is what the render pipeline reads (reference image, execution mode, voice, music).
+        // V2 saves every change through this method, so persist it here too; otherwise the screen shows the
+        // new reference while scene images are still made without it.
+        if (view.Settings is { } persisted)
+            RVideoRules.PreserveValidUploadedCharacterSnapshot(request.Settings, persisted);
+        await _settings.SaveAsync(view.Project.Id, request.Settings, ct);
     }
 
     public async Task SyncLifecycleAsync(long projectId, string stage, string projectStatus, CancellationToken ct = default)
