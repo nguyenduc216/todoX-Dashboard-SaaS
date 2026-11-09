@@ -56,9 +56,11 @@ public static class RVideoSceneLink
         => video is not null && string.Equals(video.Status, "completed", StringComparison.OrdinalIgnoreCase);
 
     public static string ContinuationInstruction
-        => "CONTINUITY: The reference image is the exact last frame of the previous shot. Continue seamlessly from it: "
-           + "keep the same characters, faces, outfits, props, lighting, colour grade and camera framing unless the scene "
-           + "description below explicitly changes them.";
+        => "CONTINUITY (highest priority): The reference image is the exact last frame of the previous shot and this image "
+           + "is the very next moment of the same continuous shot. Keep EXACTLY the same person and face, outfit, location, "
+           + "background, props, lighting, colour grade, camera angle, lens and framing as the reference. Ignore any location, "
+           + "set, background, lighting or camera change in the scene description below; use it only for the person's pose, "
+           + "gesture, expression and action, changed as little as needed.";
 }
 
 public sealed record RVideoSceneLinkResult(bool Started, string Reason);
@@ -130,15 +132,15 @@ public sealed class RVideoSceneLinkService : IRVideoSceneLinkService
             if (RVideoSceneLink.IsLinkCurrent(scene, previousVideo)) continue;     // already linked
             if (RVideoSceneLink.IsCompleted(await _versions.GetSelectedVideoVersionAsync(scene.Id, ct)))
             {
-                _logger.LogWarning("RVIDEO_SCENE_LINK_SKIPPED projectId={ProjectId} sceneId={SceneId} reason=scene_has_completed_video", project.Id, scene.Id);
+                _logger.LogInformation("RVIDEO_SCENE_LINK_SKIPPED projectId={ProjectId} sceneId={SceneId} reason=scene_has_completed_video", project.Id, scene.Id);
                 continue;                                                          // ask the user (UI), never auto-rerender
             }
             if (await _versions.HasActiveImageVersionAsync(scene.Id, ct))
             {
-                _logger.LogWarning("RVIDEO_SCENE_LINK_SKIPPED projectId={ProjectId} sceneId={SceneId} reason=image_in_progress", project.Id, scene.Id);
+                _logger.LogInformation("RVIDEO_SCENE_LINK_SKIPPED projectId={ProjectId} sceneId={SceneId} reason=image_in_progress", project.Id, scene.Id);
                 continue;
             }
-            _logger.LogWarning("RVIDEO_SCENE_LINK_ATTEMPT projectId={ProjectId} sceneId={SceneId} previousVideoVersionId={VideoId}", project.Id, scene.Id, previousVideo!.Id);
+            _logger.LogInformation("RVIDEO_SCENE_LINK_ATTEMPT projectId={ProjectId} sceneId={SceneId} previousVideoVersionId={VideoId}", project.Id, scene.Id, previousVideo!.Id);
             try
             {
                 await LinkAsync(project, setting, scene, previousVideo!, "RVIDEO_LIFECYCLE", ct);

@@ -214,7 +214,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
 
         var linkedNotReady = new HashSet<long>();
         if (linkedSceneIds.Count > 0)
-            _logger.LogWarning("RVIDEO_LINKED_PROJECT_EVALUATED projectId={ProjectId} auto={IsAuto} linkedScenes={Linked} linkService={HasService}",
+            _logger.LogDebug("RVIDEO_LINKED_PROJECT_EVALUATED projectId={ProjectId} auto={IsAuto} linkedScenes={Linked} linkService={HasService}",
                 project.Id, isAuto, linkedSceneIds.Count, sceneLinks is not null);
         if (isAuto && linkedSceneIds.Count > 0)
         {

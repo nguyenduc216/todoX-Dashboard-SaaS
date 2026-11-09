@@ -112,8 +112,8 @@ else
           @if(!string.IsNullOrWhiteSpace(a.SceneVideoUrl) && !string.IsNullOrWhiteSpace(a.StaticImageUrl))
           {
             <div class="rv2-pv-media-switch" role="group" aria-label="Chọn media">
-              <button type="button" class="@(ShowVideo(a)?"on":null)" @onclick="@(()=>_showImage.Remove(a.Id))">Video</button>
               <button type="button" class="@(ShowVideo(a)?null:"on")" @onclick="@(()=>_showImage.Add(a.Id))">Ảnh</button>
+              <button type="button" class="@(ShowVideo(a)?"on":null)" @onclick="@(()=>_showImage.Remove(a.Id))">Video</button>
             </div>
           }
         </div>

@@ -42,6 +42,13 @@
                            Disabled="@_busy" OnClick="RelinkAsync">Tạo ảnh nối tiếp</MudButton>
             </MudAlert>
         }
+        else if (_canRelink)
+        {
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <MudText Typo="Typo.caption">Đổi cách nối hoặc muốn làm lại ảnh đầu cảnh này từ khung cuối cảnh @_previous.SceneIndex?</MudText>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_busy" OnClick="RelinkAsync">Nối lại từ cảnh trước</MudButton>
+            </div>
+        }
     }
     @if (_canSplit)
     {
@@ -71,6 +78,7 @@
     private bool _previousHasVideo;
     private bool _stale;
     private bool _needsFirstLink;
+    private bool _canRelink;
     private bool _canSplit;
     private bool _busy;
     private string? _loadedKey;
@@ -89,6 +97,7 @@
         _isSplitPart = metadata.Extra.ContainsKey(RVideoSceneSplit.SplitFromKey);
         _stale = false;
         _needsFirstLink = false;
+        _canRelink = false;
         _previousHasVideo = false;
         var ownVideo = await Versions.GetSelectedVideoVersionAsync(Scene.Id);
         var hasOwnVideo = RVideoSceneLink.IsCompleted(ownVideo);
@@ -99,6 +108,8 @@
             var linkCurrent = RVideoSceneLink.IsLinkCurrent(Scene, previousVideo);
             _stale = _previousHasVideo && hasOwnVideo && !linkCurrent;
             _needsFirstLink = _previousHasVideo && !hasOwnVideo && !linkCurrent && !await Versions.HasActiveImageVersionAsync(Scene.Id);
+            // Already linked to the current clip: still allow a redo (new link mode, or a better start image).
+            _canRelink = _previousHasVideo && linkCurrent && !await Versions.HasActiveImageVersionAsync(Scene.Id);
         }
         _canSplit = !hasOwnVideo
                     && string.Equals(Scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase)
