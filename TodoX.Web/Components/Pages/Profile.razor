@@ -8,6 +8,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject TodoX.Web.Services.Affiliate.AffiliateRepository AffiliateRepo
 
 <PageTitle>Hồ sơ cá nhân</PageTitle>
 
@@ -85,6 +86,27 @@
                 <MudButton Class="todox-primary-btn mt-4" OnClick="SaveProfile" Disabled="_busy">Lưu thông tin</MudButton>
             </MudPaper>
 
+            @if (_agent is { IsActive: true })
+            {
+                <MudPaper Class="todox-card pa-5 mt-4" rounded="true">
+                    <MudText Typo="Typo.h6">Tài khoản ngân hàng nhận hoa hồng</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Đại lý @_agent.AgentCode — TodoX chuyển hoa hồng vào tài khoản này.</MudText>
+                    <MudDivider Class="my-3" />
+                    <MudGrid>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" Label="Ngân hàng" @bind-Value="_bankName" Variant="Variant.Outlined" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" Label="Số tài khoản" @bind-Value="_bankAccountNo" Variant="Variant.Outlined" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" Label="Chủ tài khoản" @bind-Value="_bankAccountName" Variant="Variant.Outlined" />
+                        </MudItem>
+                    </MudGrid>
+                    <MudButton Class="todox-primary-btn mt-4" OnClick="SaveBank" Disabled="_busy">Lưu tài khoản ngân hàng</MudButton>
+                </MudPaper>
+            }
+
             <MudPaper Class="todox-card pa-5 mt-4" rounded="true">
                 <MudText Typo="Typo.h6">Đổi mật khẩu</MudText>
                 <MudDivider Class="my-3" />
@@ -116,6 +138,41 @@
     private string _newPassword = string.Empty;
     private string _confirmPassword = string.Empty;
     private bool _busy;
+    private AffiliateAgentView? _agent;
+    private string? _bankName;
+    private string? _bankAccountNo;
+    private string? _bankAccountName;
+
+    private async Task LoadAgentAsync()
+    {
+        if (AuthState.CurrentUser?.CustomerId is not Guid customerId) return;
+        try
+        {
+            _agent = await AffiliateRepo.GetAgentByCustomerAsync(customerId);
+            _bankName = _agent?.BankName;
+            _bankAccountNo = _agent?.BankAccountNo;
+            _bankAccountName = _agent?.BankAccountName;
+        }
+        catch (Exception)
+        {
+            _agent = null;
+        }
+    }
+
+    private async Task SaveBank()
+    {
+        if (AuthState.CurrentUser?.CustomerId is not Guid customerId || _agent is null) return;
+        _busy = true;
+        try
+        {
+            var ok = await AffiliateRepo.UpdateOwnBankAsync(customerId, _bankName, _bankAccountNo, _bankAccountName, AuthState.CurrentUser.UserId);
+            Snackbar.Add(ok ? "Đã lưu tài khoản nhận hoa hồng." : "Không lưu được tài khoản.", ok ? Severity.Success : Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private string RoleLabel => AuthState.CurrentUser?.Role switch
     {
@@ -131,6 +188,7 @@
     protected override async Task OnInitializedAsync()
     {
         _fullName = AuthState.CurrentUser?.DisplayName ?? string.Empty;
+        await LoadAgentAsync();
         if (AuthState.CurrentUser is not null)
         {
             var uid = AuthState.CurrentUser.UserId;

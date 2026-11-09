@@ -19,6 +19,8 @@ public sealed class AffiliateAgentView
     public decimal PendingAmount { get; set; }
     public decimal PaidAmount { get; set; }
     public DateTime CreatedAt { get; set; }
+    /// <summary>% hoa hồng trên mỗi lần nạp điểm của khách được giới thiệu (null = mặc định).</summary>
+    public decimal? TopupCommissionPercent { get; set; }
 }
 
 /// <summary>Khách hàng do đại lý giới thiệu, hiển thị cho chính đại lý (không có email/điện thoại).</summary>
@@ -130,4 +132,61 @@ public static class AffiliateCommissionStatuses
         Cancelled => "Đã hủy",
         _ => status ?? string.Empty
     };
+}
+
+/// <summary>Cấu hình hoa hồng nạp điểm (affiliate.settings).</summary>
+public sealed class AffiliateSettings
+{
+    /// <summary>Giá trị 1 điểm (VND) dùng quy đổi lần nạp điểm ra tiền. 0 = chưa cấu hình, chưa tính hoa hồng nạp.</summary>
+    public decimal VndPerPoint { get; set; }
+    public decimal DefaultTopupCommissionPercent { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>Hoa hồng phát sinh từ một lần nạp điểm của khách được giới thiệu (affiliate.topup_commissions).</summary>
+public sealed class AffiliateTopupCommissionView
+{
+    public Guid Id { get; set; }
+    public Guid AgentId { get; set; }
+    public string AgentCode { get; set; } = string.Empty;
+    public string AgentName { get; set; } = string.Empty;
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public DateTime TopupAt { get; set; }
+    public decimal Points { get; set; }
+    public decimal VndPerPoint { get; set; }
+    public decimal BaseAmount { get; set; }
+    public decimal CommissionPercent { get; set; }
+    public decimal CommissionAmount { get; set; }
+    public string Currency { get; set; } = "VND";
+    public string Status { get; set; } = AffiliateCommissionStatuses.Pending;
+    public Guid? PayoutId { get; set; }
+    public DateTime? PaidAt { get; set; }
+}
+
+/// <summary>Một lần TodoX thanh toán hoa hồng cho đại lý (affiliate.payouts).</summary>
+public sealed class AffiliatePayoutView
+{
+    public Guid Id { get; set; }
+    public Guid AgentId { get; set; }
+    public string AgentCode { get; set; } = string.Empty;
+    public string AgentName { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "VND";
+    public int ItemCount { get; set; }
+    public DateTime PaidAt { get; set; }
+    public string? BankName { get; set; }
+    public string? BankAccountNo { get; set; }
+    public string? BankAccountName { get; set; }
+    public string? BankReference { get; set; }
+    public string? Note { get; set; }
+    public string Status { get; set; } = "paid";
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>Số hoa hồng đại lý chưa được thanh toán (gói + nạp điểm).</summary>
+public sealed record AffiliatePendingSummary(int PackageCount, decimal PackageAmount, int TopupCount, decimal TopupAmount)
+{
+    public int Count => PackageCount + TopupCount;
+    public decimal Amount => PackageAmount + TopupAmount;
 }

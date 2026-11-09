@@ -57,7 +57,7 @@ public static class AffiliateRules
 /// <summary>
 /// Đại lý, mã giới thiệu, gói khách hàng, lịch sử mua gói và hoa hồng (schema affiliate.*).
 /// Tables come from database/manual/affiliate/20261104_affiliate_commission.sql (run manually).
-/// Does not touch point wallets / billing.
+/// Reads billing.token_transactions (top-ups) for top-up commissions; never writes point wallets / billing.
 /// </summary>
 public sealed class AffiliateRepository
 {
@@ -76,7 +76,7 @@ public sealed class AffiliateRepository
         {
             using var conn = await _factory.OpenAsync();
             return await conn.ExecuteScalarAsync<bool>(
-                "SELECT to_regclass('affiliate.commissions') IS NOT NULL AND to_regclass('affiliate.customer_referrals') IS NOT NULL;");
+                "SELECT to_regclass('affiliate.commissions') IS NOT NULL AND to_regclass('affiliate.customer_referrals') IS NOT NULL AND to_regclass('affiliate.payouts') IS NOT NULL;");
         }
         catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
         {
@@ -153,11 +153,16 @@ public sealed class AffiliateRepository
                    a.agent_code AS AgentCode, a.is_active AS IsActive,
                    a.bank_name AS BankName, a.bank_account_no AS BankAccountNo,
                    a.bank_account_name AS BankAccountName, a.note AS Note, a.created_at AS CreatedAt,
+                   a.topup_commission_percent AS TopupCommissionPercent,
                    (SELECT count(*) FROM affiliate.customer_referrals r WHERE r.agent_id = a.id)::int AS ReferredCount,
                    COALESCE((SELECT sum(m.commission_amount) FROM affiliate.commissions m
-                              WHERE m.agent_id = a.id AND m.status = 'pending'), 0) AS PendingAmount,
+                              WHERE m.agent_id = a.id AND m.status = 'pending'), 0)
+                 + COALESCE((SELECT sum(t.commission_amount) FROM affiliate.topup_commissions t
+                              WHERE t.agent_id = a.id AND t.status = 'pending'), 0) AS PendingAmount,
                    COALESCE((SELECT sum(m.commission_amount) FROM affiliate.commissions m
-                              WHERE m.agent_id = a.id AND m.status = 'paid'), 0) AS PaidAmount
+                              WHERE m.agent_id = a.id AND m.status = 'paid'), 0)
+                 + COALESCE((SELECT sum(t.commission_amount) FROM affiliate.topup_commissions t
+                              WHERE t.agent_id = a.id AND t.status = 'paid'), 0) AS PaidAmount
               FROM affiliate.agents a
               JOIN crm.customers c ON c.id = a.customer_id
              WHERE a.tenant_id = @tenant AND (@customerId::uuid IS NULL OR a.customer_id = @customerId)
@@ -250,12 +255,14 @@ public sealed class AffiliateRepository
             """
             UPDATE affiliate.agents
                SET bank_name=@BankName, bank_account_no=@BankAccountNo, bank_account_name=@BankAccountName,
-                   note=@Note, is_active=@IsActive, updated_at=now(), updated_by=@actorUserId
+                   note=@Note, is_active=@IsActive, topup_commission_percent=@TopupPercent,
+                   updated_at=now(), updated_by=@actorUserId
              WHERE id=@Id;
             """,
             new
             {
                 agent.Id,
+                TopupPercent = agent.TopupCommissionPercent is decimal percent ? Math.Clamp(percent, 0m, 100m) : (decimal?)null,
                 BankName = Blank(agent.BankName),
                 BankAccountNo = Blank(agent.BankAccountNo),
                 BankAccountName = Blank(agent.BankAccountName),
@@ -613,7 +620,9 @@ public sealed class AffiliateRepository
         return rows.ToList();
     }
 
-    /// <summary>Đánh dấu các khoản hoa hồng "chưa chuyển khoản" là đã chuyển khoản.</summary>
+    /// <summary>
+    /// Thanh toán các khoản hoa hồng gói đang chọn: mỗi đại lý một lần thanh toán (có lịch sử thanh toán).
+    /// </summary>
     public async Task<int> MarkCommissionsPaidAsync(IReadOnlyCollection<Guid> ids, DateTime paidAt, string? bankReference, string? note, Guid? actorUserId)
     {
         if (ids.Count == 0)
@@ -621,27 +630,247 @@ public sealed class AffiliateRepository
             return 0;
         }
 
-        using var conn = await _factory.OpenAsync();
-        return await conn.ExecuteAsync(
-            """
-            UPDATE affiliate.commissions
-               SET status='paid', paid_at=@paidAt, paid_by=@actorUserId,
-                   bank_reference=@bankReference, note=COALESCE(@note, note), updated_at=now()
-             WHERE id = ANY(@ids) AND status='pending';
-            """,
-            new { ids = ids.ToArray(), paidAt = paidAt.ToUniversalTime(), bankReference = Blank(bankReference), note = Blank(note), actorUserId });
+        List<Guid> agentIds;
+        using (var conn = await _factory.OpenAsync())
+        {
+            agentIds = (await conn.QueryAsync<Guid>(
+                "SELECT DISTINCT agent_id FROM affiliate.commissions WHERE id = ANY(@ids) AND status='pending';",
+                new { ids = ids.ToArray() })).ToList();
+        }
+
+        var paid = 0;
+        foreach (var agentId in agentIds)
+        {
+            var result = await CreatePayoutAsync(agentId, paidAt, bankReference, note, actorUserId, packageCommissionIds: ids, topupCommissionIds: Array.Empty<Guid>());
+            if (result.Ok) paid += result.ItemCount;
+        }
+
+        return paid;
     }
 
-    /// <summary>Hoàn tác: chuyển hoa hồng đã chuyển khoản về "chưa chuyển khoản".</summary>
-    public async Task<int> MarkCommissionPendingAsync(Guid id)
+    // ===================== Hoa hồng nạp điểm & thanh toán =====================
+
+    public async Task<AffiliateSettings> GetSettingsAsync()
     {
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        return await conn.QuerySingleOrDefaultAsync<AffiliateSettings>(
+            """
+            SELECT vnd_per_point AS VndPerPoint, default_topup_commission_percent AS DefaultTopupCommissionPercent, updated_at AS UpdatedAt
+              FROM affiliate.settings WHERE tenant_id=@tenant;
+            """, new { tenant = _tenant.TenantId }) ?? new AffiliateSettings();
+    }
+
+    public async Task<(bool Ok, string Message)> SaveSettingsAsync(AffiliateSettings settings, Guid? actorUserId)
+    {
+        if (settings.VndPerPoint < 0) return (false, "Giá trị 1 điểm không hợp lệ.");
+        if (settings.DefaultTopupCommissionPercent is < 0 or > 100) return (false, "Tỷ lệ hoa hồng phải từ 0 đến 100%.");
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO affiliate.settings (tenant_id, vnd_per_point, default_topup_commission_percent, updated_at, updated_by)
+            VALUES (@tenant, @vnd, @percent, now(), @actorUserId)
+            ON CONFLICT (tenant_id) DO UPDATE
+               SET vnd_per_point=EXCLUDED.vnd_per_point,
+                   default_topup_commission_percent=EXCLUDED.default_topup_commission_percent,
+                   updated_at=now(), updated_by=EXCLUDED.updated_by;
+            """,
+            new { tenant = _tenant.TenantId, vnd = settings.VndPerPoint, percent = settings.DefaultTopupCommissionPercent, actorUserId });
+        return (true, "Đã lưu cấu hình. Áp dụng cho các lần nạp điểm chưa được ghi nhận hoa hồng.");
+    }
+
+    /// <summary>
+    /// Ghi nhận hoa hồng cho các lần nạp điểm (billing.token_transactions loại 'topup') của khách được giới thiệu,
+    /// kể từ lúc khách gắn với đại lý. Chỉ đọc billing; mỗi giao dịch nạp sinh tối đa một dòng.
+    /// Chưa cấu hình giá trị 1 điểm thì chưa ghi nhận gì.
+    /// </summary>
+    public async Task<int> SyncTopupCommissionsAsync()
+    {
+        await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         return await conn.ExecuteAsync(
             """
+            INSERT INTO affiliate.topup_commissions
+                (tenant_id, agent_id, customer_id, transaction_id, topup_at, points, vnd_per_point,
+                 base_amount, commission_percent, commission_amount)
+            SELECT @tenant, a.id, r.customer_id, t.id, t.created_at, t.amount, s.vnd_per_point,
+                   round(t.amount * s.vnd_per_point, 0),
+                   COALESCE(a.topup_commission_percent, s.default_topup_commission_percent),
+                   round(t.amount * s.vnd_per_point * COALESCE(a.topup_commission_percent, s.default_topup_commission_percent) / 100, 0)
+              FROM billing.token_transactions t
+              JOIN billing.token_wallets w ON w.id = t.wallet_id
+              JOIN affiliate.customer_referrals r ON r.customer_id = w.customer_id
+              JOIN affiliate.agents a ON a.id = r.agent_id AND a.is_active
+              JOIN affiliate.settings s ON s.tenant_id = @tenant AND s.vnd_per_point > 0
+             WHERE t.tenant_id = @tenant
+               AND t.transaction_type = 'topup'
+               AND t.amount > 0
+               AND t.created_at >= r.assigned_at
+               AND r.customer_id <> a.customer_id
+               AND NOT EXISTS (SELECT 1 FROM affiliate.topup_commissions x WHERE x.transaction_id = t.id)
+            ON CONFLICT (transaction_id) DO NOTHING;
+            """, new { tenant = _tenant.TenantId });
+    }
+
+    public async Task<IReadOnlyList<AffiliateTopupCommissionView>> GetTopupCommissionsAsync(Guid? agentId = null, string? status = null)
+    {
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<AffiliateTopupCommissionView>(
+            """
+            SELECT t.id AS Id, t.agent_id AS AgentId, a.agent_code AS AgentCode,
+                   COALESCE(NULLIF(ac.company_name, ''), ac.full_name, '') AS AgentName,
+                   c.customer_code AS CustomerCode, COALESCE(NULLIF(c.company_name, ''), c.full_name, '') AS CustomerName,
+                   t.topup_at AS TopupAt, t.points AS Points, t.vnd_per_point AS VndPerPoint, t.base_amount AS BaseAmount,
+                   t.commission_percent AS CommissionPercent, t.commission_amount AS CommissionAmount,
+                   t.currency AS Currency, t.status AS Status, t.payout_id AS PayoutId, t.paid_at AS PaidAt
+              FROM affiliate.topup_commissions t
+              JOIN affiliate.agents a ON a.id = t.agent_id
+              JOIN crm.customers ac ON ac.id = a.customer_id
+              JOIN crm.customers c ON c.id = t.customer_id
+             WHERE t.tenant_id=@tenant
+               AND (@agentId::uuid IS NULL OR t.agent_id=@agentId)
+               AND (@status::text IS NULL OR t.status=@status)
+             ORDER BY t.topup_at DESC
+             LIMIT 1000;
+            """, new { tenant = _tenant.TenantId, agentId, status = string.IsNullOrWhiteSpace(status) ? null : status });
+        return rows.ToList();
+    }
+
+    public async Task<AffiliatePendingSummary> GetPendingSummaryAsync(Guid agentId)
+    {
+        using var conn = await _factory.OpenAsync();
+        var row = await conn.QuerySingleAsync<(int PackageCount, decimal PackageAmount, int TopupCount, decimal TopupAmount)>(
+            """
+            SELECT (SELECT count(*) FROM affiliate.commissions WHERE agent_id=@agentId AND status='pending')::int,
+                   COALESCE((SELECT sum(commission_amount) FROM affiliate.commissions WHERE agent_id=@agentId AND status='pending'), 0),
+                   (SELECT count(*) FROM affiliate.topup_commissions WHERE agent_id=@agentId AND status='pending')::int,
+                   COALESCE((SELECT sum(commission_amount) FROM affiliate.topup_commissions WHERE agent_id=@agentId AND status='pending'), 0);
+            """, new { agentId });
+        return new AffiliatePendingSummary(row.PackageCount, row.PackageAmount, row.TopupCount, row.TopupAmount);
+    }
+
+    /// <summary>
+    /// TodoX thanh toán hoa hồng cho một đại lý: các khoản chưa thanh toán (gói + nạp điểm, hoặc chỉ các khoản chỉ định)
+    /// chuyển sang "đã chuyển khoản" và gắn với một dòng lịch sử thanh toán (chụp lại tài khoản ngân hàng của đại lý).
+    /// </summary>
+    public async Task<(bool Ok, string Message, int ItemCount, decimal Amount)> CreatePayoutAsync(
+        Guid agentId, DateTime paidAt, string? bankReference, string? note, Guid? actorUserId,
+        IReadOnlyCollection<Guid>? packageCommissionIds = null, IReadOnlyCollection<Guid>? topupCommissionIds = null)
+    {
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        using var tx = conn.BeginTransaction();
+        var agent = await conn.QuerySingleOrDefaultAsync<AgentBankRow>(
+            """
+            SELECT bank_name AS BankName, bank_account_no AS BankAccountNo, bank_account_name AS BankAccountName
+              FROM affiliate.agents WHERE id=@agentId AND tenant_id=@tenant FOR UPDATE;
+            """,
+            new { agentId, tenant = _tenant.TenantId }, tx);
+        if (agent is null)
+        {
+            tx.Rollback();
+            return (false, "Không tìm thấy đại lý.", 0, 0);
+        }
+
+        var payoutId = Guid.NewGuid();
+        var paidUtc = paidAt.ToUniversalTime();
+        var reference = Blank(bankReference);
+        // The payout row comes first so its items can reference it; amount and count are filled in below.
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO affiliate.payouts (id, tenant_id, agent_id, amount, item_count, paid_at, bank_name, bank_account_no,
+                                           bank_account_name, bank_reference, note, created_by)
+            VALUES (@payoutId, @tenant, @agentId, 0, 0, @paidUtc, @bankName, @accountNo, @accountName, @reference, @note, @actorUserId);
+            """,
+            new
+            {
+                payoutId, tenant = _tenant.TenantId, agentId, paidUtc, bankName = agent.BankName, accountNo = agent.BankAccountNo,
+                accountName = agent.BankAccountName, reference, note = Blank(note), actorUserId
+            }, tx);
+        var packageAmounts = (await conn.QueryAsync<decimal>(
+            """
             UPDATE affiliate.commissions
-               SET status='pending', paid_at=NULL, paid_by=NULL, bank_reference=NULL, updated_at=now()
-             WHERE id=@id AND status='paid';
-            """, new { id });
+               SET status='paid', paid_at=@paidUtc, paid_by=@actorUserId, bank_reference=@reference,
+                   payout_id=@payoutId, updated_at=now()
+             WHERE agent_id=@agentId AND status='pending' AND (@ids::uuid[] IS NULL OR id = ANY(@ids))
+            RETURNING commission_amount;
+            """, new { agentId, paidUtc, actorUserId, reference, payoutId, ids = packageCommissionIds?.ToArray() }, tx)).ToList();
+        var topupAmounts = (await conn.QueryAsync<decimal>(
+            """
+            UPDATE affiliate.topup_commissions
+               SET status='paid', paid_at=@paidUtc, payout_id=@payoutId
+             WHERE agent_id=@agentId AND status='pending' AND (@ids::uuid[] IS NULL OR id = ANY(@ids))
+            RETURNING commission_amount;
+            """, new { agentId, paidUtc, payoutId, ids = topupCommissionIds?.ToArray() }, tx)).ToList();
+        var count = packageAmounts.Count + topupAmounts.Count;
+        if (count == 0)
+        {
+            tx.Rollback();
+            return (false, "Đại lý không có khoản hoa hồng nào chưa thanh toán.", 0, 0);
+        }
+
+        var amount = packageAmounts.Sum() + topupAmounts.Sum();
+        await conn.ExecuteAsync("UPDATE affiliate.payouts SET amount=@amount, item_count=@count WHERE id=@payoutId;",
+            new { amount, count, payoutId }, tx);
+        tx.Commit();
+        return (true, $"Đã ghi nhận thanh toán {amount:N0} VND ({count} khoản).", count, amount);
+    }
+
+    public async Task<IReadOnlyList<AffiliatePayoutView>> GetPayoutsAsync(Guid? agentId = null)
+    {
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<AffiliatePayoutView>(
+            """
+            SELECT p.id AS Id, p.agent_id AS AgentId, a.agent_code AS AgentCode,
+                   COALESCE(NULLIF(ac.company_name, ''), ac.full_name, '') AS AgentName,
+                   p.amount AS Amount, p.currency AS Currency, p.item_count AS ItemCount, p.paid_at AS PaidAt,
+                   p.bank_name AS BankName, p.bank_account_no AS BankAccountNo, p.bank_account_name AS BankAccountName,
+                   p.bank_reference AS BankReference, p.note AS Note, p.status AS Status, p.created_at AS CreatedAt
+              FROM affiliate.payouts p
+              JOIN affiliate.agents a ON a.id = p.agent_id
+              JOIN crm.customers ac ON ac.id = a.customer_id
+             WHERE p.tenant_id=@tenant AND (@agentId::uuid IS NULL OR p.agent_id=@agentId)
+             ORDER BY p.paid_at DESC, p.created_at DESC
+             LIMIT 500;
+            """, new { tenant = _tenant.TenantId, agentId });
+        return rows.ToList();
+    }
+
+    /// <summary>Hủy một lần thanh toán ghi nhầm: các khoản của nó quay về "chưa chuyển khoản".</summary>
+    public async Task<(bool Ok, string Message)> CancelPayoutAsync(Guid payoutId, Guid? actorUserId)
+    {
+        using var conn = await _factory.OpenAsync();
+        using var tx = conn.BeginTransaction();
+        var cancelled = await conn.ExecuteAsync(
+            "UPDATE affiliate.payouts SET status='cancelled', cancelled_at=now(), cancelled_by=@actorUserId WHERE id=@payoutId AND status='paid';",
+            new { payoutId, actorUserId }, tx);
+        if (cancelled == 0)
+        {
+            tx.Rollback();
+            return (false, "Lần thanh toán không tồn tại hoặc đã hủy.");
+        }
+
+        await conn.ExecuteAsync(
+            """
+            UPDATE affiliate.commissions
+               SET status='pending', paid_at=NULL, paid_by=NULL, bank_reference=NULL, payout_id=NULL, updated_at=now()
+             WHERE payout_id=@payoutId AND status='paid';
+            """, new { payoutId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE affiliate.topup_commissions SET status='pending', paid_at=NULL, payout_id=NULL WHERE payout_id=@payoutId AND status='paid';",
+            new { payoutId }, tx);
+        tx.Commit();
+        return (true, "Đã hủy lần thanh toán, các khoản hoa hồng quay về chưa chuyển khoản.");
+    }
+
+    private sealed class AgentBankRow
+    {
+        public string? BankName { get; set; }
+        public string? BankAccountNo { get; set; }
+        public string? BankAccountName { get; set; }
     }
 
     public sealed class AgentRefRow

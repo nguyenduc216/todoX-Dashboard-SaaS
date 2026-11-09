@@ -132,12 +132,14 @@
                 @if (_editAgent is not null)
                 {
                     <MudPaper Class="todox-table-card pa-4 mb-3" rounded="true">
-                        <MudText Typo="Typo.h6" Class="mb-2">Thông tin chuyển khoản — @_editAgent.AgentCode (@_editAgent.CustomerName)</MudText>
+                        <MudText Typo="Typo.h6" Class="mb-2">Đại lý @_editAgent.AgentCode (@_editAgent.CustomerName)</MudText>
                         <MudGrid>
                             <MudItem xs="12" sm="4"><MudTextField T="string" Label="Ngân hàng" @bind-Value="_editAgent.BankName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                             <MudItem xs="12" sm="4"><MudTextField T="string" Label="Số tài khoản" @bind-Value="_editAgent.BankAccountNo" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                             <MudItem xs="12" sm="4"><MudTextField T="string" Label="Chủ tài khoản" @bind-Value="_editAgent.BankAccountName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-                            <MudItem xs="12" sm="9"><MudTextField T="string" Label="Ghi chú" @bind-Value="_editAgent.Note" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="3"><MudNumericField T="decimal?" Label="% hoa hồng nạp điểm" @bind-Value="_editAgent.TopupCommissionPercent" Min="0" Max="100"
+                                                                     HelperText="@($"Trống = mặc định {_settings.DefaultTopupCommissionPercent:0.##}%")" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField T="string" Label="Ghi chú" @bind-Value="_editAgent.Note" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                             <MudItem xs="12" sm="3" Class="d-flex align-center"><MudSwitch T="bool" @bind-Value="_editAgent.IsActive" Label="Đại lý hoạt động" Color="Color.Success" /></MudItem>
                         </MudGrid>
                         <MudStack Row="true" Spacing="2" Class="mt-3">
@@ -154,6 +156,7 @@
                             <MudTh>Khách hàng</MudTh>
                             <MudTh>Liên hệ</MudTh>
                             <MudTh>Tài khoản ngân hàng</MudTh>
+                            <MudTh Style="text-align:right">% nạp điểm</MudTh>
                             <MudTh Style="text-align:right">KH giới thiệu</MudTh>
                             <MudTh Style="text-align:right">Chưa chuyển</MudTh>
                             <MudTh Style="text-align:right">Đã chuyển</MudTh>
@@ -165,6 +168,7 @@
                             <MudTd DataLabel="Khách hàng">@context.CustomerCode — @context.CustomerName</MudTd>
                             <MudTd DataLabel="Liên hệ">@context.Email<br />@context.Phone</MudTd>
                             <MudTd DataLabel="Tài khoản ngân hàng">@BankText(context.BankName, context.BankAccountNo, context.BankAccountName)</MudTd>
+                            <MudTd DataLabel="% nạp điểm" Style="text-align:right">@((context.TopupCommissionPercent ?? _settings.DefaultTopupCommissionPercent).ToString("0.##"))%</MudTd>
                             <MudTd DataLabel="KH giới thiệu" Style="text-align:right">@context.ReferredCount</MudTd>
                             <MudTd DataLabel="Chưa chuyển" Style="text-align:right">@Money(context.PendingAmount)</MudTd>
                             <MudTd DataLabel="Đã chuyển" Style="text-align:right">@Money(context.PaidAmount)</MudTd>
@@ -173,7 +177,8 @@
                             </MudTd>
                             <MudTd DataLabel="Thao tác" Style="text-align:right">
                                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa thông tin chuyển khoản" OnClick="@(() => EditAgent(context))" />
-                                <MudIconButton Icon="@Icons.Material.Filled.ReceiptLong" Size="Size.Small" title="Xem hoa hồng" OnClick="@(() => ShowAgentCommissionsAsync(context))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.ReceiptLong" Size="Size.Small" title="Xem hoa hồng nạp điểm" OnClick="@(() => ShowAgentCommissionsAsync(context))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Payments" Size="Size.Small" title="Thanh toán hoa hồng" OnClick="@(() => StartPayoutAsync(context))" />
                             </MudTd>
                         </RowTemplate>
                         <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có đại lý nào.</MudText></NoRecordsContent>
@@ -266,7 +271,7 @@
             </MudTabPanel>
 
             @* ===================== Hoa hồng ===================== *@
-            <MudTabPanel Text="Hoa hồng & chuyển khoản" Icon="@Icons.Material.Filled.Payments">
+            <MudTabPanel Text="Hoa hồng gói" Icon="@Icons.Material.Filled.Percent">
                 <MudPaper Class="todox-table-card pa-4" rounded="true">
                     <MudGrid>
                         <MudItem xs="12" sm="6" md="4">
@@ -324,7 +329,6 @@
                             <MudTh Style="text-align:right">Hoa hồng</MudTh>
                             <MudTh>Trạng thái</MudTh>
                             <MudTh>Chuyển khoản</MudTh>
-                            <MudTh Style="text-align:right">Thao tác</MudTh>
                         </HeaderContent>
                         <RowTemplate>
                             <MudTd DataLabel="Ngày phát sinh">@context.PurchasedAt.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
@@ -350,14 +354,157 @@
                                     }
                                 }
                             </MudTd>
-                            <MudTd DataLabel="Thao tác" Style="text-align:right">
-                                @if (context.Status == AffiliateCommissionStatuses.Paid)
+                        </RowTemplate>
+                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có hoa hồng nào.</MudText></NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudTabPanel>
+
+            @* ====== Hoa hồng nạp điểm ====== *@
+            <MudTabPanel Text="Nạp điểm & hoa hồng" Icon="@Icons.Material.Filled.AccountBalanceWallet">
+                <MudPaper Class="todox-table-card pa-4 mb-3" rounded="true">
+                    <MudText Typo="Typo.h6" Class="mb-1">Cấu hình hoa hồng nạp điểm</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-2">
+                        Mỗi lần khách được giới thiệu nạp điểm, đại lý nhận: số điểm × giá trị 1 điểm × % hoa hồng (của đại lý, hoặc mặc định).
+                        Giá trị và % được chốt tại lúc ghi nhận; đổi cấu hình chỉ áp dụng cho lần nạp sau.
+                    </MudText>
+                    @if (_settings.VndPerPoint <= 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">Chưa cấu hình giá trị 1 điểm — hệ thống chưa tính hoa hồng nạp điểm.</MudAlert>
+                    }
+                    <MudGrid>
+                        <MudItem xs="12" sm="4"><MudNumericField T="decimal" Label="Giá trị 1 điểm (VND)" @bind-Value="_settingsEdit.VndPerPoint" Min="0" Format="N0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="12" sm="4"><MudNumericField T="decimal" Label="% hoa hồng mặc định" @bind-Value="_settingsEdit.DefaultTopupCommissionPercent" Min="0" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="12" sm="4" Class="d-flex align-center">
+                            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSettingsAsync" Disabled="_busy">Lưu cấu hình</MudButton>
+                        </MudItem>
+                    </MudGrid>
+                </MudPaper>
+
+                <MudPaper Class="todox-table-card pa-4" rounded="true">
+                    <MudGrid>
+                        <MudItem xs="12" sm="6" md="4">
+                            <MudSelect T="Guid?" Label="Đại lý" Value="_topupAgentId" ValueChanged="OnTopupAgentChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem T="Guid?" Value="null">Tất cả đại lý</MudSelectItem>
+                                @foreach (var a in _agents)
                                 {
-                                    <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small" title="Chuyển về chưa chuyển khoản" OnClick="@(() => UndoPaidAsync(context))" />
+                                    <MudSelectItem T="Guid?" Value="@a.Id">@a.AgentCode — @a.CustomerName</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudSelect T="string" Label="Trạng thái" Value="_topupStatus" ValueChanged="OnTopupStatusChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@string.Empty">Tất cả</MudSelectItem>
+                                @foreach (var st in AffiliateCommissionStatuses.All)
+                                {
+                                    <MudSelectItem Value="@st">@AffiliateCommissionStatuses.Label(st)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" md="5" Class="d-flex align-center">
+                            <MudText Typo="Typo.body2">
+                                @_topups.Count lần nạp · tổng nạp <b>@Money(_topups.Sum(x => x.BaseAmount))</b> ·
+                                hoa hồng chưa chuyển <b>@Money(_topups.Where(x => x.Status == AffiliateCommissionStatuses.Pending).Sum(x => x.CommissionAmount))</b>
+                            </MudText>
+                        </MudItem>
+                    </MudGrid>
+                    <MudTable Items="@_topups" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table mt-3">
+                        <HeaderContent>
+                            <MudTh>Ngày nạp</MudTh>
+                            <MudTh>Đại lý</MudTh>
+                            <MudTh>Khách hàng</MudTh>
+                            <MudTh Style="text-align:right">Số điểm</MudTh>
+                            <MudTh Style="text-align:right">Giá trị nạp</MudTh>
+                            <MudTh Style="text-align:right">Tỷ lệ</MudTh>
+                            <MudTh Style="text-align:right">Hoa hồng</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Ngày nạp">@context.TopupAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                            <MudTd DataLabel="Đại lý"><span class="todox-badge">@context.AgentCode</span> @context.AgentName</MudTd>
+                            <MudTd DataLabel="Khách hàng">@context.CustomerCode — @context.CustomerName</MudTd>
+                            <MudTd DataLabel="Số điểm" Style="text-align:right">@context.Points.ToString("N0")</MudTd>
+                            <MudTd DataLabel="Giá trị nạp" Style="text-align:right">@Money(context.BaseAmount, context.Currency)</MudTd>
+                            <MudTd DataLabel="Tỷ lệ" Style="text-align:right">@context.CommissionPercent.ToString("0.##")%</MudTd>
+                            <MudTd DataLabel="Hoa hồng" Style="text-align:right"><b>@Money(context.CommissionAmount, context.Currency)</b></MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@AffiliateCommissionStatuses.Label(context.Status)</MudChip>
+                                @if (context.PaidAt is DateTime topupPaidAt)
+                                {
+                                    <MudText Typo="Typo.caption">@topupPaidAt.ToLocalTime().ToString("dd/MM/yyyy")</MudText>
                                 }
                             </MudTd>
                         </RowTemplate>
-                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có hoa hồng nào.</MudText></NoRecordsContent>
+                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có lần nạp điểm nào của khách được giới thiệu.</MudText></NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudTabPanel>
+
+            @* ====== Thanh toán hoa hồng ====== *@
+            <MudTabPanel Text="Thanh toán hoa hồng" Icon="@Icons.Material.Filled.Payments">
+                <MudPaper Class="todox-table-card pa-4 mb-3" rounded="true">
+                    <MudText Typo="Typo.h6" Class="mb-2">Thanh toán cho đại lý</MudText>
+                    <MudGrid>
+                        <MudItem xs="12" md="5">
+                            <MudSelect T="Guid?" Label="Đại lý" Value="_payoutAgentId" ValueChanged="OnPayoutAgentChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem T="Guid?" Value="null">Chọn đại lý</MudSelectItem>
+                                @foreach (var a in _agents)
+                                {
+                                    <MudSelectItem T="Guid?" Value="@a.Id">@a.AgentCode — @a.CustomerName (chưa chuyển @Money(a.PendingAmount))</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        @if (PayoutAgent is { } payoutAgent && _pending is { } pending)
+                        {
+                            <MudItem xs="12" md="7">
+                                <MudText Typo="Typo.body2">
+                                    Chưa thanh toán: <b>@Money(pending.Amount)</b> (@pending.TopupCount khoản nạp điểm @Money(pending.TopupAmount), @pending.PackageCount khoản gói @Money(pending.PackageAmount))
+                                </MudText>
+                                <MudText Typo="Typo.body2">Chuyển vào: <b>@BankText(payoutAgent.BankName, payoutAgent.BankAccountNo, payoutAgent.BankAccountName)</b></MudText>
+                            </MudItem>
+                            <MudItem xs="12" sm="4"><MudDatePicker Label="Ngày chuyển khoản" @bind-Date="_payoutDate" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField T="string" Label="Mã giao dịch ngân hàng" @bind-Value="_payoutReference" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField T="string" Label="Ghi chú" @bind-Value="_payoutNote" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12">
+                                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.CheckCircle" OnClick="CreatePayoutAsync" Disabled="@(_busy || pending.Count == 0)">
+                                    Xác nhận đã thanh toán @Money(pending.Amount)
+                                </MudButton>
+                            </MudItem>
+                        }
+                    </MudGrid>
+                </MudPaper>
+
+                <MudPaper Class="todox-table-card pa-4" rounded="true">
+                    <MudText Typo="Typo.h6" Class="mb-2">Lịch sử thanh toán hoa hồng</MudText>
+                    <MudTable Items="@VisiblePayouts" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                        <HeaderContent>
+                            <MudTh>Ngày chuyển khoản</MudTh>
+                            <MudTh>Đại lý</MudTh>
+                            <MudTh Style="text-align:right">Số tiền</MudTh>
+                            <MudTh Style="text-align:right">Số khoản</MudTh>
+                            <MudTh>Tài khoản nhận</MudTh>
+                            <MudTh>Mã giao dịch / ghi chú</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                            <MudTh Style="text-align:right">Thao tác</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Ngày chuyển khoản">@context.PaidAt.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+                            <MudTd DataLabel="Đại lý"><span class="todox-badge">@context.AgentCode</span> @context.AgentName</MudTd>
+                            <MudTd DataLabel="Số tiền" Style="text-align:right"><b>@Money(context.Amount, context.Currency)</b></MudTd>
+                            <MudTd DataLabel="Số khoản" Style="text-align:right">@context.ItemCount</MudTd>
+                            <MudTd DataLabel="Tài khoản nhận">@BankText(context.BankName, context.BankAccountNo, context.BankAccountName)</MudTd>
+                            <MudTd DataLabel="Mã giao dịch / ghi chú">@context.BankReference<br /><MudText Typo="Typo.caption">@context.Note</MudText></MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@(context.Status == "paid" ? Color.Success : Color.Default)">@(context.Status == "paid" ? "Đã thanh toán" : "Đã hủy")</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Thao tác" Style="text-align:right">
+                                @if (context.Status == "paid")
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small" title="Hủy lần thanh toán (ghi nhầm)" OnClick="@(() => CancelPayoutAsync(context))" />
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có lần thanh toán nào.</MudText></NoRecordsContent>
                     </MudTable>
                 </MudPaper>
             </MudTabPanel>
@@ -407,6 +554,12 @@
             _agents = await AffiliateRepo.GetAgentsAsync();
             _purchases = await AffiliateRepo.GetPurchasesAsync();
             await LoadCommissionsAsync();
+            _settings = await AffiliateRepo.GetSettingsAsync();
+            _settingsEdit = new AffiliateSettings { VndPerPoint = _settings.VndPerPoint, DefaultTopupCommissionPercent = _settings.DefaultTopupCommissionPercent };
+            await AffiliateRepo.SyncTopupCommissionsAsync();
+            _agents = await AffiliateRepo.GetAgentsAsync();
+            await LoadTopupsAsync();
+            _payouts = await AffiliateRepo.GetPayoutsAsync();
 
             var customers = await Accounts.GetCustomersAsync();
             var map = await AffiliateRepo.GetCustomerAffiliateMapAsync();
@@ -485,7 +638,8 @@
         BankAccountNo = a.BankAccountNo,
         BankAccountName = a.BankAccountName,
         Note = a.Note,
-        IsActive = a.IsActive
+        IsActive = a.IsActive,
+        TopupCommissionPercent = a.TopupCommissionPercent
     };
 
     private async Task SaveAgentAsync()
@@ -504,10 +658,10 @@
 
     private async Task ShowAgentCommissionsAsync(AffiliateAgentView a)
     {
-        _filterAgentId = a.Id;
-        _filterStatus = string.Empty;
-        await LoadCommissionsAsync();
-        _tab = 3;
+        _topupAgentId = a.Id;
+        _topupStatus = string.Empty;
+        await LoadTopupsAsync();
+        _tab = TopupTab;
     }
 
     // ---------- Purchases ----------
@@ -622,12 +776,10 @@
         {
             var count = await AffiliateRepo.MarkCommissionsPaidAsync(ids, PurchaseMoment(_paidDate), _bankReference, _paidNote, ActorId);
             await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "commission_paid", entityDisplay: $"{count} khoản {_bankReference}");
-            Snackbar.Add($"Đã đánh dấu {count} khoản là đã chuyển khoản.", Severity.Success);
+            Snackbar.Add($"Đã ghi nhận thanh toán {count} khoản (xem tab Thanh toán hoa hồng).", Severity.Success);
             _bankReference = null;
             _paidNote = null;
-            _agents = await AffiliateRepo.GetAgentsAsync();
-            _purchases = await AffiliateRepo.GetPurchasesAsync();
-            await LoadCommissionsAsync();
+            await ReloadMoneyAsync();
         }
         finally
         {
@@ -635,21 +787,129 @@
         }
     }
 
-    private async Task UndoPaidAsync(AffiliateCommissionView c)
+    // ---------- Top-up commissions & payouts ----------
+
+    private const int TopupTab = 4;
+    private const int PayoutTab = 5;
+    private AffiliateSettings _settings = new();
+    private AffiliateSettings _settingsEdit = new();
+    private IReadOnlyList<AffiliateTopupCommissionView> _topups = Array.Empty<AffiliateTopupCommissionView>();
+    private IReadOnlyList<AffiliatePayoutView> _payouts = Array.Empty<AffiliatePayoutView>();
+    private Guid? _topupAgentId;
+    private string _topupStatus = string.Empty;
+    private Guid? _payoutAgentId;
+    private AffiliatePendingSummary? _pending;
+    private DateTime? _payoutDate = DateTime.Today;
+    private string? _payoutReference;
+    private string? _payoutNote;
+
+    private AffiliateAgentView? PayoutAgent => _agents.FirstOrDefault(x => x.Id == _payoutAgentId);
+    private IEnumerable<AffiliatePayoutView> VisiblePayouts => _payoutAgentId is Guid id ? _payouts.Where(x => x.AgentId == id) : _payouts;
+
+    private async Task LoadTopupsAsync() => _topups = await AffiliateRepo.GetTopupCommissionsAsync(_topupAgentId, _topupStatus);
+
+    private async Task OnTopupAgentChanged(Guid? agentId)
     {
-        var confirm = await DialogService.ShowMessageBoxAsync("Hoàn tác chuyển khoản",
-            $"Chuyển khoản hoa hồng {Money(c.CommissionAmount, c.Currency)} của {c.AgentCode} về \"chưa chuyển khoản\"?",
-            yesText: "Hoàn tác", cancelText: "Đóng");
+        _topupAgentId = agentId;
+        await LoadTopupsAsync();
+    }
+
+    private async Task OnTopupStatusChanged(string status)
+    {
+        _topupStatus = status;
+        await LoadTopupsAsync();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        _busy = true;
+        try
+        {
+            var (ok, message) = await AffiliateRepo.SaveSettingsAsync(_settingsEdit, ActorId);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+            if (!ok) return;
+            await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "settings_save",
+                entityDisplay: $"{_settingsEdit.VndPerPoint:N0} VND/điểm, {_settingsEdit.DefaultTopupCommissionPercent:0.##}%");
+            _settings = await AffiliateRepo.GetSettingsAsync();
+            await AffiliateRepo.SyncTopupCommissionsAsync();
+            _agents = await AffiliateRepo.GetAgentsAsync();
+            await LoadTopupsAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task StartPayoutAsync(AffiliateAgentView agent)
+    {
+        await OnPayoutAgentChanged(agent.Id);
+        _tab = PayoutTab;
+    }
+
+    private async Task OnPayoutAgentChanged(Guid? agentId)
+    {
+        _payoutAgentId = agentId;
+        _pending = agentId is Guid id ? await AffiliateRepo.GetPendingSummaryAsync(id) : null;
+    }
+
+    private async Task CreatePayoutAsync()
+    {
+        if (PayoutAgent is not { } agent || _pending is not { Count: > 0 } pending)
+        {
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync("Thanh toán hoa hồng",
+            $"Ghi nhận đã chuyển {Money(pending.Amount)} cho đại lý {agent.AgentCode} ({BankText(agent.BankName, agent.BankAccountNo, agent.BankAccountName)})?",
+            yesText: "Xác nhận", cancelText: "Hủy");
         if (confirm != true)
         {
             return;
         }
 
-        await AffiliateRepo.MarkCommissionPendingAsync(c.Id);
-        await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "commission_unpaid", entityDisplay: c.AgentCode);
+        _busy = true;
+        try
+        {
+            var result = await AffiliateRepo.CreatePayoutAsync(agent.Id, PurchaseMoment(_payoutDate), _payoutReference, _payoutNote, ActorId);
+            Snackbar.Add(result.Message, result.Ok ? Severity.Success : Severity.Warning);
+            if (!result.Ok) return;
+            await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "payout_create", entityDisplay: $"{agent.AgentCode} {result.Amount:N0} VND {_payoutReference}");
+            _payoutReference = null;
+            _payoutNote = null;
+            await ReloadMoneyAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CancelPayoutAsync(AffiliatePayoutView payout)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync("Hủy lần thanh toán",
+            $"Hủy lần thanh toán {Money(payout.Amount, payout.Currency)} ngày {payout.PaidAt.ToLocalTime():dd/MM/yyyy} cho {payout.AgentCode}? Các khoản hoa hồng sẽ quay về \"chưa chuyển khoản\".",
+            yesText: "Hủy thanh toán", cancelText: "Đóng");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        var (ok, message) = await AffiliateRepo.CancelPayoutAsync(payout.Id, ActorId);
+        Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+        if (!ok) return;
+        await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "payout_cancel", entityDisplay: $"{payout.AgentCode} {payout.Amount:N0}");
+        await ReloadMoneyAsync();
+    }
+
+    private async Task ReloadMoneyAsync()
+    {
         _agents = await AffiliateRepo.GetAgentsAsync();
         _purchases = await AffiliateRepo.GetPurchasesAsync();
+        _payouts = await AffiliateRepo.GetPayoutsAsync();
         await LoadCommissionsAsync();
+        await LoadTopupsAsync();
+        if (_payoutAgentId is Guid id) _pending = await AffiliateRepo.GetPendingSummaryAsync(id);
     }
 
     // ---------- Formatting ----------
