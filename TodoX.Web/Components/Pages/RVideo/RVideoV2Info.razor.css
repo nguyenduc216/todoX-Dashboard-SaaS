@@ -28,3 +28,7 @@
 .rv2-info-creative{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px}
 .rv2-info-creative ::deep .rv2-info-creative-dur{max-width:220px}
 .rv2-info-linked{margin-top:2px}
+.rv2-speech-live{display:flex;align-items:center;gap:8px;margin-top:6px;padding:6px 10px;border-radius:8px;background:rgba(229,57,53,.12);font-size:.85rem}
+.rv2-speech-dot{flex:0 0 auto;width:10px;height:10px;border-radius:50%;background:#e53935;animation:rv2-speech-pulse 1s ease-in-out infinite}
+@keyframes rv2-speech-pulse{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.rv2-speech-dot{animation:none}}

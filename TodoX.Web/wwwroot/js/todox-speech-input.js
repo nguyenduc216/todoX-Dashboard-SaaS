@@ -27,7 +27,8 @@ window.todoXSpeechInput = {
   //   onFinal(transcript)      — final result, append to canonical text
   //   onError(kind, message)   — friendly error marshalling
   //   onEnd()                  — recognition ended (mic released / auto stop)
-  start: async function (id, lang, dotnet, onFinal, onError, onEnd) {
+  //   onInterim(text)          - optional: live, not-yet-final text for a preview (never appended)
+  start: async function (id, lang, dotnet, onFinal, onError, onEnd, onInterim) {
     if (!this.isSupported()) {
       return false;
     }
@@ -45,6 +46,13 @@ window.todoXSpeechInput = {
     let lastFinalEventIndex = -1;
 
     recognition.onresult = function (event) {
+      if (onInterim) {
+        let interim = '';
+        for (let k = event.resultIndex; k < event.results.length; k++) {
+          if (!event.results[k].isFinal && event.results[k][0]) interim += event.results[k][0].transcript;
+        }
+        dotnetRef.invokeMethodAsync(onInterim, interim.trim()).catch(function () { });
+      }
       // Only the final (isFinal=true) results are appended; interim results
       // are never pushed to .NET so duplicated interim events cannot
       // duplicate text. The resultIndex guard ensures a final result is

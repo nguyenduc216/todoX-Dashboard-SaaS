@@ -24,8 +24,9 @@
       <div class="rv2-section-head mt-2">
         <MudText Typo="Typo.subtitle2">Nội dung video mong muốn</MudText>
         <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-          <MudTooltip Text="Nhập nội dung bằng giọng nói">
-            <MudIconButton Icon="@Icons.Material.Filled.Mic" Size="Size.Small" Disabled="@(!_speechSupported)" OnClick="ToggleSpeechAsync" />
+          <MudTooltip Text="@(Listening ? "Đang nghe - bấm để dừng" : "Nhập nội dung bằng giọng nói")">
+            <MudIconButton Icon="@(Listening ? Icons.Material.Filled.StopCircle : Icons.Material.Filled.Mic)" Color="@(Listening ? Color.Error : Color.Default)"
+                           Size="Size.Small" Disabled="@(!_speechSupported)" OnClick="ToggleSpeechAsync" aria-label="Nhập bằng giọng nói" />
           </MudTooltip>
           <MudTooltip Text="Tạo Prompt AI nhanh">
             <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" OnClick="OpenQuickPromptAsync" Disabled="@_generating" />
@@ -33,6 +34,21 @@
         </MudStack>
       </div>
       <MudTextField T="string" Value="_workingInput" ValueChanged="HandleWorkingInputChanged" Immediate="true" Variant="Variant.Outlined" Lines="6" Placeholder="Hãy mô tả video..." />
+      @if (Listening)
+      {
+        <div class="rv2-speech-live" role="status" aria-live="polite">
+          <span class="rv2-speech-dot" aria-hidden="true"></span>
+          <span>@(string.IsNullOrWhiteSpace(_speech?.InterimTranscript) ? "Đang nghe… hãy nói, chữ sẽ tự điền vào ô. Bấm micro để dừng." : _speech!.InterimTranscript)</span>
+        </div>
+      }
+      else if (!string.IsNullOrWhiteSpace(_speech?.ErrorMessage))
+      {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">@_speech!.ErrorMessage</MudAlert>
+      }
+      else if (!_speechSupported && _speechChecked)
+      {
+        <MudText Typo="Typo.caption" Class="rv2-adv-label">Trình duyệt này chưa hỗ trợ nhập bằng giọng nói (dùng Chrome hoặc Edge).</MudText>
+      }
       <div class="rv2-info-cta">
         <MudButton Class="rv2-info-primary" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@(!CanGenerate)" OnClick="HandleGenerateAsync">Tạo Prompt AI</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="HandleReloadAsync" Disabled="@_generating">Làm mới</MudButton>
@@ -216,9 +232,15 @@
   private bool _creativeMode;
   private int _creativeDuration = 30;
   private bool _creativeDurationSeeded;
-  protected override async Task OnInitializedAsync(){
-    _speech = new PromptSpeechHandler(JS, "rvideo-v2-info", async t=>{ _workingInput = QuickPromptTranscriptMerger.AppendTranscript(_workingInput,t); await InvokeAsync(StateHasChanged); }, async ()=> await InvokeAsync(StateHasChanged));
-    await _speech.InitializeAsync(); _speechSupported = _speech.IsSupported;
+  private bool _speechChecked;
+  private bool Listening => _speech?.State is PromptSpeechState.Listening or PromptSpeechState.RequestingPermission;
+  // JS interop is only available after the first interactive render (not while prerendering).
+  protected override async Task OnAfterRenderAsync(bool firstRender){
+    if(!firstRender || _speech is not null) return;
+    _speech = new PromptSpeechHandler(JS, "rvideo-v2-info", async t=>{ _workingInput = QuickPromptTranscriptMerger.AppendTranscript(_workingInput,t); await InvokeAsync(StateHasChanged); },
+      async ()=> await InvokeAsync(StateHasChanged), interimPreview:true);
+    await _speech.InitializeAsync(); _speechSupported = _speech.IsSupported; _speechChecked = true;
+    StateHasChanged();
   }
   private long? _lastWorkingProjectId; private Guid? _lastWorkingActiveId;
   private bool _catalogsLoaded;
@@ -369,7 +391,12 @@
     if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
     Snackbar.Add("Đã áp dụng bản mới nhất.",Severity.Success);
   }
-  private async Task ToggleSpeechAsync(){ if(_speech!=null) await _speech.ToggleAsync(); }
+  private async Task ToggleSpeechAsync(){
+    if(_speech is null) return;
+    await _speech.ToggleAsync();
+    _speechSupported = _speech.IsSupported;
+    StateHasChanged();
+  }
   private async Task OpenQuickPromptAsync(){
     var p=new DialogParameters{ ["CanonicalInput"]=_workingInput, ["OnApplyInput"]=(Func<string,Task>)(async v=>{ _workingInput=v; await InvokeAsync(StateHasChanged); }), ["OnGenerate"]=(Func<Task>)(async ()=>await HandleGenerateAsync()), ["Generating"]=_generating };
     await Dialogs.ShowAsync<QuickPromptDialog>("",p,new DialogOptions{ MaxWidth=MaxWidth.Large, FullWidth=true });
