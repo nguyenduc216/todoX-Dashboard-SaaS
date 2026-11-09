@@ -1,0 +1,229 @@
+@page "/customer-videos"
+@using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Models
+@using TodoX.Web.Services
+@using TodoX.Web.Services.CustomerVideos
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject CustomerVideoRepository Repository
+@inject AuditRepository Audit
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<CustomerVideos> Logger
+
+<PageTitle>Video khách hàng</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Video khách hàng</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Video truyền thông / TVC TodoX làm cho khách: thêm vào tài khoản, trừ điểm theo bảng giá, khách xem trong "Jobs của tôi".</MudText>
+        </div>
+        @if (_ready)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" Disabled="_busy" OnClick="AddAsync">Thêm video cho khách</MudButton>
+        }
+    </MudStack>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser))
+    {
+        <MudAlert Severity="Severity.Error">Chỉ quản trị viên TodoX được truy cập trang này.</MudAlert>
+    }
+    else if (!_ready)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Database chưa có bảng video khách hàng. Cần chạy script <code>database/manual/customer-videos/20261110_customer_videos.sql</code>.
+        </MudAlert>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
+        <MudTabs Elevation="0" Rounded="true">
+            <MudTabPanel Text="@($"Video đã giao ({_videos.Count})")">
+                <MudPaper Class="todox-card pa-3">
+                    <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo khách hàng, tiêu đề" Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Class="mb-2" Clearable="true" />
+                    @if (FilteredVideos.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2">Chưa có video nào.</MudText>
+                    }
+                    else
+                    {
+                        <MudTable T="CustomerVideo" Items="FilteredVideos" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+                            <HeaderContent>
+                                <MudTh>Ngày</MudTh>
+                                <MudTh>Khách hàng</MudTh>
+                                <MudTh>Loại</MudTh>
+                                <MudTh>Tiêu đề</MudTh>
+                                <MudTh>Điểm</MudTh>
+                                <MudTh></MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Ngày">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                                <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                                <MudTd DataLabel="Loại">@context.ProductName</MudTd>
+                                <MudTd DataLabel="Tiêu đề">@context.Title</MudTd>
+                                <MudTd DataLabel="Điểm">
+                                    @(context.ChargeStatus == CustomerVideoRules.StatusCharged ? context.ChargedPoints.ToString("#,0.##") : CustomerVideoRules.StatusLabel(context.ChargeStatus))
+                                </MudTd>
+                                <MudTd Style="text-align:right;white-space:nowrap">
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="_busy" OnClick="@(() => EditAsync(context))">Sửa</MudButton>
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" Disabled="_busy" OnClick="@(() => DeleteAsync(context))">Xóa</MudButton>
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudPaper>
+            </MudTabPanel>
+            <MudTabPanel Text="Bảng giá">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.body2" Class="mb-3">Số điểm trừ của khách khi thêm một video. Có thể sửa riêng từng lần thêm.</MudText>
+                    <MudGrid>
+                        @foreach (var product in _products)
+                        {
+                            <MudItem xs="12" md="6">
+                                <MudPaper Outlined="true" Class="pa-3">
+                                    <MudStack Spacing="2">
+                                        <MudTextField T="string" Label="Tên loại video" @bind-Value="product.Name" />
+                                        <MudNumericField T="decimal" Label="Số điểm trừ / video" @bind-Value="product.Points" Min="0" Format="#,0.##" />
+                                        <MudTextField T="string" Label="Mô tả" @bind-Value="product.Description" Lines="2" />
+                                        <MudSwitch T="bool" @bind-Value="product.IsActive" Color="Color.Warning" Label="Đang áp dụng" />
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                            <MudText Typo="Typo.caption">Cập nhật: @product.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Disabled="_busy" OnClick="@(() => SaveProductAsync(product))">Lưu</MudButton>
+                                        </MudStack>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                        }
+                    </MudGrid>
+                </MudPaper>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudStack>
+
+@code {
+    private bool _loaded;
+    private bool _ready;
+    private bool _busy;
+    private string? _error;
+    private string? _search;
+    private IReadOnlyList<CustomerVideo> _videos = [];
+    private IReadOnlyList<CustomerVideoProduct> _products = [];
+    private IReadOnlyList<CustomerProfile> _customers = [];
+
+    private IReadOnlyList<CustomerVideo> FilteredVideos => string.IsNullOrWhiteSpace(_search)
+        ? _videos
+        : _videos.Where(x => (x.CustomerName ?? "").Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                             || x.Title.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        try
+        {
+            _ready = AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) && await Repository.IsReadyAsync();
+            if (_ready)
+            {
+                _products = await Repository.GetProductsAsync();
+                _customers = await Accounts.GetCustomersAsync();
+                await ReloadAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Customer videos load failed.");
+            _error = "Không tải được dữ liệu video khách hàng.";
+        }
+        finally { _loaded = true; }
+    }
+
+    private async Task ReloadAsync() => _videos = await Repository.ListAllAsync();
+
+    private Task AddAsync() => OpenEditorAsync(null);
+    private Task EditAsync(CustomerVideo video) => OpenEditorAsync(video);
+
+    private async Task OpenEditorAsync(CustomerVideo? video)
+    {
+        if (_busy) return;
+        _error = null;
+        var parameters = new DialogParameters<CustomerVideoDialog>
+        {
+            { x => x.Source, video },
+            { x => x.Products, _products },
+            { x => x.Customers, _customers }
+        };
+        // An upload runs inside the dialog: only its own buttons may close it.
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false };
+        var dialog = await DialogService.ShowAsync<CustomerVideoDialog>(video is null ? "Thêm video cho khách hàng" : "Chỉnh sửa video", parameters, options);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled) return;
+        await Audit.LogAsync(AuthState.CurrentUser, "customer_videos", video is null ? "create" : "update", entityDisplay: video?.Title);
+        try { await ReloadAsync(); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Customer videos reload failed.");
+            _error = "Không tải lại được danh sách. Vui lòng tải lại trang.";
+        }
+    }
+
+    private async Task DeleteAsync(CustomerVideo video)
+    {
+        if (_busy) return;
+        var refund = video.ChargeStatus == CustomerVideoRules.StatusCharged && video.ChargedPoints > 0;
+        var message = refund
+            ? $"Xóa \"{video.Title}\" khỏi tài khoản {video.CustomerName} và hoàn lại {video.ChargedPoints:#,0.##} điểm cho khách?"
+            : $"Xóa \"{video.Title}\" khỏi tài khoản {video.CustomerName}?";
+        var confirmed = await DialogService.ShowMessageBoxAsync("Xóa video", message, yesText: refund ? "Xóa và hoàn điểm" : "Xóa", cancelText: "Hủy");
+        if (confirmed != true) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await Repository.DeleteAsync(video.Id);
+            if (!result.Ok)
+            {
+                _error = result.Error;
+                return;
+            }
+            await Audit.LogAsync(AuthState.CurrentUser, "customer_videos", "delete", entityDisplay: video.Title);
+            await ReloadAsync();
+            Snackbar.Add(refund ? "Đã xóa video và hoàn điểm cho khách." : "Đã xóa video.", Severity.Success);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _error = "Tài khoản của bạn chưa có quyền hoàn điểm, nên chưa xóa được video đã trừ điểm.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Customer video delete failed.");
+            _error = "Không xóa được video. Vui lòng thử lại.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveProductAsync(CustomerVideoProduct product)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Repository.SaveProductAsync(product);
+            await Audit.LogAsync(AuthState.CurrentUser, "customer_videos", "price_update", entityDisplay: $"{product.Name}: {product.Points:0.##} điểm");
+            _products = await Repository.GetProductsAsync();
+            Snackbar.Add("Đã lưu bảng giá.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Customer video price save failed.");
+            _error = "Không lưu được bảng giá.";
+        }
+        finally { _busy = false; }
+    }
+}

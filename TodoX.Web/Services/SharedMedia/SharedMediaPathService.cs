@@ -73,6 +73,20 @@ public sealed class SharedMediaPathService
         return $"{NormalizeRequestPath(_options.RequestPath)}/landing/{area}/{subfolder}/{Uri.EscapeDataString(fileName)}";
     }
 
+    /// <summary>Videos TodoX produced for a customer (shown under that customer's "Jobs của tôi").</summary>
+    public string GetCustomerVideoPhysicalFolder(string subfolder)
+    {
+        if (subfolder is not ("videos" or "posters" or "temp")) throw new ArgumentException("Invalid media folder.");
+        return CombineInsideRoot(StorageRoot ?? throw new InvalidOperationException("SharedMedia storage unavailable."), "customer-videos", subfolder);
+    }
+
+    public string GetCustomerVideoPublicUrl(string subfolder, string fileName)
+    {
+        if (subfolder is not ("videos" or "posters") || Path.GetFileName(fileName) != fileName)
+            throw new ArgumentException("Invalid media path.");
+        return $"{NormalizeRequestPath(_options.RequestPath)}/customer-videos/{subfolder}/{Uri.EscapeDataString(fileName)}";
+    }
+
     public string GetIndustryPublicUrl(string subfolder, string fileName)
     {
         var requestPath = NormalizeRequestPath(_options.RequestPath);

@@ -1,0 +1,108 @@
+@page "/jobs/video/{VideoId:guid}"
+@using TodoX.Web.Services
+@using TodoX.Web.Services.CustomerVideos
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject CustomerVideoRepository Repository
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject ILogger<CustomerVideoDetail> Logger
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
+
+<PageTitle>@(_video?.Title ?? "Video")</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" title="Jobs của tôi" OnClick="@(() => Navigation.NavigateTo("/jobs"))" />
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">@(_video?.Title ?? "Video")</MudText>
+            @if (_video is not null)
+            {
+                <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+                    @_video.ProductName · @_video.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                    @if (_video.ChargeStatus == CustomerVideoRules.StatusCharged)
+                    {
+                        <span> · @_video.ChargedPoints.ToString("#,0.##") điểm</span>
+                    }
+                </MudText>
+            }
+        </div>
+    </MudStack>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_video is null)
+    {
+        <MudAlert Severity="Severity.Warning">Không tìm thấy video hoặc bạn không có quyền xem video này.</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Class="todox-card pa-3">
+                    <MudStack Spacing="2">
+                        @if (!string.IsNullOrWhiteSpace(_video.VideoUrl))
+                        {
+                            <video src="@_video.VideoUrl" poster="@_video.PosterUrl" controls playsinline preload="metadata" controlslist="nodownload"
+                                   style="width:100%;max-height:70vh;background:#000;border-radius:8px"></video>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" OnClick="DownloadAsync">Tải video</MudButton>
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="3">
+                    <MudPaper Class="todox-card pa-4">
+                        <MudText Typo="Typo.h6" Class="mb-2">Ghi chú</MudText>
+                        <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@(string.IsNullOrWhiteSpace(_video.Note) ? "Không có ghi chú." : _video.Note)</MudText>
+                    </MudPaper>
+                    @if (!string.IsNullOrWhiteSpace(_video.Script))
+                    {
+                        <MudPaper Class="todox-card pa-4">
+                            <MudText Typo="Typo.h6" Class="mb-2">Kịch bản</MudText>
+                            <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@_video.Script</MudText>
+                        </MudPaper>
+                    }
+                </MudStack>
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public Guid VideoId { get; set; }
+
+    private CustomerVideo? _video;
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loaded = false;
+        try
+        {
+            if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+            _video = await Repository.GetAsync(VideoId, AuthState.CurrentUser);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Customer video load failed {VideoId}", VideoId);
+            _video = null;
+        }
+        finally { _loaded = true; }
+    }
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadAsync()
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(_video?.VideoUrl, $"{_video?.Title}.mp4");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
+}

@@ -9,6 +9,7 @@
 @inject IDanceSellPhase2Service DanceJobs
 @inject IDanceSellOperationRepository DanceOperations
 @inject IRVideoJobService RVideoJobs
+@inject TodoX.Web.Services.CustomerVideos.CustomerVideoRepository CustomerVideos
 @inject TodoX.Web.Services.Platform.ICoreJobApplicationService CoreJobs
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService ServiceCatalog
 @inject NavigationManager Navigation
@@ -163,19 +164,22 @@
                 // One extra row per source tells whether an older page exists.
                 var danceTask = DanceJobs.ListAsync(currentUser, _take + 1);
                 var coreTask = ListCoreJobsAsync(currentUser, _take + 1);
+                var videoTask = ListCustomerVideosAsync(currentUser, _take + 1);
                 var catalogTask = _catalog is null ? ServiceCatalog.ListAsync() : null;
-                await Task.WhenAll(new Task[] { timelapseTask, danceTask, coreTask, catalogTask ?? Task.CompletedTask });
+                await Task.WhenAll(new Task[] { timelapseTask, danceTask, coreTask, videoTask, catalogTask ?? Task.CompletedTask });
                 if (version != _loadVersion || _disposed) return;
                 _catalog ??= catalogTask!.Result.ToDictionary(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase);
                 var catalog = _catalog;
 
                 var dance = danceTask.Result;
                 var core = coreTask.Result;
+                var videos = videoTask.Result;
                 // A source that returned a full window may hide older rows; only rows newer than every such
                 // source's oldest kept row are certain to be in the right order, so the list is cut there.
                 DateTime? frontier = null;
                 if (dance.Count > _take) frontier = Max(frontier, dance[_take - 1].CreatedAt);
                 if (core.Count > _take) frontier = Max(frontier, core[_take - 1].CreatedAt);
+                if (videos.Count > _take) frontier = Max(frontier, videos[_take - 1].CreatedAt);
 
                 var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
                         x.Id,
@@ -199,6 +203,7 @@
                             "…",
                             $"/jobs/rvideo/{x.JobId}",
                             RVideoCore: x))))
+                    .Concat(videos.Take(_take).Select(BuildCustomerVideoRow))
                     .Where(x => frontier is null || x.CreatedAt >= frontier)
                     .OrderByDescending(x => x.CreatedAt)
                     .ToList();
@@ -246,6 +251,28 @@
 
         return items.Count > count ? items.GetRange(0, count) : items;
     }
+
+    // Videos TodoX made for this customer (Video truyền thông / TVC); a missing table must not hide other jobs.
+    private async Task<IReadOnlyList<TodoX.Web.Services.CustomerVideos.CustomerVideo>> ListCustomerVideosAsync(CurrentUserSession user, int count)
+    {
+        try { return await CustomerVideos.ListOwnedAsync(user, count); }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "My jobs customer videos load failed");
+            return Array.Empty<TodoX.Web.Services.CustomerVideos.CustomerVideo>();
+        }
+    }
+
+    internal static CustomerJobRow BuildCustomerVideoRow(TodoX.Web.Services.CustomerVideos.CustomerVideo video)
+        => new(
+            video.Id,
+            video.Title,
+            video.ProductName ?? TodoX.Web.Services.CustomerVideos.CustomerVideoRules.DefaultName(video.ProductCode),
+            "completed",
+            "Hoàn tất",
+            video.CreatedAt,
+            video.ChargeStatus == TodoX.Web.Services.CustomerVideos.CustomerVideoRules.StatusCharged ? $"{video.ChargedPoints:0.##}" : "0",
+            $"/jobs/video/{video.Id}");
 
     private static DateTime Max(DateTime? current, DateTime value) => current is { } c && c > value ? c : value;
 
@@ -353,7 +380,7 @@
             ? value.GetString()
             : null;
 
-    private sealed record CustomerJobRow(
+    internal sealed record CustomerJobRow(
         Guid Id,
         string Title,
         string ServiceLabel,

@@ -1,0 +1,218 @@
+@using System.Diagnostics
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Models
+@using TodoX.Web.Services
+@using TodoX.Web.Services.CustomerVideos
+@using TodoX.Web.Services.Landing
+@using TodoX.Web.Services.SharedMedia
+@inject CustomerVideoRepository Repository
+@inject CustomerVideoMediaService Media
+@inject SharedMediaPathService Paths
+@inject WalletService Wallets
+@inject ISnackbar Snackbar
+@inject ILogger<CustomerVideoDialog> Logger
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(IsNew ? "Thêm video cho khách hàng" : "Chỉnh sửa video")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
+            @if (!Paths.IsConfigured || !Paths.CanWrite()) { <MudAlert Severity="Severity.Warning">SharedMedia chưa sẵn sàng để upload.</MudAlert> }
+            @if (IsNew)
+            {
+                <MudGrid>
+                    <MudItem xs="12" sm="6">
+                        <MudAutocomplete T="CustomerProfile" Label="Tài khoản khách hàng" Value="_customer" ValueChanged="CustomerChangedAsync" SearchFunc="SearchCustomersAsync"
+                                         ToStringFunc="CustomerDisplay" Clearable="true" ResetValueOnEmptyText="true" MaxItems="30"
+                                         Disabled="_busy" />
+                        @if (_customer is not null && _balance is not null)
+                        {
+                            <MudText Typo="Typo.caption" Color="@(_balance < _points ? Color.Error : Color.Secondary)">Số dư hiện tại: @_balance.Value.ToString("#,0.##") điểm</MudText>
+                        }
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudSelect T="string" Label="Loại video" Value="_model.ProductCode" ValueChanged="ProductChanged" Disabled="_busy">
+                            @foreach (var product in Products.Where(x => x.IsActive))
+                            {
+                                <MudSelectItem Value="@product.ProductCode">@product.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudNumericField T="decimal" Label="Trừ điểm" @bind-Value="_points" Min="0" Format="#,0.##" Disabled="_busy"
+                                         HelperText="Theo bảng giá, có thể sửa" />
+                    </MudItem>
+                </MudGrid>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2">
+                    Khách hàng: <b>@Source!.CustomerName</b> · @Source.ProductName · @CustomerVideoRules.StatusLabel(Source.ChargeStatus) @Source.ChargedPoints.ToString("#,0.##") điểm
+                </MudText>
+            }
+            <MudTextField T="string" Label="Tiêu đề video" @bind-Value="_model.Title" MaxLength="300" Disabled="_busy" />
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudStack Spacing="2">
+                        <MudText>Video MP4/WebM (tối đa @(Media.MaxBytes(true) / (1024 * 1024)) MB):</MudText>
+                        <InputFile OnChange="@(args => UploadAsync(args, true))" accept=".mp4,.webm,video/mp4,video/webm" disabled="@_busy" />
+                        @if (_uploadingVideo)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">Đang tải lên và tối ưu video cho web (720p), có thể mất 1–2 phút...</MudText>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_model.VideoUrl))
+                        {
+                            <video src="@_model.VideoUrl" poster="@_model.PosterUrl" controls playsinline preload="metadata" style="max-width:100%;max-height:300px"></video>
+                        }
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudStack Spacing="2">
+                        <MudText>Ảnh bìa (không bắt buộc, JPG/PNG/WebP):</MudText>
+                        <InputFile OnChange="@(args => UploadAsync(args, false))" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled="@_busy" />
+                        @if (!string.IsNullOrWhiteSpace(_model.PosterUrl))
+                        {
+                            <img src="@_model.PosterUrl" alt="" style="max-width:100%;max-height:200px;object-fit:contain" />
+                            <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="_busy" OnClick="@(() => _model.PosterUrl = null)">Bỏ ảnh bìa</MudButton>
+                        }
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+            <MudTextField T="string" Label="Ghi chú cho khách hàng" @bind-Value="_model.Note" Lines="3" Disabled="_busy" />
+            <MudTextField T="string" Label="Kịch bản video" @bind-Value="_model.Script" Lines="8" Disabled="_busy" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())" Disabled="_busy">Hủy</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="SaveAsync" Disabled="_busy">
+            @(IsNew ? (_points > 0 ? $"Thêm video và trừ {_points:#,0.##} điểm" : "Thêm video (miễn phí)") : "Lưu")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public CustomerVideo? Source { get; set; }
+    [Parameter] public IReadOnlyList<CustomerVideoProduct> Products { get; set; } = [];
+    [Parameter] public IReadOnlyList<CustomerProfile> Customers { get; set; } = [];
+
+    private CustomerVideo _model = new();
+    private CustomerProfile? _customer;
+    private decimal _points;
+    private decimal? _balance;
+    private bool _busy;
+    private bool _uploadingVideo;
+    private string? _error;
+
+    private bool IsNew => Source is null;
+
+    protected override void OnInitialized()
+    {
+        if (Source is not null)
+        {
+            _model = new CustomerVideo
+            {
+                Id = Source.Id, CustomerId = Source.CustomerId, ProductCode = Source.ProductCode, Title = Source.Title,
+                VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, Note = Source.Note, Script = Source.Script
+            };
+            return;
+        }
+
+        var first = Products.FirstOrDefault(x => x.IsActive) ?? Products.FirstOrDefault();
+        if (first is not null) ProductChanged(first.ProductCode);
+    }
+
+    private void ProductChanged(string code)
+    {
+        _model.ProductCode = code;
+        _points = Products.FirstOrDefault(x => x.ProductCode == code)?.Points ?? 0;
+    }
+
+    private static string CustomerDisplay(CustomerProfile? customer)
+        => customer is null ? string.Empty : $"{customer.CompanyName} ({customer.CustomerCode}{(string.IsNullOrWhiteSpace(customer.Email) ? "" : " · " + customer.Email)})";
+
+    private Task<IEnumerable<CustomerProfile>> SearchCustomersAsync(string value, CancellationToken cancellationToken)
+    {
+        IEnumerable<CustomerProfile> result = Customers;
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            var term = value.Trim();
+            result = result.Where(c => c.CompanyName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.CustomerCode.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.Email.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.Phone.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.ContactName.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+        return Task.FromResult(result.Take(30));
+    }
+
+    private async Task CustomerChangedAsync(CustomerProfile? customer)
+    {
+        _customer = customer;
+        _balance = null;
+        if (_customer is null) return;
+        try { _balance = await Wallets.GetBalanceAsync(_customer.Id); }
+        catch (Exception ex) { Logger.LogWarning(ex, "Customer video balance lookup failed {CustomerId}", _customer.Id); }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs args, bool video)
+    {
+        if (_busy) return;
+        _busy = true;
+        _uploadingVideo = video;
+        _error = null;
+        try
+        {
+            var url = await Media.UploadAsync(args.File, video);
+            if (video) _model.VideoUrl = url;
+            else _model.PosterUrl = url;
+            Snackbar.Add("Upload thành công.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            var maxBytes = Media.MaxBytes(video);
+            var category = IntroUploadDiagnostics.Classify(ex, Paths.IsConfigured && Paths.CanWrite());
+            Logger.LogError(ex, "Customer video upload failed. FileName={FileName} FileSize={FileSize} Video={Video} ErrorCategory={ErrorCategory} CorrelationId={CorrelationId}",
+                IntroUploadDiagnostics.SafeFileName(args.File.Name), args.File.Size, video, category, Activity.Current?.Id);
+            _error = IntroUploadDiagnostics.Message(category, maxBytes);
+        }
+        finally { _busy = false; _uploadingVideo = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            CustomerVideoSaveResult result;
+            if (IsNew)
+            {
+                _model.CustomerId = _customer?.Id ?? Guid.Empty;
+                result = await Repository.CreateAsync(_model, _points);
+            }
+            else
+            {
+                result = await Repository.UpdateAsync(_model);
+            }
+
+            if (!result.Ok)
+            {
+                _error = result.Error;
+                return;
+            }
+
+            Snackbar.Add(IsNew ? (_points > 0 ? $"Đã thêm video và trừ {_points:#,0.##} điểm của khách." : "Đã thêm video cho khách.") : "Đã lưu video.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(result.Id));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Customer video save failed.");
+            _error = "Không lưu được video. Vui lòng thử lại.";
+        }
+        finally { _busy = false; }
+    }
+}

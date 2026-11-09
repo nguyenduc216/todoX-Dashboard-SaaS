@@ -766,6 +766,29 @@
             }
         }
 
+        if (!existingCodes.Contains("customer_videos"))
+        {
+            var customerVideosItem = new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                Code = "customer_videos",
+                Title = "Video khách hàng",
+                Href = "/customer-videos",
+                IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "admin_job_monitor",
+                MatchAll = false,
+                SortOrder = 30
+            };
+            var billingServices = list.FirstOrDefault(g => g.Code.Equals("billing_services", StringComparison.OrdinalIgnoreCase))
+                ?? list.FirstOrDefault(g => g.Code.Equals("administration", StringComparison.OrdinalIgnoreCase));
+            if (billingServices is not null)
+            {
+                customerVideosItem.GroupId = billingServices.Id;
+                billingServices.Items.Add(customerVideosItem);
+            }
+        }
+
         if (!existingCodes.Contains("admin_system_diagnostics"))
         {
             var diagnosticsItem = new NavigationMenuItemDto
@@ -1037,7 +1060,8 @@
                 Item("admin_system_diagnostics", "System diagnostics", "/admin/system/diagnostics", "Memory", Array.Empty<string>(), "admin_job_monitor", sort: 70)),
             Group("billing_services", "Dịch vụ & điểm", "AccountBalanceWallet", 30, true,
                 Item("wallets", "Quản lý điểm", "/wallets", "AccountBalanceWallet", new[] { "token_wallets" }, sort: 10),
-                Item("services", "Quản lý dịch vụ", "/services", "Category", new[] { "services" }, sort: 20)),
+                Item("services", "Quản lý dịch vụ", "/services", "Category", new[] { "services" }, sort: 20),
+                Item("customer_videos", "Video khách hàng", "/customer-videos", "VideoLibrary", Array.Empty<string>(), "admin_job_monitor", sort: 30)),
             Group("ai_studio", "AI Studio", "AutoFixHigh", 40, true,
                 Item("admin_avatar_manager", "Quản lý avatar mẫu", "/admin/avatar-manager", "FaceRetouchingNatural", new[] { "settings", "services" }, "admin_avatar_manager", sort: 10),
                 Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
