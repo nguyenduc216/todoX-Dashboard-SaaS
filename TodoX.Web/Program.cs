@@ -270,6 +270,7 @@ builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.Vid
 builder.Services.AddScoped<IRVideoInitialPointEstimateService, RVideoInitialPointEstimateService>();
 builder.Services.AddScoped<IRVideoSceneVideoAutoChainService, RVideoSceneVideoAutoChainService>();
 builder.Services.AddScoped<IRVideoSceneLinkService, RVideoSceneLinkService>();
+builder.Services.AddScoped<IRVideoScenePipelineService, RVideoScenePipelineService>();
 builder.Services.AddScoped<IRVideoSceneSplitService, RVideoSceneSplitService>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageBatchRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler>();

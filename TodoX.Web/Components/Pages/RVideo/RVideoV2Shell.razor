@@ -38,7 +38,7 @@
         @* Tabs stay mounted after their first visit so switching never re-initializes or re-queries. *@
         @if (_visitedTabs.Contains(0))
         {
-            <div class="rv2-tab-pane" hidden="@(_tabIndex != 0)"><RVideoV2Info JobView="_jobView" JobId="JobId" OnReloadRequested="ReloadAsync" /></div>
+            <div class="rv2-tab-pane" hidden="@(_tabIndex != 0)"><RVideoV2Info JobView="_jobView" JobId="JobId" OnReloadRequested="ReloadAsync" OnOpenPreview="@(() => TabIndex = 1)" /></div>
         }
         @if (_visitedTabs.Contains(1))
         {

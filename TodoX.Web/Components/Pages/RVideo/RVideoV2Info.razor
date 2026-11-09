@@ -5,6 +5,7 @@
 @inject TodoX.Web.Services.IAiStudioCatalogService Catalog
 @inject IRVideoJobService RVideoJobs
 @inject IRVideoSceneLinkService SceneLinks
+@inject IRVideoScenePipelineService Pipeline
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
 @inject IRVideoPromptGenerationAction PromptAction
 @inject IServicePromptAssistantService PromptAssistant
@@ -69,6 +70,34 @@
           <MudText Typo="Typo.caption" Class="rv2-adv-label">Áp dụng cho các scene khi tạo Prompt AI.</MudText>
         }
       </div>
+      @if (JobView is not null && (SceneCount > 0 || PromptHasScenes))
+      {
+        <div class="rv2-next" data-testid="rv2-next-step">
+          @if (SceneCount == 0)
+          {
+            <MudText Typo="Typo.body2">Prompt đã sẵn sàng. Bước tiếp theo: tạo các scene từ prompt.</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ViewCarousel" Disabled="@_pipelineBusy" OnClick="CreateScenesAsync">Tạo scene từ prompt</MudButton>
+          }
+          else if (IsAuto)
+          {
+            <MudText Typo="Typo.body2">Đã có @SceneCount scene. Chế độ tự động: hệ thống tự tạo ảnh → video → video hoàn chỉnh.</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayCircle" OnClick="OpenPreviewAsync">Xem tiến trình</MudButton>
+          }
+          else
+          {
+            <MudText Typo="Typo.body2">Đã có @SceneCount scene. Tạo ảnh cho các scene, rồi tạo video ở tab Xem trước (nút Render job).</MudText>
+            <div class="rv2-next-actions">
+              <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@_pipelineBusy" OnClick="CreateImagesAsync">Tạo ảnh các scene</MudButton>
+              <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" OnClick="OpenPreviewAsync">Tạo video</MudButton>
+            </div>
+          }
+          @if (SceneCount > 0 && PromptHasScenes)
+          {
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_pipelineBusy" OnClick="RecreateScenesAsync">Tạo lại scene từ prompt</MudButton>
+          }
+          @if (_pipelineBusy) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" /> }
+        </div>
+      }
       @if (_generating) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" /> }
       @if (!string.IsNullOrWhiteSpace(_status)) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@_status</MudAlert> }
       @if (JobView is null && JobId is null) { <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Chưa chọn job.</MudAlert> }
@@ -207,6 +236,40 @@
   [Parameter] public RVideoJobView? JobView{get;set;}
   [Parameter] public Guid? JobId{get;set;}
   [Parameter] public EventCallback OnReloadRequested{get;set;}
+  [Parameter] public EventCallback OnOpenPreview{get;set;}
+  private bool _pipelineBusy;
+  private int SceneCount => JobView?.Project.Scenes.Count ?? 0;
+  private bool IsAuto => string.Equals(JobView?.Settings?.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase);
+  private bool PromptHasScenes => JobView is not null && RVideoScenePipelineService.PromptHasScenes(JobView.Project);
+  private async Task OpenPreviewAsync(){ if(OnOpenPreview.HasDelegate) await OnOpenPreview.InvokeAsync(); }
+  private async Task CreateScenesAsync(){
+    if(JobView is null || AuthState.CurrentUser is null || _pipelineBusy) return;
+    _pipelineBusy=true; StateHasChanged();
+    try{
+      var result=await Pipeline.CreateScenesFromPromptAsync(JobView.Project.Id, _linkedVideo, AuthState.CurrentUser);
+      Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+      if(!result.Started) return;
+      _linkedPending=null;
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+      await OpenPreviewAsync();
+    }finally{ _pipelineBusy=false; StateHasChanged(); }
+  }
+  private async Task RecreateScenesAsync(){
+    var ok=await Dialogs.ShowMessageBoxAsync("Tạo lại scene",
+      "Tạo lại toàn bộ scene từ prompt hiện tại? Các scene đang có (kể cả ảnh/video đã tạo) sẽ được thay bằng scene mới.",
+      yesText:"Tạo lại", cancelText:"Hủy");
+    if(ok==true) await CreateScenesAsync();
+  }
+  private async Task CreateImagesAsync(){
+    if(JobView is null || AuthState.CurrentUser is null || _pipelineBusy) return;
+    _pipelineBusy=true; StateHasChanged();
+    try{
+      var result=await Pipeline.EnqueueMissingImagesAsync(JobView.Project.Id, AuthState.CurrentUser);
+      Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Info);
+      if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+      if(result.Started) await OpenPreviewAsync();
+    }finally{ _pipelineBusy=false; StateHasChanged(); }
+  }
   private bool _adv=false;
   private string _titleWorking=string.Empty;
   private string _workingInput=string.Empty;
@@ -351,6 +414,12 @@
       // Confirm the new generation is active, then advance baseline to the persisted user_input.
       if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
       var reloaded = await WaitForActiveGenerationAsync(outcome.Result.GenerationId);
+      // First prompt of the job: build the scenes straight away (what "Tạo / phân tách scene" did in V1).
+      if(JobView is not null && JobView.Project.Scenes.Count == 0){
+        var seeded=await Pipeline.CreateScenesFromPromptAsync(JobView.Project.Id, wantLinked, AuthState.CurrentUser);
+        if(seeded.Started){ Snackbar.Add(seeded.Reason, Severity.Success); wantLinked=false; _linkedPending=null;
+          if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }
+      }
       // New scenes replace the old ones: keep "Video liên kết" as the user had it.
       if(wantLinked && JobView is not null){
         try{ await SceneLinks.SetProjectLinkedAsync(JobView.Project.Id, true, AuthState.CurrentUser); _linkedPending=null;
