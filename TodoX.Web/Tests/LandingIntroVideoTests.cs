@@ -75,7 +75,9 @@ public sealed class LandingIntroVideoTests
     [InlineData("a.webm", "video/webm", 1, true, true)]
     [InlineData("a.png", "image/png", 1, false, true)]
     [InlineData("a.exe", "video/mp4", 1, true, false)]
-    [InlineData("a.mp4", "image/png", 1, true, false)]
+    [InlineData("a.mp4", "image/png", 1, true, true)]      // browser type is not trusted; bytes decide
+    [InlineData("a.png", "", 1, false, true)]
+    [InlineData("a.gif", "image/gif", 1, false, false)]
     [InlineData("a.mp4", "video/mp4", 0, true, false)]
     [InlineData("a.mp4", "video/mp4", 201, true, false)]
     public void UploadMetadataIsChecked(string name, string mime, long bytes, bool video, bool allowed)
@@ -92,6 +94,21 @@ public sealed class LandingIntroVideoTests
         System.Text.Encoding.ASCII.GetBytes("ftyp").CopyTo(mp4, 4);
         Assert.True(LandingIntroVideoMediaService.HasValidHeader(".mp4", mp4));
         Assert.True(LandingIntroVideoMediaService.HasValidHeader(".webm", [0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+    }
+
+    [Fact]
+    public void Image_format_comes_from_its_bytes_not_its_name()
+    {
+        byte[] jpeg = [0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        var webp = new byte[16];
+        System.Text.Encoding.ASCII.GetBytes("RIFF").CopyTo(webp, 0);
+        System.Text.Encoding.ASCII.GetBytes("WEBP").CopyTo(webp, 8);
+        byte[] png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0];
+        Assert.Equal(".jpg", LandingIntroVideoMediaService.DetectExtension(jpeg, video: false));   // "thumbnail.png" saved as JPEG
+        Assert.Equal(".webp", LandingIntroVideoMediaService.DetectExtension(webp, video: false));
+        Assert.Equal(".png", LandingIntroVideoMediaService.DetectExtension(png, video: false));
+        Assert.Null(LandingIntroVideoMediaService.DetectExtension(new byte[16], video: false));
+        Assert.Null(LandingIntroVideoMediaService.DetectExtension(jpeg, video: true));
     }
 
     [Fact]

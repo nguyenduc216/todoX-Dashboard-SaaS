@@ -73,7 +73,10 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
             }
             var header = new byte[16];
             await using (var stream = File.OpenRead(source)) _ = await stream.ReadAsync(header, ct);
-            if (!HasValidHeader(ext, header)) throw new IntroUploadException(IntroUploadError.InvalidFile, "Nội dung file không hợp lệ.");
+            // The real format comes from the file's bytes: AI/editing tools often save JPEG or WebP under a .png name.
+            var detected = DetectExtension(header, video)
+                ?? throw new IntroUploadException(IntroUploadError.InvalidFile, "Nội dung file không hợp lệ.");
+            ext = detected;
             var transcode = options.Value.IndustrySolutions.VideoTranscode;
             if (video && transcode.Enabled)
             {
@@ -116,11 +119,22 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
     public static void ValidateUpload(string name, string contentType, long size, bool video, long limit)
     {
         var ext = Path.GetExtension(name).ToLowerInvariant();
-        var mime = video ? ext switch { ".mp4" => "video/mp4", ".webm" => "video/webm", _ => null }
-            : ext switch { ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png", ".webp" => "image/webp", _ => null };
+        var knownExt = video ? ext is ".mp4" or ".webm"
+            : ext is ".jpg" or ".jpeg" or ".png" or ".webp";
+        // The name only pre-filters; the browser's reported type is not trusted (it follows the name, and some
+        // browsers send none). The bytes decide after upload (DetectExtension).
+        _ = contentType;
         if (size > limit) throw new IntroUploadException(IntroUploadError.TooLarge, "Tệp vượt quá dung lượng cho phép.");
-        if (mime is null || !string.Equals(mime, contentType, StringComparison.OrdinalIgnoreCase) || size <= 0)
+        if (!knownExt || size <= 0)
             throw new IntroUploadException(IntroUploadError.InvalidFile, "Định dạng hoặc dung lượng file không hợp lệ.");
+    }
+
+    /// <summary>The file's real extension from its first bytes, or null when it is not an allowed video/image.</summary>
+    public static string? DetectExtension(byte[] header, bool video)
+    {
+        if (header.Length < 16) return null;
+        string[] candidates = video ? [".mp4", ".webm"] : [".jpg", ".png", ".webp"];
+        return candidates.FirstOrDefault(c => HasValidHeader(c, header));
     }
 
     public static bool HasValidHeader(string ext, byte[] header)
