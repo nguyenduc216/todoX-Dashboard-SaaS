@@ -12,6 +12,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<RVideoLifecycleWorker> _logger;
+    private static readonly TimeSpan ProjectEvaluationTimeout = TimeSpan.FromSeconds(90);
 
     public RVideoLifecycleWorker(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<RVideoLifecycleWorker> logger)
     {
@@ -50,11 +51,19 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var sceneLinks = scope.ServiceProvider.GetService<IRVideoSceneLinkService>();
                 foreach (var setting in settings)
                 {
+                    // One slow or stuck project must not hold up every other project's lifecycle.
+                    using var projectTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    projectTimeout.CancelAfter(ProjectEvaluationTimeout);
                     try
                     {
-                        await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, finalizer, autoChain, versions, finalization, factory, tenant, catalog, stoppingToken, sceneLinks);
+                        await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, finalizer, autoChain, versions, finalization, factory, tenant, catalog, projectTimeout.Token, sceneLinks)
+                            .WaitAsync(ProjectEvaluationTimeout + TimeSpan.FromSeconds(5), stoppingToken);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+                    catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
+                    {
+                        _logger.LogWarning("RVIDEO_PROJECT_LIFECYCLE_TIMEOUT projectId={ProjectId} seconds={Seconds}", setting.ProjectId, ProjectEvaluationTimeout.TotalSeconds);
+                    }
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "RVIDEO_PROJECT_LIFECYCLE_FAILED projectId={ProjectId}", setting.ProjectId);
@@ -394,7 +403,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                    created_at AS CreatedAt, updated_at AS UpdatedAt
               FROM video_render.rvideo_job_settings
              WHERE tenant_id=@tenant
-               AND execution_mode IN ('AUTO', 'MANUAL');
+               AND execution_mode IN ('AUTO', 'MANUAL')
+             ORDER BY updated_at DESC, project_id DESC;
             """, new { tenant = tenant.TenantId });
         return rows.ToList();
     }
