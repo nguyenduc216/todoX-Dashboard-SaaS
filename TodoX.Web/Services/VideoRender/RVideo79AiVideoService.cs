@@ -18,12 +18,12 @@ public static class RVideoVideoModelPolicy
 
     public static readonly IReadOnlyList<RVideoVideoModelPolicyEntry> Models =
     [
-        // Gemini Omni Flash 1.2 (79AI, 2026-11) supports every duration from 4 to 15 seconds,
-        // so it is the default first choice; the others are duration-aware fallbacks.
-        new(0, ProviderCode, "gemini-omni-flash-1.2", "flash"),
-        new(1, ProviderCode, "veo_omni", "flash"),
-        new(2, ProviderCode, "veo_3_1", "fast"),
-        new(3, ProviderCode, "veo_3_1", "lite"),
+        // Default order (user, 2026-11-10): the Veo family first (Veo 3.1 Omni, Veo 3.1 Fast, Veo 3.1 Lite),
+        // then Gemini Omni Flash 1.2 (every duration 4-15 s), Grok last. Later entries are duration-aware fallbacks.
+        new(0, ProviderCode, "veo_omni", "flash"),
+        new(1, ProviderCode, "veo_3_1", "fast"),
+        new(2, ProviderCode, "veo_3_1", "lite"),
+        new(3, ProviderCode, "gemini-omni-flash-1.2", "flash"),
         new(4, ProviderCode, "grok_video_heavy", "normal")
     ];
 

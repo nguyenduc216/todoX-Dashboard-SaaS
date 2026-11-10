@@ -47,15 +47,18 @@ public sealed class RVideoVideoHotfixTests
         {
             Assert.Equal(RVideoVideoModelPolicy.ProviderCode, model.ProviderCode);
         });
-        Assert.Equal("gemini-omni-flash-1.2", RVideoVideoModelPolicy.GetInitial().Model);
+        // Default order (2026-11-10): Veo 3.1 Omni, Veo 3.1 Fast, Veo 3.1 Lite, Gemini Omni Flash 1.2, Grok.
+        Assert.Equal(
+            ["79ai|veo_omni|flash", "79ai|veo_3_1|fast", "79ai|veo_3_1|lite", "79ai|gemini-omni-flash-1.2|flash", "79ai|grok_video_heavy|normal"],
+            RVideoVideoModelPolicy.Models.Select(RVideoVideoModelPolicy.BuildKey));
+        Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetInitial().Model);
         Assert.Equal("flash", RVideoVideoModelPolicy.GetInitial().Mode);
-        Assert.Equal("veo_omni", RVideoVideoModelPolicy.Models[1].Model);
         Assert.Equal("normal", RVideoVideoModelPolicy.Models[4].Mode);
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
         Assert.Equal(5, RVideoVideoModelPolicy.Models.Count);
-        Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetNext(0)!.Model);
+        Assert.Equal("veo_3_1", RVideoVideoModelPolicy.GetNext(0)!.Model);
         Assert.Equal("grok_video_heavy", RVideoVideoModelPolicy.GetNext(3)!.Model);
         Assert.Null(RVideoVideoModelPolicy.GetNext(4));
     }
