@@ -29,7 +29,7 @@
                                          Disabled="_busy" />
                         @if (_customer is not null && _balance is not null)
                         {
-                            <MudText Typo="Typo.caption" Color="@(_balance < _points ? Color.Error : Color.Secondary)">Số dư hiện tại: @_balance.Value.ToString("#,0.##") điểm</MudText>
+                            <MudText Typo="Typo.caption" Class="mt-1 d-block" Color="@(_balance < _points ? Color.Error : Color.Secondary)">Số dư hiện tại: @_balance.Value.ToString("#,0.##") điểm</MudText>
                         }
                     </MudItem>
                     <MudItem xs="12" sm="3">
@@ -58,6 +58,7 @@
                     <MudStack Spacing="2">
                         <MudText>Video MP4/WebM (tối đa @(Media.MaxBytes(true) / (1024 * 1024)) MB):</MudText>
                         <InputFile OnChange="@(args => UploadAsync(args, true))" accept=".mp4,.webm,video/mp4,video/webm" disabled="@_busy" />
+                        @LibraryButton(true)
                         @if (_uploadingVideo)
                         {
                             <MudText Typo="Typo.caption" Color="Color.Warning">Đang tải lên và tối ưu video cho web (720p), có thể mất 1–2 phút...</MudText>
@@ -72,6 +73,7 @@
                     <MudStack Spacing="2">
                         <MudText>Ảnh bìa (không bắt buộc, JPG/PNG/WebP):</MudText>
                         <InputFile OnChange="@(args => UploadAsync(args, false))" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled="@_busy" />
+                        @LibraryButton(false)
                         @if (!string.IsNullOrWhiteSpace(_model.PosterUrl))
                         {
                             <img src="@_model.PosterUrl" alt="" style="max-width:100%;max-height:200px;object-fit:contain" />
@@ -80,6 +82,47 @@
                     </MudStack>
                 </MudItem>
             </MudGrid>
+            @if (_libraryVideo is { } libraryVideo)
+            {
+                <MudPaper Outlined="true" Class="pa-3">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap">
+                        <MudText Typo="Typo.subtitle2">Thư viện @(libraryVideo ? "video" : "ảnh bìa") đã tải lên</MudText>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudSelect T="string" Value="_librarySource" ValueChanged="@(v => _librarySource = v)" Dense="true" Margin="Margin.Dense" Style="min-width:180px">
+                                <MudSelectItem Value="@string.Empty">Tất cả</MudSelectItem>
+                                <MudSelectItem Value="@CustomerVideoMediaService.SourceCustomerVideos">@CustomerVideoMediaService.SourceCustomerVideos</MudSelectItem>
+                                <MudSelectItem Value="@CustomerVideoMediaService.SourceVideoSamples">@CustomerVideoMediaService.SourceVideoSamples</MudSelectItem>
+                            </MudSelect>
+                            <MudButton Size="Size.Small" OnClick="@(() => _libraryVideo = null)">Đóng</MudButton>
+                        </MudStack>
+                    </MudStack>
+                    @if (!LibraryFiles.Any())
+                    {
+                        <MudText Typo="Typo.caption">Chưa có tệp nào trong thư viện.</MudText>
+                    }
+                    else
+                    {
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;max-height:420px;overflow:auto;margin-top:8px">
+                            @foreach (var file in LibraryFiles)
+                            {
+                                var picked = file.Url == (libraryVideo ? _model.VideoUrl : _model.PosterUrl);
+                                <div style="border:2px solid @(picked ? "var(--mud-palette-warning)" : "var(--mud-palette-lines-default)");border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px">
+                                    @if (libraryVideo)
+                                    {
+                                        <video src="@file.Url" preload="metadata" muted playsinline controls style="width:100%;height:180px;object-fit:contain;background:#000"></video>
+                                    }
+                                    else
+                                    {
+                                        <img src="@file.Url" alt="@file.FileName" loading="lazy" style="width:100%;height:160px;object-fit:contain;background:#111;cursor:pointer" @onclick="() => PickFromLibrary(file)" />
+                                    }
+                                    <MudText Typo="Typo.caption">@file.Source · @file.UploadedAtUtc.AddHours(7).ToString("dd/MM HH:mm") · @FormatSize(file.Size)</MudText>
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" Disabled="@picked" OnClick="() => PickFromLibrary(file)">@(picked ? "Đang dùng" : "Chọn")</MudButton>
+                                </div>
+                            }
+                        </div>
+                    }
+                </MudPaper>
+            }
             <MudTextField T="string" Label="Ghi chú cho khách hàng" @bind-Value="_model.Note" Lines="3" Disabled="_busy" />
             <MudTextField T="string" Label="Kịch bản video" @bind-Value="_model.Script" Lines="8" Disabled="_busy" />
         </MudStack>
@@ -107,6 +150,45 @@
     private string? _error;
 
     private bool IsNew => Source is null;
+
+    // Library: reuse a file already on the server (an earlier upload, or a "Kho mẫu video" file) instead of uploading again.
+    private bool? _libraryVideo;
+    private string _librarySource = string.Empty;
+    private IReadOnlyList<CustomerVideoLibraryFile> _library = [];
+
+    private IEnumerable<CustomerVideoLibraryFile> LibraryFiles
+        => string.IsNullOrEmpty(_librarySource) ? _library : _library.Where(x => x.Source == _librarySource);
+
+    private RenderFragment LibraryButton(bool video) => @<MudButton Size="Size.Small" Variant="Variant.Outlined"
+        StartIcon="@Icons.Material.Filled.VideoLibrary" Disabled="@_busy" OnClick="() => OpenLibrary(video)"
+        Style="align-self:flex-start">Chọn từ thư viện</MudButton>;
+
+    private void OpenLibrary(bool video)
+    {
+        _error = null;
+        try
+        {
+            _library = Media.ListLibrary(video);
+            _libraryVideo = video;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Customer video library listing failed. Video={Video}", video);
+            _error = "Không mở được thư viện tệp. Vui lòng thử lại.";
+        }
+    }
+
+    private void PickFromLibrary(CustomerVideoLibraryFile file)
+    {
+        if (_libraryVideo is not { } video) return;
+        if (video) _model.VideoUrl = file.Url;
+        else _model.PosterUrl = file.Url;
+        Snackbar.Add(video ? "Đã chọn video từ thư viện." : "Đã chọn ảnh bìa từ thư viện.", Severity.Success);
+        _libraryVideo = null;
+    }
+
+    private static string FormatSize(long bytes)
+        => bytes >= 1024 * 1024 ? $"{bytes / (1024d * 1024):0.#} MB" : $"{Math.Max(1, bytes / 1024)} KB";
 
     protected override void OnInitialized()
     {

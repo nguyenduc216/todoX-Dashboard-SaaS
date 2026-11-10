@@ -110,4 +110,33 @@ public sealed class CustomerVideoTests
         Assert.True(File.Exists(Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..")),
             "database", "manual", "customer-videos", "20261110_customer_videos.test.sql")));
     }
+
+    [Fact]
+    public void Video_dialog_can_pick_files_already_on_the_server()
+    {
+        var dialog = RepoFile("TodoX.Web", "Components", "Dialogs", "CustomerVideoDialog.razor");
+        Assert.Contains("@LibraryButton(true)", dialog);
+        Assert.Contains("@LibraryButton(false)", dialog);
+        Assert.Contains("Media.ListLibrary(video)", dialog);
+
+        var root = Path.Combine(Path.GetTempPath(), "todox-customer-library-" + Guid.NewGuid().ToString("N"));
+        var options = Options.Create(new SharedMediaOptions { StorageRoot = root, RequestPath = "/media" });
+        var paths = new SharedMediaPathService(options);
+        Directory.CreateDirectory(paths.GetCustomerVideoPhysicalFolder("videos"));
+        Directory.CreateDirectory(paths.GetLandingMediaPhysicalFolder("video-samples", "videos"));
+        File.WriteAllBytes(Path.Combine(paths.GetCustomerVideoPhysicalFolder("videos"), "a.mp4"), [1]);
+        File.WriteAllBytes(Path.Combine(paths.GetLandingMediaPhysicalFolder("video-samples", "videos"), "b.mp4"), [1]);
+        File.WriteAllBytes(Path.Combine(paths.GetLandingMediaPhysicalFolder("video-samples", "videos"), "c.txt"), [1]);
+        var auth = new AuthStateService(null!, null!, Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthStateService>.Instance);
+        typeof(AuthStateService).GetProperty(nameof(AuthStateService.CurrentUser))!
+            .SetValue(auth, new CurrentUserSession { UserId = Guid.NewGuid(), Role = TodoXUserRole.Admin, IsAuthenticated = true });
+        try
+        {
+            var files = new CustomerVideoMediaService(paths, options, auth).ListLibrary(video: true);
+            Assert.Equal(2, files.Count);
+            Assert.Contains(files, f => f.Url == "/media/customer-videos/videos/a.mp4" && f.Source == CustomerVideoMediaService.SourceCustomerVideos);
+            Assert.Contains(files, f => f.Url == "/media/landing/video-samples/videos/b.mp4" && f.Source == CustomerVideoMediaService.SourceVideoSamples);
+        }
+        finally { Directory.Delete(root, true); }
+    }
 }
