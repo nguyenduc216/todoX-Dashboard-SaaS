@@ -117,7 +117,9 @@ public sealed class RVideoScenePipelineService : IRVideoScenePipelineService
             await _settings.SetAutoRunStartedAsync(projectId, true, ct);
             await _repo.AddProjectEventAsync(projectId, "AUTO_RUN_STARTED", "info", "RVIDEO auto run started by the user (V2).",
                 new { projectId, sceneCount = project.Scenes.Count, userId = user.UserId }, ct);
-            return new(true, $"Đã bắt đầu tự động tạo {project.Scenes.Count} scene: ảnh → video, scene nối tiếp tạo từ khung cuối của scene trước.");
+            return new(true, RVideoSceneLink.IsProjectLinked(project.Scenes)
+                ? $"Đã bắt đầu tự động tạo {project.Scenes.Count} scene: ảnh → video, scene nối tiếp tạo từ khung cuối của scene trước."
+                : $"Đã bắt đầu tự động tạo {project.Scenes.Count} scene: ảnh → video.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

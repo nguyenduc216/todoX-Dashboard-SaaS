@@ -23,4 +23,17 @@ public sealed class RVideoVideoBlockedTextTests
         Assert.Contains("RVideoUserText.VideoBlocked(currentState.HasActiveJob", preview);
         Assert.Contains("RVIDEO_V2_VIDEO_RENDER_BLOCKED", preview);
     }
+
+    [Fact]
+    public void Start_confirmation_only_mentions_what_the_job_will_do()
+    {
+        var plain = RVideoUserText.AutoRunConfirm(3, 0, false, false);
+        Assert.DoesNotContain("nối tiếp", plain);
+        Assert.DoesNotContain("tạo ảnh cho", plain);
+        Assert.Contains("3 scene", plain);
+        var full = RVideoUserText.AutoRunConfirm(4, 2, false, true);
+        Assert.Contains("tạo ảnh cho 2 scene chưa có ảnh", full);
+        Assert.Contains("nối tiếp", full);
+        Assert.Contains("ảnh tham chiếu chung", RVideoUserText.AutoRunConfirm(2, 2, true, false));
+    }
 }

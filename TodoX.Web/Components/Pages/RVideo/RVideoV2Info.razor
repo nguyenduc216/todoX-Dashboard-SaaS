@@ -292,7 +292,9 @@
   private bool AutoRunPending => IsAuto && JobView?.Settings?.AutoRunStartedAt is null;
   private async Task StartAutoRunAsync(){
     if(JobView is null || AuthState.CurrentUser is not { } user || _pipelineBusy) return;
-    var ok=await JS.InvokeAsync<bool>("confirm",$"Hệ thống sẽ tự tạo ảnh rồi tạo video cho {SceneCount} scene (scene nối tiếp tạo video từ khung cuối của scene trước), không cần duyệt từng scene. Điểm được trừ theo từng ảnh / video tạo ra. Bắt đầu?");
+    var ok=await JS.InvokeAsync<bool>("confirm",RVideoUserText.AutoRunConfirm(SceneCount,
+      JobView.Project.Scenes.Count(x=>string.IsNullOrWhiteSpace(x.StaticImageUrl)),
+      JobView.Settings?.UseReferenceImageForAllScenes==true, RVideoSceneLink.IsProjectLinked(JobView.Project.Scenes)));
     if(!ok) return;
     _pipelineBusy=true; StateHasChanged();
     try{

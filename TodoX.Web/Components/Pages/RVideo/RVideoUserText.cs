@@ -35,6 +35,18 @@ internal static class RVideoUserText
         _ => "Chưa thể thử lại"
     };
 
+    /// <summary>Confirmation for "Bắt đầu tạo video" (AUTO), describing only what this job will actually do.</summary>
+    public static string AutoRunConfirm(int sceneCount, int scenesWithoutImage, bool sharedReferenceImage, bool linked)
+    {
+        var steps = new List<string>();
+        if (!sharedReferenceImage && scenesWithoutImage > 0)
+            steps.Add($"tạo ảnh cho {scenesWithoutImage} scene chưa có ảnh");
+        steps.Add(sharedReferenceImage ? "tạo video từ ảnh tham chiếu chung" : "tạo video từ ảnh của từng scene");
+        var text = $"Hệ thống sẽ tự chạy cho {sceneCount} scene: {string.Join(", rồi ", steps)}";
+        if (linked) text += "; scene nối tiếp tạo video từ khung cuối của scene trước";
+        return text + ". Không cần duyệt từng scene. Điểm được trừ theo từng ảnh / video tạo ra. Bắt đầu?";
+    }
+
     /// <summary>Why a scene video cannot be started right now, in words the user can act on.</summary>
     public static string VideoBlocked(bool hasActiveJob, string? reason, string? latestJobStatus) => reason switch
     {

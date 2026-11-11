@@ -27,10 +27,10 @@ public partial class RVideoV2Preview
     private async Task StartAutoRunAsync()
     {
         if (JobView is null || _busy || AuthState.CurrentUser is not { } user) return;
-        var sceneCount = JobView.Project.Scenes.Count;
+        var scenes = JobView.Project.Scenes;
         var confirmed = await DialogService.ShowMessageBoxAsync("Bắt đầu tạo video",
-            $"Hệ thống sẽ tự tạo ảnh rồi tạo video cho {sceneCount} scene (scene nối tiếp tạo video từ khung cuối của scene trước), "
-            + "không cần duyệt từng scene. Điểm được trừ theo từng ảnh / video tạo ra. Bắt đầu?",
+            RVideoUserText.AutoRunConfirm(scenes.Count, scenes.Count(x => string.IsNullOrWhiteSpace(x.StaticImageUrl)),
+                JobView.Settings?.UseReferenceImageForAllScenes == true, RVideoSceneLink.IsProjectLinked(scenes)),
             yesText: "Bắt đầu", cancelText: "Hủy");
         if (confirmed != true) return;
         _busy = true;
