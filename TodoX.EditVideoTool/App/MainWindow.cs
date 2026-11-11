@@ -36,14 +36,15 @@ public sealed partial class MainWindow : Form
 
     private readonly Label _licenseState = Label("", 11);
     private readonly TextBox _keyBox = new() { Width = 520, Font = new Font("Segoe UI", 10), BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Dán license key TodoX (tdxv_...)" };
-    private readonly ListView _checks = new() { View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.None, Height = 190, Width = 640, BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 9.5f) };
+    private readonly ListView _checks = new() { View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.None, Height = 40, Width = 640, Scrollable = false, ShowItemToolTips = true, BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 9.5f) };
     private readonly Label _clientsLabel = Label("", 9.5f);
     private readonly Label _skillsLabel = Label("", 9.5f);
     private readonly NumericUpDown _skillHours = new() { Minimum = 1, Maximum = 48, Width = 60, BackColor = Panel, ForeColor = Ink, Font = new Font("Segoe UI", 10), Margin = new Padding(0, 6, 8, 0) };
     private readonly Label _resourceLabel = Label("", 9.5f);
     private readonly ComboBox _skillPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Panel, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
     private readonly ComboBox _versionPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Panel, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
-    private readonly TextBox _log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Height = 110, Width = 640, BackColor = Panel, ForeColor = Muted, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9) };
+    // No scroll bar: it always shows the newest lines; the mouse wheel over it still scrolls back through older ones.
+    private readonly RichTextBox _log = new() { ReadOnly = true, ScrollBars = RichTextBoxScrollBars.None, Height = 126, Width = 640, BackColor = Panel, ForeColor = Muted, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9), DetectUrls = false };
     private readonly List<Button> _actions = [];
     private readonly Panel _updateBanner = new() { Width = 640, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = ColorTranslator.FromHtml("#3A2E0A"), Padding = new Padding(12, 10, 12, 10), Margin = new Padding(0, 0, 0, 8), Visible = false };
     private readonly Label _updateTitle = new() { AutoSize = true, MaximumSize = new Size(610, 0), Font = new Font("Segoe UI Semibold", 11), ForeColor = Yellow };
@@ -69,11 +70,13 @@ public sealed partial class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(700, 860);
-        AutoScroll = true;
+        ClientSize = new Size(706, Math.Min(900, Screen.FromPoint(Cursor.Position).WorkingArea.Height - 60));
 
-        var root = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28, 20, 28, 20), AutoScroll = true };
-        Controls.Add(root);
+        // The page is the only thing that scrolls, with TodoX's thin bar, and only when the window is too short.
+        var root = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28, 20, 28, 20), AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+        var page = new ScrollHost(root, Ground) { Dock = DockStyle.Fill };
+        page.WheelOwners.Add(_log);
+        Controls.Add(page);
 
         root.Controls.Add(Header());
         root.Controls.Add(UpdateBanner());
@@ -85,12 +88,12 @@ public sealed partial class MainWindow : Form
         keyRow.Controls.Add(_keyBox);
         keyRow.Controls.Add(Action("Kích hoạt", ActivateAsync, primary: true));
         root.Controls.Add(keyRow);
-        root.Controls.Add(new Label { Text = LicenseMessages.OneMachineNote, AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 4, 0, 8) });
+        root.Controls.Add(new Label { Text = LicenseMessages.OneMachineNote, AutoSize = true, MaximumSize = new Size(640, 0), ForeColor = Muted, Margin = new Padding(0, 4, 0, 8) });
 
         root.Controls.Add(Section("Kiểm tra hệ thống"));
         _checks.Columns.Add("", 26);
-        _checks.Columns.Add("", 190);
-        _checks.Columns.Add("", 410);
+        _checks.Columns.Add("", 210);
+        _checks.Columns.Add("", 400);
         root.Controls.Add(_checks);
         var checkRow = Row();
         checkRow.Controls.Add(Action("Kiểm tra lại", () => RunHealthAsync(untilConnected: true)));
@@ -423,8 +426,11 @@ public sealed partial class MainWindow : Form
                 var row = new ListViewItem(item.Ok ? "✔" : "✖") { ForeColor = item.Ok ? ColorTranslator.FromHtml("#4ADE80") : ColorTranslator.FromHtml("#F87171") };
                 row.SubItems.Add(item.Name);
                 row.SubItems.Add(item.Ok ? item.Detail : $"{item.Detail} — {item.Fix}");
+                row.ToolTipText = row.SubItems[2].Text;
                 _checks.Items.Add(row);
             }
+
+            FitChecksHeight();
 
             Log(report.Ok ? "Hệ thống sẵn sàng." : "Có mục cần xử lý (xem danh sách).");
         }
@@ -458,7 +464,16 @@ public sealed partial class MainWindow : Form
         }
 
         _log.AppendText($"{DateTime.Now:HH:mm:ss}  {line}{Environment.NewLine}");
+        _log.ScrollToCaret();
     }
+
+    /// <summary>The check list grows to show every row, so it never needs its own scroll bar.</summary>
+    private void FitChecksHeight()
+    {
+        var rowHeight = _checks.Items.Count > 0 ? _checks.GetItemRect(0).Height : 24;
+        _checks.Height = Math.Max(1, _checks.Items.Count) * rowHeight + 4;
+    }
+
 
     // ------------------------------------------------------------------ layout helpers
 
