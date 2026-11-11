@@ -158,6 +158,56 @@ else
             <div class="rv2-skel rv2-skel-field"></div><div class="rv2-skel rv2-skel-field"></div>
           }
         </div>
+        @if(_optsReady && VoiceFit(a) is { Fits: false } fit)
+        {
+          var target = SuggestedDuration(a, fit.NeededSeconds);
+          <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">
+            Lời thoại khoảng @fit.Words từ, cần ~@fit.NeededSeconds giây để đọc hết, dài hơn thời lượng scene (@a.DurationSeconds giây)@(IsLibraryVoice ? ": giọng sẽ bị cắt khi ghép vào video." : ".")
+            @if(target is { } t)
+            {
+              <span> Nên chọn <b>@t.Seconds giây</b> với <b>@t.Option.Label</b>.</span>
+              <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Class="ml-2" Disabled="@_busy" OnClick="@(()=>ApplyVoiceFitAsync(a, t.Option.Key, t.Seconds))">Áp dụng</MudButton>
+            }
+            else
+            {
+              <span> Không model nào làm được @fit.NeededSeconds giây: nên rút gọn lời thoại hoặc tách scene.</span>
+            }
+          </MudAlert>
+        }
+        @if(FallbackSteps(a) is { Count: > 0 } steps)
+        {
+          var last = steps[^1];
+          <div class="rv2-pv-fallback">
+            <div class="rv2-pv-fallback-title">
+              @if(last.Kind == "switched" && VideoInFlight(a))
+              {
+                <span>⚠ @last.FromModel không tạo được (@last.Reason) → đang tự chuyển sang <b>@last.Model</b>.</span>
+              }
+              else if(last.Kind == "exhausted")
+              {
+                <span>✕ Đã thử hết các model theo thứ tự ưu tiên nhưng chưa tạo được video.</span>
+              }
+              else
+              {
+                <span>Lượt gần nhất đã tự chuyển model dự phòng.</span>
+              }
+            </div>
+            <ol>
+              @foreach(var step in steps)
+              {
+                <li>
+                  @if(step.Kind == "switched"){<span>Chuyển sang <b>@step.Model</b></span>}
+                  else if(step.Kind == "duration"){<span><b>@step.Model</b>: @step.Reason</span>}
+                  else {<span><b>@step.Model</b> thất bại: @step.Reason</span>}
+                  @if(IsStaff && (!string.IsNullOrWhiteSpace(step.ErrorCode) || !string.IsNullOrWhiteSpace(step.ErrorDetail)))
+                  {
+                    <div class="rv2-pv-fallback-detail">@step.ErrorCode @Short(step.ErrorDetail)</div>
+                  }
+                </li>
+              }
+            </ol>
+          </div>
+        }
         @if(_optsReady && UsedModelLabel(a) is { } usedLabel)
         {
           <div class="rv2-pv-used-model">Video hiện tại tạo bằng: <b>@usedLabel</b>@(HasExplicitModel(a) ? " · lượt mới dùng model đang chọn ở trên" : null)</div>
@@ -261,6 +311,35 @@ async Task HandleSceneVoiceChangedAsync(VideoProjectSceneDto scene, string code)
   else metadata.Extra[RVideoSceneVoice.VoiceCodeKey] = code.Trim();
   await DoSaveAsync(scene, metadata, scene.DurationSeconds);
   Snackbar.Add("Đã chọn giọng cho scene. Bấm \"Tạo lại giọng\" để áp dụng.", Severity.Info);
+}
+bool IsStaff => AuthState.CurrentUser is { } u && (u.ImpersonatorUserId is not null || TodoX.Web.Services.AdminEndpointAuthorization.IsAdmin(u));
+IReadOnlyList<RVideoFallbackStep> FallbackSteps(VideoProjectSceneDto scene)
+  => JobView is null ? Array.Empty<RVideoFallbackStep>() : RVideoFallbackTimeline.ForScene(JobView.Project.Events, scene.Id);
+static string? Short(string? text) => string.IsNullOrWhiteSpace(text) ? null : (text.Length > 300 ? text[..300] + "…" : text);
+RVideoVoiceFit? VoiceFit(VideoProjectSceneDto scene)
+{
+  var mode = RVideoRules.ResolveVoiceMode(JobView?.Settings);
+  if(mode == RVideoVoiceModes.None) return null;
+  var rate = ReadMeta(scene).TtsRate ?? JobView?.Settings?.DefaultTtsRate;
+  return RVideoVoiceTiming.Estimate(RVideoRules.ResolveSceneVoiceText(scene), mode == RVideoVoiceModes.Library ? rate : 1.0m, scene.DurationSeconds);
+}
+// Shortest duration that fits the dialogue: the current model if it offers it, otherwise the first model in priority order that does.
+(SceneVideoModelOption Option, int Seconds)? SuggestedDuration(VideoProjectSceneDto scene, int needed)
+{
+  var current = _opts.FirstOrDefault(x=>string.Equals(x.Key, ResolveModelKey(scene), StringComparison.OrdinalIgnoreCase));
+  foreach(var option in current is null ? _opts : _opts.Prepend(current))
+  {
+    var seconds = option.Durations.Where(d=>d >= needed).OrderBy(d=>d).FirstOrDefault();
+    if(seconds > 0) return (option, seconds);
+  }
+  return null;
+}
+async Task ApplyVoiceFitAsync(VideoProjectSceneDto scene, string modelKey, int seconds)
+{
+  if(!string.Equals(modelKey, ResolveModelKey(scene), StringComparison.OrdinalIgnoreCase)) await HandleModelChangedAsync(scene, modelKey);
+  var fresh = JobView?.Project.Scenes.FirstOrDefault(x=>x.Id==scene.Id) ?? scene;
+  if(fresh.DurationSeconds != seconds) await HandleDurationChangedAsync(fresh, seconds);
+  Snackbar.Add($"Đã đặt {seconds} giây. Bấm tạo lại video để áp dụng.", Severity.Info);
 }
 async Task HandleRegenerateVoiceAsync(VideoProjectSceneDto scene)
 {
