@@ -144,7 +144,7 @@
   @if (JobView is not null)
   {
     <div class="rv2-next" data-testid="rv2-next-step">
-      <MudText Typo="Typo.subtitle2">Các bước tạo video@(IsAuto ? " (chế độ tự động: sau bước 2 hệ thống tự chạy ảnh → video)" : null)</MudText>
+      <MudText Typo="Typo.subtitle2">Các bước tạo video@(IsAuto ? " (chế độ tự động: bấm Bắt đầu tạo video, hệ thống tự chạy ảnh → video cho mọi scene)" : null)</MudText>
       <ol class="rv2-steps">
         <li class="@StepClass(PromptHasScenes, true)">
           <span class="rv2-step-no">1</span>
@@ -185,7 +185,14 @@
             <b>Tạo video</b>
             <span class="rv2-step-note">@(SceneCount == 0 ? "Sau khi có scene và ảnh." : $"{VideosReady}/{SceneCount} scene đã có video. Xem trước số điểm trước khi tạo.")</span>
           </div>
-          <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" Disabled="@(SceneCount == 0)" OnClick="OpenPreviewAsync" data-testid="rv2-step-create-video">@(IsAuto ? "Xem tiến trình" : "Tạo video")</MudButton>
+          @if (AutoRunPending)
+          {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(SceneCount == 0 || _pipelineBusy)" OnClick="StartAutoRunAsync" data-testid="rv2-step-create-video">Bắt đầu tạo video</MudButton>
+          }
+          else
+          {
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" Disabled="@(SceneCount == 0)" OnClick="OpenPreviewAsync" data-testid="rv2-step-create-video">@(IsAuto ? "Xem tiến trình" : "Tạo video")</MudButton>
+          }
         </li>
       </ol>
       @if (_pipelineBusy) { <MudProgressLinear Indeterminate="true" Color="Color.Warning" /> }
@@ -281,6 +288,19 @@
   private static string StepClass(bool done, bool available) => done ? "rv2-step rv2-step--done" : available ? "rv2-step rv2-step--current" : "rv2-step";
   private bool PromptHasScenes => JobView is not null && RVideoScenePipelineService.PromptHasScenes(JobView.Project);
   private async Task OpenPreviewAsync(){ if(OnOpenPreview.HasDelegate) await OnOpenPreview.InvokeAsync(); }
+  // AUTO mode waits for the user: nothing is created until "Bắt đầu tạo video".
+  private bool AutoRunPending => IsAuto && JobView?.Settings?.AutoRunStartedAt is null;
+  private async Task StartAutoRunAsync(){
+    if(JobView is null || AuthState.CurrentUser is not { } user || _pipelineBusy) return;
+    var ok=await JS.InvokeAsync<bool>("confirm",$"Hệ thống sẽ tự tạo ảnh rồi tạo video cho {SceneCount} scene (scene nối tiếp tạo video từ khung cuối của scene trước), không cần duyệt từng scene. Điểm được trừ theo từng ảnh / video tạo ra. Bắt đầu?");
+    if(!ok) return;
+    _pipelineBusy=true; StateHasChanged();
+    try{
+      var result=await Pipeline.StartAutoRunAsync(JobView.Project.Id, user);
+      Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+      if(result.Started){ if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); await OpenPreviewAsync(); }
+    } finally { _pipelineBusy=false; StateHasChanged(); }
+  }
   private async Task CreateScenesAsync(){
     if(JobView is null || AuthState.CurrentUser is null || _pipelineBusy) return;
     _pipelineBusy=true; StateHasChanged();

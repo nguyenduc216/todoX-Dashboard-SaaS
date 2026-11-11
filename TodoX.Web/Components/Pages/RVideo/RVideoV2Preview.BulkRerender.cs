@@ -12,6 +12,40 @@ public partial class RVideoV2Preview
 
     private readonly Dictionary<long, RVideoSceneVideoRenderRequest> _bulkRerenderRequests = new();
 
+    /// <summary>AUTO job whose run has not been started yet: the top button starts it instead of opening the bulk dialog.</summary>
+    private bool AutoRunPending
+        => JobView?.Settings is { } settings
+           && string.Equals(settings.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
+           && settings.AutoRunStartedAt is null;
+
+    private async Task CreateVideosAsync()
+    {
+        if (AutoRunPending) await StartAutoRunAsync();
+        else await OpenBulkRerenderDialogAsync();
+    }
+
+    private async Task StartAutoRunAsync()
+    {
+        if (JobView is null || _busy || AuthState.CurrentUser is not { } user) return;
+        var sceneCount = JobView.Project.Scenes.Count;
+        var confirmed = await DialogService.ShowMessageBoxAsync("Bắt đầu tạo video",
+            $"Hệ thống sẽ tự tạo ảnh rồi tạo video cho {sceneCount} scene (scene nối tiếp tạo video từ khung cuối của scene trước), "
+            + "không cần duyệt từng scene. Điểm được trừ theo từng ảnh / video tạo ra. Bắt đầu?",
+            yesText: "Bắt đầu", cancelText: "Hủy");
+        if (confirmed != true) return;
+        _busy = true;
+        try
+        {
+            var result = await ScenePipeline.StartAutoRunAsync(JobView.Project.Id, user);
+            Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+            if (result.Started && OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
     private async Task OpenBulkRerenderDialogAsync()
     {
         if (JobView is null || _busy) return;

@@ -115,7 +115,8 @@ public sealed class RVideoBulkRerenderTests
     {
         var page = Source("Components", "Pages", "RVideo", "RVideoV2Preview.razor");
         var add = page.IndexOf(">Thêm scene</MudButton>", StringComparison.Ordinal);
-        var bulk = page.IndexOf(">Tạo video</MudButton>", StringComparison.Ordinal);
+        // AUTO jobs not started yet show "Bắt đầu tạo video" on the same button.
+        var bulk = page.IndexOf("\"Tạo video\")</MudButton>", StringComparison.Ordinal);
         Assert.True(add >= 0 && add < bulk);
 
         var flow = Source("Components", "Pages", "RVideo", "RVideoV2Preview.BulkRerender.cs");

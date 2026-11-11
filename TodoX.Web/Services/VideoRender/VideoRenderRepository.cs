@@ -1147,6 +1147,8 @@ public sealed class VideoRenderRepository
             using var conn = await _factory.OpenAsync(ct);
             using var tx = conn.BeginTransaction();
             await conn.ExecuteAsync("DELETE FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant;", new { projectId, tenant = _tenant.TenantId }, tx);
+            // New scenes from a new prompt: an AUTO job waits for "Bắt đầu tạo video" again.
+            await conn.ExecuteAsync("UPDATE video_render.rvideo_job_settings SET auto_run_started_at=NULL WHERE project_id=@projectId AND tenant_id=@tenant;", new { projectId, tenant = _tenant.TenantId }, tx);
             var list = scenes.ToList();
             foreach (var scene in list)
             {

@@ -29,6 +29,17 @@ public static class RVideoSceneLink
     public static string? GetMode(ScenePromptMetadata metadata)
         => metadata.Extra.TryGetValue(ModeKey, out var value) ? RVideoSceneLinkModes.Normalize(value) : null;
 
+    /// <summary>
+    /// The job has "Video liên kết" on: some scene after the first continues from the previous one
+    /// (scenes produced by splitting a long scene do not count, they are always linked).
+    /// </summary>
+    public static bool IsProjectLinked(IEnumerable<VideoProjectSceneDto> scenes)
+        => scenes.OrderBy(x => x.SceneIndex).Skip(1).Any(scene =>
+        {
+            var metadata = ScenePromptMetadata.FromScene(scene);
+            return GetMode(metadata) is not null && !metadata.Extra.ContainsKey(RVideoSceneSplit.SplitFromKey);
+        });
+
     public static string? GetMode(VideoProjectSceneDto scene) => GetMode(ScenePromptMetadata.FromScene(scene));
 
     public static Guid? GetSource(VideoProjectSceneDto scene)

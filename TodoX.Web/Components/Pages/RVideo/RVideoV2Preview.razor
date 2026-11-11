@@ -31,7 +31,7 @@ else
     <div class="d-flex gap-2">
       <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="HandleAddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
       <MudTooltip Text="Tạo video cho các scene (chọn tất cả hoặc chỉ scene chưa xong, xem trước số điểm)">
-        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" OnClick="OpenBulkRerenderDialogAsync" Disabled="@(_busy || scenes.Count == 0)" data-testid="rv2-create-videos">Tạo video</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@(AutoRunPending ? Icons.Material.Filled.PlayArrow : Icons.Material.Filled.Movie)" OnClick="CreateVideosAsync" Disabled="@(_busy || scenes.Count == 0)" data-testid="rv2-create-videos">@(AutoRunPending ? "Bắt đầu tạo video" : "Tạo video")</MudButton>
       </MudTooltip>
     </div>
   </div>
@@ -151,7 +151,7 @@ else
             OutcomeUnknown="@(VideoState(a)?.HasProviderIdentity == true || VideoState(a)?.HasActiveJob == true || VideoState(a)?.SubmitBlockReason != SceneVideoSubmitBlockReason.None)" OnQueued="OnReloadRequested" />
         </div>
 
-        <RVideoSceneLinkPanel ProjectId="@JobView.Project.Id" Scene="@a" Scenes="@JobView.Project.Scenes" OnChanged="@(()=>OnReloadRequested.InvokeAsync())" OnSplit="@(_=>OnReloadRequested.InvokeAsync())" />
+        <RVideoSceneLinkPanel ProjectId="@JobView.Project.Id" Scene="@a" Scenes="@JobView.Project.Scenes" LinkedVideo="@RVideoSceneLink.IsProjectLinked(JobView.Project.Scenes)" OnChanged="@(()=>OnReloadRequested.InvokeAsync())" OnSplit="@(_=>OnReloadRequested.InvokeAsync())" />
         </div>
       </section>
     }

@@ -60,6 +60,14 @@ public sealed class RVideoJobSettingsDto
     public decimal MusicVolume { get; set; } = 0.8m;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    /// <summary>
+    /// AUTO mode runs images → videos only after the user pressed "Bắt đầu tạo video"; null = not started yet.
+    /// Cleared when the scenes are rebuilt from a new prompt.
+    /// </summary>
+    public DateTime? AutoRunStartedAt { get; set; }
+
+    /// <summary>The background lifecycle may advance this job on its own.</summary>
+    public bool AutoRunActive => string.Equals(ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase) && AutoRunStartedAt is not null;
 }
 
 public sealed class RVideoJobSettingsRequest

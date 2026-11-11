@@ -166,7 +166,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 : project.Status, ct);
 
         var userId = project.UserId ?? Guid.Empty;
-        var isAuto = string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase);
+        // AUTO jobs wait for "Bắt đầu tạo video" before creating images and videos on their own.
+        var isAuto = string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase) && setting.AutoRunStartedAt is not null;
         // Linked scenes ("Video liên kết") get their image from the previous scene's last frame instead.
         var orderedScenes = project.Scenes.OrderBy(x => x.SceneIndex).ToList();
         var linkedSceneIds = usesSharedReferenceImage
@@ -415,7 +416,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                    voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
                    default_tts_rate AS DefaultTtsRate, music_catalog_code AS MusicCatalogCode,
                    music_snapshot_json::text AS MusicSnapshotJson, music_volume AS MusicVolume,
-                   created_at AS CreatedAt, updated_at AS UpdatedAt
+                   created_at AS CreatedAt, updated_at AS UpdatedAt, auto_run_started_at AS AutoRunStartedAt
               FROM video_render.rvideo_job_settings
              WHERE tenant_id=@tenant
                AND execution_mode IN ('AUTO', 'MANUAL')

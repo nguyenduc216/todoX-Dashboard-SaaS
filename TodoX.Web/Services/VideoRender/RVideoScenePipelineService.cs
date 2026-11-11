@@ -11,6 +11,8 @@ public interface IRVideoScenePipelineService
 {
     Task<RVideoSceneLinkResult> CreateScenesFromPromptAsync(long projectId, bool linked, CurrentUserSession user, CancellationToken ct = default);
     Task<RVideoSceneLinkResult> EnqueueMissingImagesAsync(long projectId, CurrentUserSession user, CancellationToken ct = default);
+    /// <summary>AUTO mode: "Bắt đầu tạo video" — from now on images then videos (or video → video for linked scenes) run on their own.</summary>
+    Task<RVideoSceneLinkResult> StartAutoRunAsync(long projectId, CurrentUserSession user, CancellationToken ct = default);
     /// <summary>The scene exactly as saved (access-checked), e.g. to quote a render after a save.</summary>
     Task<VideoProjectSceneDto?> GetSavedSceneAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default);
 }
@@ -101,6 +103,28 @@ public sealed class RVideoScenePipelineService : IRVideoScenePipelineService
 
     public async Task<VideoProjectSceneDto?> GetSavedSceneAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default)
         => (await _repo.GetProjectAsync(projectId, user, ct))?.Scenes.FirstOrDefault(x => x.Id == sceneId);
+
+    public async Task<RVideoSceneLinkResult> StartAutoRunAsync(long projectId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        try
+        {
+            var project = await _repo.GetProjectAsync(projectId, user, ct);
+            if (project is null) return new(false, "Không tìm thấy dự án hoặc bạn không có quyền.");
+            if (project.Scenes.Count == 0) return new(false, "Chưa có scene. Hãy tạo prompt và scene trước.");
+            var setting = await _settings.GetAsync(projectId, ct);
+            if (!string.Equals(setting?.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase))
+                return new(false, "Job đang ở chế độ Duyệt từng bước: bấm Tạo ảnh / Tạo video cho từng scene.");
+            await _settings.SetAutoRunStartedAsync(projectId, true, ct);
+            await _repo.AddProjectEventAsync(projectId, "AUTO_RUN_STARTED", "info", "RVIDEO auto run started by the user (V2).",
+                new { projectId, sceneCount = project.Scenes.Count, userId = user.UserId }, ct);
+            return new(true, $"Đã bắt đầu tự động tạo {project.Scenes.Count} scene: ảnh → video, scene nối tiếp tạo từ khung cuối của scene trước.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "RVIDEO_V2_AUTO_RUN_START_FAILED projectId={ProjectId}", projectId);
+            return new(false, "Chưa bắt đầu được. Vui lòng thử lại.");
+        }
+    }
 
     public async Task<RVideoSceneLinkResult> EnqueueMissingImagesAsync(long projectId, CurrentUserSession user, CancellationToken ct = default)
     {

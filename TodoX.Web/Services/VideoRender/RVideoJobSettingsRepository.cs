@@ -110,6 +110,16 @@ public sealed class RVideoJobSettingsRepository
             new { projectId = upsertedProjectId.Value, tenant = _tenant.TenantId });
     }
 
+    /// <summary>Marks the AUTO run as started (or not started); updated_at wakes the lifecycle worker at once.</summary>
+    public async Task SetAutoRunStartedAsync(long projectId, bool started, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.rvideo_job_settings SET auto_run_started_at=CASE WHEN @started THEN now() ELSE NULL END, updated_at=now() WHERE project_id=@projectId AND tenant_id=@tenant;",
+            new { projectId, started, tenant = _tenant.TenantId });
+    }
+
     public async Task SetStageAsync(long projectId, string stage, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -127,7 +137,7 @@ public sealed class RVideoJobSettingsRepository
                voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
                default_tts_rate AS DefaultTtsRate, music_catalog_code AS MusicCatalogCode,
                music_snapshot_json::text AS MusicSnapshotJson, music_volume AS MusicVolume,
-               created_at AS CreatedAt, updated_at AS UpdatedAt
+               created_at AS CreatedAt, updated_at AS UpdatedAt, auto_run_started_at AS AutoRunStartedAt
           FROM video_render.rvideo_job_settings
         """;
 }

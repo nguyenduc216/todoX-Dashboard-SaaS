@@ -12,15 +12,19 @@
 <div class="rvideo-scene-link-panel" data-testid="rvideo-scene-link-panel" style="display:flex; flex-direction:column; gap:8px; margin-top:8px">
     @if (_previous is not null)
     {
-        <MudSelect T="string" Label="Nối từ cảnh trước" Value="@(_mode ?? NoneValue)" ValueChanged="OnModeChangedAsync"
-                   Dense="true" Variant="Variant.Outlined" Disabled="@_busy">
-            @if (!_isSplitPart)
-            {
-                <MudSelectItem T="string" Value="@NoneValue">Không nối (cảnh độc lập)</MudSelectItem>
-            }
-            <MudSelectItem T="string" Value="@RVideoSceneLinkModes.Regenerate">Tạo ảnh mới từ khung cuối cảnh trước</MudSelectItem>
-            <MudSelectItem T="string" Value="@RVideoSceneLinkModes.Frame">Dùng thẳng khung cuối cảnh trước</MudSelectItem>
-        </MudSelect>
+        @* Only for "Video liên kết" jobs (or a scene that is already linked, so it can be unlinked). *@
+        @if (LinkedVideo || _mode is not null)
+        {
+            <MudSelect T="string" Label="Nối từ cảnh trước" Value="@(_mode ?? NoneValue)" ValueChanged="OnModeChangedAsync"
+                       Dense="true" Variant="Variant.Outlined" Disabled="@_busy">
+                @if (!_isSplitPart)
+                {
+                    <MudSelectItem T="string" Value="@NoneValue">Không nối (cảnh độc lập)</MudSelectItem>
+                }
+                <MudSelectItem T="string" Value="@RVideoSceneLinkModes.Regenerate">Tạo ảnh mới từ khung cuối cảnh trước</MudSelectItem>
+                <MudSelectItem T="string" Value="@RVideoSceneLinkModes.Frame">Dùng thẳng khung cuối cảnh trước</MudSelectItem>
+            </MudSelect>
+        }
         @if (_mode is not null && !_previousHasVideo)
         {
             <MudText Typo="Typo.caption">Cảnh này sẽ bắt đầu sau khi video cảnh @_previous.SceneIndex hoàn tất.</MudText>
@@ -69,6 +73,8 @@
     [Parameter] public VideoProjectSceneDto Scene { get; set; } = default!;
     [Parameter] public IReadOnlyList<VideoProjectSceneDto> Scenes { get; set; } = Array.Empty<VideoProjectSceneDto>();
     [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>The job uses "Video liên kết"; otherwise the link picker stays hidden for unlinked scenes.</summary>
+    [Parameter] public bool LinkedVideo { get; set; } = true;
     /// <summary>Raised after a split with the id of part 1, so the page can start its new video.</summary>
     [Parameter] public EventCallback<long> OnSplit { get; set; }
 
