@@ -6,6 +6,11 @@ namespace TodoX.EditVideoTool.Licensing;
 /// <summary>Vietnamese messages for the stable error codes returned by /api/editvideo/v1.</summary>
 public static class LicenseMessages
 {
+    public const string SupportContact = "0366 699 961 · hello@todox.vn";
+
+    /// <summary>Shown wherever the customer might look for a way to move the license: only TodoX can do it.</summary>
+    public const string OneMachineNote = "Mỗi license dùng trên 1 máy tính. Muốn chuyển sang máy khác (đổi máy, cài lại Windows), hãy liên hệ TodoX: " + SupportContact + ".";
+
     public static string ForServerError(string? code, string? serverMessage, JsonElement? detail = null) => code switch
     {
         "invalid_request" => "License key không đúng định dạng. Copy nguyên key TodoX (dạng tdxv_... hoặc TDXV-XXXXX-...).",
@@ -14,8 +19,9 @@ public static class LicenseMessages
         "license_revoked" => "License đã bị thu hồi.",
         "license_expired" => "License đã hết hạn. Liên hệ TodoX để gia hạn.",
         "device_limit_reached" => DeviceLimit(detail),
+        "self_release_disabled" => OneMachineNote,
         "invalid_token" => "Phiên đăng nhập của máy đã hết hiệu lực (máy có thể đã bị gỡ). Hãy kích hoạt lại.",
-        "device_mismatch" => "License này đang được dùng trên máy khác.",
+        "device_mismatch" => $"License này đang được dùng trên máy khác. Liên hệ TodoX để chuyển máy: {SupportContact}.",
         "signing_unavailable" => "Máy chủ license TodoX đang bảo trì. Thử lại sau.",
         LicenseApiClient.NetworkError => serverMessage ?? "Không kết nối được máy chủ TodoX.",
         _ => serverMessage ?? $"Lỗi license ({code})."
@@ -23,7 +29,7 @@ public static class LicenseMessages
 
     private static string DeviceLimit(JsonElement? detail)
     {
-        var sb = new StringBuilder("License đã dùng hết số máy cho phép");
+        var sb = new StringBuilder("License này đã được kích hoạt trên máy khác");
         if (detail is { ValueKind: JsonValueKind.Object } d)
         {
             if (d.TryGetProperty("limit", out var limit))
@@ -40,6 +46,6 @@ public static class LicenseMessages
             }
         }
 
-        return sb.Append(". Gỡ máy cũ trong dashboard TodoX hoặc chạy 'todox-editvideo deactivate' trên máy cũ.").ToString();
+        return sb.Append($". Muốn chuyển sang máy này, hãy liên hệ TodoX: {SupportContact}.").ToString();
     }
 }

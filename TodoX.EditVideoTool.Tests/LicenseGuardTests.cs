@@ -179,17 +179,27 @@ public sealed class LicenseGuardTests : IDisposable
     }
 
     [Fact]
-    public async Task Deactivate_removes_local_license_only_when_server_reachable()
+    public void ForgetLocal_removes_only_the_local_file_and_never_calls_the_server()
     {
         _store.Save(Stored(Payload()));
 
-        _http.Replies.Enqueue((HttpStatusCode.OK, null));
-        Assert.False((await _guard.DeactivateAsync()).Ok);
-        Assert.True(_store.Exists);
+        _guard.ForgetLocal();
 
-        _http.Replies.Enqueue((HttpStatusCode.OK, """{"success":true,"data":true}"""));
-        Assert.True((await _guard.DeactivateAsync()).Ok);
         Assert.False(_store.Exists);
+        Assert.Empty(_http.Requests);
+    }
+
+    [Fact]
+    public void Moving_to_another_machine_points_the_customer_to_TodoX_not_to_self_release()
+    {
+        var detail = System.Text.Json.JsonDocument.Parse("""{"deviceKind":"desktop","limit":1,"devices":[{"deviceName":"PC-CU"}]}""").RootElement;
+        var limit = LicenseMessages.ForServerError("device_limit_reached", null, detail);
+        Assert.Contains("PC-CU", limit);
+        Assert.Contains(LicenseMessages.SupportContact, limit);
+        Assert.DoesNotContain("deactivate", limit);
+
+        Assert.Equal(LicenseMessages.OneMachineNote, LicenseMessages.ForServerError("self_release_disabled", "x"));
+        Assert.Contains(LicenseMessages.SupportContact, LicenseMessages.ForServerError("device_mismatch", null));
     }
 
     [Fact]

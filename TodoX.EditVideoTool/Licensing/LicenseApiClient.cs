@@ -45,9 +45,6 @@ public sealed class LicenseApiClient
         SendAsync<DeviceSession>(HttpMethod.Post, serverUrl, "heartbeat", accessToken, device.DeviceHash,
             new { deviceHash = device.DeviceHash, appVersion }, ct);
 
-    public Task<LicenseApiResult<JsonElement>> DeactivateAsync(string serverUrl, string accessToken, IDeviceIdentity device, CancellationToken ct = default) =>
-        SendAsync<JsonElement>(HttpMethod.Post, serverUrl, "deactivate", accessToken, device.DeviceHash, new { }, ct);
-
     private async Task<LicenseApiResult<T>> SendAsync<T>(HttpMethod method, string serverUrl, string path, string? accessToken, string deviceHash, object? body, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, $"{serverUrl.TrimEnd('/')}/api/editvideo/v1/{path}");

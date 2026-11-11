@@ -128,23 +128,10 @@ public sealed class LicenseGuard
         return Evaluate();
     }
 
-    public async Task<(bool Ok, string Message)> DeactivateAsync(CancellationToken ct = default)
-    {
-        var stored = _store.Load();
-        if (stored is null)
-        {
-            return (true, "Máy này chưa kích hoạt.");
-        }
-
-        var result = await _api.DeactivateAsync(stored.ServerUrl, stored.AccessToken, _device, ct);
-        if (!result.Ok && result.ErrorCode == LicenseApiClient.NetworkError)
-        {
-            return (false, "Không kết nối được máy chủ TodoX, chưa gỡ được máy. Thử lại khi có mạng.");
-        }
-
-        _store.Delete();
-        return (true, result.Ok
-            ? "Đã gỡ máy này khỏi license. Bạn có thể kích hoạt trên máy khác."
-            : "Đã xóa license trên máy này (máy chủ báo phiên đã hết hiệu lực).");
-    }
+    /// <summary>
+    /// Removes the license file from this Windows account only (uninstall). The machine keeps its slot on the
+    /// server, so reinstalling on the same machine reactivates with the same key; moving to another machine is
+    /// done by TodoX staff in the dashboard.
+    /// </summary>
+    public void ForgetLocal() => _store.Delete();
 }

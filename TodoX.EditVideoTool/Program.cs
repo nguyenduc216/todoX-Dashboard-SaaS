@@ -65,10 +65,9 @@ switch (command)
     }
     case "deactivate":
     {
-        using var services = BuildServices();
-        var (ok, message) = await services.GetRequiredService<LicenseGuard>().DeactivateAsync();
-        Console.WriteLine(message);
-        return ok ? 0 : 1;
+        // Kept so old instructions get a clear answer: only TodoX moves a license to another machine.
+        Console.WriteLine(LicenseMessages.OneMachineNote);
+        return 1;
     }
     case "install":
     {
@@ -90,7 +89,7 @@ switch (command)
         return 0;
     }
     default:
-        Console.Error.WriteLine($"Unknown command '{command}'. Usage: todox-editvideo [app|mcp|status|doctor|activate|deactivate|install|uninstall|update|version]");
+        Console.Error.WriteLine($"Unknown command '{command}'. Usage: todox-editvideo [app|mcp|status|doctor|activate|install|uninstall|update|version]");
         return 2;
 }
 

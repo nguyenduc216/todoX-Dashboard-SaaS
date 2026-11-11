@@ -4,8 +4,6 @@
 @inject EditVideoUsageService Usage
 @inject EditVideoReleaseService Releases
 @inject AuthStateService AuthState
-@inject IDialogService DialogService
-@inject ISnackbar Snackbar
 
 <PageTitle>TodoX EditVideo</PageTitle>
 
@@ -69,20 +67,17 @@
                         <MudTh>Thiết bị</MudTh>
                         <MudTh>Hệ điều hành</MudTh>
                         <MudTh>Online lần cuối</MudTh>
-                        <MudTh></MudTh>
                     </HeaderContent>
                     <RowTemplate>
                         <MudTd DataLabel="Thiết bị">@(context.DeviceName ?? "—") (@(context.DeviceKind == EditVideoDeviceKinds.Mobile ? "điện thoại" : "máy tính"))</MudTd>
                         <MudTd DataLabel="Hệ điều hành">@(context.Os ?? "—")</MudTd>
                         <MudTd DataLabel="Online lần cuối">@context.LastSeenAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
-                        <MudTd Style="text-align:right">
-                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" OnClick="@(() => Release(context))">Gỡ máy này</MudButton>
-                        </MudTd>
                     </RowTemplate>
                     <NoRecordsContent>
                         <MudText Class="pa-2 todox-page-subtitle">Chưa có máy nào kích hoạt. Cài TodoX EditVideo rồi dán license key để bắt đầu.</MudText>
                     </NoRecordsContent>
                 </MudTable>
+                <MudText Typo="Typo.caption" Class="mt-2" Style="display:block">Mỗi license dùng trên 1 máy tính. Muốn chuyển sang máy khác (đổi máy, cài lại Windows), hãy liên hệ TodoX: 0366 699 961 · hello@todox.vn.</MudText>
 
                 <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Lần sử dụng gần đây</MudText>
                 @foreach (var s in _sessions.GetValueOrDefault(license.Id) ?? [])
@@ -132,21 +127,6 @@
         {
             _licenses = [];
         }
-    }
-
-    private async Task Release(EditVideoDeviceRow device)
-    {
-        var confirm = await DialogService.ShowMessageBoxAsync("Gỡ thiết bị",
-            $"Gỡ \"{device.DeviceName ?? "thiết bị"}\"? Máy này sẽ ngừng dùng được TodoX EditVideo và bạn có thể kích hoạt trên máy khác.",
-            yesText: "Gỡ máy", cancelText: "Hủy");
-        if (confirm != true)
-        {
-            return;
-        }
-
-        await Licenses.RevokeDeviceAsync(device.Id, AuthState.CurrentUser?.UserId, onlyForCustomerId: _customerId);
-        Snackbar.Add("Đã gỡ thiết bị.", Severity.Success);
-        await Reload();
     }
 
     private static string StatusLabel(string status) => status switch

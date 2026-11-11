@@ -46,7 +46,7 @@ public sealed class SignupEmails
     public static string Welcome(string name, string email) => Layout($"""
         <p>Chào {Html(name)},</p>
         <p>Tài khoản TodoX của bạn đã được tạo với email <b>{Html(email)}</b>.</p>
-        <p>Để dùng TodoX EditVideo, đăng nhập dashboard, chọn gói trong mục <b>TodoX EditVideo của tôi</b>, rồi dán mã license vào ứng dụng trên máy.</p>
+        <p>Để dùng TodoX EditVideo, TodoX sẽ liên hệ bạn để đăng ký gói và gửi mã license. Tải ứng dụng trong mục <b>TodoX EditVideo của tôi</b> rồi dán mã license vào ứng dụng trên máy tính. Mỗi tài khoản dùng trên 1 máy; muốn đổi máy, hãy liên hệ TodoX.</p>
         <p style="margin:24px 0"><a href="{DashboardUrl}/my-editvideo" style="background:#FFBE2E;color:#0B0D10;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Mở tài khoản TodoX</a></p>
         <p style="color:#666;font-size:13px">Nếu bạn không đăng ký tài khoản này, hãy bỏ qua email.</p>
         """);

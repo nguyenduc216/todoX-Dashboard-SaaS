@@ -16,7 +16,8 @@
             @if (_canManage)
             {
                 <MudPaper Class="pa-3" Outlined="true">
-                    <MudText Typo="Typo.subtitle2" Class="mb-2">Cấp license mới</MudText>
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Cấp license mới</MudText>
+                    <MudText Typo="Typo.caption" Class="mb-2" Style="display:block">Mỗi tài khoản chỉ có 1 license, mặc định 1 máy tính. Khách đổi máy: chọn license bên dưới → <b>Gỡ máy</b> cũ → khách dán lại key trên máy mới.</MudText>
                     <MudGrid Spacing="2">
                         <MudItem xs="12" sm="3">
                             <MudTextField T="string" Label="Gói" @bind-Value="_planCode" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -208,7 +209,7 @@
 
     private string _planCode = "standard";
     private int _maxDesktop = 1;
-    private int _maxMobile = 1;
+    private int _maxMobile = 0;
     private DateTime? _expiresAt;
     private string? _note;
     private string? _issuedKey;
@@ -282,6 +283,10 @@
         catch (ArgumentOutOfRangeException)
         {
             Snackbar.Add("Giới hạn thiết bị phải từ 0–50 và cho phép ít nhất 1 thiết bị.", Severity.Error);
+        }
+        catch (EditVideoLicenseExistsException ex)
+        {
+            Snackbar.Add($"Khách đã có license {ex.KeyPrefix}-… Mỗi tài khoản chỉ có 1 license: thu hồi license cũ trước khi cấp mới. Muốn đổi máy thì chỉ cần Gỡ máy cũ.", Severity.Warning);
         }
         finally
         {

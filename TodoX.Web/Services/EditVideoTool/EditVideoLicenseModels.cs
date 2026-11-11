@@ -38,6 +38,7 @@ public static class EditVideoEventTypes
     public const string DeviceMismatch = "device_mismatch";
     public const string StatusChanged = "status_changed";
     public const string LimitsChanged = "limits_changed";
+    public const string SelfReleaseRefused = "self_release_refused";
 }
 
 /// <summary>Stable error codes returned to the local tool; the exe maps them to Vietnamese messages.</summary>
@@ -52,6 +53,8 @@ public static class EditVideoErrorCodes
     public const string InvalidToken = "invalid_token";
     public const string DeviceMismatch = "device_mismatch";
     public const string SigningUnavailable = "signing_unavailable";
+    /// <summary>Moving a license to another machine is done by TodoX staff in the dashboard, never by the device.</summary>
+    public const string SelfReleaseDisabled = "self_release_disabled";
 }
 
 public sealed class EditVideoLicenseRow
@@ -111,6 +114,16 @@ public sealed record EditVideoIssueLicenseRequest(
     string? Note);
 
 public sealed record EditVideoIssuedLicense(Guid LicenseId, string LicenseKey, string KeyPrefix);
+
+/// <summary>
+/// Thrown when a customer already holds a license that is not revoked: one account gets one key. To replace a
+/// key, revoke the old one first.
+/// </summary>
+public sealed class EditVideoLicenseExistsException(string keyPrefix)
+    : InvalidOperationException($"Customer already has license {keyPrefix}; revoke it before issuing a new one.")
+{
+    public string KeyPrefix { get; } = keyPrefix;
+}
 
 public sealed class EditVideoActivateRequest
 {

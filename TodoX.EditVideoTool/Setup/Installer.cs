@@ -100,14 +100,9 @@ public sealed class Installer
 
     public void Uninstall(IProgress<string> status)
     {
-        try
-        {
-            _license.DeactivateAsync().GetAwaiter().GetResult();
-        }
-        catch (Exception)
-        {
-            // Offline uninstall still removes local files; the slot can be freed from the dashboard.
-        }
+        // The machine keeps its license slot: reinstalling here reactivates with the same key, and moving to
+        // another machine goes through TodoX (dashboard). Only this account's local license file is removed.
+        _license.ForgetLocal();
 
         _skills.RemoveAll();
         _clients.UnregisterAll();

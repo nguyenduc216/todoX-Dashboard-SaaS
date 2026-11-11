@@ -79,9 +79,7 @@ public sealed partial class MainWindow : Form
         keyRow.Controls.Add(_keyBox);
         keyRow.Controls.Add(Action("Kích hoạt", ActivateAsync, primary: true));
         root.Controls.Add(keyRow);
-        var licenseRow = Row();
-        licenseRow.Controls.Add(Action("Gỡ máy này khỏi license", DeactivateAsync));
-        root.Controls.Add(licenseRow);
+        root.Controls.Add(new Label { Text = LicenseMessages.OneMachineNote, AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 4, 0, 8) });
 
         root.Controls.Add(Section("Kiểm tra hệ thống"));
         _checks.Columns.Add("", 26);
@@ -184,18 +182,6 @@ public sealed partial class MainWindow : Form
 
         await RefreshLicenseAsync();
         await RunHealthAsync(untilConnected: false);
-    }
-
-    private async Task DeactivateAsync()
-    {
-        if (MessageBox.Show(this, "Gỡ máy này khỏi license? Bạn có thể kích hoạt lại trên máy khác.", "TodoX EditVideo", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-        {
-            return;
-        }
-
-        var (_, message) = await _license.DeactivateAsync(_closing.Token);
-        Log(message);
-        await RefreshLicenseAsync();
     }
 
     private async Task InstallAsync()
@@ -427,7 +413,7 @@ public sealed partial class MainWindow : Form
         var box = new Panel { Width = 640, Height = 66, BackColor = ColorTranslator.FromHtml("#2A2210"), Margin = new Padding(0, 0, 0, 8) };
         var text = new LinkLabel
         {
-            Text = "Ứng dụng chưa đăng ký chữ ký số với Windows nên Windows có thể cảnh báo khi mở. Đây là phần mềm chính hãng TodoX. Hỗ trợ: 0366 699 961 · hello@todox.vn · todox.vn",
+            Text = "Ứng dụng chưa đăng ký chữ ký số với Windows nên Windows có thể cảnh báo khi mở. Đây là phần mềm chính hãng TodoX. Hỗ trợ: " + LicenseMessages.SupportContact + " · todox.vn",
             LinkColor = Yellow,
             ActiveLinkColor = Yellow,
             ForeColor = ColorTranslator.FromHtml("#F5DFA6"),

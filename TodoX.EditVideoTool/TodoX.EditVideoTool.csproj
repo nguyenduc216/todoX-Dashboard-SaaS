@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>todox-editvideo</AssemblyName>
     <RootNamespace>TodoX.EditVideoTool</RootNamespace>
-    <Version>0.9.0</Version>
+    <Version>0.9.1</Version>
     <Product>TodoX EditVideo</Product>
     <Company>TodoX</Company>
     <!-- Required by the LibraryImport source generator (volume serial P/Invoke). -->
@@ -22,6 +22,8 @@
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Smaller installer download; the exe unpacks itself in memory at start. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DebugType>none</DebugType>
   </PropertyGroup>
 

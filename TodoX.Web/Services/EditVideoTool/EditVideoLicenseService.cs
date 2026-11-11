@@ -113,7 +113,7 @@ public sealed class EditVideoLicenseService
                 .ToList();
             return EditVideoResult<EditVideoDeviceSession>.Fail(
                 EditVideoErrorCodes.DeviceLimitReached,
-                "All device slots of this kind are in use. Release a device in the TodoX dashboard first.",
+                "This license is already used on another machine. Contact TodoX to move it.",
                 new { deviceKind = kind, limit = kind == EditVideoDeviceKinds.Mobile ? license.MaxMobileDevices : license.MaxDesktopDevices, devices = holders });
         }
 
@@ -197,10 +197,11 @@ public sealed class EditVideoLicenseService
             return EditVideoResult<bool>.Fail(auth.ErrorCode!, auth.Message!);
         }
 
+        // The slot stays bound to this machine: moving to another machine is done by TodoX staff in the dashboard.
         var (license, device) = auth.Value!;
-        await ReleaseDeviceAsync(conn, null, device.Id, EditVideoDeviceStatuses.Released, "self", now);
-        await InsertEventAsync(conn, null, license.Id, device.Id, EditVideoEventTypes.Released, ip, new { by = "device" });
-        return EditVideoResult<bool>.Success(true);
+        await InsertEventAsync(conn, null, license.Id, device.Id, EditVideoEventTypes.SelfReleaseRefused, ip, new { by = "device" });
+        return EditVideoResult<bool>.Fail(EditVideoErrorCodes.SelfReleaseDisabled,
+            "This machine cannot release itself. Contact TodoX to move the license to another machine.");
     }
 
     public async Task<EditVideoResult<object>> GetMeAsync(string? accessToken, string? deviceHash, string? ip, CancellationToken ct = default)
@@ -239,6 +240,23 @@ public sealed class EditVideoLicenseService
         var prefix = EditVideoLicenseKeys.DisplayPrefix(key);
 
         using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+
+        // One account, one key: serialise issuing per customer, then refuse while an unrevoked key exists.
+        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtext('editvideo-license:' || @customerId::text));",
+            new { request.CustomerId }, tx);
+        var existing = await conn.ExecuteScalarAsync<string?>(
+            """
+            SELECT key_prefix FROM editvideo.licenses
+             WHERE tenant_id = @tenantId AND customer_id = @customerId AND status <> 'revoked'
+             ORDER BY created_at LIMIT 1;
+            """,
+            new { tenantId = _tenant.TenantId, request.CustomerId }, tx);
+        if (existing is not null)
+        {
+            throw new EditVideoLicenseExistsException(existing);
+        }
+
         var id = await conn.ExecuteScalarAsync<Guid>(
             """
             INSERT INTO editvideo.licenses
@@ -260,8 +278,9 @@ public sealed class EditVideoLicenseService
                 request.ExpiresAt,
                 note = Trim(request.Note, 500),
                 actorUserId
-            });
-        await InsertEventAsync(conn, null, id, null, EditVideoEventTypes.Issued, null, new { request.PlanCode }, actorUserId);
+            }, tx);
+        await InsertEventAsync(conn, tx, id, null, EditVideoEventTypes.Issued, null, new { request.PlanCode }, actorUserId);
+        tx.Commit();
         return new EditVideoIssuedLicense(id, key, prefix);
     }
 
@@ -392,10 +411,10 @@ public sealed class EditVideoLicenseService
     }
 
     /// <summary>
-    /// Frees a device slot from the dashboard (e.g. customer changed computer). When <paramref name="onlyForCustomerId"/>
-    /// is set (customer self-service) the device must belong to that customer's license.
+    /// Frees a device slot from the admin dashboard when a customer asks TodoX to move to another computer.
+    /// Customers cannot free slots themselves.
     /// </summary>
-    public async Task RevokeDeviceAsync(Guid deviceId, Guid? actorUserId, CancellationToken ct = default, Guid? onlyForCustomerId = null)
+    public async Task RevokeDeviceAsync(Guid deviceId, Guid? actorUserId, CancellationToken ct = default)
     {
         var now = _clock.GetUtcNow();
         using var conn = await _factory.OpenAsync(ct);
@@ -403,10 +422,9 @@ public sealed class EditVideoLicenseService
             """
             SELECT d.license_id FROM editvideo.devices d
               JOIN editvideo.licenses l ON l.id = d.license_id
-             WHERE d.id = @deviceId AND d.tenant_id = @tenantId
-               AND (@customerId::uuid IS NULL OR l.customer_id = @customerId);
+             WHERE d.id = @deviceId AND d.tenant_id = @tenantId;
             """,
-            new { deviceId, tenantId = _tenant.TenantId, customerId = onlyForCustomerId });
+            new { deviceId, tenantId = _tenant.TenantId });
         if (licenseId is null)
         {
             return;
