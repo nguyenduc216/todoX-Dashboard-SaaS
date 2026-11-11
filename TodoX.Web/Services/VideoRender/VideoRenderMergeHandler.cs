@@ -45,10 +45,13 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         // Capture before reading consumed inputs; later DB writes reject any intervening generation/selection change.
         var mergeSnapshot=await _repo.GetVideoMergeSnapshotAsync(projectId, ct);
         bool manual;
+        var revoice = false;
         using (var queued = JsonDocument.Parse(string.IsNullOrWhiteSpace(job.InputJson) ? "{}" : job.InputJson))
         {
-            manual = queued.RootElement.TryGetProperty("source", out var source)
-                && source.GetString() == RVideoProjectFinalizationContracts.TriggerManual;
+            var sourceName = queued.RootElement.TryGetProperty("source", out var source) ? source.GetString() : null;
+            // A re-voiced scene keeps its video version ids: recompose it like a manual merge.
+            revoice = sourceName == RVideoProjectFinalizationContracts.TriggerSceneAudioRevoice;
+            manual = sourceName == RVideoProjectFinalizationContracts.TriggerManual || revoice;
             if (queued.RootElement.TryGetProperty("mergeSnapshot", out var expected) && expected.ValueKind == JsonValueKind.String)
             {
                 RequireCurrentSnapshot(expected.GetString()!, mergeSnapshot);
@@ -85,7 +88,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
         }
 
-        var versioningEnabled = await ResolveVersioningEnabledAsync(_versions, manual, ct);
+        var versioningEnabled = await ResolveVersioningEnabledAsync(_versions, manual && !revoice, ct);
 
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
         var mergeableScenes = project.Scenes

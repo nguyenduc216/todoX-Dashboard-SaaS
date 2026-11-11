@@ -26,6 +26,8 @@ public static class RVideoProjectFinalizationContracts
     public const string TriggerSceneVideoReady = "SCENE_VIDEO_READY";
     public const string TriggerVideoRecovered = "RVIDEO_VIDEO_RECOVERED";
     public const string TriggerSceneAudioReady = "SCENE_AUDIO_READY";
+    /// <summary>A scene's voice was (re)muxed after a final video existed: the final video must be merged again.</summary>
+    public const string TriggerSceneAudioRevoice = "SCENE_AUDIO_REVOICE";
 }
 
 public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizationService
@@ -112,6 +114,9 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             return NotEnqueued("no_scenes", logicalRequestId);
         }
 
+        // Voice changes keep the scene-video version ids, so the selection check cannot see them:
+        // a re-voiced scene recomposes like a manual merge (system-triggered, so after the user checks above).
+        if (triggerSource == RVideoProjectFinalizationContracts.TriggerSceneAudioRevoice) manual = true;
         if (!manual && !string.IsNullOrWhiteSpace(project.FinalVideoUrl)
             && await IsCurrentFinalVideoAsync(project.Id, project.Scenes, ct))
         {

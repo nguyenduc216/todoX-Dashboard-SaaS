@@ -10,6 +10,8 @@
 @inject IRVideoSceneImageRenderAction SceneImageRender
 @inject ISceneMediaVersioningService SceneVersions
 @inject IRVideoScenePipelineService ScenePipeline
+@inject IRVideoSceneAudioAutoChainService AudioChain
+@inject TodoX.Web.Services.IAiStudioCatalogService VoiceCatalog
 @inject ILogger<RVideoV2Preview> Logger
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -53,6 +55,8 @@ else
             else{<MudIcon Icon="@Icons.Material.Outlined.Image" Size="Size.Small" />}
             @if(BusyLabel(s) is not null){<span class="rv2-pv-thumb-busy" aria-hidden="true"><span class="rv2-spin"></span></span>}
             @if(!string.IsNullOrWhiteSpace(s.SceneVideoUrl)){<span class="rv2-pv-thumb-badge"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" Style="font-size:14px" /></span>}
+            @{ var thumbVoice = VoiceState(s); }
+            <span class="rv2-pv-voice rv2-pv-voice--@thumbVoice" title="@RVideoSceneVoice.Label(thumbVoice)"><MudIcon Icon="@VoiceIcon(thumbVoice)" Style="font-size:14px" /></span>
           </span>
           <span class="rv2-pv-card-body">
             <span class="rv2-pv-card-title">Scene @s.SceneIndex.ToString("00") <span class="rv2-pv-card-dur">@s.DurationSeconds s</span></span>
@@ -71,9 +75,19 @@ else
           <span class="rv2-pv-detail-title">Scene @a.SceneIndex.ToString("00") <span class="rv2-pv-muted">/ @scenes.Count.ToString("00")</span></span>
           <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" OnClick="NextScene" Disabled="@IsLast" aria-label="Scene sau" />
           <span class="rv2-pv-status rv2-pv-status--@StatusTone(a)">@if(StatusTone(a)=="busy"){<span class="rv2-spin" aria-hidden="true"></span>}@VideoStatus(a)</span>
+          @{ var detailVoice = VoiceState(a); }
+          <span class="rv2-pv-voice-chip rv2-pv-voice--@detailVoice"><MudIcon Icon="@VoiceIcon(detailVoice)" Style="font-size:15px" />@RVideoSceneVoice.Label(detailVoice)</span>
           <MudSpacer />
           <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" aria-label="Thao tác khác">
             <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(()=>HandleEditAsync(a))" Disabled="@_busy">Chỉnh prompt</MudMenuItem>
+            @if(IsLibraryVoice)
+            {
+              <MudMenuItem Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(()=>HandleRegenerateVoiceAsync(a))" Disabled="@(_busy || VoiceState(a)==RVideoSceneVoice.Rendering)">Tạo lại giọng đọc</MudMenuItem>
+            }
+            else if(IsNativeVoice)
+            {
+              <MudMenuItem Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(()=>HandleRerenderVideoAsync(a))" Disabled="@(_busy || VideoInFlight(a))">Tạo lại video (giọng Native)</MudMenuItem>
+            }
             <MudMenuItem Icon="@Icons.Material.Filled.PhotoLibrary" OnClick="@(()=>OpenImageHistoryAsync(a))">Lịch sử ảnh</MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.VideoLibrary" OnClick="@(()=>OpenVideoHistoryAsync(a))">Lịch sử video</MudMenuItem>
             <MudDivider />
@@ -119,8 +133,19 @@ else
         </div>
 
         <div class="rv2-pv-form">
-        <MudTextField T="string" Class="rv2-pv-content" Value="@SceneVoiceText(a)" ValueChanged="@(v=>HandleVoiceChangedAsync(a,v))" Label="Lời thoại" Variant="Variant.Outlined" Lines="3" Placeholder="Scene này không có lời thoại" FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
-        <MudTextField T="string" Class="rv2-pv-content" Value="@SceneMotionText(a)" ValueChanged="@(v=>HandleContentChangedAsync(a,v))" Label="Nội dung tạo video" Variant="Variant.Outlined" Lines="4" Placeholder="Mô tả hành động, chuyển động của scene..." FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
+        <MudTextField T="string" Class="rv2-pv-content" Value="@SceneVoiceText(a)" ValueChanged="@(v=>HandleVoiceChangedAsync(a,v))" Label="Lời thoại" Variant="Variant.Outlined" Lines="5" Placeholder="Scene này không có lời thoại" FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
+        @if(IsLibraryVoice && HasVoiceText(a))
+        {
+          @* Voice of this scene: pick another library voice, then make the voice again (muxed into the video, final re-merged). *@
+          <div class="rv2-pv-voice-row">
+            <MudSelect T="string" Label="Giọng đọc của scene" Value="@SceneVoiceSelection(a)" ValueChanged="@(v=>HandleSceneVoiceChangedAsync(a,v))" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="@_busy">
+              <MudSelectItem Value="@string.Empty">Theo cài đặt job (@JobVoiceName)</MudSelectItem>
+              @foreach(var v in _voiceCatalog){<MudSelectItem Value="@v.Code">@v.Name</MudSelectItem>}
+            </MudSelect>
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(()=>HandleRegenerateVoiceAsync(a))" Disabled="@(_busy || VoiceState(a)==RVideoSceneVoice.Rendering || !HasSceneVideo(a))">@(VoiceState(a)==RVideoSceneVoice.Voiced ? "Tạo lại giọng" : "Tạo giọng")</MudButton>
+          </div>
+        }
+        <MudTextField T="string" Class="rv2-pv-content" Value="@SceneMotionText(a)" ValueChanged="@(v=>HandleContentChangedAsync(a,v))" Label="Nội dung tạo video" Variant="Variant.Outlined" Lines="9" Placeholder="Mô tả hành động, chuyển động của scene..." FullWidth="true" Margin="Margin.Dense" Disabled="@_busy" />
 
         <div class="rv2-pv-settings">
           @if(_optsReady)
@@ -200,6 +225,61 @@ async Task PollOperationsAsync(CancellationToken ct)
 bool ImageBlocked(VideoProjectSceneDto scene) => _busy || _rerenderingImage.Contains(scene.Id)
     || _activeImageScenes.Contains(scene.Id) || JobView?.Settings?.UseReferenceImageForAllScenes == true;
 readonly Dictionary<long, SceneVideoUiState> _videoStates = new();
+readonly Dictionary<long, SceneAudioVersionDto?> _latestAudio = new();
+bool IsLibraryVoice => string.Equals(RVideoRules.ResolveVoiceMode(JobView?.Settings), RVideoVoiceModes.Library, StringComparison.OrdinalIgnoreCase);
+bool IsNativeVoice => string.Equals(RVideoRules.ResolveVoiceMode(JobView?.Settings), RVideoVoiceModes.Native, StringComparison.OrdinalIgnoreCase);
+bool HasVoiceText(VideoProjectSceneDto scene) => !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene));
+string VoiceState(VideoProjectSceneDto scene)
+{
+  _videoStates.TryGetValue(scene.Id, out var state);
+  _latestAudio.TryGetValue(scene.Id, out var audio);
+  return RVideoSceneVoice.Resolve(RVideoRules.ResolveVoiceMode(JobView?.Settings), HasVoiceText(scene), state?.SelectedVersion, audio);
+}
+static string VoiceIcon(string voice) => voice switch
+{
+  RVideoSceneVoice.Voiced => Icons.Material.Filled.VolumeUp,
+  RVideoSceneVoice.Rendering => Icons.Material.Filled.GraphicEq,
+  RVideoSceneVoice.Failed => Icons.Material.Filled.VoiceOverOff,
+  _ => Icons.Material.Filled.VolumeOff
+};
+readonly List<AiStudioVoiceDto> _voiceCatalog = new();
+bool _voiceCatalogLoaded;
+string JobVoiceName => _voiceCatalog.FirstOrDefault(x=>string.Equals(x.Code, JobView?.Settings?.VoiceCatalogCode, StringComparison.OrdinalIgnoreCase))?.Name
+  ?? (_voiceCatalog.FirstOrDefault(x=>x.IsDefault)?.Name ?? "giọng mặc định");
+string SceneVoiceSelection(VideoProjectSceneDto scene) => RVideoSceneVoice.SceneVoiceCode(ReadMeta(scene)) ?? string.Empty;
+async Task EnsureVoiceCatalogAsync()
+{
+  if(_voiceCatalogLoaded || !IsLibraryVoice) return;
+  try{ _voiceCatalog.Clear(); _voiceCatalog.AddRange(await VoiceCatalog.ListVoicesAsync(activeOnly:true)); _voiceCatalogLoaded = _voiceCatalog.Count > 0; }
+  catch(Exception ex){ Logger.LogWarning(ex, "RVIDEO_V2_PREVIEW_VOICES_UNAVAILABLE"); }
+}
+async Task HandleSceneVoiceChangedAsync(VideoProjectSceneDto scene, string code)
+{
+  if(JobView is null || AuthState.CurrentUser is null) return;
+  var metadata = ScenePromptMetadata.FromScene(scene);
+  if(string.IsNullOrWhiteSpace(code)) metadata.Extra.Remove(RVideoSceneVoice.VoiceCodeKey);
+  else metadata.Extra[RVideoSceneVoice.VoiceCodeKey] = code.Trim();
+  await DoSaveAsync(scene, metadata, scene.DurationSeconds);
+  Snackbar.Add("Đã chọn giọng cho scene. Bấm \"Tạo lại giọng\" để áp dụng.", Severity.Info);
+}
+async Task HandleRegenerateVoiceAsync(VideoProjectSceneDto scene)
+{
+  if(JobView is null || AuthState.CurrentUser is not { } user || _busy) return;
+  var text = RVideoRules.ResolveSceneVoiceText(scene);
+  var ok = await DialogService.ShowMessageBoxAsync("Tạo lại giọng đọc",
+    $"Scene {scene.SceneIndex:00} sẽ đọc: \"{text}\". Muốn đổi câu đọc thì sửa ô Lời thoại trước. Giọng mới được ghép vào video của scene và video cuối được ghép lại. Tiếp tục?",
+    yesText:"Tạo lại giọng", cancelText:"Hủy");
+  if(ok != true) return;
+  _busy = true;
+  try
+  {
+    var result = await AudioChain.RegenerateSceneAudioAsync(JobView.Project.Id, scene.Id, user);
+    Snackbar.Add(result.Reason, result.Started ? Severity.Success : Severity.Warning);
+    if(result.Started){ _latestAudio.Remove(scene.Id); if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync(); }
+  }
+  catch(Exception ex){ Logger.LogWarning(ex, "RVIDEO_V2_REGENERATE_VOICE_FAILED sceneId={SceneId}", scene.Id); Snackbar.Add("Chưa tạo lại được giọng. Vui lòng thử lại.", Severity.Error); }
+  finally{ _busy = false; }
+}
 readonly Dictionary<long, RVideoSupersedeButton> _supersedeButtons = new();
 SceneVideoUiState? VideoState(VideoProjectSceneDto scene) => _videoStates.GetValueOrDefault(scene.Id);
 bool NeedsExplicitOperation(VideoProjectSceneDto scene) => VideoState(scene) is { } state
@@ -217,6 +297,7 @@ protected override async Task OnParametersSetAsync()
   var revision = ++_videoStateRevision;
   var pollOnly = _pollRefresh; _pollRefresh = false;
   if(JobView is null || AuthState.CurrentUser is not { } user) return;
+  await EnsureVoiceCatalogAsync();
   var scenes = JobView.Project.Scenes;
   var ids = scenes.Select(x=>x.Id).ToHashSet();
   foreach(var gone in _videoStates.Keys.Where(k=>!ids.Contains(k)).ToArray()) _videoStates.Remove(gone);
@@ -232,6 +313,12 @@ protected override async Task OnParametersSetAsync()
       var state = await SceneVersions.GetSceneVideoUiStateAsync(scene.Id, user);
       if(revision != _videoStateRevision) return;
       _videoStates[scene.Id] = state;
+      if(IsLibraryVoice)
+      {
+        var audios = await SceneVersions.ListSceneAudioVersionsAsync(scene.Id, user, 0, 1);
+        if(revision != _videoStateRevision) return;
+        _latestAudio[scene.Id] = audios.FirstOrDefault();
+      }
       var imageActive = await SceneVersions.HasActiveImageVersionAsync(scene.Id);
       if(revision != _videoStateRevision) return;
       if(imageActive) _activeImageScenes.Add(scene.Id); else _activeImageScenes.Remove(scene.Id);
@@ -263,7 +350,16 @@ string VideoStatus(VideoProjectSceneDto scene)
     if(RVideoSceneLink.IsLinked(scene, ordered) && !HasSceneImage(scene)) return "Chờ cảnh trước";
     return HasSceneImage(scene) ? "Đã có ảnh" : "Chưa có ảnh";
   }
-  return RVideoUserText.Status(state.LatestJob?.Status ?? scene.Status);
+  var status = RVideoUserText.Status(state.LatestJob?.Status ?? scene.Status);
+  // With "Giọng từ thư viện" a scene is only done when its voice is in the video too.
+  if(status == "Hoàn tất" && IsLibraryVoice && HasVoiceText(scene))
+  {
+    var voice = VoiceState(scene);
+    if(voice == RVideoSceneVoice.Rendering) return "Đang tạo giọng";
+    if(voice == RVideoSceneVoice.Failed) return "Lỗi tạo giọng";
+    if(voice != RVideoSceneVoice.Voiced) return "Chờ tạo giọng";
+  }
+  return status;
 }
 
 IReadOnlyList<SceneVideoModelOption> _opts = Array.Empty<SceneVideoModelOption>();
@@ -287,6 +383,13 @@ string StatusTone(VideoProjectSceneDto scene)
 {
   if(!_videoStates.TryGetValue(scene.Id, out var state)) return "muted";
   if(state.HasActiveJob || _activeImageScenes.Contains(scene.Id)) return "busy";
+  if(scene.Status == VideoSceneStatuses.VideoReady && IsLibraryVoice && HasVoiceText(scene))
+  {
+    var voice = VoiceState(scene);
+    if(voice == RVideoSceneVoice.Rendering) return "busy";
+    if(voice == RVideoSceneVoice.Failed) return "error";
+    if(voice != RVideoSceneVoice.Voiced) return "warn";
+  }
   if(state.LatestJob?.Status == "pending_reconciliation" || state.SubmitBlockReason != SceneVideoSubmitBlockReason.None) return "warn";
   return scene.Status switch { VideoSceneStatuses.VideoReady => "ok", VideoSceneStatuses.Failed => "error",
     VideoSceneStatuses.VideoRendering or VideoSceneStatuses.VideoQueued => "busy", _ => "muted" };

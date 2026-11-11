@@ -10,6 +10,12 @@ namespace TodoX.Web.Services.VideoRender;
 public interface IRVideoSceneAudioAutoChainService
 {
     Task<bool> TryEnqueueSceneAudioAsync(long projectId, long sceneId, string triggerSource, CancellationToken ct = default);
+
+    /// <summary>
+    /// User action "Tạo lại giọng": a new Vbee audio attempt for the scene's current voice text (a new audio version),
+    /// even when a completed one exists. The finalizer then muxes it into the scene video and the final video is re-merged.
+    /// </summary>
+    Task<RVideoSceneLinkResult> RegenerateSceneAudioAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default);
 }
 
 public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChainService
@@ -49,7 +55,33 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         _logger = logger;
     }
 
-    public async Task<bool> TryEnqueueSceneAudioAsync(long projectId, long sceneId, string triggerSource, CancellationToken ct = default)
+    public Task<bool> TryEnqueueSceneAudioAsync(long projectId, long sceneId, string triggerSource, CancellationToken ct = default)
+        => EnqueueSceneAudioAsync(projectId, sceneId, triggerSource, regenerate: false, ct);
+
+    public const string TriggerUserRegenerate = "RVIDEO_V2_USER_REGENERATE_VOICE";
+
+    public async Task<RVideoSceneLinkResult> RegenerateSceneAudioAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var project = await _repo.GetProjectAsync(projectId, user, ct);
+        var scene = project?.Scenes.FirstOrDefault(x => x.Id == sceneId);
+        if (project is null || scene is null) return new(false, "Không tìm thấy scene hoặc bạn không có quyền.");
+        var settings = await _settings.GetAsync(projectId, ct);
+        if (!string.Equals(RVideoRules.ResolveVoiceMode(settings), RVideoVoiceModes.Library, StringComparison.OrdinalIgnoreCase))
+            return new(false, "Job không dùng giọng từ thư viện. Với AI Native Voice, giọng nằm trong video: hãy tạo lại video của scene.");
+        if (string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)))
+            return new(false, "Scene chưa có lời thoại để tạo giọng.");
+        var selectedVideo = await _versions.GetSelectedVideoVersionAsync(sceneId, ct);
+        if (selectedVideo is null || !string.Equals(selectedVideo.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            return new(false, "Scene chưa có video hoàn tất. Giọng được tạo sau khi video xong.");
+        if (await _versions.HasActiveAudioVersionAsync(sceneId, ct))
+            return new(false, "Scene đang tạo giọng. Đợi lượt hiện tại xong rồi thử lại.");
+        var started = await EnqueueSceneAudioAsync(projectId, sceneId, TriggerUserRegenerate, regenerate: true, ct);
+        return started
+            ? new(true, $"Đang tạo lại giọng cho scene {scene.SceneIndex:00}. Xong sẽ tự ghép vào video và ghép lại video cuối.")
+            : new(false, "Chưa tạo được giọng (xem nhật ký job). Kiểm tra giọng đọc đã chọn trong Cài đặt nâng cao.");
+    }
+
+    private async Task<bool> EnqueueSceneAudioAsync(long projectId, long sceneId, string triggerSource, bool regenerate, CancellationToken ct)
     {
         var project = await _repo.GetProjectAsync(projectId, ct);
         if (project is null)
@@ -89,12 +121,19 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         }
 
         var selected = await _versions.GetSelectedAudioVersionAsync(sceneId, ct);
-        if (selected is not null && string.Equals(selected.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        if (!regenerate && selected is not null && string.Equals(selected.Status, "completed", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
+        // A regeneration is a new attempt with its own audio version (the per-scene key would reuse the old one).
+        // The key follows the next version number, so a double click or a retry stays one attempt (one charge).
         var logicalRequestId = BuildLogicalRequestKey(projectId, sceneId);
+        if (regenerate)
+        {
+            var latest = (await _versions.ListSceneAudioVersionsAsync(sceneId, 0, 1, ct)).FirstOrDefault();
+            logicalRequestId = $"{logicalRequestId}:v{(latest?.VersionNumber ?? 0) + 1}";
+        }
         var existing = await _versions.GetSceneAudioVersionByLogicalRequestIdAsync(logicalRequestId, ct);
         if (existing is null && await _versions.HasActiveAudioVersionAsync(sceneId, ct))
         {
@@ -104,7 +143,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             return false;
         }
 
-        var voice = await ResolveVoiceAsync(settings, ct);
+        var voice = await ResolveVoiceAsync(settings, RVideoSceneVoice.SceneVoiceCode(metadata), ct);
         if (voice is null)
         {
             await RecordEnqueueFailureAsync(projectId, scene, settings, triggerSource,
@@ -149,7 +188,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             CustomerId: project.CustomerId,
             RenderJobId: null,
             LogicalRequestId: logicalRequestId,
-            VoiceCatalogCode: settings?.VoiceCatalogCode,
+            VoiceCatalogCode: voice.Code,
             VoiceCodeSnapshot: voiceCode,
             VoiceTextSnapshot: voiceText,
             VoiceSnapshotJson: JsonSerializer.Serialize(voice, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
@@ -204,7 +243,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 UserId = project.UserId,
                 CustomerId = project.CustomerId,
                 LogicalRequestId = logicalRequestId,
-                VoiceCatalogCode = settings?.VoiceCatalogCode ?? string.Empty,
+                VoiceCatalogCode = voice.Code,
                 VoiceCode = voiceCode,
                 VoiceName = voice.Name,
                 NarrationText = voiceText,
@@ -328,14 +367,17 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             || status.Equals(RenderJobStatuses.PendingReconciliation, StringComparison.OrdinalIgnoreCase)
             || status.Equals(RenderJobStatuses.Processing, StringComparison.OrdinalIgnoreCase));
 
-    private async Task<AiStudioVoiceDto?> ResolveVoiceAsync(RVideoJobSettingsDto? settings, CancellationToken ct)
+    private async Task<AiStudioVoiceDto?> ResolveVoiceAsync(RVideoJobSettingsDto? settings, string? sceneVoiceCode, CancellationToken ct)
     {
-        if (settings is null || string.IsNullOrWhiteSpace(settings.VoiceCatalogCode))
-        {
-            return null;
-        }
-
-        return await _catalog.GetVoiceByCodeAsync(settings.VoiceCatalogCode, activeOnly: true, ct);
+        if (settings is null) return null;
+        // A voice picked for this scene wins over the job's voice.
+        if (sceneVoiceCode is not null && await _catalog.GetVoiceByCodeAsync(sceneVoiceCode, activeOnly: true, ct) is { } sceneVoice)
+            return sceneVoice;
+        if (!string.IsNullOrWhiteSpace(settings.VoiceCatalogCode))
+            return await _catalog.GetVoiceByCodeAsync(settings.VoiceCatalogCode, activeOnly: true, ct);
+        // "Giọng từ thư viện" chosen without picking a voice: use the catalog's default voice instead of producing none.
+        var voices = await _catalog.ListVoicesAsync(activeOnly: true, ct: ct);
+        return voices.FirstOrDefault(x => x.IsDefault) ?? voices.FirstOrDefault();
     }
 
     private async Task RecordEnqueueFailureAsync(

@@ -223,7 +223,11 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
                 url = muxedUrl
             }, ct);
 
-        await _finalization.TryEnqueueFinalMergeAsync(project.Id, RVideoProjectFinalizationContracts.TriggerSceneAudioReady, ct);
+        // A final video made before this voice existed is outdated: merge again with the new scene audio.
+        await _finalization.TryEnqueueFinalMergeAsync(project.Id,
+            string.IsNullOrWhiteSpace(project.FinalVideoUrl)
+                ? RVideoProjectFinalizationContracts.TriggerSceneAudioReady
+                : RVideoProjectFinalizationContracts.TriggerSceneAudioRevoice, ct);
     }
 
     private string ResolveLocalPath(string? objectKey)

@@ -109,3 +109,14 @@
   .rv2-pv-form { grid-column:2; }
   .rv2-pv-actions { justify-content:flex-start; flex-wrap:wrap; }
 }
+
+/* Voice state of a scene: lit = the video has a voice, pulsing = voice being made, red = failed, struck = no voice. */
+.rv2-pv-voice { position:absolute; left:3px; bottom:3px; display:flex; border-radius:50%; padding:2px; background:rgba(0,0,0,.65); }
+.rv2-pv-voice-chip { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:1px 8px; border-radius:999px; background:rgba(255,255,255,.06); }
+.rv2-pv-voice--voiced { color:#f5b301; }
+.rv2-pv-voice--rendering { color:#4fc3f7; animation:rv2-voice-pulse 1.1s ease-in-out infinite; }
+.rv2-pv-voice--failed { color:#ef5350; }
+.rv2-pv-voice--none, .rv2-pv-voice--waiting { color:#9e9e9e; }
+@keyframes rv2-voice-pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+.rv2-pv-voice-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.rv2-pv-voice-row > .mud-select { flex:1 1 220px; }

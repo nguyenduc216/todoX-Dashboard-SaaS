@@ -83,7 +83,8 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
             return false;
         }
 
-        var logicalRequestId = BuildLogicalRequestKey(projectId, sceneId);
+        // One mux per (scene, audio version): a regenerated voice must be muxed again, not deduplicated against the old mux.
+        var logicalRequestId = $"{BuildLogicalRequestKey(projectId, sceneId)}:{selectedAudio.Id:N}";
         var model = new RenderJobCreateModel
         {
             JobType = RenderJobTypes.RenderSceneAudioMux,
