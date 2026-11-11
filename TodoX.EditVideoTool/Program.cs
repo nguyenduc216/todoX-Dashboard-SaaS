@@ -30,8 +30,41 @@ switch (command)
         return 0;
     case "app":
     {
+        // The downloaded setup (or any copy outside the install folder) opens the setup wizard; the installed exe
+        // opens the TodoX EditVideo window.
+        using var services = BuildServices();
+        return services.GetRequiredService<Installer>().IsRunningInstalled
+            ? TodoX.EditVideoTool.App.MainWindow.Run(services)
+            : TodoX.EditVideoTool.App.SetupWizard.Run();
+    }
+    case "setup":
+        return TodoX.EditVideoTool.App.SetupWizard.Run();
+    case "window":
+    {
         using var services = BuildServices();
         return TodoX.EditVideoTool.App.MainWindow.Run(services);
+    }
+    case "autostart":
+    {
+        // Runs at Windows sign-in (if chosen in setup): fetch a newer version and skills quietly, then exit.
+        TodoX.EditVideoTool.App.MainWindow.HideConsole();
+        using var services = BuildServices();
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+        try
+        {
+            await services.GetRequiredService<InstallLogUploader>().UploadPendingAsync(cts.Token);
+            await services.GetRequiredService<Updater>().CheckAndStageAsync(cts.Token, notify: true);
+            if ((await services.GetRequiredService<LicenseGuard>().EnsureAsync(cts.Token)).IsUsable)
+            {
+                await services.GetRequiredService<SkillSync>().SyncAsync(notify: true, cts.Token);
+            }
+        }
+        catch (Exception)
+        {
+            // Never bother the customer at sign-in; the next start tries again.
+        }
+
+        return 0;
     }
     case "version":
     case "--version":
@@ -90,7 +123,7 @@ switch (command)
         return 0;
     }
     default:
-        Console.Error.WriteLine($"Unknown command '{command}'. Usage: todox-editvideo [app|mcp|status|doctor|activate|install|uninstall|update|version]");
+        Console.Error.WriteLine($"Unknown command '{command}'. Usage: todox-editvideo [app|setup|window|mcp|status|doctor|activate|install|uninstall|update|autostart|version]");
         return 2;
 }
 
@@ -100,44 +133,7 @@ static string? OptionValue(string[] args, string name)
     return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
 }
 
-static void AddAgentServices(IServiceCollection services)
-{
-    var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-    services.AddSingleton(AgentPaths.Default());
-    services.AddSingleton<ComponentLocator>();
-    services.AddSingleton<LicenseStore>();
-    services.AddSingleton(_ => LicenseVerifier.Default());
-    services.AddSingleton<IDeviceIdentity, WindowsDeviceIdentity>();
-    services.AddSingleton(_ => new LicenseApiClient(new HttpClient { Timeout = TimeSpan.FromSeconds(20) }));
-    services.AddSingleton<LicenseGuard>(sp => new LicenseGuard(
-        sp.GetRequiredService<LicenseStore>(),
-        sp.GetRequiredService<LicenseVerifier>(),
-        sp.GetRequiredService<IDeviceIdentity>(),
-        sp.GetRequiredService<LicenseApiClient>()));
-    services.AddSingleton(sp => new TodoXServerClient(http, sp.GetRequiredService<LicenseStore>(), sp.GetRequiredService<IDeviceIdentity>()));
-    services.AddSingleton<INotifier, WindowsNotifier>();
-    services.AddSingleton(sp => new ServerConnectivity(sp.GetRequiredService<TodoXServerClient>(), sp.GetRequiredService<INotifier>()));
-    services.AddSingleton<StatusService>();
-    services.AddSingleton<MediaProbe>();
-    services.AddSingleton<ClipNormalizer>();
-    services.AddSingleton<Transcriber>();
-    services.AddSingleton<RemotionRenderer>();
-    services.AddSingleton<HealthCheck>();
-    services.AddSingleton<Installer>();
-    services.AddSingleton<Updater>();
-    services.AddSingleton<SkillSync>();
-    services.AddSingleton<ProjectFolders>();
-    services.AddSingleton(sp => new AiGenerator(sp.GetRequiredService<TodoXServerClient>()));
-    services.AddSingleton<EditStore>();
-    services.AddSingleton<SkillRunStore>();
-}
-
-static ServiceProvider BuildServices()
-{
-    var services = new ServiceCollection();
-    AddAgentServices(services);
-    return services.BuildServiceProvider();
-}
+static ServiceProvider BuildServices() => AppServices.Build();
 
 static async Task RunMcpServerAsync(string[] args)
 {
@@ -147,7 +143,7 @@ static async Task RunMcpServerAsync(string[] args)
     builder.Logging.ClearProviders();
     builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-    AddAgentServices(builder.Services);
+    AppServices.Add(builder.Services);
 
     builder.Services
         .AddMcpServer(o =>

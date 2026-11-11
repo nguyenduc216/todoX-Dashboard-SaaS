@@ -54,10 +54,13 @@ public sealed class ClientRegistrar
         return roots;
     }
 
-    public IReadOnlyList<string> RegisterAll(string exePath, string skillMarkdown)
+    /// <summary>Claude Desktop and Claude Code count as "Claude" in the setup wizard; Codex is its own choice.</summary>
+    public static bool IsClaude(string clientId) => clientId is "claude-desktop" or "claude-code";
+
+    public IReadOnlyList<string> RegisterAll(string exePath, string skillMarkdown, Func<string, bool>? include = null)
     {
         var done = new List<string>();
-        foreach (var client in Detect(exePath).Where(c => c.Detected))
+        foreach (var client in Detect(exePath).Where(c => c.Detected && (include?.Invoke(c.Id) ?? true)))
         {
             switch (client.Id)
             {

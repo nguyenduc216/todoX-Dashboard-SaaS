@@ -97,7 +97,7 @@ public sealed partial class MainWindow : Form
         root.Controls.Add(_checks);
         var checkRow = Row();
         checkRow.Controls.Add(Action("Kiểm tra lại", () => RunHealthAsync(untilConnected: true)));
-        checkRow.Controls.Add(Action(_installer.IsRunningInstalled ? "Cài lại / sửa lỗi" : "Cài đặt TodoX EditVideo", InstallAsync, primary: !_installer.IsRunningInstalled));
+        checkRow.Controls.Add(Action("Cài lại / sửa lỗi", InstallAsync));
         checkRow.Controls.Add(Action("Kiểm tra cập nhật", UpdateAsync));
         root.Controls.Add(checkRow);
 
@@ -149,10 +149,14 @@ public sealed partial class MainWindow : Form
             await RefreshLicenseAsync();
             _ = SkillLoopAsync();
             _ = RefreshUpdateBannerAsync();
+            _ = _services.GetRequiredService<InstallLogUploader>().UploadPendingAsync(_closing.Token);
             await RunHealthAsync(untilConnected: true);
         };
         FormClosing += (_, _) => _closing.Cancel();
     }
+
+    /// <summary>Hides the console window a double-click (or Windows sign-in) opened.</summary>
+    public static void HideConsole() => FreeConsole();
 
     public static int Run(IServiceProvider services)
     {
@@ -188,21 +192,19 @@ public sealed partial class MainWindow : Form
         {
             _keyBox.Clear();
             await SyncSkillsAsync(notify: false);
+            _ = _services.GetRequiredService<InstallLogUploader>().UploadPendingAsync(_closing.Token);
         }
 
         await RefreshLicenseAsync();
         await RunHealthAsync(untilConnected: false);
     }
 
-    private async Task InstallAsync()
+    /// <summary>Opens the setup wizard (update mode, same folder) and closes this window.</summary>
+    private Task InstallAsync()
     {
-        var ok = await Task.Run(() => _installer.InstallAsync(new Progress<string>(Log), _closing.Token));
-        RefreshClients();
-        await RunHealthAsync(untilConnected: false);
-        if (ok && !_installer.IsRunningInstalled)
-        {
-            Log("Từ giờ mở TodoX EditVideo bằng biểu tượng trên Desktop.");
-        }
+        Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "setup") { UseShellExecute = false });
+        Close();
+        return Task.CompletedTask;
     }
 
     private async Task UpdateAsync()
