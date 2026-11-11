@@ -14,9 +14,7 @@ public partial class RVideoV2Preview
 
     /// <summary>AUTO job whose run has not been started yet: the top button starts it instead of opening the bulk dialog.</summary>
     private bool AutoRunPending
-        => JobView?.Settings is { } settings
-           && string.Equals(settings.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
-           && settings.AutoRunStartedAt is null;
+        => JobView is not null && RVideoJobSettingsDto.AutoRunWaitingForStart(JobView.Settings, JobView.Project.Scenes);
 
     private async Task CreateVideosAsync()
     {

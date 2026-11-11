@@ -58,4 +58,22 @@ public sealed class RVideoAutoRunStartTests
         Assert.Contains("@if (LinkedVideo || _mode is not null)", panel);
         Assert.Contains("LinkedVideo=\"@RVideoSceneLink.IsProjectLinked(JobView.Project.Scenes)\"", Read("TodoX.Web", "Components", "Pages", "RVideo", "RVideoV2Preview.razor"));
     }
+
+    [Fact]
+    public void Auto_job_waits_for_start_only_until_a_scene_has_media()
+    {
+        var settings = new RVideoJobSettingsDto { ExecutionMode = RVideoExecutionModes.Auto };
+        var bare = new[] { new VideoProjectSceneDto { SceneIndex = 1 }, new VideoProjectSceneDto { SceneIndex = 2 } };
+        var withImage = new[] { new VideoProjectSceneDto { SceneIndex = 1, StaticImageUrl = "/a.png" }, new VideoProjectSceneDto { SceneIndex = 2 } };
+        Assert.True(RVideoJobSettingsDto.AutoRunWaitingForStart(settings, bare));
+        Assert.False(RVideoJobSettingsDto.AutoRunWaitingForStart(settings, withImage));
+        Assert.False(RVideoJobSettingsDto.AutoRunWaitingForStart(new RVideoJobSettingsDto { ExecutionMode = RVideoExecutionModes.Manual }, bare));
+
+        var worker = Read("TodoX.Web", "Services", "VideoRender", "RVideoLifecycleWorker.cs");
+        Assert.Contains("project.Scenes.Any(RVideoJobSettingsDto.HasMedia)", worker);
+        // The start button sits in step 2, next to "Tạo lại scene".
+        var info = Read("TodoX.Web", "Components", "Pages", "RVideo", "RVideoV2Info.razor");
+        Assert.True(info.IndexOf("Tạo lại scene", StringComparison.Ordinal) < info.IndexOf("rv2-start-auto-run", StringComparison.Ordinal));
+        Assert.True(info.IndexOf("rv2-start-auto-run", StringComparison.Ordinal) < info.IndexOf("<b>Tạo ảnh</b>", StringComparison.Ordinal));
+    }
 }

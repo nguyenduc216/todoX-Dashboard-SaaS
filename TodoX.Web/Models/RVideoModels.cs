@@ -68,6 +68,19 @@ public sealed class RVideoJobSettingsDto
 
     /// <summary>The background lifecycle may advance this job on its own.</summary>
     public bool AutoRunActive => string.Equals(ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase) && AutoRunStartedAt is not null;
+
+    /// <summary>
+    /// AUTO job that still waits for "Bắt đầu tạo video": not started and no scene has an image or video yet.
+    /// Once any scene has media the run is under way (images → videos continue on their own).
+    /// </summary>
+    public static bool AutoRunWaitingForStart(RVideoJobSettingsDto? settings, IEnumerable<VideoProjectSceneDto> scenes)
+        => settings is not null
+           && string.Equals(settings.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
+           && settings.AutoRunStartedAt is null
+           && !scenes.Any(HasMedia);
+
+    public static bool HasMedia(VideoProjectSceneDto scene)
+        => !string.IsNullOrWhiteSpace(scene.StaticImageUrl) || !string.IsNullOrWhiteSpace(scene.SceneVideoUrl);
 }
 
 public sealed class RVideoJobSettingsRequest

@@ -166,7 +166,14 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 : project.Status, ct);
 
         var userId = project.UserId ?? Guid.Empty;
-        // AUTO jobs wait for "Bắt đầu tạo video" before creating images and videos on their own.
+        // AUTO jobs wait for "Bắt đầu tạo video" only while nothing exists yet. Once a scene has an image or video
+        // (made before the start rule, or by the user) the run is under way: record the start and keep going.
+        if (string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
+            && setting.AutoRunStartedAt is null && project.Scenes.Any(RVideoJobSettingsDto.HasMedia))
+        {
+            await settingsRepo.SetAutoRunStartedAsync(project.Id, true, ct);
+            setting.AutoRunStartedAt = DateTime.UtcNow;
+        }
         var isAuto = string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase) && setting.AutoRunStartedAt is not null;
         // Linked scenes ("Video liên kết") get their image from the previous scene's last frame instead.
         var orderedScenes = project.Scenes.OrderBy(x => x.SceneIndex).ToList();
