@@ -35,6 +35,18 @@ internal static class RVideoUserText
         _ => "Chưa thể thử lại"
     };
 
+    /// <summary>Why a scene video cannot be started right now, in words the user can act on.</summary>
+    public static string VideoBlocked(bool hasActiveJob, string? reason, string? latestJobStatus) => reason switch
+    {
+        "SceneJobInFlightOrManualReview" or "SceneVersionInFlightOrReconciliation" when !hasActiveJob
+            => "Lượt tạo video trước của scene này đang chờ TodoX xác minh. Đợi vài phút rồi thử lại, hoặc dùng \"Tạo lượt video mới\".",
+        "ExistingIntentUnresolved" or "pending_reconciliation"
+            => "Lượt gửi video trước chưa được xác minh với nhà cung cấp. Đợi vài phút rồi thử lại, hoặc dùng \"Tạo lượt video mới\".",
+        _ when hasActiveJob
+            => $"Scene này đang có job video chạy ({Status(latestJobStatus)}). Đợi job xong rồi mới tạo lại.",
+        _ => "Chưa thể tạo video cho scene này lúc này. Tải lại trang rồi thử lại."
+    };
+
     // Arbitrary backend error text must never become a user-facing provider diagnostic.
     public static string? Error(string? detail, string fallback = "Tạo video thất bại")
         => string.IsNullOrWhiteSpace(detail) ? null : fallback;

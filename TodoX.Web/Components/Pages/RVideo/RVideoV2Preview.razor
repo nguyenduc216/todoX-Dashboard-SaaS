@@ -533,10 +533,15 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
   var currentState = await SceneVersions.GetSceneVideoUiStateAsync(scene.Id, user);
   _videoStates[scene.Id] = currentState;
   if(currentState.HasActiveJob || currentState.SubmitBlockReason != SceneVideoSubmitBlockReason.None)
-  { Snackbar.Add("Chưa thể thử lại", Severity.Info); return; }
+  {
+   Logger.LogInformation("RVIDEO_V2_VIDEO_RENDER_BLOCKED sceneId={SceneId} active={Active} reason={Reason} jobStatus={JobStatus}",
+    scene.Id, currentState.HasActiveJob, currentState.SubmitBlockReason, currentState.LatestJob?.Status);
+   Snackbar.Add(RVideoUserText.VideoBlocked(currentState.HasActiveJob, currentState.SubmitBlockReason.ToString(), currentState.LatestJob?.Status), Severity.Info);
+   return;
+  }
   var versions = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, user);
   if(versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault()?.Status == "pending_reconciliation")
-  { Snackbar.Add("Chưa thể thử lại", Severity.Warning); return; }
+  { Snackbar.Add(RVideoUserText.VideoBlocked(false, "pending_reconciliation", null), Severity.Warning); return; }
   var latest = versions.OrderByDescending(v=>v.VersionNumber).FirstOrDefault();
   var renderScene = await PinShownModelAsync(scene, user);
   if(renderScene is null) { Snackbar.Add("Không lưu được model của scene. Vui lòng thử lại.", Severity.Error); return; }
@@ -554,7 +559,11 @@ async Task HandleRerenderVideoAsync(VideoProjectSceneDto scene)
   Snackbar.Add(result.AlreadyActive ? "Scene đang có job video." : $"Đang tạo video. Job: {result.RenderJobId}", result.AlreadyActive ? Severity.Info : Severity.Success);
   if(OnReloadRequested.HasDelegate) await OnReloadRequested.InvokeAsync();
  }
- catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_RENDER_ACTION_FAILED"); Snackbar.Add("Chưa thể thử lại", Severity.Error); }
+ catch(Exception ex)
+ {
+  Logger.LogWarning(ex, "RVIDEO_V2_RENDER_ACTION_FAILED sceneId={SceneId} projectId={ProjectId}", scene.Id, JobView?.Project.Id);
+  Snackbar.Add("Không tạo được video cho scene này (lỗi khi chuẩn bị, đã ghi log). Tải lại trang rồi thử lại.", Severity.Error);
+ }
  finally { _busy = false; _gate.Release(); }
 }
 async Task HandleRerenderImageAsync(VideoProjectSceneDto scene)
