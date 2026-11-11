@@ -52,7 +52,7 @@
                 {
                     <MudAlert Severity="@(agentAudit?.Status == TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Fixed ? Severity.Warning : Severity.Error)" Dense="true" Class="mb-2">
                         Prompt agent của dịch vụ: <b>@TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Label(agentAudit?.Status)</b>.
-                        Mở Prompt Assistant → "Kiểm tra agent" trước khi mở dịch vụ cho khách.
+                        Mở Prompt Assistant → "Chạy thử & kiểm tra" trước khi mở dịch vụ cho khách.
                     </MudAlert>
                 }
                 <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">

@@ -29,6 +29,8 @@ public sealed class RVideoAutoRunStartTests
     {
         var repository = Read("TodoX.Web", "Services", "VideoRender", "VideoRenderRepository.cs");
         Assert.Contains("SET auto_run_started_at=NULL WHERE project_id=@projectId", repository);
+        // Leaving AUTO cancels the start, so returning to AUTO asks again.
+        Assert.Contains("auto_run_started_at=CASE WHEN EXCLUDED.execution_mode='AUTO'", Read("TodoX.Web", "Services", "VideoRender", "RVideoJobSettingsRepository.cs"));
         Assert.Contains("Bắt đầu tạo video", Read("TodoX.Web", "Components", "Pages", "RVideo", "RVideoV2Info.razor"));
         Assert.Contains("ScenePipeline.StartAutoRunAsync(", Read("TodoX.Web", "Components", "Pages", "RVideo", "RVideoV2Preview.BulkRerender.cs"));
         Assert.True(File.Exists(Path.Combine(Root, "database", "manual", "rvideo", "20261111_rvideo_auto_run_start.test.sql")));

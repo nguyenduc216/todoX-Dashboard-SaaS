@@ -78,6 +78,8 @@ public sealed class RVideoJobSettingsRepository
                 music_snapshot_json=EXCLUDED.music_snapshot_json,
                 music_volume=EXCLUDED.music_volume,
                 creative_mode=COALESCE(@CreativeMode, video_render.rvideo_job_settings.creative_mode),
+                -- Leaving AUTO cancels its start: going back to AUTO needs "Bắt đầu tạo video" (and its confirmation) again.
+                auto_run_started_at=CASE WHEN EXCLUDED.execution_mode='AUTO' THEN video_render.rvideo_job_settings.auto_run_started_at ELSE NULL END,
                 updated_at=now()
             WHERE video_render.rvideo_job_settings.tenant_id = EXCLUDED.tenant_id
             RETURNING project_id;

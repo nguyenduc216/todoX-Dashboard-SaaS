@@ -5,6 +5,9 @@ using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.PromptAssistant;
 
+/// <summary>The audit report and the agent's raw generation (JSON, tokens, timings) of one test run.</summary>
+public sealed record PromptAgentAuditRun(PromptAgentAuditReport Report, ServicePromptGenerationResult? Generation);
+
 /// <summary>
 /// Runs a service's prompt agent the way a real job does (same agent input), grades the script with
 /// <see cref="PromptAgentAudit"/> and keeps the latest report on the service
@@ -28,7 +31,7 @@ public sealed class PromptAgentAuditService
         _logger = logger;
     }
 
-    public async Task<PromptAgentAuditReport> RunAsync(Guid serviceId, string? sampleInput, CurrentUserSession? user, CancellationToken ct = default)
+    public async Task<PromptAgentAuditRun> RunAsync(Guid serviceId, string? sampleInput, CurrentUserSession? user, CancellationToken ct = default)
     {
         if (!AdminEndpointAuthorization.IsAdmin(user)) throw new UnauthorizedAccessException("Chỉ quản trị viên TodoX được kiểm tra agent.");
         var assistant = await _repository.GetOrCreateAssistantAsync(serviceId, _options.Value, ct);
@@ -38,9 +41,11 @@ public sealed class PromptAgentAuditService
 
         PromptAgentAuditReport report;
         Guid? generationId = null;
+        ServicePromptGenerationResult? generation = null;
         try
         {
             var result = await _assistant.GeneratePromptAsync(serviceId, agentInput, user, ct);
+            generation = result;
             generationId = result.GenerationId;
             report = result.GeneratedJson is not null
                 ? PromptAgentAudit.Grade(result.GeneratedJson)
@@ -70,7 +75,7 @@ public sealed class PromptAgentAuditService
         };
         await SaveAsync(serviceId, report, ct);
         _logger.LogInformation("PROMPT_AGENT_AUDIT serviceId={ServiceId} status={Status} scenes={Scenes}", serviceId, report.Status, report.SceneCount);
-        return report;
+        return new PromptAgentAuditRun(report, generation);
     }
 
     public async Task<PromptAgentAuditReport?> GetAsync(Guid serviceId, CancellationToken ct = default)

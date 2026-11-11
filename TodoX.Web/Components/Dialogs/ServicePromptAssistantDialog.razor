@@ -108,21 +108,21 @@
                     </MudStack>
                 </MudTabPanel> *@
 
-                <MudTabPanel Text="Kiểm tra agent">
+                <MudTabPanel Text="Chạy thử & kiểm tra">
                     <MudStack Spacing="2" Class="pa-2">
                         <MudText Typo="Typo.body2">
-                            Chạy agent với đúng lời nhắn mà job video thật gửi, rồi đối chiếu kết quả với chuẩn kịch bản TodoX
-                            (thời lượng scene, prompt ảnh, mô tả chuyển động, lời đọc, tốc độ đọc). Nên kiểm tra mỗi khi đổi agent
+                            Chạy agent với đúng lời nhắn mà job video thật gửi: xem prompt agent trả về và kết quả đối chiếu với chuẩn kịch bản TodoX
+                            (thời lượng scene, prompt ảnh, mô tả chuyển động, lời đọc, tốc độ đọc). Nên chạy mỗi khi đổi agent
                             và trước khi mở dịch vụ cho khách. Một lần chạy có thể mất vài phút và tốn credit của agent.
                         </MudText>
                         @if (_audit is not null && _assistantDto is not null && _audit.IsStaleFor(_assistantDto))
                         {
                             <MudAlert Severity="Severity.Warning" Dense="true">Cấu hình agent đã đổi sau lần kiểm tra này. Hãy kiểm tra lại.</MudAlert>
                         }
-                        <MudTextField T="string" @bind-Value="_auditInput" Label="Nội dung mẫu (để trống = dùng đoạn mẫu có sẵn)" Variant="Variant.Outlined" Lines="4" Disabled="_auditing" />
+                        <MudTextField T="string" @bind-Value="_auditInput" Label="Nội dung video mẫu (để trống = dùng đoạn mẫu có sẵn)" Variant="Variant.Outlined" Lines="4" Disabled="_auditing" />
                         <MudStack Row="true" AlignItems="AlignItems.Center" Class="gap-2 flex-wrap">
-                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.FactCheck" Disabled="@(_auditing || _generating)" OnClick="RunAuditAsync">
-                                @(_auditing ? "Đang kiểm tra..." : "Kiểm tra agent")
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.FactCheck" Disabled="@_auditing" OnClick="RunAuditAsync">
+                                @(_auditing ? "Đang chạy..." : "Chạy thử & kiểm tra")
                             </MudButton>
                             @if (_audit is not null)
                             {
@@ -164,33 +164,8 @@
                                 </MudSimpleTable>
                             }
                         }
-                    </MudStack>
-                </MudTabPanel>
-
-                <MudTabPanel Text="Test playground">
-                    <MudStack Spacing="2" Class="pa-2">
-                        <MudAlert Severity="Severity.Info" Dense="true">Playground chỉ kiểm tra JSON hợp lệ, không kiểm tra chuẩn kịch bản video. Dùng tab "Kiểm tra agent" trước khi mở dịch vụ.</MudAlert>
-                        <MudTextField T="string" @bind-Value="_userInput" Label="Natural-language request" Variant="Variant.Outlined" Lines="5" />
-                        <MudStack Row="true" Class="flex-wrap gap-2">
-                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@_generating" OnClick="GenerateAsync">
-                                Run test
-                            </MudButton>
-                            @if (_lastResult?.GeneratedJson is not null)
-                            {
-                                <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" title="Copy JSON" OnClick="CopyJsonAsync" />
-                                <MudIconButton Icon="@Icons.Material.Filled.Download" title="Download JSON" OnClick="DownloadJsonAsync" />
-                                <MudIconButton Icon="@Icons.Material.Filled.Replay" title="Re-run" OnClick="GenerateAsync" />
-                            }
-                        </MudStack>
-                        @if (_generating)
-                        {
-                            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
-                        }
                         @if (_lastResult is not null)
                         {
-                            <MudAlert Severity="@(_lastResult.ValidationPassed ? Severity.Success : Severity.Error)">
-                                @(_lastResult.ValidationPassed ? "Validation PASS" : $"Validation FAIL - {_lastResult.ErrorCode}")
-                            </MudAlert>
                             <MudText Typo="Typo.caption">
                                 Agent ID: @_gommoAgentId | Agent ID Base: @_gommoAgentIdBase |
                                 Configured model: @_lastResult.ModelCode | Runtime provider: @_lastResult.RuntimeProvider |
@@ -206,6 +181,11 @@
                             </MudText>
                             @if (_lastResult.GeneratedJson is not null)
                             {
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.subtitle2">Prompt agent trả về</MudText>
+                                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" title="Copy JSON" OnClick="CopyJsonAsync" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" title="Download JSON" OnClick="DownloadJsonAsync" />
+                                </MudStack>
                                 <MudTextField T="string" Value="_lastResult.GeneratedJson" Label="Generated JSON" Variant="Variant.Outlined" Lines="12" ReadOnly="true" />
                             }
                             @foreach (var error in _lastResult.ValidationErrors)
@@ -215,6 +195,7 @@
                         }
                     </MudStack>
                 </MudTabPanel>
+
 
                 <MudTabPanel Text="History">
                     <MudTable Items="_generations" Dense="true" Hover="true">
@@ -243,7 +224,6 @@
     [Parameter] public ServiceDto Service { get; set; } = new();
 
     private bool _loading = true;
-    private bool _generating;
     private bool _busy;
     private bool _enabled;
     private string _provider = "gommo_agent";
@@ -259,7 +239,6 @@
     private string _templateJson = string.Empty;
     private string _descriptionFileName = string.Empty;
     private string _description = string.Empty;
-    private string _userInput = string.Empty;
     private IReadOnlyList<ServicePromptTrainingVersionDto> _versions = [];
     private IReadOnlyList<ServicePromptGenerationDto> _generations = [];
     private ServicePromptGenerationResult? _lastResult;
@@ -274,7 +253,9 @@
         _auditing = true;
         try
         {
-            _audit = await AgentAudit.RunAsync(Service.Id, _auditInput, AuthState.CurrentUser);
+            var run = await AgentAudit.RunAsync(Service.Id, _auditInput, AuthState.CurrentUser);
+            _audit = run.Report;
+            _lastResult = run.Generation;
             var workspace = await AssistantService.LoadWorkspaceAsync(Service.Id);
             _assistantDto = workspace.Assistant;
             _generations = workspace.Generations;
@@ -498,30 +479,6 @@
     private async Task ReloadAsync()
     {
         ApplyWorkspace(await AssistantService.LoadWorkspaceAsync(Service.Id));
-    }
-
-    private async Task GenerateAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_userInput))
-        {
-            Snackbar.Add("Enter a request before running the test.", Severity.Warning);
-            return;
-        }
-
-        _generating = true;
-        try
-        {
-            _lastResult = await AssistantService.GeneratePromptAsync(Service.Id, _userInput, AuthState.CurrentUser);
-            _generations = (await AssistantService.LoadWorkspaceAsync(Service.Id)).Generations;
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Test failed: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _generating = false;
-        }
     }
 
     private async Task CopyJsonAsync()

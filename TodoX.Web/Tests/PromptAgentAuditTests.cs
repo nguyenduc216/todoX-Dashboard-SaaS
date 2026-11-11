@@ -61,7 +61,8 @@ public sealed class PromptAgentAuditTests
         var service = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Services", "PromptAssistant", "PromptAgentAuditService.cs"));
         Assert.Contains("PromptAssistantEndpoints.BuildAgentInput(", service);
         var dialog = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Dialogs", "ServicePromptAssistantDialog.razor"));
-        Assert.Contains("Kiểm tra agent", dialog);
+        Assert.Contains("Chạy thử & kiểm tra", dialog);
+        Assert.DoesNotContain("Test playground", dialog);
         Assert.DoesNotContain("`r`n", dialog);
         var servicesPage = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Pages", "Services.razor"));
         Assert.Contains("PromptAgentAuditStatuses.Label(audit?.Status)", servicesPage);
