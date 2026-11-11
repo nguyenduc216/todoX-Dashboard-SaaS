@@ -90,6 +90,7 @@ else
             }
             <MudMenuItem Icon="@Icons.Material.Filled.PhotoLibrary" OnClick="@(()=>OpenImageHistoryAsync(a))">Lịch sử ảnh</MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.VideoLibrary" OnClick="@(()=>OpenVideoHistoryAsync(a))">Lịch sử video</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Rule" OnClick="@(()=>ShowFallbackHistoryAsync(a))">Lịch sử thử model</MudMenuItem>
             <MudDivider />
             <MudMenuItem Icon="@Icons.Material.Filled.ArrowUpward" OnClick="@(()=>HandleMoveAsync(a,-1))" Disabled="@(a.SceneIndex<=1 || _busy)">Lên</MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.ArrowDownward" OnClick="@(()=>HandleMoveAsync(a,1))" Disabled="@(a.SceneIndex>=scenes.Count || _busy)">Xuống</MudMenuItem>
@@ -174,43 +175,10 @@ else
             }
           </MudAlert>
         }
-        @if(FallbackSteps(a) is { Count: > 0 } steps)
+        @if(FallbackSteps(a) is { Count: > 0 } liveSteps && liveSteps[^1] is { Kind: "switched" } live && VideoInFlight(a))
         {
-          var last = steps[^1];
-          <div class="rv2-pv-fallback">
-            <div class="rv2-pv-fallback-title">
-              @if(last.Kind == "switched" && VideoInFlight(a))
-              {
-                <span>⚠ @last.FromModel không tạo được (@last.Reason) → đang tự chuyển sang <b>@last.Model</b>.</span>
-              }
-              else if(last.Kind == "exhausted")
-              {
-                <span>✕ Đã thử hết các model theo thứ tự ưu tiên nhưng chưa tạo được video.</span>
-              }
-              else if(steps.Any(x=>x.Kind=="switched"))
-              {
-                <span>Lượt gần nhất đã tự chuyển model dự phòng.</span>
-              }
-              else
-              {
-                <span>Lượt tạo video gần nhất thất bại.</span>
-              }
-            </div>
-            <ol>
-              @foreach(var step in steps)
-              {
-                <li>
-                  @if(step.Kind == "switched"){<span>Chuyển sang <b>@step.Model</b></span>}
-                  else if(step.Kind == "duration"){<span><b>@step.Model</b>: @step.Reason</span>}
-                  else {<span><b>@step.Model</b> thất bại: @step.Reason</span>}
-                  @if(IsStaff && (!string.IsNullOrWhiteSpace(step.ErrorCode) || !string.IsNullOrWhiteSpace(step.ErrorDetail)))
-                  {
-                    <div class="rv2-pv-fallback-detail">@step.ErrorCode @Short(step.ErrorDetail)</div>
-                  }
-                </li>
-              }
-            </ol>
-          </div>
+          @* Full history lives in the ⋮ menu ("Lịch sử thử model"); only the live switch is shown inline. *@
+          <div class="rv2-pv-fallback">⚠ @live.FromModel không tạo được (@live.Reason) → đang tự chuyển sang <b>@live.Model</b>.</div>
         }
         @if(_optsReady && UsedModelLabel(a) is { } usedLabel)
         {
@@ -344,6 +312,38 @@ async Task ApplyVoiceFitAsync(VideoProjectSceneDto scene, string modelKey, int s
   var fresh = JobView?.Project.Scenes.FirstOrDefault(x=>x.Id==scene.Id) ?? scene;
   if(fresh.DurationSeconds != seconds) await HandleDurationChangedAsync(fresh, seconds);
   Snackbar.Add($"Đã đặt {seconds} giây. Bấm tạo lại video để áp dụng.", Severity.Info);
+}
+async Task ShowFallbackHistoryAsync(VideoProjectSceneDto scene)
+{
+  var steps = FallbackSteps(scene);
+  var html = new System.Text.StringBuilder();
+  if(steps.Count == 0) html.Append("<p>Chưa có lượt nào thất bại hay phải chuyển model cho scene này.</p>");
+  else
+  {
+    var last = steps[^1];
+    html.Append("<p>").Append(System.Net.WebUtility.HtmlEncode(last.Kind switch
+    {
+      "exhausted" => "Đã thử hết các model theo thứ tự ưu tiên nhưng chưa tạo được video.",
+      "switched" => "Lượt gần nhất đã tự chuyển sang model dự phòng.",
+      _ => steps.Any(x=>x.Kind=="switched") ? "Lượt gần nhất đã tự chuyển model dự phòng." : "Lượt tạo video gần nhất thất bại."
+    })).Append("</p><ol>");
+    foreach(var step in steps)
+    {
+      var text = step.Kind switch
+      {
+        "switched" => $"{step.At.ToLocalTime():HH:mm:ss} · Chuyển từ {step.FromModel} sang {step.Model}",
+        "duration" => $"{step.At.ToLocalTime():HH:mm:ss} · {step.Model}: {step.Reason}",
+        _ => $"{step.At.ToLocalTime():HH:mm:ss} · {step.Model} thất bại: {step.Reason}"
+      };
+      html.Append("<li>").Append(System.Net.WebUtility.HtmlEncode(text));
+      if(IsStaff && (!string.IsNullOrWhiteSpace(step.ErrorCode) || !string.IsNullOrWhiteSpace(step.ErrorDetail)))
+        html.Append("<div style=\"opacity:.7;font-family:monospace;font-size:12px\">")
+            .Append(System.Net.WebUtility.HtmlEncode($"{step.ErrorCode} {Short(step.ErrorDetail)}")).Append("</div>");
+      html.Append("</li>");
+    }
+    html.Append("</ol>");
+  }
+  await DialogService.ShowMessageBoxAsync($"Lịch sử thử model · Scene {scene.SceneIndex:00}", new MarkupString(html.ToString()), yesText: "Đóng");
 }
 async Task HandleRegenerateVoiceAsync(VideoProjectSceneDto scene)
 {

@@ -174,16 +174,23 @@ public sealed class SceneVideoSupersedeUiTests
     }
 
     [Fact]
-    public void StrictNewOperationHasOnlyTheConfirmedModelAndMode()
+    public void StrictNewOperationStartsWithTheConfirmedModelThenFallsBackInPriorityOrder()
     {
+        // User decision 2026-11-11: a manual operation tries its confirmed model first, then the others.
         var policy = RVideoVideoModelPolicy.Models.Last();
         var input = new SceneVideoRenderWorkItemInput { ProviderCode=policy.ProviderCode,
             RequestedModelCode=policy.Model, RequestedMode=policy.Mode, ManualOverride=true, StrictRequestedSettings=true };
         var policies = (IReadOnlyList<RVideoVideoModelPolicyEntry>)typeof(SceneVideoWorkerHandler)
             .GetMethod("ResolveOrderedPolicies", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [input])!;
-        var selected = Assert.Single(policies);
-        Assert.Equal(policy.Model, selected.Model);
-        Assert.Equal(policy.Mode, selected.Mode);
+        Assert.Equal(policy.Model, policies[0].Model);
+        Assert.Equal(policy.Mode, policies[0].Mode);
+        Assert.Equal(RVideoVideoModelPolicy.Models.Count, policies.Count);
+
+        // Models that already failed in this chain are never tried again.
+        input.ExcludedModelKeys = [RVideoVideoModelPolicy.BuildKey(RVideoVideoModelPolicy.Models[0])];
+        policies = (IReadOnlyList<RVideoVideoModelPolicyEntry>)typeof(SceneVideoWorkerHandler)
+            .GetMethod("ResolveOrderedPolicies", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [input])!;
+        Assert.DoesNotContain(policies, p => RVideoVideoModelPolicy.BuildKey(p) == RVideoVideoModelPolicy.BuildKey(RVideoVideoModelPolicy.Models[0]));
     }
 
     [Theory]

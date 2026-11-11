@@ -40,10 +40,21 @@ public static class RVideoFallbackTimeline
         }
         if (parsed.Count == 0) return [];
 
-        // Only the latest attempt (render job) of the scene.
-        var latestJob = parsed.OrderByDescending(x => x.Event.CreatedAt).ThenByDescending(x => x.Event.Id).First().JobId;
-        return parsed
-            .Where(x => x.JobId == latestJob)
+        // The latest attempt (render job) of the scene, plus the earlier jobs of the same fallback chain
+        // (a provider failure starts the next model as a new job, linked by nextRenderJobId).
+        var chain = new HashSet<string?> { parsed.OrderByDescending(x => x.Event.CreatedAt).ThenByDescending(x => x.Event.Id).First().JobId };
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (var link in parsed.Where(x => x.Event.EventType == Started && chain.Contains(Str(x.Data, "nextRenderJobId"))))
+                grew |= chain.Add(link.JobId);
+        } while (grew);
+        var inChain = parsed.Where(x => chain.Contains(x.JobId)).ToList();
+        // The fallback events already describe a failure the generic terminal event repeats.
+        var detailedJobs = inChain.Where(x => x.Event.EventType is Failed or Exhausted).Select(x => x.JobId).ToHashSet();
+        return inChain
+            .Where(x => x.Event.EventType != TerminalFailed || !detailedJobs.Contains(x.JobId))
             .OrderBy(x => x.Event.CreatedAt).ThenBy(x => x.Event.Id)
             .Select(x => ToStep(x.Event, x.Data))
             .ToList();

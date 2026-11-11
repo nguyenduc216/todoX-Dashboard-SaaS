@@ -68,6 +68,10 @@ public sealed class SceneVideoRenderWorkItemInput
     /// <summary>Service-configured model order for the fallback chain; null = default policy order.</summary>
     public List<string>? VideoModelOrder { get; set; }
     public RVideoSceneVideoOperationSettings? ConfirmedOperationSettings { get; set; }
+    /// <summary>"provider|model|mode" keys that already failed earlier in this fallback chain; never tried again.</summary>
+    public List<string>? ExcludedModelKeys { get; set; }
+    /// <summary>The render job whose provider failure started this fallback attempt.</summary>
+    public Guid? FallbackFromRenderJobId { get; set; }
 }
 
 public enum VideoSceneImageInputMode
@@ -1565,6 +1569,13 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                     }
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, providerTaskId ?? taskId, ct, policy.Model, candidate.ProviderDurationSeconds);
                     await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
+                    // This attempt is settled (failed, not charged). If another model may succeed, the next one in
+                    // priority order runs as a new attempt; this job still ends here without touching its task.
+                    if (await TryStartModelFallbackAfterProviderFailureAsync(project, scene, job, input, candidate, attemptIndex,
+                            candidates, providerTaskId ?? taskId, status.ErrorCode, failure, status.SanitizedResponseJson, ct))
+                    {
+                        throw new RenderJobTerminalFailureException(failure);
+                    }
                     await FailAsync(project.Id, scene, version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
                     throw new RenderJobTerminalFailureException(failure);
                 }
@@ -2511,9 +2522,12 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         return new FallbackCandidateResolution(PreferExactDuration(resolved, input.DurationSeconds), diagnostics);
     }
 
+    private static bool IsExcluded(SceneVideoRenderWorkItemInput input, RVideoVideoModelPolicyEntry policy)
+        => input.ExcludedModelKeys?.Contains(RVideoVideoModelPolicy.BuildKey(policy), StringComparer.OrdinalIgnoreCase) == true;
+
     private static IReadOnlyList<RVideoVideoModelPolicyEntry> ResolveOrderedPolicies(SceneVideoRenderWorkItemInput input)
     {
-        var policies = RVideoVideoModelPolicy.Ordered(input.VideoModelOrder).ToList();
+        var policies = RVideoVideoModelPolicy.Ordered(input.VideoModelOrder).Where(policy => !IsExcluded(input, policy)).ToList();
         if (!input.ManualOverride || string.IsNullOrWhiteSpace(input.RequestedModelCode))
         {
             return policies;
@@ -2535,10 +2549,12 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
                 string.IsNullOrWhiteSpace(requestedMode) ? null : requestedMode);
         }
 
-        // Explicit new operations must fail rather than silently switch the confirmed model/mode.
-        if (input.StrictRequestedSettings) return new[] { selected };
+        // The confirmed model goes first; when it fails, the rest follow in the service's priority order
+        // (user decision 2026-11-11). Strict operations still never round duration or resolution, and the
+        // price is the TodoX per-second video rate confirmed in the quote, whichever model makes the clip.
         return new[] { selected }
             .Concat(policies.Where(policy => !IsSamePolicy(policy, selected)))
+            .Where(policy => !IsExcluded(input, policy))
             .ToList();
     }
 
@@ -3645,6 +3661,104 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         }
 
         return "MODEL_PROVIDER_FAILURE";
+    }
+
+    internal const string ModelFallbackTriggerSource = "RVIDEO_MODEL_FALLBACK";
+
+    /// <summary>Provider-side errors another model cannot fix (TodoX's own provider account) stop the chain.</summary>
+    internal static bool ShouldFallbackAfterProviderFailure(string classification)
+        => classification is not ("AUTHENTICATION_FAILURE" or "BILLING_FAILURE");
+
+    internal static string BuildModelFallbackLogicalRequestId(string logicalRequestId, int failedModels)
+        => $"{System.Text.RegularExpressions.Regex.Replace(logicalRequestId, ":fb\\d+$", string.Empty)}:fb{failedModels}";
+
+    private async Task<bool> TryStartModelFallbackAfterProviderFailureAsync(
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        RenderJobDto job,
+        SceneVideoRenderWorkItemInput input,
+        ResolvedFallbackCandidate failed,
+        int attemptIndex,
+        List<ResolvedFallbackCandidate> candidates,
+        string? providerTaskId,
+        string? errorCode,
+        string failure,
+        string? providerResponseJson,
+        CancellationToken ct)
+    {
+        var classification = ClassifyProviderFailure(errorCode, failure, null);
+        await AddFallbackFailedEventAsync(project, scene, job, input, failed.Policy, providerTaskId, classification, errorCode,
+            providerResponseJson, failure, ct);
+        if (!ShouldFallbackAfterProviderFailure(classification)) return false;
+
+        var excluded = (input.ExcludedModelKeys ?? new List<string>())
+            .Append(RVideoVideoModelPolicy.BuildKey(failed.Policy))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var next = candidates
+            .Skip(attemptIndex + 1)
+            .FirstOrDefault(c => !c.IsDurationFallback && !IsSamePolicy(c.Policy, failed.Policy)
+                                 && !excluded.Contains(RVideoVideoModelPolicy.BuildKey(c.Policy), StringComparer.OrdinalIgnoreCase));
+        if (next is null)
+        {
+            await AddFallbackExhaustedEventAsync(project, scene, job, input, failed.Policy, providerTaskId, classification, errorCode,
+                providerResponseJson, failure, ct);
+            return false;
+        }
+
+        var nextInput = JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(JsonSerializer.Serialize(input))!;
+        nextInput.ModelName = next.Policy.Model;
+        nextInput.RequestedModelCode = next.Policy.Model;
+        nextInput.RequestedMode = next.Policy.Mode;
+        nextInput.ManualOverride = true;
+        nextInput.ExcludedModelKeys = excluded;
+        nextInput.FallbackFromRenderJobId = job.Id;
+        nextInput.ExistingSceneVideoVersionId = null;
+        nextInput.ReuseExistingSceneVideoVersion = false;
+        nextInput.CreatedAtUtc = DateTimeOffset.UtcNow;
+        nextInput.LogicalRequestId = BuildModelFallbackLogicalRequestId(input.LogicalRequestId, excluded.Count);
+
+        var (nextJob, _) = await _jobs.EnqueueForLogCodeIfNoneActiveAsync(new RenderJobCreateModel
+        {
+            JobType = job.JobType,
+            UserId = job.UserId,
+            CustomerId = input.CustomerId,
+            Input = nextInput,
+            Prompt = new { projectId = input.ProjectId, sceneId = input.SceneId, source = ModelFallbackTriggerSource, fromRenderJobId = job.Id },
+            References = Array.Empty<object>(),
+            LogCode = nextInput.LogicalRequestId,
+            ProviderCode = input.ProviderCode,
+            ModelCode = next.Policy.Model,
+            MaxAttempts = 1,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.Pending
+        }, nextInput.LogicalRequestId, ct);
+
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_STARTED", "warning",
+            "Scene-video model failed at the provider; the next model in priority order was started.",
+            new
+            {
+                projectId = input.ProjectId,
+                sceneId = scene.Id,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                nextRenderJobId = nextJob.Id,
+                fromProvider = failed.Policy.ProviderCode,
+                fromModel = failed.Policy.Model,
+                fromMode = failed.Policy.Mode,
+                toProvider = next.Policy.ProviderCode,
+                toModel = next.Policy.Model,
+                toMode = next.Policy.Mode,
+                status = "selected",
+                providerTaskId,
+                failureClassification = classification,
+                providerErrorCode = errorCode,
+                errorMessage = failure,
+                excludedModels = excluded
+            }, ct);
+        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoQueued, errorMessage: null, title: scene.Title,
+            scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
+        return true;
     }
 
     private static bool ShouldFallback(string classification)

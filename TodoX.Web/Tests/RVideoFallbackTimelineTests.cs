@@ -60,4 +60,27 @@ public sealed class RVideoFallbackTimelineTests
         Assert.Equal("Veo 3.1 Fast", step.Model);
         Assert.Contains("chính sách nội dung", step.Reason);
     }
+
+    [Fact]
+    public void A_provider_failure_moves_on_to_the_next_model_in_a_linked_attempt()
+    {
+        Assert.True(SceneVideoWorkerHandler.ShouldFallbackAfterProviderFailure("INVALID_INPUT"));
+        Assert.True(SceneVideoWorkerHandler.ShouldFallbackAfterProviderFailure("MODEL_PROVIDER_FAILURE"));
+        Assert.False(SceneVideoWorkerHandler.ShouldFallbackAfterProviderFailure("BILLING_FAILURE"));
+        Assert.False(SceneVideoWorkerHandler.ShouldFallbackAfterProviderFailure("AUTHENTICATION_FAILURE"));
+        Assert.Equal("rv:1:fb1", SceneVideoWorkerHandler.BuildModelFallbackLogicalRequestId("rv:1", 1));
+        Assert.Equal("rv:1:fb2", SceneVideoWorkerHandler.BuildModelFallbackLogicalRequestId("rv:1:fb1", 2));
+
+        var events = new[]
+        {
+            E(1, "RVIDEO_VIDEO_FAILED", """{"jobId":"a","sceneId":42,"requestedModel":"veo_3_1","mode":"fast","errorMessage":"#vid_policy"}""", 1),
+            E(2, "RVIDEO_VIDEO_FALLBACK_FAILED", """{"renderJobId":"a","sceneId":42,"model":"veo_3_1","mode":"fast","errorMessage":"#vid_policy","failureClassification":"INVALID_INPUT"}""", 1),
+            E(3, "RVIDEO_VIDEO_FALLBACK_STARTED", """{"renderJobId":"a","nextRenderJobId":"b","sceneId":42,"fromModel":"veo_3_1","fromMode":"fast","toModel":"veo_3_1","toMode":"lite"}""", 2),
+            E(4, "RVIDEO_VIDEO_FAILED", """{"jobId":"b","sceneId":42,"requestedModel":"veo_3_1","mode":"lite","errorMessage":"model error"}""", 3)
+        };
+        var steps = RVideoFallbackTimeline.ForScene(events, 42);
+        // Job a: one failure (the generic event is not repeated) and the switch; job b: its own failure.
+        Assert.Equal(["failed", "switched", "failed"], steps.Select(s => s.Kind));
+        Assert.Equal("Veo 3.1 Lite", steps[2].Model);
+    }
 }
