@@ -253,6 +253,9 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         var readyScenes = isAuto
             ? sceneStates
                 .Where(x => x.IsImageReady || x.UsesSharedReferenceImage)
+                // A scene that already has (or is making, or terminally failed) its video is not "ready" again:
+                // shared-reference scenes used to be re-enqueued every pass and answered "already completed".
+                .Where(x => !x.HasVideo && !x.VideoAttemptActive && !x.VideoFailedTerminal)
                 .Select(x => x.SceneId)
                 .Except(activeSceneIds.VideoSceneIds)
                 .Except(linkedNotReady)
@@ -264,8 +267,10 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         {
             try
             {
+                if (!RVideoLifecycleBackoff.ShouldAttempt(sceneId, setting.UpdatedAt, DateTime.UtcNow)) continue;
                 await audioAutoChain.TryEnqueueSceneAudioAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
                 await finalizer.TryFinalizeSceneMediaAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
+                RVideoLifecycleBackoff.Succeeded(sceneId);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -277,9 +282,14 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                     "RVIDEO_SCENE_AUDIO_LIFECYCLE_FAILED projectId={ProjectId} sceneId={SceneId}",
                     project.Id,
                     sceneId);
-                await repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_AUTO_ENQUEUE_FAILED", "error",
-                    "Scene audio lifecycle evaluation failed; other scenes will continue.",
-                    new { projectId = project.Id, sceneId, reason = "scene_lifecycle_exception", error = ex.Message }, ct);
+                var backoff = RVideoLifecycleBackoff.Failed(sceneId, setting.UpdatedAt, DateTime.UtcNow);
+                await repo.AddProjectEventAsync(project.Id, backoff.Halted ? "SCENE_AUDIO_AUTO_ENQUEUE_HALTED" : "SCENE_AUDIO_AUTO_ENQUEUE_FAILED",
+                    "error",
+                    backoff.Halted
+                        ? $"Scene audio failed {backoff.Failures} times in a row; automatic retries stopped until the job settings change."
+                        : "Scene audio lifecycle evaluation failed; other scenes will continue.",
+                    new { projectId = project.Id, sceneId, reason = "scene_lifecycle_exception", error = ex.Message,
+                          failures = backoff.Failures, retryAfterMinutes = backoff.Halted ? (double?)null : backoff.Delay.TotalMinutes }, ct);
             }
         }
         foreach (var sceneId in readyScenes)

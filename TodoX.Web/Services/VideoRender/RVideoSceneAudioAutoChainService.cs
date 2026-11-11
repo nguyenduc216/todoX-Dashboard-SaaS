@@ -184,8 +184,9 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 "provider_voice_id_missing", ex.Message, ct);
             return false;
         }
-        var ttsRate = ResolveTtsRate(metadata, settings);
-        ValidateTtsRate(voice, ttsRate);
+        // A script rate outside the voice's range (AI scripts write 2.0, voices allow e.g. up to 1.9) is brought into
+        // range instead of failing on every lifecycle pass and never making the voice.
+        var ttsRate = ClampTtsRate(voice, ResolveTtsRate(metadata, settings));
         var options = await _runtimeConfig.GetAsync(ct);
         var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
@@ -470,6 +471,14 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         }
 
         return 1.0m;
+    }
+
+    internal static decimal ClampTtsRate(AiStudioVoiceDto voice, decimal rate)
+    {
+        if (rate <= 0) rate = 1.0m;
+        if (voice.MinRate is decimal min && rate < min) rate = min;
+        if (voice.MaxRate is decimal max && rate > max) rate = max;
+        return rate;
     }
 
     private static void ValidateTtsRate(AiStudioVoiceDto voice, decimal rate)

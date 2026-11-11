@@ -35,4 +35,36 @@ public sealed class RVideoRepeatableEventsTests
         Assert.Contains("NOT EXISTS (SELECT 1 FROM video_render.final_video_versions f", jobs);
         Assert.Contains("ORDER BY j2.created_at DESC LIMIT 1", jobs);
     }
+
+    [Fact]
+    public void Failing_scene_work_backs_off_and_stops_until_settings_change()
+    {
+        RVideoLifecycleBackoff.Reset();
+        var settings = new DateTime(2026, 11, 11, 6, 0, 0, DateTimeKind.Utc);
+        var now = new DateTime(2026, 11, 11, 7, 0, 0, DateTimeKind.Utc);
+        Assert.True(RVideoLifecycleBackoff.ShouldAttempt(1, settings, now));
+        var first = RVideoLifecycleBackoff.Failed(1, settings, now);
+        Assert.Equal(TimeSpan.FromMinutes(1), first.Delay);
+        Assert.False(RVideoLifecycleBackoff.ShouldAttempt(1, settings, now.AddSeconds(30)));
+        Assert.True(RVideoLifecycleBackoff.ShouldAttempt(1, settings, now.AddMinutes(1)));
+        RVideoLifecycleBackoff.Outcome last = first;
+        for (var i = 2; i <= RVideoLifecycleBackoff.MaxFailures; i++) last = RVideoLifecycleBackoff.Failed(1, settings, now);
+        Assert.True(last.Halted);
+        Assert.False(RVideoLifecycleBackoff.ShouldAttempt(1, settings, now.AddDays(3)));
+        // The user changed the job: try again.
+        Assert.True(RVideoLifecycleBackoff.ShouldAttempt(1, settings.AddMinutes(5), now.AddDays(3)));
+        RVideoLifecycleBackoff.Reset();
+    }
+
+    [Fact]
+    public void Tts_rate_is_brought_into_the_voice_range()
+    {
+        var voice = new TodoX.Web.Models.AiStudioVoiceDto { MinRate = 0.8m, MaxRate = 1.9m };
+        Assert.Equal(1.9m, RVideoSceneAudioAutoChainService.ClampTtsRate(voice, 2.0m));
+        Assert.Equal(0.8m, RVideoSceneAudioAutoChainService.ClampTtsRate(voice, 0.5m));
+        Assert.Equal(1.2m, RVideoSceneAudioAutoChainService.ClampTtsRate(voice, 1.2m));
+        var worker = File.ReadAllText(Path.Combine(Root, "TodoX.Web", "Services", "VideoRender", "RVideoLifecycleWorker.cs"));
+        Assert.Contains(".Where(x => !x.HasVideo && !x.VideoAttemptActive && !x.VideoFailedTerminal)", worker);
+        Assert.Contains("RVideoLifecycleBackoff.ShouldAttempt(sceneId", worker);
+    }
 }

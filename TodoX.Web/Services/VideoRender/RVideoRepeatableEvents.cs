@@ -8,11 +8,12 @@ namespace TodoX.Web.Services.VideoRender;
 /// "State" events the background lifecycle re-evaluates every few seconds (skipped / not ready / validation failed).
 /// Writing them on every pass filled video_project_events (2026-11-11 audit: ~4,400 rows/day, one job 343 rows of the
 /// same "voice skipped" line). Such an event is written once and then again only when its content changes or after
-/// <see cref="Window"/>, so the history still shows the state and when it persisted.
+/// <see cref="Window"/> (6 hours), so the history still shows the state and when it persisted.
 /// </summary>
 public static class RVideoRepeatableEvents
 {
-    public static readonly TimeSpan Window = TimeSpan.FromMinutes(30);
+    // Matches the lifecycle's 6-hour "active project" window: idle states repeat every 30-60 minutes per scene.
+    public static readonly TimeSpan Window = TimeSpan.FromHours(6);
 
     private static readonly HashSet<string> Types = new(StringComparer.Ordinal)
     {
