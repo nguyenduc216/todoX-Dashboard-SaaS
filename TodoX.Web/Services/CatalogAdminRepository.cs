@@ -34,6 +34,10 @@ public sealed class ServiceDto
     public int SellPriceCount { get; set; }
     public decimal? MinSellPoints { get; set; }
     public string JobDefaultsJson { get; set; } = "{}";
+    /// <summary>Latest prompt-agent audit (default_options.agent_audit), see PromptAgentAuditReport.</summary>
+    public string? AgentAuditJson { get; set; }
+    /// <summary>The service has an enabled prompt agent (settings.service_prompt_assistants).</summary>
+    public bool HasPromptAgent { get; set; }
 }
 
 public sealed class ServiceIllustrationDialogValue
@@ -92,6 +96,8 @@ public sealed class CatalogAdminRepository
                    s.thumbnail_url AS ThumbnailUrl, s.cover_image_url AS CoverImageUrl,
                    s.workflow_code AS WorkflowCode, s.status AS Status, s.sort_order AS SortOrder,
                    COALESCE(s.default_options->'job_defaults', '{}'::jsonb)::text AS JobDefaultsJson,
+                   (s.default_options->'agent_audit')::text AS AgentAuditJson,
+                   EXISTS (SELECT 1 FROM settings.service_prompt_assistants a WHERE a.service_id = s.id AND a.enabled) AS HasPromptAgent,
                    (SELECT count(*) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id) AS TierCount,
                    (SELECT min(token_cost) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id AND t.is_active) AS MinTokenCost,
                    (SELECT count(*) FROM catalog.service_sell_prices p WHERE p.service_id = s.id) AS SellPriceCount,

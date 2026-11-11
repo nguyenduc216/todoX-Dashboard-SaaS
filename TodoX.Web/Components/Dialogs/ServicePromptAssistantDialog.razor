@@ -8,6 +8,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
 @inject IOptions<ServicePromptAssistantOptions> PromptAssistantOptions
+@inject PromptAgentAuditService AgentAudit
 
 <MudDialog>
     <TitleContent>
@@ -43,7 +44,8 @@
                         </MudItem>
                         <MudItem xs="12" sm="6">
                             <MudNumericField T="int?" @bind-Value="_maxTokens" Label="Max tokens" Variant="Variant.Outlined" Min="1" />
-                        </MudItem>`r`n                        <MudItem xs="12">
+                        </MudItem>
+                        <MudItem xs="12">
                             <MudText Typo="Typo.caption">Connection: @_connectionStatus</MudText>
                             <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.CloudDone" OnClick="TestConnectionAsync" Disabled="_busy">
                                 Test Connection
@@ -106,8 +108,68 @@
                     </MudStack>
                 </MudTabPanel> *@
 
+                <MudTabPanel Text="Kiểm tra agent">
+                    <MudStack Spacing="2" Class="pa-2">
+                        <MudText Typo="Typo.body2">
+                            Chạy agent với đúng lời nhắn mà job video thật gửi, rồi đối chiếu kết quả với chuẩn kịch bản TodoX
+                            (thời lượng scene, prompt ảnh, mô tả chuyển động, lời đọc, tốc độ đọc). Nên kiểm tra mỗi khi đổi agent
+                            và trước khi mở dịch vụ cho khách. Một lần chạy có thể mất vài phút và tốn credit của agent.
+                        </MudText>
+                        @if (_audit is not null && _assistantDto is not null && _audit.IsStaleFor(_assistantDto))
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true">Cấu hình agent đã đổi sau lần kiểm tra này. Hãy kiểm tra lại.</MudAlert>
+                        }
+                        <MudTextField T="string" @bind-Value="_auditInput" Label="Nội dung mẫu (để trống = dùng đoạn mẫu có sẵn)" Variant="Variant.Outlined" Lines="4" Disabled="_auditing" />
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="gap-2 flex-wrap">
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.FactCheck" Disabled="@(_auditing || _generating)" OnClick="RunAuditAsync">
+                                @(_auditing ? "Đang kiểm tra..." : "Kiểm tra agent")
+                            </MudButton>
+                            @if (_audit is not null)
+                            {
+                                <MudText Typo="Typo.caption">Lần kiểm tra: @_audit.CheckedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm") · @_audit.CheckedBy · model @_audit.ModelCode · agent @_audit.AgentId</MudText>
+                            }
+                        </MudStack>
+                        @if (_auditing)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                        }
+                        @if (_audit is not null)
+                        {
+                            <MudAlert Severity="@AuditSeverity(_audit.Status)">
+                                <b>@PromptAgentAuditStatuses.Label(_audit.Status)</b>
+                                @if (_audit.SceneCount > 0)
+                                {
+                                    <span> · @_audit.SceneCount scene @(_audit.TotalSeconds is int sec ? $"· {sec} giây" : "")</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(_audit.Error))
+                                {
+                                    <div>@_audit.Error</div>
+                                }
+                                <div>@AuditAdvice(_audit.Status)</div>
+                            </MudAlert>
+                            @if (_audit.Checks.Count > 0)
+                            {
+                                <MudSimpleTable Dense="true" Hover="true">
+                                    <thead><tr><th>Yêu cầu</th><th>Kết quả</th><th>Chi tiết</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var check in _audit.Checks)
+                                        {
+                                            <tr>
+                                                <td>@check.Label</td>
+                                                <td><MudChip T="string" Size="Size.Small" Color="@CheckColor(check.Status)">@CheckLabel(check.Status)</MudChip></td>
+                                                <td>@check.Detail</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </MudSimpleTable>
+                            }
+                        }
+                    </MudStack>
+                </MudTabPanel>
+
                 <MudTabPanel Text="Test playground">
                     <MudStack Spacing="2" Class="pa-2">
+                        <MudAlert Severity="Severity.Info" Dense="true">Playground chỉ kiểm tra JSON hợp lệ, không kiểm tra chuẩn kịch bản video. Dùng tab "Kiểm tra agent" trước khi mở dịch vụ.</MudAlert>
                         <MudTextField T="string" @bind-Value="_userInput" Label="Natural-language request" Variant="Variant.Outlined" Lines="5" />
                         <MudStack Row="true" Class="flex-wrap gap-2">
                             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@_generating" OnClick="GenerateAsync">
@@ -201,6 +263,61 @@
     private IReadOnlyList<ServicePromptTrainingVersionDto> _versions = [];
     private IReadOnlyList<ServicePromptGenerationDto> _generations = [];
     private ServicePromptGenerationResult? _lastResult;
+    private PromptAgentAuditReport? _audit;
+    private ServicePromptAssistantDto? _assistantDto;
+    private string _auditInput = string.Empty;
+    private bool _auditing;
+
+    private async Task RunAuditAsync()
+    {
+        if (_auditing) return;
+        _auditing = true;
+        try
+        {
+            _audit = await AgentAudit.RunAsync(Service.Id, _auditInput, AuthState.CurrentUser);
+            var workspace = await AssistantService.LoadWorkspaceAsync(Service.Id);
+            _assistantDto = workspace.Assistant;
+            _generations = workspace.Generations;
+            Snackbar.Add(PromptAgentAuditStatuses.Label(_audit.Status), AuditSeverity(_audit.Status));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không kiểm tra được agent: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _auditing = false;
+        }
+    }
+
+    private static Severity AuditSeverity(string status) => status switch
+    {
+        PromptAgentAuditStatuses.Pass => Severity.Success,
+        PromptAgentAuditStatuses.Fixed => Severity.Warning,
+        _ => Severity.Error
+    };
+
+    private static string AuditAdvice(string status) => status switch
+    {
+        PromptAgentAuditStatuses.Pass => "Có thể mở dịch vụ cho khách.",
+        PromptAgentAuditStatuses.Fixed => "Job vẫn chạy được vì TodoX tự bổ sung các mục màu vàng, nhưng chất lượng tốt hơn nếu agent tự trả đủ. Nên sửa hướng dẫn của agent (trên 79AI) theo các mục này.",
+        PromptAgentAuditStatuses.Fail => "Job của khách sẽ báo 'Tạo prompt thất bại'. Sửa agent theo các mục màu đỏ rồi kiểm tra lại trước khi mở dịch vụ.",
+        _ => "Kiểm tra cấu hình kết nối agent (Agent ID, Agent ID Base, Enabled) rồi chạy lại."
+    };
+
+    private static Color CheckColor(string status) => status switch
+    {
+        PromptAgentAuditCheckStatuses.Ok => Color.Success,
+        PromptAgentAuditCheckStatuses.Fixed => Color.Warning,
+        _ => Color.Error
+    };
+
+    private static string CheckLabel(string status) => status switch
+    {
+        PromptAgentAuditCheckStatuses.Ok => "Đạt",
+        PromptAgentAuditCheckStatuses.Fixed => "TodoX tự bổ sung",
+        _ => "Thiếu"
+    };
 
     private ServicePromptTrainingVersionDto? PublishedVersion
         => _versions.FirstOrDefault(x => x.Status == ServicePromptTrainingStatus.Published);
@@ -213,7 +330,10 @@
     {
         try
         {
-            ApplyWorkspace(await AssistantService.LoadWorkspaceAsync(Service.Id));
+            var workspace = await AssistantService.LoadWorkspaceAsync(Service.Id);
+            ApplyWorkspace(workspace);
+            _assistantDto = workspace.Assistant;
+            _audit = await AgentAudit.GetAsync(Service.Id);
         }
         catch (Exception ex)
         {

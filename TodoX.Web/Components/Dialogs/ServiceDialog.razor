@@ -46,6 +46,15 @@
                 <MudTextField T="string" Label="Mô tả chi tiết" @bind-Value="_model.Description" Variant="Variant.Outlined" Lines="4" />
             </MudItem>
             <MudItem xs="12" sm="6">
+                @if (Source is { HasPromptAgent: true } && TodoXServiceStatuses.IsActive(_model.Status)
+                     && TodoX.Web.Services.PromptAssistant.PromptAgentAuditReport.FromJson(Source.AgentAuditJson) is var agentAudit
+                     && agentAudit?.Status is not TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Pass)
+                {
+                    <MudAlert Severity="@(agentAudit?.Status == TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Fixed ? Severity.Warning : Severity.Error)" Dense="true" Class="mb-2">
+                        Prompt agent của dịch vụ: <b>@TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Label(agentAudit?.Status)</b>.
+                        Mở Prompt Assistant → "Kiểm tra agent" trước khi mở dịch vụ cho khách.
+                    </MudAlert>
+                }
                 <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
                     <MudSelectItem T="string" Value="@TodoXServiceStatuses.Active">Hoạt động</MudSelectItem>
                     <MudSelectItem T="string" Value="@TodoXServiceStatuses.Inactive">Tạm ngưng</MudSelectItem>

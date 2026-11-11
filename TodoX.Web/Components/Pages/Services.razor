@@ -76,6 +76,15 @@
                                 <MudText Typo="Typo.caption" Color="Color.Secondary">
                                     @PriceSummary(svc)
                                 </MudText>
+                                @if (svc.HasPromptAgent)
+                                {
+                                    var audit = TodoX.Web.Services.PromptAssistant.PromptAgentAuditReport.FromJson(svc.AgentAuditJson);
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Style="align-self:flex-start;cursor:pointer"
+                                             Color="@AgentAuditColor(audit?.Status)" OnClick="@(() => OpenPromptAssistant(svc))"
+                                             title="Kết quả kiểm tra prompt agent — bấm để mở">
+                                        @TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Label(audit?.Status)
+                                    </MudChip>
+                                }
                             </MudStack>
 
                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-4">
@@ -95,6 +104,14 @@
 </MudStack>
 
 @code {
+    private static Color AgentAuditColor(string? status) => status switch
+    {
+        TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Pass => Color.Success,
+        TodoX.Web.Services.PromptAssistant.PromptAgentAuditStatuses.Fixed => Color.Warning,
+        null => Color.Default,
+        _ => Color.Error
+    };
+
     private bool _loading = true;
     private IReadOnlyList<ServiceDto> _services = new List<ServiceDto>();
     private IReadOnlyList<ServiceCategoryDto> _categories = new List<ServiceCategoryDto>();
