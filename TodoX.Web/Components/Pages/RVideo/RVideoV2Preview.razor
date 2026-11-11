@@ -187,9 +187,13 @@ else
               {
                 <span>✕ Đã thử hết các model theo thứ tự ưu tiên nhưng chưa tạo được video.</span>
               }
-              else
+              else if(steps.Any(x=>x.Kind=="switched"))
               {
                 <span>Lượt gần nhất đã tự chuyển model dự phòng.</span>
+              }
+              else
+              {
+                <span>Lượt tạo video gần nhất thất bại.</span>
               }
             </div>
             <ol>

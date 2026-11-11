@@ -22,7 +22,9 @@ public static class RVideoFallbackTimeline
     private const string Started = "RVIDEO_VIDEO_FALLBACK_STARTED";
     private const string Exhausted = "RVIDEO_VIDEO_FALLBACK_EXHAUSTED";
     private const string Duration = "RVIDEO_VIDEO_DURATION_FALLBACK_STARTED";
-    private static readonly HashSet<string> Types = [Failed, Started, Exhausted, Duration];
+    /// <summary>Terminal failure reported by the provider after it accepted the task (no switch happened).</summary>
+    private const string TerminalFailed = "RVIDEO_VIDEO_FAILED";
+    private static readonly HashSet<string> Types = [Failed, Started, Exhausted, Duration, TerminalFailed];
 
     public static IReadOnlyList<RVideoFallbackStep> ForScene(IEnumerable<VideoProjectEventDto> events, long sceneId)
     {
@@ -34,7 +36,7 @@ public static class RVideoFallbackTimeline
             try { data = JsonDocument.Parse(e.DataJson).RootElement.Clone(); }
             catch (JsonException) { continue; }
             if (Long(data, "sceneId") != sceneId) continue;
-            parsed.Add((e, data, Str(data, "renderJobId")));
+            parsed.Add((e, data, Str(data, "renderJobId") ?? Str(data, "jobId")));
         }
         if (parsed.Count == 0) return [];
 
@@ -59,8 +61,22 @@ public static class RVideoFallbackTimeline
             Exhausted => new(e.CreatedAt, "exhausted", ModelName(Str(d, "model"), Str(d, "mode")), null, Reason(classification), code, detail),
             Duration => new(e.CreatedAt, "duration", ModelName(Str(d, "model") ?? Str(d, "toModel"), Str(d, "mode") ?? Str(d, "toMode")),
                 null, "Model không hỗ trợ đúng thời lượng, thử thời lượng gần nhất", code, detail),
-            _ => new(e.CreatedAt, "failed", ModelName(Str(d, "model"), Str(d, "mode")), null, Reason(classification), code, detail)
+            TerminalFailed => new(e.CreatedAt, "failed", ModelName(Str(d, "model") ?? Str(d, "requestedModel"), Str(d, "mode")), null,
+                ReasonFromProvider(detail) ?? Reason(classification), Str(d, "errorCode") ?? code, detail),
+            _ => new(e.CreatedAt, "failed", ModelName(Str(d, "model"), Str(d, "mode")), null, ReasonFromProvider(detail) ?? Reason(classification), code, detail)
         };
+    }
+
+    /// <summary>Recognized provider messages, in words the customer can act on.</summary>
+    public static string? ReasonFromProvider(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return null;
+        var m = message.ToLowerInvariant();
+        if (m.Contains("vid_policy") || m.Contains("chính sách") || m.Contains("policy") || m.Contains("safety"))
+            return "bộ lọc chính sách nội dung của nhà cung cấp từ chối (cần chỉnh prompt hoặc ảnh, hoặc thử model khác)";
+        if (m.Contains("not_resources") || m.Contains("resources")) return "nhà cung cấp hết tài nguyên tạm thời";
+        if (m.Contains("timeout")) return "nhà cung cấp xử lý quá lâu";
+        return null;
     }
 
     public static string Reason(string? classification) => classification switch

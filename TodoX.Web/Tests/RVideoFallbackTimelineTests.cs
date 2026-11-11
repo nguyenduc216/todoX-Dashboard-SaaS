@@ -45,4 +45,19 @@ public sealed class RVideoFallbackTimelineTests
         Assert.True(RVideoVoiceTiming.Estimate(text, 2.0m, 8).Fits);
         Assert.True(RVideoVoiceTiming.Estimate("", 1.0m, 4).Fits);
     }
+
+    [Fact]
+    public void A_provider_failure_without_a_switch_still_shows()
+    {
+        // Scene 2 of job 6c0954eb: Veo 3.1 Fast accepted the task, then reported a policy rejection.
+        var events = new[]
+        {
+            E(1, "RVIDEO_VIDEO_FAILED", """{"jobId":"j9","sceneId":42,"sceneIndex":2,"requestedModel":"veo_3_1","mode":"fast","errorMessage":"Không tạo được vì nội dung vi phạm chính sách, vui lòng chỉnh lại prompt/ảnh #vid_policy"}""", 1)
+        };
+        var steps = RVideoFallbackTimeline.ForScene(events, 42);
+        var step = Assert.Single(steps);
+        Assert.Equal("failed", step.Kind);
+        Assert.Equal("Veo 3.1 Fast", step.Model);
+        Assert.Contains("chính sách nội dung", step.Reason);
+    }
 }
