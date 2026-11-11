@@ -140,6 +140,44 @@ public sealed class MediaAccessTests
         Assert.Contains("UseProtectedMedia", Read("Program.cs"));
     }
 
+    [Fact]
+    public void Share_pages_offer_a_download_button_without_opening_the_raw_file()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tdx-dl-" + Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(root, "landing", "video-samples", "videos");
+        Directory.CreateDirectory(folder);
+        File.WriteAllBytes(Path.Combine(folder, "0123456789abcdef0123456789abcdef.mp4"), [0, 1, 2]);
+        try
+        {
+            Assert.NotNull(LandingVideoDownload.ResolveFile("/media/landing/video-samples/videos/0123456789abcdef0123456789abcdef.mp4", root, "/media"));
+            Assert.Null(LandingVideoDownload.ResolveFile("/media/../secret.mp4", root, "/media"));
+            Assert.Null(LandingVideoDownload.ResolveFile("/media/landing/video-samples/videos/x.txt", root, "/media"));
+            Assert.Null(LandingVideoDownload.ResolveFile("/other/landing/video-samples/videos/0123456789abcdef0123456789abcdef.mp4", root, "/media"));
+        }
+        finally { Directory.Delete(root, true); }
+
+        var own = new DefaultHttpContext();
+        own.Request.Host = new HostString("todox.vn");
+        own.Request.Headers["Sec-Fetch-Site"] = "same-origin";
+        Assert.True(LandingVideoDownload.IsFromOwnPage(own.Request));
+        var pasted = new DefaultHttpContext();
+        pasted.Request.Host = new HostString("todox.vn");
+        pasted.Request.Headers["Sec-Fetch-Site"] = "none";
+        Assert.False(LandingVideoDownload.IsFromOwnPage(pasted.Request));
+        var oldBrowser = new DefaultHttpContext();
+        oldBrowser.Request.Host = new HostString("todox.vn");
+        oldBrowser.Request.Headers.Referer = "https://todox.vn/mau-video/phong-van-karaoke-quinter";
+        Assert.True(LandingVideoDownload.IsFromOwnPage(oldBrowser.Request));
+
+        var repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var page = File.ReadAllText(Path.Combine(repo, "TodoX.Landing", "Services", "VideoSharePage.cs"));
+        Assert.Contains("href=\"{{E(m.SharePath + LandingVideoDownload.RouteSuffix)}}\"", page);
+        Assert.Contains("<span>Tải xuống</span>", page);
+        var program = File.ReadAllText(Path.Combine(repo, "TodoX.Landing", "Program.cs"));
+        Assert.Contains("app.MapGet(\"/mau-video/{slug}\" + LandingVideoDownload.RouteSuffix", program);
+        Assert.Contains("app.MapGet(\"/video/{slug}\" + LandingVideoDownload.RouteSuffix", program);
+    }
+
     private sealed class FakeEnv : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
     {
         public string WebRootPath { get; set; } = string.Empty;

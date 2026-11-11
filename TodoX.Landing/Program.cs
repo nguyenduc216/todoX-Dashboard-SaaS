@@ -259,6 +259,33 @@ app.MapGet("/mau-video/{slug}", async (
     return Results.Content(VideoSharePage.Render(VideoSharePage.FromSample(found.Sample, found.Catalog), baseUrl), "text/html; charset=utf-8");
 });
 
+// "Tải xuống" on the share pages: the raw /media file stays blocked, the page's button gets it with a readable name.
+app.MapGet("/video/{slug}" + LandingVideoDownload.RouteSuffix, async (
+    string slug,
+    HttpContext http,
+    IndustrySolutionRepository repository,
+    IOptions<SharedMediaOptions> media,
+    CancellationToken ct) =>
+{
+    var match = await repository.FindVideoBySlugAsync(slug, ct);
+    if (match is not { } found || string.IsNullOrWhiteSpace(found.Video.VideoUrl))
+        return Results.Redirect("/#industries");
+    return LandingVideoDownload.Serve(http, found.Video.VideoUrl, found.Video.Slug, media.Value, found.Video.SharePath);
+});
+
+app.MapGet("/mau-video/{slug}" + LandingVideoDownload.RouteSuffix, async (
+    string slug,
+    HttpContext http,
+    VideoSampleRepository repository,
+    IOptions<SharedMediaOptions> media,
+    CancellationToken ct) =>
+{
+    var match = await repository.FindBySlugAsync(slug, ct);
+    if (match is not { } found)
+        return Results.Redirect("/mau-video");
+    return LandingVideoDownload.Serve(http, found.Sample.VideoUrl, found.Sample.Slug, media.Value, found.Sample.SharePath);
+});
+
 // Serve the marketing deep link as its own document, including on refresh.
 app.MapGet("/bat-dong-san", () => Results.File(Path.Combine(app.Environment.WebRootPath, "bat-dong-san.html"), "text/html; charset=utf-8"));
 app.MapGet("/video-ngan", () => Results.File(Path.Combine(app.Environment.WebRootPath, "video-ngan.html"), "text/html; charset=utf-8"));

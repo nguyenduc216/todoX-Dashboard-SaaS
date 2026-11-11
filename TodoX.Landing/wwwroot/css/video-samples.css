@@ -38,7 +38,8 @@
 .vs-player p{margin:12px 0 0;color:var(--muted);font-size:14px;white-space:pre-line}
 .vs-player p:empty{display:none}
 .vs-body h2 a:hover{color:var(--gold)}
-.vs-player-actions{display:flex;justify-content:flex-end;margin-top:12px}
+.vs-player-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin-top:12px}
+.vs-player-actions a.vs-share{text-decoration:none}
 .vs-share{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border:1px solid #79571c;border-radius:999px;background:transparent;color:#fff;font-size:14px;font-weight:650}
 .vs-share:hover{border-color:var(--gold);color:var(--gold)}
 .vs-share[hidden]{display:none}

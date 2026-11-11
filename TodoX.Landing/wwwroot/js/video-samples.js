@@ -13,6 +13,7 @@
   const player = document.getElementById('samplePlayer');
   const playerVideo = document.getElementById('samplePlayerVideo');
   const shareButton = document.getElementById('samplePlayerShare');
+  const downloadLink = document.getElementById('samplePlayerDownload');
   const validSharePath = path => typeof path === 'string' && /^\/mau-video\/[a-z0-9-]+$/.test(path);
   const validMedia = (url, folder) => typeof url === 'string' && new RegExp(`^/media/landing/video-samples/${folder}/[a-f0-9]{32}\\.[a-z0-9]+$`).test(url);
   const el = (tag, className, text) => {
@@ -36,6 +37,10 @@
     playerVideo.src = video.videoUrl;
     const sharePath = validSharePath(video.sharePath) ? video.sharePath : '';
     shareButton.hidden = !sharePath;
+    if (downloadLink) {
+      downloadLink.hidden = !sharePath;
+      downloadLink.href = sharePath ? `${sharePath}/tai-xuong` : '#';
+    }
     shareButton.dataset.shareUrl = sharePath;
     shareButton.dataset.shareTitle = video.title;
     if (sharePath && window.location.pathname !== sharePath) {
