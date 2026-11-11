@@ -186,7 +186,7 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
                     assistant.ProviderCode,
                     assistant.ModelCode,
                     parserError),
-                validateOutput: videoProjectId is null ? null : root => PromptAssistantVideoOutputValidator.Validate(root),
+                validateOutput: videoProjectId is null ? null : root => PromptAssistantVideoOutputNormalizer.ValidateNormalized(root),
                 onRepairAttempt: count => repairAttempts = count,
                 logStage: (stage, detail) => _logger.LogWarning("PROMPT_ASSISTANT_STAGE GenerationId={GenerationId} Stage={Stage} Detail={Detail}", generationId, stage, detail));
             repairAttempts = outcome.RepairAttempts;
@@ -204,6 +204,9 @@ public sealed class ServicePromptAssistantService : IServicePromptAssistantServi
             sanitizedAssembledContent = response.SanitizedAssembledContent;
             providerDiagnostics = response.Diagnostics;
             generatedJson = outcome.GeneratedJson;
+            // Provider-side agents may use their own scene schema; bring it into the TodoX contract first.
+            if (videoProjectId is not null && generatedJson is not null)
+                generatedJson = PromptAssistantVideoOutputNormalizer.Normalize(generatedJson);
             if (!IsJsonObject(generatedJson))
                 throw new ServicePromptProviderException("generated_output_validation_failed", "Final prompt must be a JSON object.", response.SanitizedRawResponse);
             if (videoProjectId is long projectId)

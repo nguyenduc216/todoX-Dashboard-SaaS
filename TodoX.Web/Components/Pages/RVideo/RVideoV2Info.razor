@@ -498,7 +498,7 @@
         CharacterReference:BuildPromptCharacterReference(),
         DurationSeconds:_creativeMode && _creativeDuration>0 ? _creativeDuration : null,
         CreativeMode:_creativeMode),CancellationToken.None);
-      if(!outcome.Result.ValidationPassed || string.IsNullOrWhiteSpace(outcome.Result.GeneratedJson)){ Snackbar.Add("Tạo prompt thất bại.",Severity.Error); return; }
+      if(!outcome.Result.ValidationPassed || string.IsNullOrWhiteSpace(outcome.Result.GeneratedJson)){ Snackbar.Add(PromptFailureMessage(outcome.Result),Severity.Error); return; }
       var req=RVideoJobUpdateHelper.BuildSafeUpdate(JobView, promptOverride:outcome.Result.GeneratedJson!);
       await RVideoJobs.UpdateAsync(JobId.Value, req, AuthState.CurrentUser);
       // Confirm the new generation is active, then advance baseline to the persisted user_input.
@@ -526,6 +526,18 @@
       Snackbar.Add("Đã tạo prompt.",Severity.Success); _status="Đã tạo prompt.";
     }catch(Exception ex){ Logger.LogWarning(ex,"generate failed"); Snackbar.Add("Lỗi tạo prompt.",Severity.Error); }
     finally{ _generating=false; StateHasChanged(); }
+  }
+  // Tells the user why the AI script was rejected instead of a bare "failed".
+  internal static string PromptFailureMessage(TodoX.Web.Services.PromptAssistant.ServicePromptGenerationResult result){
+    var errors=result.ValidationErrors ?? [];
+    if(errors.Count==0) return string.IsNullOrWhiteSpace(result.ErrorMessage) ? "Tạo prompt thất bại." : $"Tạo prompt thất bại: {result.ErrorMessage}";
+    var reasons=errors.Select(e=>e.Code switch{
+        "duration_out_of_range"=>$"thời lượng scene phải từ {TodoX.Web.Services.PromptAssistant.PromptAssistantVideoOutputValidator.MinSceneSeconds} đến {TodoX.Web.Services.PromptAssistant.PromptAssistantVideoOutputValidator.MaxSceneSeconds} giây",
+        "required_text"=>$"thiếu {e.Path.Split('.').Last()}",
+        "required_scenes"=>"AI không trả về scene nào",
+        "tts_rate_invalid"=>"thiếu tốc độ đọc",
+        _=>e.Message }).Distinct().Take(3);
+    return $"Tạo prompt thất bại (AI trả kết quả chưa đúng định dạng: {string.Join("; ",reasons)}). Vui lòng thử lại.";
   }
   private async Task<ServicePromptGenerationDto?> WaitForActiveGenerationAsync(Guid generationId){
     try{
