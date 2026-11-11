@@ -296,6 +296,7 @@ builder.Services.AddScoped<IRenderJobDispatcher, RenderJobDispatcher>();
 builder.Services.AddHostedService<RenderJobWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Render.SceneVideoJobWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.SceneVideoReconciliationWorker>();
+builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.RVideoEventRetentionWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.SceneImageEnqueueReconciliationWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.RVideoLifecycleWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseImageWorker>();

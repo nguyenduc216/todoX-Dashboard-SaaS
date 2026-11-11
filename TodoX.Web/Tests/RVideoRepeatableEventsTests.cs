@@ -67,4 +67,18 @@ public sealed class RVideoRepeatableEventsTests
         Assert.Contains(".Where(x => !x.HasVideo && !x.VideoAttemptActive && !x.VideoFailedTerminal)", worker);
         Assert.Contains("RVideoLifecycleBackoff.ShouldAttempt(sceneId", worker);
     }
+
+    [Fact]
+    public void Retention_keeps_events_the_app_reads_and_money_lines()
+    {
+        Assert.Contains("RVIDEO_PARENT_BILLED", RVideoEventRetentionWorker.KeepEventTypes);
+        var pattern = new System.Text.RegularExpressions.Regex(RVideoEventRetentionWorker.KeepPattern);
+        Assert.Matches(pattern, "RVIDEO_VIDEO_BILLING_RESERVED");
+        Assert.Matches(pattern, "RVIDEO_AUDIO_BILLING_ANOMALY");
+        Assert.DoesNotMatch(pattern, "SCENE_VIDEO_AUTO_ENQUEUE_SKIPPED");
+        Assert.Contains("p.status = ANY(@statuses)", RVideoEventRetentionWorker.DeleteBatchSql);
+        Assert.Contains("LIMIT @batch", RVideoEventRetentionWorker.DeleteBatchSql);
+        var preview = File.ReadAllText(Path.Combine(Root, "TodoX.Web", "Components", "Pages", "RVideo", "RVideoV2Preview.razor"));
+        Assert.Contains("Error = VideoVersionError(v)", preview);
+    }
 }

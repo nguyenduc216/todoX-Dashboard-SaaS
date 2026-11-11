@@ -859,13 +859,37 @@ async Task OpenVideoHistoryAsync(VideoProjectSceneDto scene)
     CanSelect = string.Equals(v.Status, "completed", StringComparison.OrdinalIgnoreCase),
     IsVideo = true,
     MediaUrl = v.PublicUrl ?? v.PosterUrl,
-    Prompt = v.VideoPromptSnapshot
+    Prompt = v.VideoPromptSnapshot,
+    Metadata = string.IsNullOrWhiteSpace(v.ModelName) ? null : $"Model: {RVideoFallbackTimeline.ModelName(v.ModelName, ModeOf(v))}",
+    Error = VideoVersionError(v)
   }).ToList();
   var p = new DialogParameters{ ["Title"]="Lịch sử video", ["Items"]=items };
   var dlg = await DialogService.ShowAsync<TodoX.Web.Components.Dialogs.MediaHistoryDialog>("Lịch sử video", p, new DialogOptions{ CloseButton=true, MaxWidth=MaxWidth.Medium, FullWidth=true });
   var result = await dlg.Result;
   if(result is null || result.Canceled || result.Data is not string key || !Guid.TryParse(key, out var versionId)) return;
   await SelectVideoVersionAsync(scene, versionId);
+}
+
+// Why a video version failed: a reason the customer can act on; TodoX staff also see the provider's code and text.
+string? VideoVersionError(SceneVideoVersionDto v)
+{
+  if(!string.Equals(v.Status, "failed", StringComparison.OrdinalIgnoreCase)
+     && string.IsNullOrWhiteSpace(v.ErrorMessage) && string.IsNullOrWhiteSpace(v.ErrorCode)) return null;
+  var reason = RVideoFallbackTimeline.ReasonFromProvider(v.ErrorMessage) ?? RVideoFallbackTimeline.ReasonFromProvider(v.ErrorCode)
+               ?? (string.IsNullOrWhiteSpace(v.ErrorMessage) && string.IsNullOrWhiteSpace(v.ErrorCode) ? "không rõ lý do" : "model báo lỗi khi tạo video");
+  return IsStaff ? $"{reason} · {v.ErrorCode} {Short(v.ErrorMessage)}".TrimEnd() : reason;
+}
+static string? ModeOf(SceneVideoVersionDto v)
+{
+  if(string.IsNullOrWhiteSpace(v.RenderConfigJson)) return null;
+  try
+  {
+    using var doc = System.Text.Json.JsonDocument.Parse(v.RenderConfigJson);
+    foreach(var name in new[]{ "mode", "requestedMode", "RequestedMode" })
+      if(doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && doc.RootElement.TryGetProperty(name, out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String) return m.GetString();
+  }
+  catch(System.Text.Json.JsonException) { }
+  return null;
 }
 
 async Task SelectImageVersionAsync(VideoProjectSceneDto scene, Guid versionId)
