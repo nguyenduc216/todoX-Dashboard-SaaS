@@ -66,11 +66,19 @@
                     <HeaderContent>
                         <MudTh>Thiết bị</MudTh>
                         <MudTh>Hệ điều hành</MudTh>
+                        <MudTh>Phiên bản</MudTh>
                         <MudTh>Online lần cuối</MudTh>
                     </HeaderContent>
                     <RowTemplate>
                         <MudTd DataLabel="Thiết bị">@(context.DeviceName ?? "—") (@(context.DeviceKind == EditVideoDeviceKinds.Mobile ? "điện thoại" : "máy tính"))</MudTd>
                         <MudTd DataLabel="Hệ điều hành">@(context.Os ?? "—")</MudTd>
+                        <MudTd DataLabel="Phiên bản">
+                            @(context.AppVersion ?? "—")
+                            @if (EditVideoAppVersionPolicy.IsOutdated(context.AppVersion, _release?.Version))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">có bản mới @_release!.Version — tắt mở lại Claude/Codex để cập nhật</MudChip>
+                            }
+                        </MudTd>
                         <MudTd DataLabel="Online lần cuối">@context.LastSeenAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
                     </RowTemplate>
                     <NoRecordsContent>

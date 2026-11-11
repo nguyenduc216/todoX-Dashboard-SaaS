@@ -78,6 +78,8 @@ public sealed class HealthCheck
             license.IsUsable ? null : "Kích hoạt bằng license key TodoX trong cửa sổ TodoX EditVideo."));
 
         string? latest = null;
+        string? minSupported = null;
+        string? notes = null;
         var updateAvailable = false;
         if (reachable)
         {
@@ -86,14 +88,19 @@ public sealed class HealthCheck
             {
                 latest = v.GetString();
                 updateAvailable = IsNewer(latest, StatusService.Version);
+                minSupported = release.Value.TryGetProperty("minSupported", out var m) ? m.GetString() : null;
+                notes = release.Value.TryGetProperty("notes", out var n) ? n.GetString() : null;
             }
         }
 
+        var outdated = IsNewer(minSupported, StatusService.Version);
         items.Add(new HealthItem("update", "Phiên bản", !updateAvailable,
-            updateAvailable ? $"{StatusService.Version} → có bản mới {latest}" : $"{StatusService.Version} (mới nhất)",
-            updateAvailable ? "Tool sẽ tự cập nhật ở lần khởi động tới." : null));
+            outdated ? $"{StatusService.Version} đã cũ, TodoX yêu cầu từ bản {minSupported} (bản mới nhất {latest})"
+            : updateAvailable ? $"{StatusService.Version} → có bản mới {latest}" + (string.IsNullOrWhiteSpace(notes) ? "" : $" — {notes.Trim()}")
+            : $"{StatusService.Version} (mới nhất)",
+            updateAvailable ? $"Bản mới được tải tự động. {Updater.RestartHint}" : null));
 
-        var report = new HealthReport(StatusService.Version, items.All(i => i.Ok || i.Id is "browser" or "update" or "whisper"),
+        var report = new HealthReport(StatusService.Version, !outdated && items.All(i => i.Ok || i.Id is "browser" or "update" or "whisper"),
             reachable, license.Code, latest, updateAvailable, items);
 
         if (reportProblems && reachable && license.IsUsable && report.Problems.Any(p => p.Id is not "update"))

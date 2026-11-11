@@ -121,6 +121,8 @@ public sealed class TodoXServerClient
     private async Task<ServerResult<T>> SendAsync<T>(HttpMethod method, string path, object? body, bool authenticated, CancellationToken ct, TimeSpan? timeout = null)
     {
         using var request = new HttpRequestMessage(method, $"{ServerUrl}/api/editvideo/v1/{path}");
+        // Lets TodoX stop versions it no longer supports (release manifest "minSupported").
+        request.Headers.Add("X-TodoX-App-Version", Status.StatusService.Version);
         if (authenticated)
         {
             var stored = _store.Load();

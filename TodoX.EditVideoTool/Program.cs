@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Protocol;
 using TodoX.EditVideoTool;
 using TodoX.EditVideoTool.Components;
 using TodoX.EditVideoTool.Licensing;
@@ -156,28 +157,26 @@ static async Task RunMcpServerAsync(string[] args)
         })
         .WithStdioServerTransport()
         .WithToolsFromAssembly()
-        .WithRequestFilters(f => f.AddCallToolFilter(next => (context, ct) =>
+        .WithRequestFilters(f => f.AddCallToolFilter(next => async (context, ct) =>
         {
             // Claude Desktop, Claude Code and Codex each send their own name when they connect.
             CallerApp.Set(context.Server.ClientInfo?.Name ?? "mcp", context.Server.ClientInfo?.Version);
-            return next(context, ct);
+            var result = await next(context, ct);
+            // Once per session: tell the assistant to let the customer know a newer TodoX EditVideo is ready.
+            if (context.Services?.GetService<Updater>()?.TakeAssistantNotice() is { } notice)
+            {
+                result.Content.Add(new TextContentBlock { Text = notice });
+            }
+
+            return result;
         }));
 
     var host = builder.Build();
-    // Pull a newer version in the background; it is switched in on the next start, never mid-session.
-    _ = Task.Run(async () =>
-    {
-        try
-        {
-            await host.Services.GetRequiredService<Updater>().CheckAndStageAsync(CancellationToken.None);
-        }
-        catch (Exception)
-        {
-            // Updates must never break the MCP session.
-        }
-    });
-    // Skill library: install/refresh TodoX skills now and every few hours while Claude/Codex keeps us running.
+    // Pull a newer version in the background now and every few hours; it is switched in on the next start, never
+    // mid-session. The customer gets a Windows notification when it is ready.
     var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+    _ = Task.Run(() => host.Services.GetRequiredService<Updater>().RunPeriodicallyAsync(lifetime.ApplicationStopping));
+    // Skill library: install/refresh TodoX skills now and every few hours while Claude/Codex keeps us running.
     _ = Task.Run(() => host.Services.GetRequiredService<SkillSync>().RunPeriodicallyAsync(lifetime.ApplicationStopping));
     await host.RunAsync();
 }

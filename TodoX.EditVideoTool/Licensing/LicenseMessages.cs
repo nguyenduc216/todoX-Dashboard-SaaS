@@ -20,6 +20,7 @@ public static class LicenseMessages
         "license_expired" => "License đã hết hạn. Liên hệ TodoX để gia hạn.",
         "device_limit_reached" => DeviceLimit(detail),
         "self_release_disabled" => OneMachineNote,
+        "app_outdated" => serverMessage ?? "Bản TodoX EditVideo trên máy đã cũ. Tắt hẳn rồi mở lại Claude/Codex để tự cập nhật.",
         "invalid_token" => "Phiên đăng nhập của máy đã hết hiệu lực (máy có thể đã bị gỡ). Hãy kích hoạt lại.",
         "device_mismatch" => $"License này đang được dùng trên máy khác. Liên hệ TodoX để chuyển máy: {SupportContact}.",
         "signing_unavailable" => "Máy chủ license TodoX đang bảo trì. Thử lại sau.",

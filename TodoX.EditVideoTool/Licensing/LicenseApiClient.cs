@@ -49,6 +49,7 @@ public sealed class LicenseApiClient
     {
         using var request = new HttpRequestMessage(method, $"{serverUrl.TrimEnd('/')}/api/editvideo/v1/{path}");
         request.Headers.Add("X-TodoX-Device", deviceHash);
+        request.Headers.Add("X-TodoX-App-Version", Status.StatusService.Version);
         if (accessToken is not null)
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);

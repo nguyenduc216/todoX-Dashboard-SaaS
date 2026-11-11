@@ -309,6 +309,7 @@ builder.Services.AddHttpClient<FacebookPageVideoPublisher>(client => client.Time
 builder.Services.AddHttpClient<ReupVideoCacheService>(client => client.Timeout = TimeSpan.FromMinutes(10));
 builder.Services.Configure<EditVideoToolOptions>(builder.Configuration.GetSection(EditVideoToolOptions.SectionName));
 builder.Services.AddSingleton<EditVideoLicenseSigner>();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<EditVideoLicenseService>();
 builder.Services.AddScoped<EditVideoUsageService>();
 builder.Services.AddScoped<EditVideoPlanService>();

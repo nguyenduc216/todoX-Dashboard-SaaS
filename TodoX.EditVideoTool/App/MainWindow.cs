@@ -45,6 +45,11 @@ public sealed partial class MainWindow : Form
     private readonly ComboBox _versionPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Panel, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
     private readonly TextBox _log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Height = 110, Width = 640, BackColor = Panel, ForeColor = Muted, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9) };
     private readonly List<Button> _actions = [];
+    private readonly Panel _updateBanner = new() { Width = 640, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = ColorTranslator.FromHtml("#3A2E0A"), Padding = new Padding(12, 10, 12, 10), Margin = new Padding(0, 0, 0, 8), Visible = false };
+    private readonly Label _updateTitle = new() { AutoSize = true, MaximumSize = new Size(610, 0), Font = new Font("Segoe UI Semibold", 11), ForeColor = Yellow };
+    private readonly Label _updateText = new() { AutoSize = true, MaximumSize = new Size(610, 0), Font = new Font("Segoe UI", 9.5f), ForeColor = ColorTranslator.FromHtml("#F5DFA6"), Margin = new Padding(0, 4, 0, 8) };
+    private Button? _updateNow;
+    private Button? _restartNow;
 
     private MainWindow(IServiceProvider services)
     {
@@ -71,6 +76,7 @@ public sealed partial class MainWindow : Form
         Controls.Add(root);
 
         root.Controls.Add(Header());
+        root.Controls.Add(UpdateBanner());
         root.Controls.Add(UnsignedNotice());
 
         root.Controls.Add(Section("License"));
@@ -139,6 +145,7 @@ public sealed partial class MainWindow : Form
             RefreshClients();
             await RefreshLicenseAsync();
             _ = SkillLoopAsync();
+            _ = RefreshUpdateBannerAsync();
             await RunHealthAsync(untilConnected: true);
         };
         FormClosing += (_, _) => _closing.Cancel();
@@ -195,7 +202,71 @@ public sealed partial class MainWindow : Form
         }
     }
 
-    private async Task UpdateAsync() => Log(await Task.Run(() => _updater.CheckAndApplyAsync(new Progress<string>(Log), _closing.Token)));
+    private async Task UpdateAsync()
+    {
+        Log(await Task.Run(() => _updater.CheckAndApplyAsync(new Progress<string>(Log), _closing.Token)));
+        await RefreshUpdateBannerAsync();
+    }
+
+    /// <summary>Yellow bar under the header: new version with its notes, "Cập nhật ngay", then "Mở lại".</summary>
+    private Control UpdateBanner()
+    {
+        var stack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Fill };
+        stack.Controls.Add(_updateTitle);
+        stack.Controls.Add(_updateText);
+        var buttons = Row();
+        _updateNow = Action("Cập nhật ngay", UpdateAsync, primary: true);
+        _restartNow = Action("Mở lại TodoX EditVideo", RestartAsync, primary: true);
+        buttons.Controls.Add(_updateNow);
+        buttons.Controls.Add(_restartNow);
+        stack.Controls.Add(buttons);
+        _updateBanner.Controls.Add(stack);
+        return _updateBanner;
+    }
+
+    private async Task RefreshUpdateBannerAsync()
+    {
+        UpdateInfo info;
+        try
+        {
+            info = await _updater.CheckAsync(_closing.Token);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (!info.UpdateAvailable)
+        {
+            _updateBanner.Visible = false;
+            return;
+        }
+
+        _updateTitle.Text = info.BelowMinimum
+            ? $"Bản {info.Current} đã cũ — cần cập nhật lên {info.Latest} để tiếp tục dùng"
+            : $"Có bản mới TodoX EditVideo {info.Latest}";
+        var notes = Updater.CleanNotes(info.Latest, info.Notes);
+
+        _updateText.Text = (notes.Length > 0 ? notes + Environment.NewLine : "")
+            + (info.Staged ? $"Bản mới đã được tải về máy. {Updater.RestartHint}" : $"Bạn đang dùng bản {info.Current}. Bấm \"Cập nhật ngay\" để tải bản mới.");
+        _updateBanner.BackColor = ColorTranslator.FromHtml(info.BelowMinimum ? "#4A1A1A" : "#3A2E0A");
+        _updateNow!.Visible = !info.Staged;
+        _restartNow!.Visible = info.Staged;
+        _updateBanner.Visible = true;
+    }
+
+    /// <summary>Starts the freshly swapped-in exe and closes this (old) window.</summary>
+    private Task RestartAsync()
+    {
+        var exe = _updater.InstalledExe;
+        if (File.Exists(exe))
+        {
+            Process.Start(new ProcessStartInfo(exe, "app") { UseShellExecute = false });
+            Close();
+        }
+
+        return Task.CompletedTask;
+    }
 
     private Task ConnectAsync()
     {
@@ -410,7 +481,7 @@ public sealed partial class MainWindow : Form
 
     private static Control UnsignedNotice()
     {
-        var box = new Panel { Width = 640, Height = 66, BackColor = ColorTranslator.FromHtml("#2A2210"), Margin = new Padding(0, 0, 0, 8) };
+        var box = new Panel { Width = 640, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(0, 0, 0, 10), BackColor = ColorTranslator.FromHtml("#2A2210"), Margin = new Padding(0, 0, 0, 8) };
         var text = new LinkLabel
         {
             Text = "Ứng dụng chưa đăng ký chữ ký số với Windows nên Windows có thể cảnh báo khi mở. Đây là phần mềm chính hãng TodoX. Hỗ trợ: " + LicenseMessages.SupportContact + " · todox.vn",
@@ -418,9 +489,10 @@ public sealed partial class MainWindow : Form
             ActiveLinkColor = Yellow,
             ForeColor = ColorTranslator.FromHtml("#F5DFA6"),
             Location = new Point(12, 10),
-            Size = new Size(616, 44)
+            AutoSize = true,
+            MaximumSize = new Size(616, 0)
         };
-        text.LinkArea = new LinkArea(text.Text.IndexOf("todox.vn", StringComparison.Ordinal), "todox.vn".Length);
+        text.LinkArea = new LinkArea(text.Text.LastIndexOf("todox.vn", StringComparison.Ordinal), "todox.vn".Length);
         text.LinkClicked += (_, _) => Process.Start(new ProcessStartInfo(SupportUrl) { UseShellExecute = true });
         box.Controls.Add(text);
         return box;

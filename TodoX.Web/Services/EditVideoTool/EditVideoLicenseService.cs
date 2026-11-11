@@ -34,14 +34,20 @@ public sealed class EditVideoLicenseService
     private readonly EditVideoLicenseSigner _signer;
     private readonly EditVideoToolOptions _options;
     private readonly TimeProvider _clock;
+    private readonly EditVideoReleaseService? _releases;
+    private readonly IHttpContextAccessor? _http;
 
     public EditVideoLicenseService(
         TodoXConnectionFactory factory,
         TenantContext tenant,
         EditVideoLicenseSigner signer,
         IOptions<EditVideoToolOptions> options,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        EditVideoReleaseService? releases = null,
+        IHttpContextAccessor? http = null)
     {
+        _releases = releases;
+        _http = http;
         _factory = factory;
         _tenant = tenant;
         _signer = signer;
@@ -90,6 +96,11 @@ public sealed class EditVideoLicenseService
         if (blocker is not null)
         {
             return EditVideoResult<EditVideoDeviceSession>.Fail(blocker, "License cannot be used.");
+        }
+
+        if (OutdatedMessage(request.AppVersion) is { } outdated)
+        {
+            return EditVideoResult<EditVideoDeviceSession>.Fail(EditVideoErrorCodes.AppOutdated, outdated);
         }
 
         var active = (await conn.QueryAsync<EditVideoDeviceRow>(
@@ -483,10 +494,27 @@ public sealed class EditVideoLicenseService
             return Fail(blocker, "License cannot be used.");
         }
 
+        // Apps from 1.0 send their version on every call; older ones are judged by the version they last reported.
+        if (OutdatedMessage(device.AppVersion) is { } outdated)
+        {
+            return Fail(EditVideoErrorCodes.AppOutdated, outdated);
+        }
+
         return EditVideoResult<(EditVideoLicenseRow, EditVideoDeviceRow)>.Success((license, device));
 
         static EditVideoResult<(EditVideoLicenseRow, EditVideoDeviceRow)> Fail(string code, string message) =>
             EditVideoResult<(EditVideoLicenseRow, EditVideoDeviceRow)>.Fail(code, message);
+    }
+
+    /// <summary>Vietnamese message when the calling app is older than the release's minSupported, else null.</summary>
+    private string? OutdatedMessage(string? fallbackVersion)
+    {
+        var header = _http?.HttpContext?.Request.Headers[EditVideoAppVersionPolicy.HeaderName].ToString();
+        var version = string.IsNullOrWhiteSpace(header) ? fallbackVersion : header;
+        var min = _releases?.GetLatest()?.MinSupported;
+        return EditVideoAppVersionPolicy.IsBelowMinimum(version, min)
+            ? EditVideoAppVersionPolicy.OutdatedMessage(version!.Split('+')[0].Trim(), min!)
+            : null;
     }
 
     private EditVideoDeviceSession BuildSession(EditVideoLicenseRow license, string deviceHash, string kind, string token, DateTimeOffset tokenExpires, DateTimeOffset now)

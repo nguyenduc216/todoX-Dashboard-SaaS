@@ -48,3 +48,23 @@ public static class EditVideoDevicePolicy
         return license.ExpiresAt is { } expires && expires <= now ? EditVideoErrorCodes.LicenseExpired : null;
     }
 }
+
+/// <summary>Version rules for the desktop app: TodoX can stop versions older than the release's "minSupported".</summary>
+public static class EditVideoAppVersionPolicy
+{
+    public const string HeaderName = "X-TodoX-App-Version";
+
+    /// <summary>True only when both versions parse and the app is older; unknown versions are never blocked.</summary>
+    public static bool IsBelowMinimum(string? appVersion, string? minSupported) =>
+        Parse(appVersion) is { } app && Parse(minSupported) is { } min && app < min;
+
+    /// <summary>True when the app is older than the latest release (for the "cần cập nhật" marks in the dashboard).</summary>
+    public static bool IsOutdated(string? appVersion, string? latest) => IsBelowMinimum(appVersion, latest);
+
+    public static string OutdatedMessage(string appVersion, string minSupported) =>
+        $"Bản TodoX EditVideo trên máy ({appVersion}) đã cũ, TodoX yêu cầu từ bản {minSupported} trở lên. " +
+        "Tắt hẳn rồi mở lại Claude/Codex để tự cập nhật, hoặc tải bộ cài mới tại dashboard.todox.vn/my-editvideo.";
+
+    private static Version? Parse(string? value) =>
+        Version.TryParse(value?.Split('+')[0].Trim(), out var v) ? v : null;
+}

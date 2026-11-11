@@ -16,6 +16,8 @@
 param(
     [switch] $Upload,
     [string] $Notes = '',
+    # Versions older than this stop working until updated (enforced by the app from 1.0 and by the server).
+    [string] $MinSupported = '0.4.0',
     [string] $FfmpegZipUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-8.1.zip',
     [string] $RemotionVersion = '4.0.540',
     [string] $WhisperZipUrl = 'https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip',
@@ -125,7 +127,7 @@ $files = @(
     (Entry $remZip 'component' 'remotion' "$RemotionVersion-$bundleHash"),
     (Entry $whZip 'component' 'whisper' 'b5454-small-q5_1')
 )
-$manifest = [ordered]@{ version = $version; minSupported = '0.4.0'; publishedAt = (Get-Date).ToUniversalTime().ToString('o'); notes = $Notes; files = $files }
+$manifest = [ordered]@{ version = $version; minSupported = $MinSupported; publishedAt = (Get-Date).ToUniversalTime().ToString('o'); notes = $Notes; files = $files }
 $manifestPath = Join-Path $Out 'manifest.json'
 [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
 $files | ForEach-Object { Write-Host ("  {0,-45} {1,8:N1} MB  {2}" -f $_.name, ($_.size / 1MB), $_.sha256.Substring(0, 12)) }

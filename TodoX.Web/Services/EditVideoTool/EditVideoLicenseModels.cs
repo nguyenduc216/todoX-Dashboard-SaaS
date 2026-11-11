@@ -55,6 +55,8 @@ public static class EditVideoErrorCodes
     public const string SigningUnavailable = "signing_unavailable";
     /// <summary>Moving a license to another machine is done by TodoX staff in the dashboard, never by the device.</summary>
     public const string SelfReleaseDisabled = "self_release_disabled";
+    /// <summary>The app is older than the release manifest's minSupported; the customer must restart to update.</summary>
+    public const string AppOutdated = "app_outdated";
 }
 
 public sealed class EditVideoLicenseRow

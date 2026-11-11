@@ -200,3 +200,26 @@ public sealed class EditVideoLicenseTests
     public void Error_codes_map_to_http_status(string code, int status) =>
         Assert.Equal(status, EditVideoEndpoints.StatusFor(code));
 }
+
+public sealed class EditVideoAppVersionPolicyTests
+{
+    [Theory]
+    [InlineData("0.9.1", "1.0.0", true)]
+    [InlineData("1.0.0", "1.0.0", false)]
+    [InlineData("1.0.1+abc", "1.0.0", false)]
+    [InlineData("0.9.0+abc", "0.9.1", true)]
+    [InlineData(null, "1.0.0", false)]
+    [InlineData("1.0.0", null, false)]
+    [InlineData("garbage", "1.0.0", false)]
+    public void Only_known_older_versions_are_below_minimum(string? app, string? min, bool expected) =>
+        Assert.Equal(expected, EditVideoAppVersionPolicy.IsBelowMinimum(app, min));
+
+    [Fact]
+    public void Outdated_message_tells_the_customer_how_to_update()
+    {
+        var message = EditVideoAppVersionPolicy.OutdatedMessage("0.9.1", "1.0.0");
+        Assert.Contains("0.9.1", message);
+        Assert.Contains("1.0.0", message);
+        Assert.Contains("mở lại Claude/Codex", message);
+    }
+}

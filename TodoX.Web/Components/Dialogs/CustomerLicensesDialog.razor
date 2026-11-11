@@ -2,6 +2,7 @@
 @using TodoX.Web.Services.EditVideoTool
 @inject EditVideoLicenseService Licenses
 @inject EditVideoUsageService Usage
+@inject EditVideoReleaseService Releases
 @inject AuthStateService AuthState
 @inject AuditRepository Audit
 @inject IDialogService DialogService
@@ -134,7 +135,13 @@
                             </MudTd>
                             <MudTd DataLabel="Tên máy">@(context.DeviceName ?? "—")</MudTd>
                             <MudTd DataLabel="Hệ điều hành">@(context.Os ?? "—")</MudTd>
-                            <MudTd DataLabel="Phiên bản">@(context.AppVersion ?? "—")</MudTd>
+                            <MudTd DataLabel="Phiên bản">
+                                @(context.AppVersion ?? "—")
+                                @if (context.Status == EditVideoDeviceStatuses.Active && EditVideoAppVersionPolicy.IsOutdated(context.AppVersion, _latestVersion))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="@(EditVideoAppVersionPolicy.IsBelowMinimum(context.AppVersion, _minVersion) ? Color.Error : Color.Warning)">@(EditVideoAppVersionPolicy.IsBelowMinimum(context.AppVersion, _minVersion) ? "quá cũ, đã bị chặn" : $"cần cập nhật lên {_latestVersion}")</MudChip>
+                                }
+                            </MudTd>
                             <MudTd DataLabel="Online lần cuối">@context.LastSeenAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
                             <MudTd DataLabel="IP">@(context.LastIp ?? "—")</MudTd>
                             <MudTd DataLabel="Trạng thái">
@@ -216,8 +223,14 @@
     private int _editDesktop;
     private int _editMobile;
 
+    private string? _latestVersion;
+    private string? _minVersion;
+
     protected override async Task OnInitializedAsync()
     {
+        var release = Releases.GetLatest();
+        _latestVersion = release?.Version;
+        _minVersion = release?.MinSupported;
         var user = AuthState.CurrentUser;
         _canManage = user?.IsAuthenticated == true && !user.IsCustomer;
         await Reload();

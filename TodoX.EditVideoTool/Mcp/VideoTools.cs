@@ -29,11 +29,13 @@ public sealed partial class VideoTools
     private readonly EditStore _edits;
     private readonly AiGenerator _ai;
     private readonly Projects.ProjectFolders _projects;
+    private readonly Updater _updater;
 
     public VideoTools(LicenseGuard license, LicenseVerifier verifier, MediaProbe probe, ClipNormalizer normalizer,
         RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber,
-        SkillSync skills, EditStore edits, AiGenerator ai, Projects.ProjectFolders projects)
+        SkillSync skills, EditStore edits, AiGenerator ai, Projects.ProjectFolders projects, Updater updater)
     {
+        _updater = updater;
         _ai = ai;
         _projects = projects;
         _edits = edits;
@@ -365,6 +367,12 @@ public sealed partial class VideoTools
             return null;
         }
 #endif
+        if (_updater.MinimumProblem() is { } outdated)
+        {
+            session?.Error("app_outdated", StatusService.Version);
+            return outdated;
+        }
+
         var status = await _license.EnsureAsync(ct);
         if (!status.IsUsable)
         {
