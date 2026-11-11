@@ -332,8 +332,15 @@ public sealed class RenderJobService : IRenderJobService
                 var completed = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(SelectJobSql + "\n" + """
                     WHERE tenant_id=@tenant AND job_type=@jobType AND log_code=@logCode AND status='completed'
                       AND input_json->>'mergeSelectionKey'=@snapshot
-                      AND id IN (SELECT render_job_id FROM video_render.final_video_versions
-                                 WHERE tenant_id=@tenant AND status='completed' AND is_selected=true)
+                      AND (id IN (SELECT render_job_id FROM video_render.final_video_versions
+                                  WHERE tenant_id=@tenant AND status='completed' AND is_selected=true)
+                           -- Projects merged without final-video versions: the latest completed merge is the current
+                           -- final video. Without this, such projects were re-merged on every lifecycle pass (job 71fe1a13).
+                           OR (NOT EXISTS (SELECT 1 FROM video_render.final_video_versions f
+                                            WHERE f.tenant_id=@tenant AND f.project_id::text = input_json->>'projectId')
+                               AND id = (SELECT j2.id FROM render.render_jobs j2
+                                          WHERE j2.tenant_id=@tenant AND j2.job_type=@jobType AND j2.log_code=@logCode AND j2.status='completed'
+                                          ORDER BY j2.created_at DESC LIMIT 1)))
                     ORDER BY created_at DESC LIMIT 1;
                     """, new { tenant=_tenant.TenantId, jobType, logCode=uniqueLogCode, snapshot=snapshot.GetString() }, tx);
                 if (completed is not null) { tx.Commit(); return (completed, true); }

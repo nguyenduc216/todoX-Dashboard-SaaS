@@ -550,6 +550,22 @@ public sealed class VideoRenderRepository
         try
         {
             using var conn = await _factory.OpenAsync(ct);
+            var dataJson = JsonSerializer.Serialize(data ?? new { }, JsonOptions);
+            if (RVideoRepeatableEvents.IsRepeatable(eventType))
+            {
+                // Background "state" events: skip a pass that would only repeat the last identical line.
+                var signature = RVideoRepeatableEvents.Signature(eventType, dataJson);
+                var repeated = await conn.ExecuteScalarAsync<bool>(
+                    """
+                    SELECT EXISTS (SELECT 1 FROM video_render.video_project_events
+                                    WHERE project_id=@projectId AND tenant_id=@tenant AND event_type=@eventType
+                                      AND created_at > now() - make_interval(secs => @windowSeconds)
+                                      AND data_json->>'_sig' = @signature);
+                    """,
+                    new { projectId, tenant = _tenant.TenantId, eventType, signature, windowSeconds = RVideoRepeatableEvents.Window.TotalSeconds });
+                if (repeated) return;
+                dataJson = RVideoRepeatableEvents.WithSignature(dataJson, signature);
+            }
             await conn.ExecuteAsync(
                 """
                 INSERT INTO video_render.video_project_events
@@ -564,7 +580,7 @@ public sealed class VideoRenderRepository
                     eventType,
                     level,
                     message,
-                    data = JsonSerializer.Serialize(data ?? new { }, JsonOptions)
+                    data = dataJson
                 });
         }
         catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_add_event"))
