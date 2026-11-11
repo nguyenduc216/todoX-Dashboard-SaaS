@@ -217,9 +217,17 @@
         @if (_advVoiceMode == RVideoVoiceModes.Library)
         {
           <MudItem xs="12" sm="4">
-            <MudSelect T="string" Value="_advVoiceCode" ValueChanged="@(async v=>await HandleAdvancedVoiceCodeChangedAsync(v))" Label="Giọng đọc" Variant="Variant.Outlined" Dense="true" Disabled="@_advSaving">
+            <MudSelect T="string" Value="_advVoiceCode" ValueChanged="@(async v=>await HandleAdvancedVoiceCodeChangedAsync(v))" Label="Giọng đọc" Variant="Variant.Outlined" Dense="true" Disabled="@_advSaving"
+                       OnOpen="@(async ()=>{ await EnsureVoicesLoadedAsync(); StateHasChanged(); })">
               @foreach (var v in _voices) { <MudSelectItem Value="@v.Code">@v.Name (@v.Code)</MudSelectItem> }
             </MudSelect>
+            @if (_voices.Count == 0)
+            {
+              <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.caption" Color="Color.Warning">@(_voicesLoading ? "Đang tải thư viện giọng đọc..." : "Chưa tải được thư viện giọng đọc.")</MudText>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_voicesLoading" OnClick="@(async ()=>{ await EnsureVoicesLoadedAsync(); if(string.IsNullOrWhiteSpace(_advVoiceCode) && _voices.Count>0){ _advVoiceCode=DefaultLibraryVoiceCode(_voices); await SaveSettingsAsync(); } })">Tải lại</MudButton>
+              </MudStack>
+            }
           </MudItem>
           <MudItem xs="12" sm="4"><MudNumericField T="decimal" Value="_advTtsRate" ValueChanged="@(async v=>await HandleAdvancedTtsRateChangedAsync(v))" Label="Tốc độ đọc" Variant="Variant.Outlined" Min="0.5m" Max="2.0m" Step="0.1m" Disabled="@_advSaving"/></MudItem>
         }
@@ -337,14 +345,26 @@
     StateHasChanged();
   }
   private long? _lastWorkingProjectId; private Guid? _lastWorkingActiveId;
-  private bool _catalogsLoaded;
-  // Catalogs are loaded once per component; refreshes of the job view do not re-query them.
+  private bool _voicesLoaded; private bool _musicLoaded; private bool _voicesLoading;
+  // Catalogs are loaded once per component and refreshes of the job view do not re-query them; a list that failed
+  // to load (or came back empty) is retried on the next pass instead of staying empty for the whole session.
   private async Task LoadCatalogsAsync(){
-    if(_catalogsLoaded) return;
-    _catalogsLoaded = true;
-    try{ _voices.AddRange(await Catalog.ListVoicesAsync(activeOnly:true)); }catch{}
-    try{ _music.AddRange(await Catalog.ListMusicAsync(activeOnly:true)); }catch{}
+    await EnsureVoicesLoadedAsync();
+    if(!_musicLoaded){
+      try{ _music.Clear(); _music.AddRange(await Catalog.ListMusicAsync(activeOnly:true)); _musicLoaded=true; }
+      catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_MUSIC_UNAVAILABLE"); }
+    }
   }
+  private async Task EnsureVoicesLoadedAsync(){
+    if(_voicesLoaded || _voicesLoading) return;
+    _voicesLoading=true;
+    try{ var voices=await Catalog.ListVoicesAsync(activeOnly:true); _voices.Clear(); _voices.AddRange(voices); _voicesLoaded=_voices.Count>0; }
+    catch(Exception ex){ Logger.LogWarning(ex,"RVIDEO_V2_INFO_VOICES_UNAVAILABLE"); }
+    finally{ _voicesLoading=false; }
+  }
+  /// <summary>Voice picked when "Giọng từ thư viện" is chosen with no voice yet: the catalog default, else the first one.</summary>
+  internal static string? DefaultLibraryVoiceCode(IReadOnlyList<TodoX.Web.Models.AiStudioVoiceDto> voices)
+    => (voices.FirstOrDefault(x=>x.IsDefault) ?? voices.FirstOrDefault())?.Code;
   private bool _linkedSeeded;
   private async Task SeedLinkedDefaultAsync(){
     if(_linkedSeeded || JobView is null) return;
@@ -654,7 +674,15 @@
     } finally { _advSaving=false; }
   }
   private async Task HandleAdvancedExecutionModeChangedAsync(string v){ if(string.Equals(v,_advExecutionMode)) return; _advExecutionMode=v; await SaveSettingsAsync(); }
-  private async Task HandleAdvancedVoiceModeChangedAsync(string v){ if(string.Equals(v,_advVoiceMode)) return; _advVoiceMode=v; if(v!=RVideoVoiceModes.Library){ _advVoiceCode=null; } await SaveSettingsAsync(); }
+  private async Task HandleAdvancedVoiceModeChangedAsync(string v){
+    if(string.Equals(v,_advVoiceMode)) return;
+    _advVoiceMode=v;
+    if(v!=RVideoVoiceModes.Library){ _advVoiceCode=null; }
+    else{
+      await EnsureVoicesLoadedAsync();
+      if(string.IsNullOrWhiteSpace(_advVoiceCode)) _advVoiceCode=DefaultLibraryVoiceCode(_voices);
+    }
+    await SaveSettingsAsync(); }
   private async Task HandleAdvancedVoiceCodeChangedAsync(string v){ if(string.Equals(v,_advVoiceCode)) return; _advVoiceCode=v; await SaveSettingsAsync(); }
   private async Task HandleAdvancedTtsRateChangedAsync(decimal v){ if(v==_advTtsRate) return; _advTtsRate=v; await SaveSettingsAsync(); }
   private async Task HandleAdvancedMusicCodeChangedAsync(string? v){ if(string.Equals(v,_advMusicCode)) return; _advMusicCode=v; await SaveSettingsAsync(); }
