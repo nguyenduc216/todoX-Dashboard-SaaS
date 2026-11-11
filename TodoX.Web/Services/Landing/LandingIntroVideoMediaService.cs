@@ -99,6 +99,23 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         }
     }
 
+    /// <summary>
+    /// Deletes a video-sample file that a newer version replaced ("Ghi đè file cũ"). Only files of the video-samples
+    /// area with a generated name are accepted; the caller checks that no sample still uses it.
+    /// </summary>
+    public bool DeleteSampleUpload(string url)
+    {
+        LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
+        var folder = LandingVideoSampleRepository.IsMediaUrl(url, "videos") ? "videos"
+            : LandingVideoSampleRepository.IsMediaUrl(url, "posters") ? "posters"
+            : null;
+        if (folder is null) return false;
+        var path = Path.Combine(paths.GetLandingMediaPhysicalFolder(LandingVideoSampleRepository.MediaArea, folder), Path.GetFileName(url));
+        if (!File.Exists(path)) return false;
+        File.Delete(path);
+        return true;
+    }
+
     /// <summary>Files already uploaded to a landing media area, newest first, so an admin can reuse one instead of uploading again.</summary>
     public IReadOnlyList<LandingMediaFile> ListUploads(string area, bool video, int take = 60)
     {

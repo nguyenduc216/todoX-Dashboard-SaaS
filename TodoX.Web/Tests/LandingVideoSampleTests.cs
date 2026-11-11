@@ -269,6 +269,27 @@ public sealed class LandingVideoSampleTests
         Assert.DoesNotContain("not null", sql.Split("-- Verification")[0], StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Samples_can_be_hidden_and_replaced_files_are_removed()
+    {
+        Assert.True(new LandingVideoSample().IsVisible);
+        var root = FindRoot();
+        var sql = File.ReadAllText(Path.Combine(root, LandingVideoSampleRepository.VisibilityScript));
+        Assert.Contains("add column if not exists is_visible boolean not null default true;", sql);
+        Assert.DoesNotContain("drop ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(root, LandingVideoSampleRepository.VisibilityScript.Replace(".sql", ".test.sql"))));
+
+        var landing = File.ReadAllText(Path.Combine(root, "TodoX.Landing", "Data", "VideoSampleRepository.cs"));
+        Assert.Contains("var visibleFilter = visibleColumn ? \"and s.is_visible\" : \"\";", landing);
+
+        var dialog = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Dialogs", "LandingVideoSampleDialog.razor"));
+        Assert.Contains("Ghi đè file cũ khi tải bản mới", dialog);
+        Assert.Contains("RememberReplaced(slot, url);", dialog);
+        Assert.Contains("_replaced.Where(url => !used.Contains(url))", dialog);
+        var page = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Pages", "Landing", "LandingVideoSamples.razor"));
+        Assert.Contains("Repository.SetVisibleAsync(sample.Id, visible)", page);
+    }
+
     private static string FindRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)

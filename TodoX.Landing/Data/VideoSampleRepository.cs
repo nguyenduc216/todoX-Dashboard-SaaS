@@ -68,6 +68,12 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
                 where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'sample_group'
                 """, cancellationToken: ct)) == 1;
             var sampleGroup = groupColumn ? "s.sample_group" : "null::text";
+            // is_visible comes from database/manual/landing/20261111_landing_video_samples_visible.sql; work without it.
+            var visibleColumn = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+                select count(*) from information_schema.columns
+                where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'is_visible'
+                """, cancellationToken: ct)) == 1;
+            var visibleFilter = visibleColumn ? "and s.is_visible" : "";
             // Rows come in group order (services, then TVC, then "Video truyền thông"); videos are re-sorted newest first below.
             var rows = await connection.QueryAsync<VideoSample>(new CommandDefinition($"""
                 select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
@@ -77,7 +83,7 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
                        s.created_at as CreatedAt
                 from landing.video_samples s
                 left join catalog.services sv on sv.id = s.service_id
-                where sv.id is null or sv.status = 'active'
+                where (sv.id is null or sv.status = 'active') {visibleFilter}
                 order by sv.id is null, {sampleGroup} is null, sv.sort_order, sv.service_name, s.created_at desc
                 """, cancellationToken: ct));
             var videos = rows.Where(video => IsPublishable(video, root)).ToList();

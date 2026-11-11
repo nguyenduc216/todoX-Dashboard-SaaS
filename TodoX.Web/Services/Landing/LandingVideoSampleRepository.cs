@@ -24,6 +24,8 @@ public sealed class LandingVideoSample
     // Built-in group for samples without a service: null = "Video truyền thông", "tvc" = "Video TVC doanh nghiệp".
     public string? SampleGroup { get; set; }
     public string GroupName => ServiceName ?? LandingVideoSampleRepository.BuiltInGroupName(SampleGroup);
+    // False hides the sample from the landing page (/mau-video, homepage) without deleting it.
+    public bool IsVisible { get; set; } = true;
 }
 
 public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, AuthStateService auth)
@@ -50,6 +52,47 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
         => sample.ServiceId?.ToString() ?? (sample.SampleGroup == TvcGroup ? TvcServiceChoice : OtherServiceChoice);
 
     private static volatile bool _groupColumnReady;
+    public const string VisibilityScript = "database/manual/landing/20261111_landing_video_samples_visible.sql";
+    private static volatile bool _visibleColumnReady;
+
+    private static async Task<bool> SupportsVisibilityAsync(System.Data.IDbConnection connection, CancellationToken ct)
+    {
+        if (_visibleColumnReady) return true;
+        var count = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+            select count(*) from information_schema.columns
+            where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'is_visible'
+            """, cancellationToken: ct));
+        return _visibleColumnReady = count == 1;
+    }
+
+    public async Task<bool> SupportsVisibilityAsync(CancellationToken ct = default)
+    {
+        if (_visibleColumnReady) return true;
+        using var connection = await db.OpenAsync(ct);
+        return await SupportsVisibilityAsync(connection, ct);
+    }
+
+    /// <summary>Show or hide a sample on the landing page without opening the editor.</summary>
+    public async Task SetVisibleAsync(Guid id, bool visible, CancellationToken ct = default)
+    {
+        LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
+        using var connection = await db.OpenAsync(ct);
+        if (!await SupportsVisibilityAsync(connection, ct))
+            throw new InvalidOperationException($"Cần chạy script {VisibilityScript} trên database để ẩn/hiện video mẫu.");
+        await connection.ExecuteAsync(new CommandDefinition(
+            "update landing.video_samples set is_visible = @visible, updated_at = now(), updated_by = @user where id = @id",
+            new { id, visible, user = auth.CurrentUser!.UserId.ToString() }, cancellationToken: ct));
+    }
+
+    /// <summary>Every media URL any sample still uses (video, poster, thumbnails, share image).</summary>
+    public async Task<HashSet<string>> ReferencedMediaUrlsAsync(CancellationToken ct = default)
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sample in await ListAsync(ct))
+            foreach (var url in new[] { sample.VideoUrl, sample.PosterUrl, sample.ThumbnailPortraitUrl, sample.ThumbnailLandscapeUrl, sample.ShareImageUrl })
+                if (!string.IsNullOrWhiteSpace(url)) used.Add(url);
+        return used;
+    }
 
     private static async Task<bool> SupportsGroupAsync(System.Data.IDbConnection connection, CancellationToken ct)
     {
@@ -90,10 +133,11 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
             ? "s.thumbnail_portrait_url as ThumbnailPortraitUrl, s.thumbnail_landscape_url as ThumbnailLandscapeUrl, s.share_image_url as ShareImageUrl"
             : "null as ThumbnailPortraitUrl, null as ThumbnailLandscapeUrl, null as ShareImageUrl";
         var group = await SupportsGroupAsync(connection, ct) ? "s.sample_group" : "null";
+        var visible = await SupportsVisibilityAsync(connection, ct) ? "s.is_visible" : "true";
         var rows = await connection.QueryAsync<LandingVideoSample>(new CommandDefinition($"""
             select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
                    s.video_url as VideoUrl, s.poster_url as PosterUrl, s.service_id as ServiceId, sv.service_name as ServiceName,
-                   {group} as SampleGroup, {thumbnails}
+                   {group} as SampleGroup, {visible} as IsVisible, {thumbnails}
             from landing.video_samples s
             left join catalog.services sv on sv.id = s.service_id
             order by s.created_at desc
@@ -148,6 +192,12 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
                 new { sample.Id, sample.SampleGroup }, cancellationToken: ct));
         else if (sample.SampleGroup is not null)
             throw new InvalidOperationException($"Cần chạy script {GroupScript} trên database để dùng nhóm {TvcGroupName}.");
+        if (await SupportsVisibilityAsync(connection, ct))
+            await connection.ExecuteAsync(new CommandDefinition(
+                "update landing.video_samples set is_visible = @IsVisible where id = @Id",
+                new { sample.Id, sample.IsVisible }, cancellationToken: ct));
+        else if (!sample.IsVisible)
+            throw new InvalidOperationException($"Cần chạy script {VisibilityScript} trên database để ẩn video mẫu.");
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)

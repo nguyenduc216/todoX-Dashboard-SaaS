@@ -22,6 +22,27 @@
             @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error">@_error</MudAlert> }
             @if (!Paths.IsConfigured || !Paths.CanWrite()) { <MudAlert Severity="Severity.Warning">SharedMedia chưa sẵn sàng để upload.</MudAlert> }
             <MudTextField T="string" Label="Tiêu đề video" @bind-Value="_model.Title" MaxLength="@LandingVideoSampleRepository.MaxTitleLength" />
+            <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
+                <MudSwitch T="bool" @bind-Value="_model.IsVisible" Color="Color.Success" Disabled="@(!_visibilityReady)"
+                           Label="@(_model.IsVisible ? "Hiển thị trên landing: Có" : "Hiển thị trên landing: Không (đang ẩn)")" />
+                @if (_model.Id != Guid.Empty)
+                {
+                    <MudSwitch T="bool" @bind-Value="_overwrite" Color="Color.Warning" Disabled="@_busy"
+                               Label="Ghi đè file cũ khi tải bản mới" />
+                }
+            </MudStack>
+            @if (!_visibilityReady)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">Cần chạy script <code>@LandingVideoSampleRepository.VisibilityScript</code> trên database để ẩn/hiện video mẫu.</MudAlert>
+            }
+            @if (_overwrite)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Chế độ ghi đè: video/ảnh mới tải lên (hoặc chọn từ thư viện) sẽ thay bản cũ, và file cũ bị xóa khỏi thư viện khi bấm Lưu (nếu không video mẫu nào khác còn dùng). Link chia sẻ của video mẫu giữ nguyên; người xem thấy ngay bản mới.</MudAlert>
+                @if (_replaced.Count > 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning">Sẽ thay @_replaced.Count file cũ khi lưu.</MudText>
+                }
+            }
             <MudTextField T="string" Label="Thông tin nội dung video" @bind-Value="_model.Description" Lines="4" MaxLength="@LandingVideoSampleRepository.MaxDescriptionLength" />
             <MudGrid>
                 <MudItem xs="12" sm="4">
@@ -145,7 +166,11 @@
     private bool _busy;
     private bool _uploadingVideo;
     private bool _thumbnailsReady;
+    private bool _visibilityReady = true;
     private string? _error;
+    // Overwrite mode: files of the saved sample that a new version replaced; deleted after a successful save.
+    private bool _overwrite;
+    private readonly HashSet<string> _replaced = new(StringComparer.OrdinalIgnoreCase);
 
     private const string ImageAccept = ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
     private enum ImageSlot { Video, Portrait, Landscape, Share }
@@ -158,6 +183,8 @@
     {
         try { _thumbnailsReady = await Repository.SupportsThumbnailsAsync(); }
         catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample thumbnail columns check failed."); }
+        try { _visibilityReady = await Repository.SupportsVisibilityAsync(); }
+        catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample visibility column check failed."); }
 
         if (Source is not null)
         {
@@ -166,7 +193,7 @@
                 Id = Source.Id, Title = Source.Title, Description = Source.Description, AspectRatio = Source.AspectRatio,
                 VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, ServiceId = Source.ServiceId, SampleGroup = Source.SampleGroup,
                 ThumbnailLandscapeUrl = Source.ThumbnailLandscapeUrl, ShareImageUrl = Source.ShareImageUrl,
-                ThumbnailPortraitUrl = Source.ThumbnailPortraitUrl
+                ThumbnailPortraitUrl = Source.ThumbnailPortraitUrl, IsVisible = Source.IsVisible
             };
             // Samples saved before the extra slots existed only have the main poster: show it in its ratio's slot.
             if (_model.ThumbnailPortraitUrl is null && _model.ThumbnailLandscapeUrl is null)
@@ -210,6 +237,7 @@
 
     private void PickFromLibrary(LandingMediaFile file)
     {
+        if (_librarySlot is { } pickSlot) RememberReplaced(pickSlot, file.Url);
         switch (_librarySlot)
         {
             case ImageSlot.Video: _model.VideoUrl = file.Url; break;
@@ -220,6 +248,17 @@
         }
         Snackbar.Add($"Đã chọn {SlotName(_librarySlot.Value)} từ thư viện. Nhấn Lưu video mẫu để áp dụng.", Severity.Success);
         _librarySlot = null;
+    }
+
+    /// <summary>In overwrite mode, remembers the saved sample's file in this slot so it is deleted after saving.</summary>
+    private void RememberReplaced(ImageSlot slot, string newUrl)
+    {
+        if (!_overwrite || Source is null) return;
+        var old = CurrentUrl(slot);
+        var saved = new[] { Source.VideoUrl, Source.PosterUrl, Source.ThumbnailPortraitUrl, Source.ThumbnailLandscapeUrl, Source.ShareImageUrl };
+        if (!string.IsNullOrWhiteSpace(old) && !string.Equals(old, newUrl, StringComparison.OrdinalIgnoreCase)
+            && saved.Contains(old, StringComparer.OrdinalIgnoreCase))
+            _replaced.Add(old);
     }
 
     private string? CurrentUrl(ImageSlot slot) => slot switch
@@ -252,6 +291,7 @@
         try
         {
             var url = await Media.UploadAsync(args.File, video, LandingVideoSampleRepository.MediaArea);
+            RememberReplaced(slot, url);
             switch (slot)
             {
                 case ImageSlot.Video: _model.VideoUrl = url; break;
@@ -284,7 +324,8 @@
         {
             LandingVideoSampleRepository.ApplyServiceChoice(_model, _serviceChoice);
             await Repository.SaveAsync(_model, AuthState.CurrentUser.UserId.ToString());
-            Snackbar.Add("Đã lưu video mẫu.", Severity.Success);
+            var removed = await RemoveReplacedFilesAsync();
+            Snackbar.Add(removed > 0 ? $"Đã lưu video mẫu và thay {removed} file cũ." : "Đã lưu video mẫu.", Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         }
         catch (ArgumentException ex) { _error = ex.Message.Split(" (Parameter")[0]; }
@@ -294,5 +335,24 @@
             _error = "Không thể lưu video mẫu. Kiểm tra database và script landing.video_samples.";
         }
         finally { _busy = false; }
+    }
+
+    /// <summary>Deletes the replaced files that no sample uses any more (a file picked for several samples stays).</summary>
+    private async Task<int> RemoveReplacedFilesAsync()
+    {
+        if (_replaced.Count == 0) return 0;
+        var removed = 0;
+        try
+        {
+            var used = await Repository.ReferencedMediaUrlsAsync();
+            foreach (var url in _replaced.Where(url => !used.Contains(url)))
+                if (Media.DeleteSampleUpload(url)) removed++;
+        }
+        catch (Exception ex)
+        {
+            // The sample is saved; a leftover old file only stays in the library.
+            Logger.LogWarning(ex, "Landing video sample replaced-file cleanup failed. Files={Count}", _replaced.Count);
+        }
+        return removed;
     }
 }

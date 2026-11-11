@@ -45,6 +45,7 @@
                             <MudTh>Tiêu đề</MudTh>
                             <MudTh>Nhóm dịch vụ</MudTh>
                             <MudTh>Kích thước</MudTh>
+                            <MudTh>Hiển thị</MudTh>
                             <MudTh></MudTh>
                         </HeaderContent>
                         <RowTemplate>
@@ -52,6 +53,11 @@
                             <MudTd>@context.Title</MudTd>
                             <MudTd>@context.GroupName</MudTd>
                             <MudTd>@context.AspectRatio</MudTd>
+                            <MudTd>
+                                <MudSwitch T="bool" Value="@context.IsVisible" ValueChanged="@(value => SetVisibleAsync(context, value))"
+                                           Color="Color.Success" Disabled="@(!CanUpdate || _busy)"
+                                           Label="@(context.IsVisible ? "Có" : "Ẩn")" />
+                            </MudTd>
                             <MudTd Style="text-align:right;white-space:nowrap">
                                 <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => EditAsync(context))">Sửa</MudButton>
                                 <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => DeleteAsync(context))">Xóa</MudButton>
@@ -115,6 +121,26 @@
             Logger.LogError(ex, "Landing video samples reload failed.");
             _error = "Không thể tải lại kho mẫu video. Vui lòng tải lại trang.";
         }
+    }
+
+    private async Task SetVisibleAsync(LandingVideoSample sample, bool visible)
+    {
+        if (!CanUpdate || _busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Repository.SetVisibleAsync(sample.Id, visible);
+            sample.IsVisible = visible;
+            Snackbar.Add(visible ? $"Đã hiện \"{sample.Title}\" trên landing." : $"Đã ẩn \"{sample.Title}\" khỏi landing.", Severity.Success);
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video sample visibility change failed.");
+            _error = "Không thể đổi trạng thái hiển thị. Vui lòng thử lại.";
+        }
+        finally { _busy = false; }
     }
 
     private async Task DeleteAsync(LandingVideoSample sample)
