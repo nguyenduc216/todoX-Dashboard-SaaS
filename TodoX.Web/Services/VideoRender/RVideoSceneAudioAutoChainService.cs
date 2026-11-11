@@ -16,6 +16,9 @@ public interface IRVideoSceneAudioAutoChainService
     /// even when a completed one exists. The finalizer then muxes it into the scene video and the final video is re-merged.
     /// </summary>
     Task<RVideoSceneLinkResult> RegenerateSceneAudioAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default);
+
+    /// <summary>Points one Vbee voice costs for this job, from the TodoX voice rate (service price or global rate).</summary>
+    Task<decimal?> EstimateVoicePointsAsync(long projectId, CancellationToken ct = default);
 }
 
 public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChainService
@@ -79,6 +82,25 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         return started
             ? new(true, $"Đang tạo lại giọng cho scene {scene.SceneIndex:00}. Xong sẽ tự ghép vào video và ghép lại video cuối.")
             : new(false, "Chưa tạo được giọng (xem nhật ký job). Kiểm tra giọng đọc đã chọn trong Cài đặt nâng cao.");
+    }
+
+    public async Task<decimal?> EstimateVoicePointsAsync(long projectId, CancellationToken ct = default)
+    {
+        try
+        {
+            var project = await _repo.GetProjectAsync(projectId, ct);
+            if (project is null) return null;
+            var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
+            var estimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+                pointServiceId, 0, ServiceSellPriceQualityTiers.Standard, 0, ServiceSellPriceQualityTiers.Standard,
+                1, ServiceSellPriceQualityTiers.Standard, true), ct);
+            return estimate.TotalPoints;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "RVIDEO_VOICE_ESTIMATE_UNAVAILABLE projectId={ProjectId}", projectId);
+            return null;
+        }
     }
 
     private async Task<bool> EnqueueSceneAudioAsync(long projectId, long sceneId, string triggerSource, bool regenerate, CancellationToken ct)
@@ -177,7 +199,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             true), ct);
         var customerPointRate = pointEstimate.Voice.Rate;
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, selectedVideo.RenderJobId ?? Guid.Empty);
-        var parentJobBilled = RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(
+        // A user-requested new voice is always billed at the TodoX voice rate, never covered by the video's charge.
+        var parentJobBilled = !regenerate && RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(
             project.Events,
             billingOperationId);
 
@@ -215,6 +238,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 source = triggerSource,
                 stage = "audio",
                 autoChain = true,
+                billingIntent = regenerate ? nameof(PointBillingIntent.UserRerender) : nameof(PointBillingIntent.InitialRender),
                 voiceCatalogCode = settings?.VoiceCatalogCode,
                 voiceCode,
                 defaultTtsRate = settings?.DefaultTtsRate,
@@ -269,7 +293,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                     logicalRequestId,
                     customerPointRate,
                     customerPointQuality = ServiceSellPriceQualityTiers.Standard,
-                    billingIntent = PointBillingIntent.InitialRender,
+                    billingIntent = regenerate ? PointBillingIntent.UserRerender : PointBillingIntent.InitialRender,
                     billingOperationId = billingOperationId
                 }
             },

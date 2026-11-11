@@ -54,6 +54,9 @@ public sealed class RVideoSceneVoiceTests
         var chain = Read("TodoX.Web", "Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs");
         Assert.Contains("logicalRequestId = $\"{logicalRequestId}:v{(latest?.VersionNumber ?? 0) + 1}\";", chain);
         Assert.Contains("if (!regenerate && selected is not null", chain);
+        // Billed at the TodoX voice rate every time, recorded as a user re-render.
+        Assert.Contains("var parentJobBilled = !regenerate &&", chain);
+        Assert.Contains("billingIntent = regenerate ? PointBillingIntent.UserRerender : PointBillingIntent.InitialRender", chain);
         Assert.Contains("voices.FirstOrDefault(x => x.IsDefault)", chain);
         Assert.Contains(":{selectedAudio.Id:N}", Read("TodoX.Web", "Services", "VideoRender", "RVideoSceneMediaFinalizerService.cs"));
         Assert.Contains("TriggerSceneAudioRevoice", Read("TodoX.Web", "Services", "VideoRender", "SceneAudioMuxHandler.cs"));

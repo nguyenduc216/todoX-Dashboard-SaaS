@@ -266,8 +266,10 @@ async Task HandleRegenerateVoiceAsync(VideoProjectSceneDto scene)
 {
   if(JobView is null || AuthState.CurrentUser is not { } user || _busy) return;
   var text = RVideoRules.ResolveSceneVoiceText(scene);
+  var points = await AudioChain.EstimateVoicePointsAsync(JobView.Project.Id);
+  var cost = points is decimal p ? $"Trừ {p:0.##} điểm theo đơn giá giọng của TodoX. " : "Trừ điểm theo đơn giá giọng của TodoX. ";
   var ok = await DialogService.ShowMessageBoxAsync("Tạo lại giọng đọc",
-    $"Scene {scene.SceneIndex:00} sẽ đọc: \"{text}\". Muốn đổi câu đọc thì sửa ô Lời thoại trước. Giọng mới được ghép vào video của scene và video cuối được ghép lại. Tiếp tục?",
+    $"Scene {scene.SceneIndex:00} sẽ đọc: \"{text}\". Muốn đổi câu đọc thì sửa ô Lời thoại trước. {cost}Giọng mới được ghép vào video của scene và video cuối được ghép lại. Tiếp tục?",
     yesText:"Tạo lại giọng", cancelText:"Hủy");
   if(ok != true) return;
   _busy = true;
