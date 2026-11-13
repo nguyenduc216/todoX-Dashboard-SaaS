@@ -66,7 +66,7 @@ window.TODOX_LANDING_CONFIG = {
     if (!founder) return;
 
     founder.style.backgroundImage =
-      "linear-gradient(to top, rgba(0,0,0,.32), transparent 55%), url('/img/landing/tran-trong-tuyen.png?v=20260809-3')";
+      "linear-gradient(to top, rgba(0,0,0,.32), transparent 55%), url('/img/landing/tran-trong-tuyen.png?v=20261113-1')";
     founder.style.backgroundPosition = 'center top';
     founder.style.backgroundSize = 'contain';
     founder.style.backgroundRepeat = 'no-repeat';
