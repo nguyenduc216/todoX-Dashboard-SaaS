@@ -1,0 +1,16 @@
+/* ChatStaff chat widget (script from chat-api.genstaff.net creates the [data-chatstaff-widget] host).
+   Gold glow so the dark robot bubble stands out on the dark theme. */
+[data-chatstaff-widget] {
+  filter: drop-shadow(0 0 3px rgba(255, 216, 107, .95)) drop-shadow(0 0 14px rgba(245, 158, 11, .75));
+}
+
+/* Desktop: keep the bubble and its badge off the screen edge. Mobile keeps the widget's own (full-screen) layout. */
+@media (min-width: 768px) {
+  [data-chatstaff-widget] {
+    right: 22px !important;
+    bottom: 22px !important;
+  }
+}
+
+/* The back-to-top button sat underneath the chat bubble: lift it above. */
+.back-top { bottom: 96px; }
