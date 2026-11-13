@@ -14,3 +14,15 @@
 
 /* The back-to-top button sat underneath the chat bubble: lift it above. */
 .back-top { bottom: 96px; }
+
+/* Homepage ChatStaff box (js/chatstaff-inline.js): real conversation, so it scrolls and shows a typing indicator. */
+#chatstaff .messages { max-height: 420px; overflow-y: auto; overscroll-behavior: contain; }
+#chatstaff .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+#chatstaff .msg.cs-system { border: 1px solid rgba(255, 120, 120, .45); color: #ffb4b4; }
+#chatstaff .msg.cs-typing { display: inline-flex; gap: 4px; align-items: center; width: max-content; }
+#chatstaff .msg.cs-typing span { width: 6px; height: 6px; border-radius: 50%; background: #c9ccd2; animation: cs-dot 1.2s ease-in-out infinite; }
+#chatstaff .msg.cs-typing span:nth-child(2) { animation-delay: .16s; }
+#chatstaff .msg.cs-typing span:nth-child(3) { animation-delay: .32s; }
+#chatstaff .online[data-state="error"] { color: #ffb4b4; }
+@keyframes cs-dot { 0%, 80%, 100% { transform: scale(.7); opacity: .4; } 40% { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #chatstaff .msg.cs-typing span { animation: none; } }

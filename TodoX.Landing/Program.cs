@@ -63,8 +63,8 @@ app.Use(async (context, next) =>
     context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
     context.Response.Headers["Content-Security-Policy"] =
         "default-src 'self'; img-src 'self' data: https://todox.vn https://chat-api.genstaff.net; " +
-        "media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://chat-api.genstaff.net; " +
-        "font-src 'self'; connect-src 'self' https://chat-api.genstaff.net wss://chat-api.genstaff.net; " +
+        "media-src 'self' https://chat-api.genstaff.net; style-src 'self' 'unsafe-inline' https://chat-api.genstaff.net; script-src 'self' https://chat-api.genstaff.net; " +
+        "font-src 'self' data: https://chat-api.genstaff.net; connect-src 'self' https://chat-api.genstaff.net wss://chat-api.genstaff.net; " +
         "frame-src https://chat-api.genstaff.net; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
 
     await next();

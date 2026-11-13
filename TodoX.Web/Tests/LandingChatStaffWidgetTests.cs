@@ -29,6 +29,28 @@ public sealed class LandingChatStaffWidgetTests
         Assert.Contains("script-src 'self' https://chat-api.genstaff.net", program);
         Assert.Contains("connect-src 'self' https://chat-api.genstaff.net wss://chat-api.genstaff.net", program);
         Assert.Contains("frame-src https://chat-api.genstaff.net", program);
+        Assert.Contains("style-src 'self' 'unsafe-inline' https://chat-api.genstaff.net", program);
+        Assert.Contains("font-src 'self' data: https://chat-api.genstaff.net", program);
+    }
+
+    [Fact]
+    public void HomepageChatBoxIsRealChatStaffConversationNotSimulation()
+    {
+        var root = Path.Combine(FindLandingRoot(), "wwwroot");
+        var index = File.ReadAllText(Path.Combine(root, "index.html"));
+        Assert.Contains("js/chatstaff-inline.js?v=", index);
+        Assert.Contains("id=\"chatStatus\"", index);
+        Assert.DoesNotContain("Tôi muốn làm video cho sản phẩm mỹ phẩm.", index);
+
+        var landing = File.ReadAllText(Path.Combine(root, "js", "landing.js"));
+        Assert.DoesNotContain("ChatStaff đã ghi nhận nhu cầu", landing);
+
+        var inline = File.ReadAllText(Path.Combine(root, "js", "chatstaff-inline.js"));
+        Assert.Contains("[data-chatstaff-widget]", inline);
+        Assert.Contains("requestSubmit", inline);
+        Assert.DoesNotContain("innerHTML", inline);
+        // rAF pauses in background tabs, which hid bot replies.
+        Assert.DoesNotContain("requestAnimationFrame(render)", inline);
     }
 
     private static string FindLandingRoot()

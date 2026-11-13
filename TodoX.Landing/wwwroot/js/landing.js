@@ -648,30 +648,7 @@ AOS.init({
     }
 
 
-    const sendChat = document.getElementById("sendChat");
-    const chatInput = document.getElementById("chatInput");
-    const messages = document.getElementById("messages");
-
-    function sendMessage() {
-      const value = chatInput.value.trim();
-      if (!value) return;
-      const user = document.createElement("div");
-      user.className = "msg user";
-      user.textContent = value;
-      messages.appendChild(user);
-      chatInput.value = "";
-      messages.scrollTop = messages.scrollHeight;
-
-      setTimeout(() => {
-        const bot = document.createElement("div");
-        bot.className = "msg bot";
-        bot.textContent = "Cảm ơn anh/chị. ChatStaff đã ghi nhận nhu cầu và sẽ chuyển thông tin cho chuyên viên TodoX.";
-        messages.appendChild(bot);
-        messages.scrollTop = messages.scrollHeight;
-      }, 650);
-    }
-    sendChat.addEventListener("click", sendMessage);
-    chatInput.addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
+    // The homepage ChatStaff box is a real chat: see js/chatstaff-inline.js.
 
     const leadForm = document.getElementById("leadForm");
     const leadFormStatus = document.getElementById("leadFormStatus");
