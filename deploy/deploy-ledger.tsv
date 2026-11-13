@@ -83,4 +83,8 @@ deployed_at	target	commit	server
 2026-11-13T15:31:46.2178851+07:00	landing	d98fb03f172d3024dbcf51b9900477923bef31ad	prod
 2026-11-13T16:51:38.9976100+07:00	landing	47f659778ed8d3b7206368186f1f4b53198fee15	prod
 2026-11-13T16:55:33.5841601+07:00	landing	176f6ce92079a764a62da3a009e13f1901ae3600	prod
+<<<<<<< HEAD
 2026-11-13T17:03:57.5037172+07:00	landing	b60a4af0aeeb4c328f15b29e857f393dd981cb1e	prod
+=======
+2026-11-13T17:40:08.5214809+07:00	landing	b59f67311e2e1f50929df0d86ade630b47772a4b	prod
+>>>>>>> 934d83ec (fix(landing): chip nhóm mẫu video cuộn ngang trên điện thoại)

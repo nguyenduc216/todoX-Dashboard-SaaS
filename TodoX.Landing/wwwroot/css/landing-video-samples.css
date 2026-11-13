@@ -47,3 +47,10 @@
 /* Affiliate video page: its first section starts under the fixed header. */
 .affiliate-page main > .section:first-child { padding-top: 150px; }
 @media (max-width: 700px) { .affiliate-page main > .section:first-child { padding-top: 120px; } }
+
+/* Phone: the group chips scroll sideways instead of stacking one per line. */
+@media (max-width: 700px) {
+  .ls-filters { flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; margin-left:-4px; padding:0 4px 6px; scrollbar-width:none; }
+  .ls-filters::-webkit-scrollbar { display:none; }
+  .ls-filter { flex:0 0 auto; padding:7px 13px; font-size:13px; }
+}
