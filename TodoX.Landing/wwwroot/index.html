@@ -27,7 +27,7 @@
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="css/landing.css?v=20261030-1">
   <link rel="stylesheet" href="css/landing-short-video.css?v=1">
-  <link rel="stylesheet" href="css/landing-video-samples.css?v=4">
+  <link rel="stylesheet" href="css/landing-video-samples.css?v=5">
   <link rel="stylesheet" href="/css/chatstaff-widget.css?v=20261113-3">
   <script async src="https://chat-api.genstaff.net/widget/chatstaff-widget.js" data-channel-key="wlc_Z1RU-uztGV-CChNMsOyMOS1N2eN8Gpyb" data-lang="vi"></script>
   <script type="application/ld+json">
@@ -176,7 +176,12 @@
 
         <div class="ls-filters" id="homeSampleFilters" role="group" aria-label="Lọc theo nhóm dịch vụ video" hidden></div>
         <p class="ls-status" id="homeSampleStatus" role="status" aria-live="polite">Đang tải mẫu video...</p>
-        <div class="ls-grid" id="homeSampleGrid"></div>
+        <div class="swiper sampleSwiper" id="homeSampleSwiper" data-aos="fade-up">
+          <div class="swiper-wrapper ls-grid" id="homeSampleGrid"></div>
+          <div class="swiper-button-prev"></div>
+          <div class="swiper-button-next"></div>
+          <div class="swiper-pagination"></div>
+        </div>
         <div class="ls-more">
           <a class="btn btn-primary" href="/mau-video">Xem tất cả mẫu video <i class="fa-solid fa-arrow-right"></i></a>
           <a class="btn btn-outline" href="/affiliate-video"><i class="fa-regular fa-circle-play"></i> Affiliate video theo ngành nghề</a>
@@ -413,7 +418,7 @@
 <script src="js/landing-intro-video.js?v=20261017-1" defer></script>
 <script src="js/landing-short-video.js?v=1" defer></script>
 <script src="js/landing-video-samples.js?v=1" defer></script>
-<script src="js/landing-samples-section.js?v=1" defer></script>
+<script src="js/landing-samples-section.js?v=2" defer></script>
 <script src="js/video-share.js?v=20261103-1" defer></script>
 </body>
 </html>

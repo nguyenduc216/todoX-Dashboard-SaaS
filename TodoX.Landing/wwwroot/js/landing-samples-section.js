@@ -20,7 +20,9 @@
   let current = '';
 
   const card = video => {
-    const link = el('a', video.aspectRatio === '16:9' ? 'ls-card is-landscape' : 'ls-card');
+    // Same shape as the industry cards: a slide on phones, a grid cell on desktop.
+    const slide = el('div', video.aspectRatio === '16:9' ? 'swiper-slide is-landscape' : 'swiper-slide');
+    const link = el('a', 'ls-card');
     link.href = video.sharePath;
     const thumb = el('span', 'ls-thumb');
     const image = el('img');
@@ -33,13 +35,44 @@
     const body = el('span', 'ls-body');
     body.append(el('span', 'ls-group', video.groupName || 'Mẫu video'), el('span', 'ls-name', video.title));
     link.append(thumb, body);
-    return link;
+    slide.append(link);
+    return slide;
+  };
+
+  // On phones the cards are swiped one at a time instead of shrinking into a grid.
+  const phone = window.matchMedia('(max-width: 768px)');
+  let slider = null;
+
+  const syncSlider = () => {
+    if (!phone.matches || !grid.children.length) {
+      if (slider) { slider.destroy(true, true); slider = null; }
+      return;
+    }
+    if (slider) { slider.update(); slider.slideTo(0, 0); return; }
+    if (typeof Swiper !== 'function') return;
+    slider = new Swiper('#homeSampleSwiper', {
+      slidesPerView: 'auto',
+      centeredSlides: true,
+      centeredSlidesBounds: true,
+      spaceBetween: 12,
+      rewind: true,
+      speed: 420,
+      threshold: 10,
+      grabCursor: true,
+      watchOverflow: true,
+      roundLengths: true,
+      pagination: { el: '#homeSampleSwiper .swiper-pagination', clickable: true },
+      navigation: { nextEl: '#homeSampleSwiper .swiper-button-next', prevEl: '#homeSampleSwiper .swiper-button-prev' }
+    });
   };
 
   const render = () => {
     filters.querySelectorAll('.ls-filter').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.group === current)));
     grid.replaceChildren(...videos.filter(video => !current || video.groupCode === current).slice(0, MAX_CARDS).map(card));
+    syncSlider();
   };
+
+  phone.addEventListener('change', syncSlider);
 
   const filterButton = (code, name) => {
     const button = el('button', 'ls-filter', name);

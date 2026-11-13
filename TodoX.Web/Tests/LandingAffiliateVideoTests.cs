@@ -37,6 +37,8 @@ public sealed class LandingAffiliateVideoTests
         Assert.DoesNotContain("industrySolutions", html);
         Assert.DoesNotContain("industryModal", html);
         Assert.Contains("id=\"homeSampleGrid\"", html);
+        // On phones the cards are swiped, like the industry cards, instead of shrinking into a grid.
+        Assert.Contains("swiper sampleSwiper", html);
         Assert.Contains("js/landing-samples-section.js", html);
         // The section title still opens the full library.
         Assert.Contains("<h2><a class=\"ls-title-link\" href=\"/mau-video\">", html);
@@ -66,6 +68,9 @@ public sealed class LandingAffiliateVideoTests
         // Only samples with a real share page and real media become cards.
         Assert.Contains("validSharePath(video.sharePath)", script);
         Assert.Contains("validMedia(video.posterUrl, 'posters')", script);
+        // The phone slider is built from the same cards.
+        Assert.Contains("new Swiper('#homeSampleSwiper'", script);
+        Assert.Contains("max-width: 768px", script);
     }
 
     private static string Page(string relative) => Page("wwwroot", relative);

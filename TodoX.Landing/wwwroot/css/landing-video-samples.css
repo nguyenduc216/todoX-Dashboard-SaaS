@@ -11,7 +11,8 @@
   .nav-submenu::before { display:none; }
 }
 
-/* Homepage "Mẫu video" section: preview cards linking to each sample's own page. */
+/* Homepage "Mẫu video" section: a grid on desktop, a swipeable slider on phones
+   (same behaviour as the industry cards). Each card links to that sample's own page. */
 .ls-title-link { color:inherit; }
 .ls-title-link:hover { color:var(--gold); }
 .ls-filters { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin-top:22px; }
@@ -21,14 +22,15 @@
 .ls-filter[aria-pressed="true"] { border-color:var(--gold); background:linear-gradient(110deg,#ffe073,#ffb81c); color:#16100a; }
 .ls-status { margin-top:22px; color:var(--muted); text-align:center; }
 .ls-status:empty { display:none; }
-.ls-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); grid-auto-flow:dense; align-items:start; gap:22px; margin-top:28px; }
-.ls-grid:empty { display:none; }
-.ls-card { display:block; min-width:0; border:1px solid var(--white-line); border-radius:14px; background:#10100d; overflow:hidden; color:inherit; transition:border-color .2s, transform .2s; }
+.sampleSwiper { overflow:visible; margin-top:28px; }
+.ls-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); grid-auto-flow:dense; align-items:start; gap:22px; }
+.ls-grid .swiper-slide { width:auto !important; height:auto; }
+.ls-grid .swiper-slide.is-landscape { grid-column:span 2; }
+.ls-card { display:block; height:100%; min-width:0; border:1px solid var(--white-line); border-radius:14px; background:#10100d; overflow:hidden; color:inherit; transition:border-color .2s, transform .2s; }
 .ls-card:hover { border-color:var(--gold); transform:translateY(-4px); }
-.ls-card.is-landscape { grid-column:span 2; }
 .ls-thumb { position:relative; display:block; width:100%; background:#000; }
 .ls-thumb img { display:block; width:100%; aspect-ratio:9/16; object-fit:cover; }
-.ls-card.is-landscape .ls-thumb img { aspect-ratio:16/9; }
+.is-landscape .ls-thumb img { aspect-ratio:16/9; }
 .ls-thumb i { position:absolute; top:50%; left:50%; display:grid; place-items:center; width:56px; height:56px; border-radius:50%; background:linear-gradient(135deg,#ffe073,#ffb81c); color:#16100a; font-size:20px; transform:translate(-50%,-50%); transition:transform .2s; }
 .ls-card:hover .ls-thumb i { transform:translate(-50%,-50%) scale(1.1); }
 .ls-ratio { position:absolute; top:10px; right:10px; padding:3px 8px; border-radius:6px; background:#000b; color:#fff; font-size:12px; font-weight:700; }
@@ -36,21 +38,23 @@
 .ls-group { display:block; color:var(--gold); font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
 .ls-name { display:-webkit-box; margin-top:6px; font-size:17px; line-height:1.35; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .ls-more { display:flex; flex-wrap:wrap; justify-content:center; gap:14px; margin-top:30px; }
-@media (max-width: 1050px) { .ls-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
-@media (max-width: 700px) {
-  .ls-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
-  .ls-thumb i { width:44px; height:44px; font-size:16px; }
-  .ls-body { padding:10px 12px 12px; }
-  .ls-name { font-size:15px; }
+@media (min-width: 769px) {
+  .sampleSwiper .swiper-button-next,
+  .sampleSwiper .swiper-button-prev,
+  .sampleSwiper .swiper-pagination { display:none; }
+}
+@media (max-width: 1100px) { .ls-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width: 768px) {
+  /* Phone: one card at a time, swiped sideways - the layout does not shrink. */
+  .sampleSwiper { padding-inline:20px; }
+  .ls-grid { display:flex; gap:0; }
+  .ls-grid .swiper-slide { width:min(82vw,330px) !important; flex:0 0 min(82vw,330px); }
+  .ls-grid .swiper-slide.is-landscape { grid-column:auto; }
+  .ls-filters { flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; margin-left:-4px; padding:0 4px 6px; scrollbar-width:none; }
+  .ls-filters::-webkit-scrollbar { display:none; }
+  .ls-filter { flex:0 0 auto; padding:7px 13px; font-size:13px; }
 }
 
 /* Affiliate video page: its first section starts under the fixed header. */
 .affiliate-page main > .section:first-child { padding-top: 150px; }
 @media (max-width: 700px) { .affiliate-page main > .section:first-child { padding-top: 120px; } }
-
-/* Phone: the group chips scroll sideways instead of stacking one per line. */
-@media (max-width: 700px) {
-  .ls-filters { flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; margin-left:-4px; padding:0 4px 6px; scrollbar-width:none; }
-  .ls-filters::-webkit-scrollbar { display:none; }
-  .ls-filter { flex:0 0 auto; padding:7px 13px; font-size:13px; }
-}
