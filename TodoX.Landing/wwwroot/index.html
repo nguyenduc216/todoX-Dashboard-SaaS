@@ -27,7 +27,7 @@
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="css/landing.css?v=20261030-1">
   <link rel="stylesheet" href="css/landing-short-video.css?v=1">
-  <link rel="stylesheet" href="css/landing-video-samples.css?v=1">
+  <link rel="stylesheet" href="css/landing-video-samples.css?v=3">
   <link rel="stylesheet" href="/css/chatstaff-widget.css?v=20261113-3">
   <script async src="https://chat-api.genstaff.net/widget/chatstaff-widget.js" data-channel-key="wlc_Z1RU-uztGV-CChNMsOyMOS1N2eN8Gpyb" data-lang="vi"></script>
   <script type="application/ld+json">
@@ -56,8 +56,7 @@
       <nav class="nav-links" id="navLinks">
         <a class="active" href="#home">Trang chủ</a>
         <a href="#about">Giới thiệu</a>
-        <a href="#industries">Ngành nghề</a>
-        <a href="#industries">Giải pháp</a>
+        <a href="/affiliate-video">Affiliate video</a>
         <a href="#chatstaff">ChatStaff</a>
         <a href="/editvideo">EditVideo</a>
         <div class="nav-dropdown"><a href="/mau-video">Mẫu video</a><div class="nav-submenu" id="videoSampleGroups" hidden></div></div>
@@ -80,7 +79,7 @@
           <p>Hệ thống sản xuất video AI tự động giúp xây kênh, làm affiliate, triển khai nội dung đa nền tảng và tạo AI Video chuyển đổi cao cho từng ngành hàng.</p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="#contact">Nhận tư vấn giải pháp <i class="fa-solid fa-arrow-right"></i></a>
-            <a class="btn btn-outline" href="#industries"><i class="fa-regular fa-circle-play"></i> Xem video mẫu</a>
+            <a class="btn btn-outline" href="#mau-video"><i class="fa-regular fa-circle-play"></i> Xem video mẫu</a>
           </div>
           <div class="stats">
             <div class="stat"><strong data-count="30">0</strong><span>Dự án triển khai</span></div>
@@ -107,7 +106,7 @@
             <div class="industry-pill"><i class="fa-solid fa-shirt"></i><span>Thời trang</span></div>
             <div class="industry-pill"><i class="fa-solid fa-building"></i><span>Xây dựng</span></div>
             <div class="industry-pill"><i class="fa-solid fa-couch"></i><span>Nội thất</span></div>
-            <a class="industry-pill industry-pill-more" href="#industries" aria-label="Xem thêm ngành nghề"><i class="fa-solid fa-ellipsis"></i><span>Ngành nghề khác</span></a>
+            <a class="industry-pill industry-pill-more" href="/affiliate-video" aria-label="Xem thêm ngành nghề"><i class="fa-solid fa-ellipsis"></i><span>Ngành nghề khác</span></a>
           </div>
         </div>
       </div>
@@ -167,21 +166,20 @@
       </div>
     </section>
 
-    <section class="section" id="industries">
+    <section class="section" id="mau-video">
       <div class="container">
         <div class="section-title" data-aos="fade-up">
-          <span class="eyebrow">Giải pháp theo ngành nghề</span>
-          <h2>Mỗi ngành hàng, một cách kể câu chuyện riêng</h2>
-          <p>TodoX xây dựng concept hình ảnh, kịch bản và chuyển động phù hợp với từng nhóm sản phẩm và khách hàng mục tiêu.</p>
+          <span class="eyebrow">Kho mẫu video</span>
+          <h2><a class="ls-title-link" href="/mau-video">Mẫu video TodoX</a></h2>
+          <p>Những video TodoX đã sản xuất cho khách hàng, sắp xếp theo từng nhóm dịch vụ. Bấm vào tiêu đề để xem toàn bộ kho mẫu.</p>
         </div>
 
-        <div class="swiper industrySwiper" data-aos="fade-up">
-          <div class="swiper-wrapper" id="industrySolutions" aria-live="polite">
-            <div class="swiper-slide industry-loading">Đang tải giải pháp ngành nghề...</div>
-          </div>
-          <div class="swiper-button-prev"></div>
-          <div class="swiper-button-next"></div>
-          <div class="swiper-pagination"></div>
+        <div class="ls-filters" id="homeSampleFilters" role="group" aria-label="Lọc theo nhóm dịch vụ video" hidden></div>
+        <p class="ls-status" id="homeSampleStatus" role="status" aria-live="polite">Đang tải mẫu video...</p>
+        <div class="ls-grid" id="homeSampleGrid"></div>
+        <div class="ls-more">
+          <a class="btn btn-primary" href="/mau-video">Xem tất cả mẫu video <i class="fa-solid fa-arrow-right"></i></a>
+          <a class="btn btn-outline" href="/affiliate-video"><i class="fa-regular fa-circle-play"></i> Affiliate video theo ngành nghề</a>
         </div>
       </div>
     </section>
@@ -394,8 +392,8 @@
           </a>
           <p style="margin-top:18px;">Nền tảng AI Video và ChatStaff giúp doanh nghiệp tạo nội dung bán hàng chuyên nghiệp và vận hành hiệu quả hơn.</p>
         </div>
-        <div><h3>Về TodoX</h3><div class="footer-links"><a href="#about">Giới thiệu</a><a href="#founder">Người sáng lập</a><a href="#industries">Ngành nghề</a></div></div>
-        <div><h3>Giải pháp</h3><div class="footer-links"><a href="#industries">AI Video</a><a href="/video-ngan" data-short-video-entry>Video truyền thông</a><a href="#chatstaff">ChatStaff</a><a href="/editvideo">TodoX EditVideo – tải app</a><a href="https://dashboard.todox.vn" data-dashboard-link>Đăng nhập Dashboard</a></div></div>
+        <div><h3>Về TodoX</h3><div class="footer-links"><a href="#about">Giới thiệu</a><a href="#founder">Người sáng lập</a><a href="/affiliate-video">Ngành nghề</a></div></div>
+        <div><h3>Giải pháp</h3><div class="footer-links"><a href="/affiliate-video">Affiliate video</a><a href="/mau-video">Mẫu video</a><a href="/video-ngan" data-short-video-entry>Video truyền thông</a><a href="#chatstaff">ChatStaff</a><a href="/editvideo">TodoX EditVideo – tải app</a><a href="https://dashboard.todox.vn" data-dashboard-link>Đăng nhập Dashboard</a></div></div>
         <div><h3>Liên hệ</h3><div class="footer-links"><span>Nha Trang, Khánh Hòa</span><span>0366 699 961</span><span>hello@todox.vn</span></div></div>
       </div>
       <div class="copyright">© 2026 TodoX.</div>
@@ -403,26 +401,6 @@
   </footer>
 
   <button class="back-top" id="backTop" aria-label="Lên đầu trang"><i class="fa-solid fa-arrow-up"></i></button>
-  <div class="industry-modal" id="industryModal" aria-hidden="true">
-    <div class="industry-modal__overlay" data-industry-modal-close></div>
-    <div class="industry-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="industryModalTitle">
-      <button class="industry-modal__close" type="button" data-industry-modal-close aria-label="Đóng video"><i class="fa-solid fa-xmark"></i></button>
-      <div class="industry-modal__video">
-        <video id="industryModalVideo" controls playsinline preload="metadata"></video>
-      </div>
-      <div class="industry-related-videos" id="industryRelatedVideos" hidden></div>
-      <div class="industry-modal__content">
-        <span class="eyebrow">VIDEO DEMO</span>
-        <h3 id="industryModalTitle"></h3>
-        <p id="industryModalDescription"></p>
-        <div class="industry-modal__notes" id="industryModalNotes"></div>
-        <div class="industry-modal__actions">
-          <a class="btn btn-primary" href="#contact" data-industry-consult>Tư vấn giải pháp này <i class="fa-solid fa-arrow-right"></i></a>
-          <button class="btn btn-outline industry-modal__share" type="button" id="industryModalShare" hidden><i class="fa-solid fa-share-nodes"></i> <span>Chia sẻ video</span></button>
-        </div>
-      </div>
-    </div>
-  </div>
   <script src="js/landing-config.js?v=20261113-2" defer></script>
   <script src="vendor/gsap/gsap.min.js" defer></script>
   <script src="vendor/gsap/ScrollTrigger.min.js" defer></script>
@@ -435,6 +413,7 @@
 <script src="js/landing-intro-video.js?v=20261017-1" defer></script>
 <script src="js/landing-short-video.js?v=1" defer></script>
 <script src="js/landing-video-samples.js?v=1" defer></script>
+<script src="js/landing-samples-section.js?v=1" defer></script>
 <script src="js/video-share.js?v=20261103-1" defer></script>
 </body>
 </html>

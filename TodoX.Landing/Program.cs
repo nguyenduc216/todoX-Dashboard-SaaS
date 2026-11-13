@@ -229,7 +229,7 @@ app.MapGet("/video/{slug}", async (
 {
     var match = await repository.FindVideoBySlugAsync(slug, ct);
     if (match is not { } found || string.IsNullOrWhiteSpace(found.Video.VideoUrl))
-        return Results.Redirect("/#industries");
+        return Results.Redirect("/affiliate-video");
 
     if (!string.Equals(slug, found.Video.Slug, StringComparison.Ordinal))
         return Results.Redirect(found.Video.SharePath, permanent: true);
@@ -269,7 +269,7 @@ app.MapGet("/video/{slug}" + LandingVideoDownload.RouteSuffix, async (
 {
     var match = await repository.FindVideoBySlugAsync(slug, ct);
     if (match is not { } found || string.IsNullOrWhiteSpace(found.Video.VideoUrl))
-        return Results.Redirect("/#industries");
+        return Results.Redirect("/affiliate-video");
     return LandingVideoDownload.Serve(http, found.Video.VideoUrl, found.Video.Slug, media.Value, found.Video.SharePath);
 });
 
@@ -289,6 +289,7 @@ app.MapGet("/mau-video/{slug}" + LandingVideoDownload.RouteSuffix, async (
 // Serve the marketing deep link as its own document, including on refresh.
 app.MapGet("/bat-dong-san", () => Results.File(Path.Combine(app.Environment.WebRootPath, "bat-dong-san.html"), "text/html; charset=utf-8"));
 app.MapGet("/video-ngan", () => Results.File(Path.Combine(app.Environment.WebRootPath, "video-ngan.html"), "text/html; charset=utf-8"));
+app.MapGet("/affiliate-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "affiliate-video.html"), "text/html; charset=utf-8"));
 app.MapGet("/mau-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "mau-video.html"), "text/html; charset=utf-8"));
 app.MapGet("/editvideo", () => Results.File(Path.Combine(app.Environment.WebRootPath, "editvideo.html"), "text/html; charset=utf-8"));
 app.MapFallbackToFile("index.html");

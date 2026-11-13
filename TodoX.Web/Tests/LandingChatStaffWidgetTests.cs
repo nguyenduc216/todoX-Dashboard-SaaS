@@ -12,6 +12,7 @@ public sealed class LandingChatStaffWidgetTests
     [InlineData("bat-dong-san.html")]
     [InlineData("editvideo.html")]
     [InlineData("mau-video.html")]
+    [InlineData("affiliate-video.html")]
     public void LandingPageLoadsChatStaffWidgetOnceAsync(string page)
     {
         var html = File.ReadAllText(Path.Combine(FindLandingRoot(), "wwwroot", page));

@@ -52,7 +52,7 @@ public static class VideoSharePage
         FallbackDescription = $"Video mẫu {industry.Title} do TodoX AI Video thực hiện.",
         Notes = new[] { ("Định dạng", video.FormatNote), ("Mục tiêu", video.GoalNote), ("Năng lực", video.CapabilityNote) }
             .Where(x => !string.IsNullOrWhiteSpace(x.Item2)).Select(x => (x.Item1, x.Item2!.Trim())).ToList(),
-        BackPath = "/#industries",
+        BackPath = "/affiliate-video",
         BackLabel = "Xem thêm video mẫu",
         RelatedHeading = $"Video cùng ngành {industry.Title}",
         Related = industry.Videos
