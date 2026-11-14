@@ -404,6 +404,8 @@ public interface ISceneMediaVersioningService
     Task<SceneImageVersionDto?> GetSelectedImageVersionAsync(long sceneId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<bool> HasActiveImageVersionAsync(long sceneId, CancellationToken ct = default);
+    /// <summary>Scenes of one job that currently have an image being generated, in a single query.</summary>
+    Task<IReadOnlyCollection<long>> ListActiveImageSceneIdsAsync(IReadOnlyCollection<long> sceneIds, CancellationToken ct = default);
     Task<Guid?> FindImageRenderJobAsync(Guid versionId, CancellationToken ct = default);
     Task<bool> TryActivateImageRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default);
     Task MarkImageEnqueueUnknownAsync(Guid versionId, CancellationToken ct = default);
@@ -1064,6 +1066,23 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """,
             new { sceneId, tenant = _tenant.TenantId });
         return count > 0;
+    }
+
+    public async Task<IReadOnlyCollection<long>> ListActiveImageSceneIdsAsync(IReadOnlyCollection<long> sceneIds, CancellationToken ct = default)
+    {
+        if (sceneIds.Count == 0) return Array.Empty<long>();
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<long>(
+            """
+            SELECT DISTINCT scene_id
+              FROM video_render.scene_image_versions
+             WHERE tenant_id=@tenant
+               AND scene_id = ANY(@sceneIds)
+               AND lower(status) IN ('queued','submitted','pending','processing','pending_reconciliation');
+            """,
+            new { sceneIds = sceneIds.ToArray(), tenant = _tenant.TenantId });
+        return rows.ToArray();
     }
 
     // RVID-UI-V2-SCENE-RERENDER-HISTORY / TODOX-20261014-RVIDEO-RERENDER-HARDENING-001:

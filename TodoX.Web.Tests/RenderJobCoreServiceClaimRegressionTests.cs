@@ -75,7 +75,11 @@ public sealed class RenderJobCoreServiceClaimRegressionTests
         var sceneWorker = ReadSource("TodoX.Web", "Services", "Render", "SceneVideoJobWorker.cs");
         var program = ReadSource("TodoX.Web", "Program.cs");
 
-        Assert.Contains("ClaimNextExcludingJobTypesAsync(_workerKey, lockFor, new[] { RenderJobTypes.RenderSceneVideo }", worker, StringComparison.Ordinal);
+        // Scene videos and scene images each have their own parallel worker, so both stay out of the shared lane.
+        var claim = worker[worker.IndexOf("ClaimNextExcludingJobTypesAsync(_workerKey, lockFor", StringComparison.Ordinal)..];
+        claim = claim[..claim.IndexOf("stoppingToken)", StringComparison.Ordinal)];
+        Assert.Contains("RenderJobTypes.RenderSceneVideo", claim, StringComparison.Ordinal);
+        Assert.Contains("SceneImageRenderWorkItemHandler.JobTypeName", claim, StringComparison.Ordinal);
         Assert.Contains("ClaimNextByJobTypeAsync(workerKey, lockFor, new[] { RenderJobTypes.RenderSceneVideo }", sceneWorker, StringComparison.Ordinal);
         Assert.Contains("AddHostedService<RenderJobWorker>()", program, StringComparison.Ordinal);
         Assert.Contains("AddHostedService<TodoX.Web.Services.Render.SceneVideoJobWorker>()", program, StringComparison.Ordinal);

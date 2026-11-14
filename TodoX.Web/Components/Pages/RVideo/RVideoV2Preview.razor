@@ -227,7 +227,12 @@ readonly HashSet<long> _activeImageScenes = new();
 readonly CancellationTokenSource _pollCancellation = new();
 Task? _operationPolling;
 bool HasRunningOperation() => _activeImageScenes.Count > 0 || _videoStates.Values.Any(state => state.HasActiveJob
-    && state.LatestJob?.Status != "pending_reconciliation");
+    && state.LatestJob?.Status != "pending_reconciliation")
+  || AutoRunInProgress;
+// An AUTO job keeps refreshing between two steps as well: right after "Bắt đầu tạo video" no scene is busy
+// yet, and polling used to stop there, so the page looked frozen until the user reloaded it.
+bool AutoRunInProgress => JobView is { } view && view.Settings?.AutoRunActive == true
+  && view.Project.Scenes.Any(x => string.IsNullOrWhiteSpace(x.SceneVideoUrl));
 
 async Task PollOperationsAsync(CancellationToken ct)
 {
@@ -387,6 +392,15 @@ protected override async Task OnParametersSetAsync()
   var ids = scenes.Select(x=>x.Id).ToHashSet();
   foreach(var gone in _videoStates.Keys.Where(k=>!ids.Contains(k)).ToArray()) _videoStates.Remove(gone);
   _activeImageScenes.RemoveWhere(k=>!ids.Contains(k));
+  // Every scene's image state is refreshed on every poll in one query: a scene whose image starts after
+  // the page was opened used to stay "Chưa có ảnh" because only the scenes already busy were re-read.
+  try
+  {
+    var active = await SceneVersions.ListActiveImageSceneIdsAsync(ids);
+    if(revision != _videoStateRevision) return;
+    foreach(var id in ids) { if(active.Contains(id)) _activeImageScenes.Add(id); else _activeImageScenes.Remove(id); }
+  }
+  catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_ACTIVE_IMAGE_STATE_UNAVAILABLE projectId={ProjectId}", JobView.Project.Id); }
   var targets = scenes
     .Where(s=>!pollOnly || !_videoStates.ContainsKey(s.Id) || IsSceneBusy(s))
     .OrderBy(s=>s.Id==SelectedSceneId ? 0 : 1).ThenBy(s=>s.SceneIndex).ToArray();
@@ -404,9 +418,6 @@ protected override async Task OnParametersSetAsync()
         if(revision != _videoStateRevision) return;
         _latestAudio[scene.Id] = audios.FirstOrDefault();
       }
-      var imageActive = await SceneVersions.HasActiveImageVersionAsync(scene.Id);
-      if(revision != _videoStateRevision) return;
-      if(imageActive) _activeImageScenes.Add(scene.Id); else _activeImageScenes.Remove(scene.Id);
     }
     catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_VIDEO_STATE_UNAVAILABLE sceneId={SceneId}", scene.Id); }
     if(first && targets.Length > 1) { first = false; StateHasChanged(); }

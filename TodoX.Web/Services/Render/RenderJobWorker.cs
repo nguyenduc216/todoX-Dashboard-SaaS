@@ -69,7 +69,10 @@ public sealed class RenderJobWorker : BackgroundService
 
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
                 var dispatcher = scope.ServiceProvider.GetRequiredService<IRenderJobDispatcher>();
-                var job = await jobs.ClaimNextExcludingJobTypesAsync(_workerKey, lockFor, new[] { RenderJobTypes.RenderSceneVideo }, stoppingToken);
+                // Scene images and scene videos each have their own parallel worker, so one slow provider
+                // submission never holds back the rest of this shared lane.
+                var job = await jobs.ClaimNextExcludingJobTypesAsync(_workerKey, lockFor,
+                    new[] { RenderJobTypes.RenderSceneVideo, SceneImageRenderWorkItemHandler.JobTypeName }, stoppingToken);
                 if (job is null)
                 {
                     await Task.Delay(idleDelay, stoppingToken);
@@ -90,7 +93,7 @@ public sealed class RenderJobWorker : BackgroundService
         }
     }
 
-    private async Task ProcessJobAsync(IRenderJobService jobs, IRenderJobDispatcher dispatcher, RenderJobDto job, CancellationToken ct)
+    internal static async Task ProcessJobAsync(IRenderJobService jobs, IRenderJobDispatcher dispatcher, RenderJobDto job, CancellationToken ct)
     {
         try
         {
