@@ -74,13 +74,32 @@ app.UseForwardedHeaders();
 app.UseRateLimiter();
 // Video files under /media play only inside todox.vn pages (no direct links, downloads or hotlinking).
 app.UseLandingMediaGuard(app.Configuration, app.Configuration["SharedMedia:RequestPath"] ?? "/media");
+// Pages must show a new deploy at once: browsers re-check HTML with the server (ETag) on every visit,
+// unless the endpoint chose its own lifetime (share pages). CSS/JS/images keep the 7-day cache and use ?v=.
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        if (context.Response.ContentType?.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) == true
+            && !context.Response.Headers.ContainsKey("Cache-Control"))
+        {
+            context.Response.Headers.CacheControl = "no-cache";
+        }
+        return Task.CompletedTask;
+    });
+    await next();
+});
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
     OnPrepareResponse = context =>
     {
         var path = context.File.Name;
-        if (path is not null && path.Contains('.'))
+        if (path is not null && path.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Context.Response.Headers.CacheControl = "no-cache";
+        }
+        else if (path is not null && path.Contains('.'))
         {
             context.Context.Response.Headers.CacheControl = "public,max-age=604800";
         }

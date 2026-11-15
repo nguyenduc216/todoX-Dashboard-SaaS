@@ -48,6 +48,16 @@ public sealed class LandingAffiliateVideoTests
     }
 
     [Fact]
+    public void PagesAreRecheckedSoANewDeployShowsAtOnce()
+    {
+        // Without this the homepage stayed on the old copy in returning visitors' browsers after a deploy.
+        var program = Page(".", "Program.cs");
+        Assert.Contains("path.EndsWith(\".html\", StringComparison.OrdinalIgnoreCase)", program);
+        Assert.Contains("ContentType?.StartsWith(\"text/html\"", program);
+        Assert.Contains("CacheControl = \"no-cache\"", program);
+    }
+
+    [Fact]
     public void LandingSellsBrandVideosNotAffiliate()
     {
         // TodoX now makes short brand-advertising videos for businesses; no page should pitch affiliate work.
@@ -59,7 +69,7 @@ public sealed class LandingAffiliateVideoTests
 
         var home = Page("index.html");
         Assert.Contains("<a href=\"/video-ngan\">Video thương hiệu</a>", home);
-        Assert.Contains("<h1>Video ngắn quảng cáo thương hiệu cho doanh nghiệp.</h1>", home);
+        Assert.Contains("<h1>Biến Một Bức Ảnh Thành Phim Ngắn Doanh Nghiệp Ấn Tượng</h1>", home);
     }
 
     [Fact]
