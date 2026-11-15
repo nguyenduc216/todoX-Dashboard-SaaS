@@ -42,9 +42,24 @@ public sealed class LandingAffiliateVideoTests
         Assert.Contains("js/landing-samples-section.js", html);
         // The section title still opens the full library.
         Assert.Contains("<h2><a class=\"ls-title-link\" href=\"/mau-video\">", html);
-        // Affiliate video is reachable from the menu, and no link points at the moved section.
-        Assert.Contains("<a href=\"/affiliate-video\">Affiliate video</a>", html);
+        // The industry page is still reachable from the homepage, and no link points at the moved section.
+        Assert.Contains("<a href=\"/affiliate-video\">Video theo ngành nghề</a>", html);
         Assert.DoesNotContain("#industries", html);
+    }
+
+    [Fact]
+    public void LandingSellsBrandVideosNotAffiliate()
+    {
+        // TodoX now makes short brand-advertising videos for businesses; no page should pitch affiliate work.
+        foreach (var page in new[] { "index.html", "affiliate-video.html", "bat-dong-san.html", "mau-video.html", "video-ngan.html", "editvideo.html" })
+        {
+            var text = Page(page).Replace("/affiliate-video", "").Replace("affiliate-page", "");
+            Assert.DoesNotContain("affiliate", text, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var home = Page("index.html");
+        Assert.Contains("<a href=\"/video-ngan\">Video thương hiệu</a>", home);
+        Assert.Contains("<h1>Video ngắn quảng cáo thương hiệu cho doanh nghiệp.</h1>", home);
     }
 
     [Fact]
