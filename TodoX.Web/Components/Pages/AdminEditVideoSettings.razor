@@ -45,12 +45,24 @@ else
                 <tbody>
                     <tr><td>Ảnh AI</td><td>@Rate("image:standard")</td><td>@Rate("image:premium")</td><td>mỗi ảnh</td></tr>
                     <tr><td>Video AI</td><td>@Rate("video:standard")</td><td>@Rate("video:premium")</td><td>mỗi giây video</td></tr>
-                    <tr><td>Nhạc AI (Suno)</td><td colspan="2">@(_form.MusicPoints is { } mp ? $"{mp:0.##}" : "chưa đặt")</td><td>mỗi lần tạo</td></tr>
+                    <tr><td>Nhạc AI (Suno)</td><td colspan="2">@MusicPriceText()</td><td>mỗi lần tạo (ra 1–2 bài)</td></tr>
                 </tbody>
             </MudSimpleTable>
             <MudText Typo="Typo.caption" Class="mt-2" Style="display:block">
                 Sửa giá ảnh, video, giọng đọc ở <MudLink Href="/wallets">Ví điểm › Bảng giá điểm</MudLink>. Ví dụ video 8 giây hạng thường = 8 × @Rate("video:standard") điểm.
             </MudText>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-1">Quy đổi và giá sàn</MudText>
+            <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
+                Ảnh và video lấy giá theo bảng điểm, nhưng không bao giờ thấp hơn chi phí 79AI × hệ số giá sàn (để model đắt không bị bán lỗ).
+            </MudText>
+            <MudStack Row="true" Spacing="3" Class="flex-wrap">
+                <MudNumericField T="decimal" @bind-Value="_vndPerPoint" Label="1 điểm = ? đồng" Variant="Variant.Outlined" Min="1" Style="min-width:200px" HelperText="1.400.000đ = 1.400 điểm → 1.000" />
+                <MudNumericField T="decimal" @bind-Value="_vndPerCredit" Label="1 credit 79AI = ? đồng" Variant="Variant.Outlined" Min="0.01m" Style="min-width:200px" />
+                <MudNumericField T="decimal?" @bind-Value="_costFloor" Label="Giá sàn = chi phí 79AI ×" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:200px" HelperText="Để trống = không có giá sàn" />
+            </MudStack>
         </MudPaper>
 
         <MudPaper Class="todox-card pa-4">
@@ -72,8 +84,10 @@ else
         <MudPaper Class="todox-card pa-4">
             <MudText Typo="Typo.h6" Class="mb-3">Nhạc AI (Suno)</MudText>
             <MudStack Row="true" Spacing="3" Class="flex-wrap">
-                <MudNumericField T="decimal?" @bind-Value="_musicPoints" Label="Điểm mỗi lần tạo nhạc" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:220px"
-                                 HelperText="Mỗi lần tạo ra 1–2 bản nhạc. Để trống = chưa mở tạo nhạc." />
+                <MudNumericField T="decimal?" @bind-Value="_musicMarkup" Label="Hệ số nhân giá 79AI" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:220px"
+                                 HelperText="2 = bán gấp đôi chi phí 79AI, tính theo từng model (Suno 5.5: 3.000 credit → 6 điểm)." />
+                <MudNumericField T="decimal?" @bind-Value="_musicPoints" Label="Hoặc giá cố định (điểm)" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:220px"
+                                 HelperText="Chỉ dùng khi không đặt hệ số. Để trống cả hai = chưa mở tạo nhạc." />
                 <MudSelect T="string" @bind-Value="_musicModel" Label="Model mặc định" Variant="Variant.Outlined" Style="min-width:220px">
                     @foreach (var m in MusicModels)
                     {
@@ -114,6 +128,21 @@ else
     private string _videoTier = "standard";
     private string? _premiumModels;
     private decimal? _musicPoints;
+    private decimal? _musicMarkup;
+    private decimal _vndPerCredit = 1m;
+    private decimal _vndPerPoint = 1000m;
+    private decimal? _costFloor = 2m;
+
+    private string MusicPriceText()
+    {
+        if (_form.MusicMarkup is { } m)
+        {
+            string P(decimal credits) => $"{Math.Max(0.1m, Math.Ceiling(credits * _vndPerCredit * m / _vndPerPoint * 10) / 10):0.##}";
+            return $"×{m:0.##} chi phí 79AI: Suno 4.5–5.5 = {P(3000)} điểm, Suno 6.0 = {P(4000)} điểm";
+        }
+
+        return _form.MusicPoints is { } mp ? $"{mp:0.##} điểm cố định" : "chưa đặt";
+    }
     private string _musicModel = "suno-v5.5";
     private bool _fallback = true;
     private string? _videoFallback;
@@ -139,6 +168,10 @@ else
         _videoTier = _form.VideoTier;
         _premiumModels = _form.PremiumModels;
         _musicPoints = _form.MusicPoints;
+        _musicMarkup = _form.MusicMarkup;
+        _vndPerCredit = prices.VndPerCredit;
+        _vndPerPoint = prices.VndPerPoint;
+        _costFloor = _form.CostFloorMarkup;
         _musicModel = _form.MusicModel;
         _fallback = _form.FallbackEnabled;
         _videoFallback = _form.VideoFallback;
@@ -160,6 +193,10 @@ else
                 VideoTier = _videoTier,
                 PremiumModels = _premiumModels ?? "",
                 MusicPoints = _musicPoints,
+                MusicMarkup = _musicMarkup,
+                VndPerPoint = _vndPerPoint,
+                VndPerCredit = _vndPerCredit,
+                CostFloorMarkup = _costFloor,
                 MusicModel = _musicModel,
                 FallbackEnabled = _fallback,
                 VideoFallback = _videoFallback ?? "",

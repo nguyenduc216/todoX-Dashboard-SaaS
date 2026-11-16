@@ -95,7 +95,7 @@ public sealed class EditVideoAiService
     private async Task<EditVideoAiPrices?> PricesAsync(CancellationToken ct) => _settings is null ? null : await _settings.PricesAsync(ct);
 
     private decimal? PriceOf(EditVideoAiPrices? prices, string kind, string model, EditVideoAiQuote quote) =>
-        prices is null ? ToPoints(quote.Credits) : prices.For(kind, model, quote.Selection.Duration);
+        prices is null ? ToPoints(quote.Credits) : prices.For(kind, model, quote.Selection.Duration, quote.Credits);
 
     private async Task<EditVideoResult<EditVideoAiTask>> PriceMissingAsync(EditVideoAiPrices prices, string kind, string model, CancellationToken ct)
     {
@@ -254,7 +254,7 @@ public sealed class EditVideoAiService
                 }
 
                 var altQuote = EditVideoGommoJson.Quote(alt, quote.Selection);
-                if (altQuote.Ok && prices.For(kind, next, altQuote.Selection.Duration) is { } altPoints && altPoints <= points)
+                if (altQuote.Ok && prices.For(kind, next, altQuote.Selection.Duration, altQuote.Credits) is { } altPoints && altPoints <= points)
                 {
                     attempts.Add((EditVideoGommoJson.Str(alt, "model")!, altQuote, altPoints));
                 }
@@ -333,7 +333,23 @@ public sealed class EditVideoAiService
 
         var prices = await PricesAsync(ct);
         var modelCode = Clean(request.Model) ?? prices?.Settings.MusicModel ?? "suno-v5.5";
-        if (prices?.For("music", modelCode, null) is not { } points)
+        decimal? credits;
+        try
+        {
+            var found = EditVideoGommoJson.FindModel(await CatalogAsync("music", ct), modelCode);
+            if (found is null)
+            {
+                return Fail("model_not_found", $"Không có model nhạc '{modelCode}'. Dùng todox_ai_models type music để xem danh sách.");
+            }
+
+            credits = EditVideoGommoJson.Quote(found, new EditVideoAiSelection(null, null, null, null)).Credits;
+        }
+        catch (EditVideoGommoException ex)
+        {
+            return await ProviderFailureAsync(ex, ct);
+        }
+
+        if (prices?.For("music", modelCode, null, credits) is not { } points)
         {
             return prices is null ? Fail("price_not_configured", "TodoX chưa đặt giá điểm cho nhạc AI.") : await PriceMissingAsync(prices, "music", modelCode, ct);
         }

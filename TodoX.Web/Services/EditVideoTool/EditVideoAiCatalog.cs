@@ -170,9 +170,18 @@ public static class EditVideoGommoJson
     {
         var code = Str(model, "model") ?? Str(model, "id_base") ?? "";
         var durations = Choices(model, "durations");
+        var rows = (model["prices"] as JsonArray ?? []).OfType<JsonObject>().Where(r => Num(r, "price") is not null).ToList();
+        decimal? CreditsFor(string? duration)
+        {
+            var match = rows.Where(r => duration is null || Str(r, "duration") is not { } d || string.Equals(d, duration, StringComparison.OrdinalIgnoreCase))
+                .Select(r => Num(r, "price")!.Value).ToList();
+            return match.Count > 0 ? match.Max() : Num(model, "price");
+        }
+
         var points = durations.Count > 0
-            ? durations.Select(d => prices.For(kind, code, d)).Where(p => p is not null).Select(p => p!.Value).ToList()
-            : prices.For(kind, code, null) is { } one ? [one] : [];
+            ? durations.Select(d => prices.For(kind, code, d, CreditsFor(d))).Where(p => p is not null).Select(p => p!.Value).ToList()
+            : (rows.Count > 0 ? rows.Select(r => Num(r, "price")!.Value).Distinct() : new[] { Num(model, "price") ?? 0m })
+                .Select(c => prices.For(kind, code, null, c > 0 ? c : null)).Where(p => p is not null).Select(p => p!.Value).ToList();
         var abilities = new[]
             {
                 "startText", "startImage", "startImageAndEnd", "withReference", "withSubject", "withMotion", "withEdit",
@@ -197,7 +206,7 @@ public static class EditVideoGommoJson
             pointsTo = points.Count > 0 ? points.Max() : (decimal?)null,
             priceNote = points.Count > 0 ? null : "TodoX chưa đặt giá điểm cho loại này; chưa tạo được.",
             prices = withPrices && durations.Count > 0
-                ? durations.Select(d => new { duration = d, points = prices.For(kind, code, d) }).ToList()
+                ? durations.Select(d => new { duration = d, points = prices.For(kind, code, d, CreditsFor(d)) }).ToList()
                 : null
         };
     }

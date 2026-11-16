@@ -23,10 +23,28 @@ public sealed record EditVideoAiSettings
     /// <summary>Models always priced at the premium rate (comma separated).</summary>
     public string PremiumModels { get; init; } = "";
 
-    /// <summary>Points for one music generation (Suno). Null = not configured: music is refused until set.</summary>
+    /// <summary>Points for one music generation (Suno) when no markup is set. Null = not configured.</summary>
     public decimal? MusicPoints { get; init; }
 
+    /// <summary>
+    /// Music price = the model's 79AI cost × this factor (2 = sell at twice the cost), per model. Takes precedence
+    /// over MusicPoints.
+    /// </summary>
+    public decimal? MusicMarkup { get; init; }
+
     public string MusicModel { get; init; } = "suno-v5.5";
+
+    /// <summary>What a customer pays for one TodoX point (1.400.000đ buys 1.400 points → 1.000đ).</summary>
+    public decimal VndPerPoint { get; init; } = 1000m;
+
+    /// <summary>What TodoX pays 79AI for one credit.</summary>
+    public decimal VndPerCredit { get; init; } = 1m;
+
+    /// <summary>
+    /// Floor for images and videos: never sell below the model's 79AI cost × this factor, whatever the point table
+    /// says (2 = at least twice the cost). Null = no floor.
+    /// </summary>
+    public decimal? CostFloorMarkup { get; init; } = 2m;
 
     public bool FallbackEnabled { get; init; } = true;
 
@@ -46,27 +64,40 @@ public sealed record EditVideoAiSettings
 /// <summary>Point prices EditVideo charges, resolved from the settings and TodoX's point table.</summary>
 public sealed record EditVideoAiPrices(EditVideoAiSettings Settings, IReadOnlyDictionary<string, decimal> Rates)
 {
-    /// <summary>Points for one generation, or null when TodoX has no price for it (never guessed).</summary>
-    public decimal? For(string kind, string model, string? duration)
+    public decimal VndPerPoint => Settings.VndPerPoint > 0 ? Settings.VndPerPoint : 1000m;
+    public decimal VndPerCredit => Settings.VndPerCredit > 0 ? Settings.VndPerCredit : 1m;
+
+    /// <summary>Points for the 79AI cost of credits × markup, rounded up to 0.1.</summary>
+    public decimal CostTimes(decimal credits, decimal markup) =>
+        Math.Max(0.1m, Math.Ceiling(credits * VndPerCredit * markup / VndPerPoint * 10) / 10);
+
+    /// <summary>
+    /// Points for one generation, or null when TodoX has no price for it (never guessed). credits is the 79AI price of
+    /// that exact generation: music is priced from it (× markup), images and videos never go below cost × floor.
+    /// </summary>
+    public decimal? For(string kind, string model, string? duration, decimal? credits = null)
     {
         if (kind == "music")
         {
+            if (Settings.MusicMarkup is > 0 && credits is > 0)
+            {
+                return CostTimes(credits.Value, Settings.MusicMarkup.Value);
+            }
+
             return Settings.MusicPoints is > 0 ? Settings.MusicPoints : null;
         }
 
+        decimal? table = null;
         var tier = Settings.IsPremium(kind, model) ? "premium" : "standard";
-        if (!Rates.TryGetValue($"{kind}:{tier}", out var rate))
+        if (Rates.TryGetValue($"{kind}:{tier}", out var rate))
         {
-            return null;
+            table = kind == "image"
+                ? rate
+                : Math.Ceiling(rate * (EditVideoGommoJson.Seconds(duration) ?? DefaultVideoSeconds) * 10) / 10;
         }
 
-        if (kind == "image")
-        {
-            return rate;
-        }
-
-        var seconds = EditVideoGommoJson.Seconds(duration) ?? EditVideoAiPrices.DefaultVideoSeconds;
-        return Math.Ceiling(rate * seconds * 10) / 10;
+        decimal? floor = Settings.CostFloorMarkup is > 0 && credits is > 0 ? CostTimes(credits.Value, Settings.CostFloorMarkup.Value) : null;
+        return table is null ? floor : floor is null ? table : Math.Max(table.Value, floor.Value);
     }
 
     public const int DefaultVideoSeconds = 8;
@@ -76,7 +107,7 @@ public sealed record EditVideoAiPrices(EditVideoAiSettings Settings, IReadOnlyDi
     {
         if (kind == "music")
         {
-            return Settings.MusicPoints is > 0 ? null : "giá điểm cho tạo nhạc (Cài đặt EditVideo › Điểm mỗi bài nhạc)";
+            return Settings.MusicPoints is > 0 || Settings.MusicMarkup is > 0 ? null : "giá điểm cho tạo nhạc (Cài đặt EditVideo › Nhạc AI)";
         }
 
         var tier = Settings.IsPremium(kind, model) ? "premium" : "standard";
@@ -92,12 +123,17 @@ public sealed class EditVideoAiSettingsService
     private readonly TodoXConnectionFactory _factory;
     private readonly IPointPricingService _pricing;
     private readonly IMemoryCache _cache;
+    private readonly IConfiguration? _configuration;
+    private readonly Microsoft.Extensions.Options.IOptionsMonitor<EditVideoAiOptions>? _options;
 
-    public EditVideoAiSettingsService(TodoXConnectionFactory factory, IPointPricingService pricing, IMemoryCache cache)
+    public EditVideoAiSettingsService(TodoXConnectionFactory factory, IPointPricingService pricing, IMemoryCache cache,
+        IConfiguration? configuration = null, Microsoft.Extensions.Options.IOptionsMonitor<EditVideoAiOptions>? options = null)
     {
         _factory = factory;
         _pricing = pricing;
         _cache = cache;
+        _configuration = configuration;
+        _options = options;
     }
 
     public async Task<EditVideoAiSettings> GetAsync(CancellationToken ct = default)
@@ -120,6 +156,11 @@ public sealed class EditVideoAiSettingsService
             VideoTier = Tier(Get("video_tier")),
             PremiumModels = Get("premium_models") ?? defaults.PremiumModels,
             MusicPoints = decimal.TryParse(Get("music_points"), NumberStyles.Number, CultureInfo.InvariantCulture, out var music) && music > 0 ? music : null,
+            MusicMarkup = decimal.TryParse(Get("music_markup"), NumberStyles.Number, CultureInfo.InvariantCulture, out var markup) && markup > 0 ? markup : null,
+            VndPerPoint = Dec(Get("vnd_per_point")) is > 0 and var vpp ? vpp : defaults.VndPerPoint,
+            VndPerCredit = Dec(Get("vnd_per_credit")) is > 0 and var vpc ? vpc : defaults.VndPerCredit,
+            // An empty value turns the floor off; a missing key keeps the default (×2).
+            CostFloorMarkup = rows.ContainsKey("cost_floor_markup") ? Dec(Get("cost_floor_markup")) is > 0 and var f ? f : null : defaults.CostFloorMarkup,
             MusicModel = Get("music_model") ?? defaults.MusicModel,
             FallbackEnabled = !string.Equals(Get("fallback_enabled"), "false", StringComparison.OrdinalIgnoreCase),
             VideoFallback = Get("video_fallback") ?? defaults.VideoFallback,
@@ -163,6 +204,10 @@ public sealed class EditVideoAiSettingsService
             ["video_tier"] = Tier(s.VideoTier),
             ["premium_models"] = string.Join(", ", EditVideoAiSettings.List(s.PremiumModels)),
             ["music_points"] = s.MusicPoints is > 0 ? s.MusicPoints.Value.ToString(CultureInfo.InvariantCulture) : "",
+            ["music_markup"] = s.MusicMarkup is > 0 ? s.MusicMarkup.Value.ToString(CultureInfo.InvariantCulture) : "",
+            ["vnd_per_point"] = (s.VndPerPoint > 0 ? s.VndPerPoint : 1000m).ToString(CultureInfo.InvariantCulture),
+            ["vnd_per_credit"] = (s.VndPerCredit > 0 ? s.VndPerCredit : 1m).ToString(CultureInfo.InvariantCulture),
+            ["cost_floor_markup"] = s.CostFloorMarkup is > 0 ? s.CostFloorMarkup.Value.ToString(CultureInfo.InvariantCulture) : "",
             ["music_model"] = (s.MusicModel ?? "").Trim(),
             ["fallback_enabled"] = s.FallbackEnabled ? "true" : "false",
             ["video_fallback"] = string.Join(", ", EditVideoAiSettings.List(s.VideoFallback)),
@@ -182,6 +227,9 @@ public sealed class EditVideoAiSettingsService
 
         _cache.Remove(CacheKey);
     }
+
+    private static decimal? Dec(string? value) =>
+        decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? d : null;
 
     private static string Tier(string? value) => string.Equals(value?.Trim(), "premium", StringComparison.OrdinalIgnoreCase) ? "premium" : "standard";
 }
