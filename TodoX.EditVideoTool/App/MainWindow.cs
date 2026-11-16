@@ -166,6 +166,15 @@ public sealed partial class MainWindow : Form
         _updateOverlay.Report("Tải TodoX EditVideo: 42%");
         await Task.Delay(400);
         Shot(_updateOverlay, "4-updating-overlay");
+        using (var consent = DesktopPriceConsent.PreviewForm(new PriceQuote("q", "video", "Video AI veo_omni · 720p · 8 giây · khung 9:16", 4.8m, 4800m, 5876m)))
+        {
+            consent.StartPosition = FormStartPosition.Manual;
+            consent.Location = new Point(-6000, 0);
+            consent.Show();
+            await Task.Delay(300);
+            Shot(consent, "4-price-consent");
+            consent.Close();
+        }
         _updateOverlay.Hide();
         Location = new Point(-6000, 0);
 

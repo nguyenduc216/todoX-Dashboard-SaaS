@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -20,7 +22,18 @@ public sealed record PriceQuote(string QuoteId, string Kind, string Summary, dec
 
     public string Text =>
         $"{Summary}\n\nGiá TodoX: {Points:0.##} điểm (≈ {Vnd:#,0} đ)\nSố dư hiện có: {Balance:0.##} điểm\n\n" +
-        "Bấm Yes để đồng ý trừ điểm và bắt đầu tạo. Bấm No để hủy — không trừ điểm.";
+        "Bấm \"Đồng ý trừ điểm\" để bắt đầu tạo. Bấm \"Hủy\" thì không tạo và không trừ điểm.";
+}
+
+/// <summary>What happened in the confirmation window.</summary>
+public enum ConsentAnswer
+{
+    Accepted,
+    Declined,
+    /// <summary>The window was shown but nobody answered in time.</summary>
+    NoAnswer,
+    /// <summary>The window could not be shown on this computer.</summary>
+    Unavailable
 }
 
 /// <summary>Asks the person (not the AI assistant) to accept a price.</summary>
@@ -29,31 +42,43 @@ public interface IPriceConsent
     /// <summary>How the agreement was given, written to TodoX's log (e.g. "desktop_dialog").</summary>
     string Method { get; }
 
-    Task<bool> AskAsync(PriceQuote quote, CancellationToken ct);
+    Task<ConsentAnswer> AskAsync(PriceQuote quote, CancellationToken ct);
 }
 
 /// <summary>
-/// A Windows confirmation window on top of everything, "No" by default. It runs on its own UI thread because
-/// the MCP server has none; the AI assistant cannot click it.
+/// TodoX's own confirmation window: always on top, flashing in the taskbar, "Hủy" by default, closed as "no answer"
+/// after 5 minutes. It runs on its own UI thread because the MCP server has none; the AI assistant cannot click it.
 /// </summary>
 public sealed class DesktopPriceConsent : IPriceConsent
 {
+    public static readonly TimeSpan Wait = TimeSpan.FromMinutes(5);
+
     public string Method => "desktop_dialog";
 
-    public Task<bool> AskAsync(PriceQuote quote, CancellationToken ct)
+    public Task<ConsentAnswer> AskAsync(PriceQuote quote, CancellationToken ct)
     {
-        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var done = new TaskCompletionSource<ConsentAnswer>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
             try
             {
-                var answer = MessageBox.Show(quote.Text, "TodoX EditVideo — Xác nhận trừ điểm", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
-                    MessageBoxDefaultButton.Button2, MessageBoxOptions.DefaultDesktopOnly);
-                done.TrySetResult(answer == DialogResult.Yes);
+                Application.EnableVisualStyles();
+                using var form = new ConsentForm(quote);
+                using var timer = new System.Windows.Forms.Timer { Interval = (int)Wait.TotalMilliseconds };
+                timer.Tick += (_, _) =>
+                {
+                    form.Answer = ConsentAnswer.NoAnswer;
+                    form.Close();
+                };
+                using var cancel = ct.Register(() => form.BeginInvoke(() => form.Close()));
+                timer.Start();
+                form.ShowDialog();
+                done.TrySetResult(form.Answer);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                done.TrySetResult(false); // no desktop to ask on: never agree on the person's behalf
+                Log("price_consent_unavailable " + ex.GetType().Name + ": " + ex.Message);
+                done.TrySetResult(ConsentAnswer.Unavailable); // never agree on the person's behalf
             }
         })
         {
@@ -62,7 +87,108 @@ public sealed class DesktopPriceConsent : IPriceConsent
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        ct.Register(() => done.TrySetResult(false));
         return done.Task;
+    }
+
+    /// <summary>The window itself, for the app's screenshot check.</summary>
+    internal static Form PreviewForm(PriceQuote quote) => new ConsentForm(quote);
+
+    private static void Log(string line)
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TodoX", "EditVideoTool", "logs");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, $"{DateTime.Now:yyyyMMdd}.log"), $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}");
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static readonly System.Globalization.CultureInfo Vi = new("vi-VN");
+
+    private sealed class ConsentForm : Form
+    {
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public ConsentAnswer Answer { get; set; } = ConsentAnswer.Declined;
+
+        public ConsentForm(PriceQuote quote)
+        {
+            Text = "TodoX EditVideo — Xác nhận trừ điểm";
+            Icon = WindowsNotifier.AppIcon();
+            TopMost = true;
+            ShowInTaskbar = true;
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            BackColor = ColorTranslator.FromHtml("#0B0D10");
+            ForeColor = Color.White;
+            Font = new Font("Segoe UI", 10.5f);
+            ClientSize = new Size(520, 320);
+
+            var title = new Label { Text = "Xác nhận trừ điểm TodoX", Font = new Font("Segoe UI Semibold", 15), AutoSize = true, Location = new Point(24, 18), ForeColor = Color.White };
+            var summary = new Label { Text = quote.Summary, AutoSize = false, Location = new Point(24, 58), Size = new Size(472, 48), ForeColor = ColorTranslator.FromHtml("#A9AFBD"), UseMnemonic = false };
+            var price = new Label
+            {
+                Text = $"{quote.Points.ToString("0.##", Vi)} điểm  (≈ {quote.Vnd.ToString("#,0", Vi)} đ)",
+                Font = new Font("Segoe UI Semibold", 20), AutoSize = true, Location = new Point(22, 110), ForeColor = ColorTranslator.FromHtml("#FFBE2E")
+            };
+            var balance = new Label
+            {
+                Text = $"Số dư hiện có: {quote.Balance.ToString("#,0.##", Vi)} điểm. Bấm Hủy thì không tạo và không trừ điểm.",
+                AutoSize = false, Location = new Point(24, 160), Size = new Size(472, 60), ForeColor = ColorTranslator.FromHtml("#A9AFBD"), UseMnemonic = false
+            };
+            var yes = new Button
+            {
+                Text = "Đồng ý trừ điểm", Size = new Size(200, 44), Location = new Point(24, 246), FlatStyle = FlatStyle.Flat,
+                BackColor = ColorTranslator.FromHtml("#FFBE2E"), ForeColor = Color.Black, Font = new Font("Segoe UI Semibold", 11)
+            };
+            yes.FlatAppearance.BorderSize = 0;
+            yes.Click += (_, _) =>
+            {
+                Answer = ConsentAnswer.Accepted;
+                Close();
+            };
+            var no = new Button
+            {
+                Text = "Hủy", Size = new Size(140, 44), Location = new Point(236, 246), FlatStyle = FlatStyle.Flat,
+                BackColor = ColorTranslator.FromHtml("#16181E"), ForeColor = Color.White
+            };
+            no.FlatAppearance.BorderColor = ColorTranslator.FromHtml("#2C2F38");
+            no.Click += (_, _) =>
+            {
+                Answer = ConsentAnswer.Declined;
+                Close();
+            };
+            Controls.AddRange([title, summary, price, balance, yes, no]);
+            CancelButton = no;
+            Shown += (_, _) =>
+            {
+                no.Focus(); // Enter does not agree by accident
+                Activate();
+                Flash(Handle);
+            };
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FlashInfo
+        {
+            public uint Size;
+            public IntPtr Hwnd;
+            public uint Flags;
+            public uint Count;
+            public uint Timeout;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool FlashWindowEx(ref FlashInfo info);
+
+        private static void Flash(IntPtr hwnd)
+        {
+            var info = new FlashInfo { Size = (uint)Marshal.SizeOf<FlashInfo>(), Hwnd = hwnd, Flags = 3 | 12, Count = 0, Timeout = 0 }; // all + until foreground
+            FlashWindowEx(ref info);
+        }
     }
 }

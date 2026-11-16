@@ -15,11 +15,11 @@ public sealed class PriceConsentTests : IDisposable
 
     private sealed class FakeConsent : IPriceConsent
     {
-        public bool Answer { get; set; } = true;
+        public ConsentAnswer Answer { get; set; } = ConsentAnswer.Accepted;
         public List<PriceQuote> Asked { get; } = [];
         public string Method => "test_dialog";
 
-        public Task<bool> AskAsync(PriceQuote quote, CancellationToken ct)
+        public Task<ConsentAnswer> AskAsync(PriceQuote quote, CancellationToken ct)
         {
             Asked.Add(quote);
             return Task.FromResult(Answer);
@@ -71,12 +71,13 @@ public sealed class PriceConsentTests : IDisposable
     [Fact]
     public async Task Refused_price_runs_nothing()
     {
-        _consent.Answer = false;
+        _consent.Answer = ConsentAnswer.Declined;
         _handler.Replies.Enqueue((HttpStatusCode.Conflict, Quote));
 
         var result = await _client.SubmitTtsAsync("Xin chào", null, null);
 
         Assert.Equal(TodoXServerClient.PriceDeclined, result.ErrorCode);
+        Assert.Contains("bấm Hủy", result.Message);
         Assert.Contains("không trừ điểm", result.Message);
         Assert.Single(_handler.Requests);
     }

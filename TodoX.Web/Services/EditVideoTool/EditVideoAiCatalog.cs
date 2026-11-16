@@ -178,10 +178,26 @@ public static class EditVideoGommoJson
             return match.Count > 0 ? match.Max() : Num(model, "price");
         }
 
-        var points = durations.Count > 0
-            ? durations.Select(d => prices.For(kind, code, d, CreditsFor(d))).Where(p => p is not null).Select(p => p!.Value).ToList()
-            : (rows.Count > 0 ? rows.Select(r => Num(r, "price")!.Value).Distinct() : new[] { Num(model, "price") ?? 0m })
-                .Select(c => prices.For(kind, code, null, c > 0 ? c : null)).Where(p => p is not null).Select(p => p!.Value).ToList();
+        // TodoX's price for every choice the customer can make (mode × resolution × length): the assistant only ever
+        // sees TodoX points, and each one is exactly what the confirmation window will ask for.
+        var modeList = Choices(model, "modes") is { Count: > 0 } ms ? ms.Select(m => (string?)m).ToList() : [null];
+        var resList = Choices(model, "resolutions") is { Count: > 0 } rs ? rs.Select(r => (string?)r).ToList() : [null];
+        var durList = durations.Count > 0 ? durations.Select(d => (string?)d).ToList() : [null];
+        var combos = (from m in modeList
+                      from r in resList
+                      from dur in durList
+                      let credits = TodoX.Web.Services.Pricing.ModelCostLookup.Credits(model, m, r, Seconds(dur))
+                      let pts = credits is > 0 ? prices.For(kind, code, dur, credits) : null
+                      where pts is not null
+                      select new { mode = m, resolution = r, duration = dur, todoxPoints = pts!.Value }).Take(240).ToList();
+        var points = combos.Select(c => c.todoxPoints).ToList();
+        if (points.Count == 0)
+        {
+            points = durations.Count > 0
+                ? durations.Select(d => prices.For(kind, code, d, CreditsFor(d))).Where(p => p is not null).Select(p => p!.Value).ToList()
+                : (rows.Count > 0 ? rows.Select(r => Num(r, "price")!.Value).Distinct() : new[] { Num(model, "price") ?? 0m })
+                    .Select(c => prices.For(kind, code, null, c > 0 ? c : null)).Where(p => p is not null).Select(p => p!.Value).ToList();
+        }
         var abilities = new[]
             {
                 "startText", "startImage", "startImageAndEnd", "withReference", "withSubject", "withMotion", "withEdit",
@@ -204,10 +220,10 @@ public static class EditVideoGommoJson
             maxReferenceImages = Num(model, "maxSubject"),
             pointsFrom = points.Count > 0 ? points.Min() : (decimal?)null,
             pointsTo = points.Count > 0 ? points.Max() : (decimal?)null,
-            priceNote = points.Count > 0 ? null : "TodoX chưa đặt giá điểm cho loại này; chưa tạo được.",
-            prices = withPrices && durations.Count > 0
-                ? durations.Select(d => new { duration = d, points = prices.For(kind, code, d, CreditsFor(d)) }).ToList()
-                : null
+            priceNote = points.Count > 0
+                ? "Giá TodoX (điểm). Đây là giá duy nhất; giá chính xác của lựa chọn đã chốt hiện trong cửa sổ xác nhận trước khi tạo."
+                : "TodoX chưa đặt giá điểm cho loại này; chưa tạo được.",
+            prices = withPrices ? (object)combos : null
         };
     }
 

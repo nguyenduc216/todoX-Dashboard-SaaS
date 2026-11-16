@@ -52,10 +52,16 @@ public sealed class TodoXServerClient
                 return result;
             }
 
-            if (Consent is null || !await Consent.AskAsync(quote, ct))
+            var answer = Consent is null ? ConsentAnswer.Unavailable : await Consent.AskAsync(quote, ct);
+            if (answer != ConsentAnswer.Accepted)
             {
-                return ServerResult<JsonElement>.Fail(PriceDeclined,
-                    $"Người dùng không đồng ý giá {quote.Points:0.##} điểm (≈ {quote.Vnd:#,0}đ) cho: {quote.Summary}. Chưa tạo gì và không trừ điểm.");
+                var price = $"{quote.Points:0.##} điểm TodoX (≈ {quote.Vnd:#,0}đ) cho: {quote.Summary}";
+                return ServerResult<JsonElement>.Fail(PriceDeclined, answer switch
+                {
+                    ConsentAnswer.Declined => $"Người dùng bấm Hủy ở cửa sổ xác nhận giá {price}. Chưa tạo gì, không trừ điểm. Không gọi lại trừ khi người dùng yêu cầu.",
+                    ConsentAnswer.NoAnswer => $"Cửa sổ xác nhận giá {price} đã hiện nhưng không ai bấm trong {DesktopPriceConsent.Wait.TotalMinutes:0} phút. Chưa tạo gì, không trừ điểm. Hỏi người dùng có thấy cửa sổ \"TodoX EditVideo — Xác nhận trừ điểm\" không rồi mới gọi lại.",
+                    _ => $"Không hiện được cửa sổ xác nhận giá {price} trên máy này. Chưa tạo gì, không trừ điểm. Báo người dùng mở TodoX EditVideo (cửa sổ chính) rồi thử lại."
+                });
             }
 
             payload["confirmQuoteId"] = quote.QuoteId;
