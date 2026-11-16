@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Drawing;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,8 +12,10 @@ using TodoX.EditVideoTool.Status;
 namespace TodoX.EditVideoTool.App;
 
 /// <summary>
-/// The window customers see when they double-click the exe: install, activate, system check, connect assistants.
-/// Claude/Codex never see it — they start the exe with "mcp".
+/// The window customers see when they open TodoX EditVideo: a top bar with the license state and Settings, and two
+/// main areas — Edit video and Create AI video — each on its own screen. Everything else (license key, resource
+/// folder, assistants, skills, system check, updates) lives in <see cref="SettingsForm"/>. The window is resizable
+/// and can be maximised. Claude/Codex never see it — they start the exe with "mcp".
 /// </summary>
 public sealed partial class MainWindow : Form
 {
@@ -24,42 +25,46 @@ public sealed partial class MainWindow : Form
     public static readonly Color Ink = Color.White;
     public static readonly Color Muted = ColorTranslator.FromHtml("#A9AFBD");
     public const string SupportUrl = "https://todox.vn";
+    public const string DashboardCreateUrl = "https://dashboard.todox.vn/create";
+
+    private enum Screen
+    {
+        Home,
+        Edit,
+        Ai
+    }
 
     private readonly IServiceProvider _services;
     private readonly LicenseGuard _license;
     private readonly HealthCheck _health;
-    private readonly Installer _installer;
     private readonly Updater _updater;
     private readonly SkillSync _skills;
+    private readonly ProjectFolders _projects;
     private readonly AgentPaths _paths;
     private readonly CancellationTokenSource _closing = new();
 
-    private readonly Label _licenseState = Label("", 11);
-    private readonly TextBox _keyBox = new() { Width = 520, Font = new Font("Segoe UI", 10), BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Dán license key TodoX (tdxv_...)" };
-    private readonly ListView _checks = new() { View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.None, Height = 40, Width = 640, Scrollable = false, ShowItemToolTips = true, BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 9.5f) };
-    private readonly Label _clientsLabel = Label("", 9.5f);
-    private readonly Label _skillsLabel = Label("", 9.5f);
-    private readonly NumericUpDown _skillHours = new() { Minimum = 1, Maximum = 48, Width = 60, BackColor = Panel, ForeColor = Ink, Font = new Font("Segoe UI", 10), Margin = new Padding(0, 6, 8, 0) };
-    private readonly Label _resourceLabel = Label("", 9.5f);
-    private readonly ComboBox _skillPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Panel, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
-    private readonly ComboBox _versionPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Panel, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
-    // No scroll bar: it always shows the newest lines; the mouse wheel over it still scrolls back through older ones.
-    private readonly RichTextBox _log = new() { ReadOnly = true, ScrollBars = RichTextBoxScrollBars.None, Height = 126, Width = 640, BackColor = Panel, ForeColor = Muted, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9), DetectUrls = false };
-    private readonly List<Button> _actions = [];
-    private readonly Panel _updateBanner = new() { Width = 640, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = ColorTranslator.FromHtml("#3A2E0A"), Padding = new Padding(12, 10, 12, 10), Margin = new Padding(0, 0, 0, 8), Visible = false };
-    private readonly Label _updateTitle = new() { AutoSize = true, MaximumSize = new Size(610, 0), Font = new Font("Segoe UI Semibold", 11), ForeColor = Yellow };
-    private readonly Label _updateText = new() { AutoSize = true, MaximumSize = new Size(610, 0), Font = new Font("Segoe UI", 9.5f), ForeColor = ColorTranslator.FromHtml("#F5DFA6"), Margin = new Padding(0, 4, 0, 8) };
-    private Button? _updateNow;
-    private Button? _restartNow;
+    private readonly Panel _content = new() { Dock = DockStyle.Fill, BackColor = Ground, Padding = new Padding(36, 24, 36, 16) };
+    private readonly Dictionary<Screen, Control> _screens = [];
+    private readonly Panel _licenseChip = new() { Height = 40, Width = 300, Cursor = Cursors.Hand, BackColor = Panel };
+    private readonly LineIcon _licenseIcon = new(TileArt.Key, 22) { Location = new Point(12, 9), BackColor = Color.Transparent };
+    private readonly Label _licenseText = new() { AutoSize = false, Location = new Point(42, 0), Height = 40, Width = 250, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10, FontStyle.Bold), BackColor = Color.Transparent, Cursor = Cursors.Hand };
+    private readonly ToolTip _tips = new();
+    private readonly Label _status = new() { AutoSize = false, Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false, Padding = new Padding(36, 0, 0, 0) };
+    private readonly Panel _updateBanner = new() { Dock = DockStyle.Top, Height = 0, BackColor = ColorTranslator.FromHtml("#3A2E0A"), Visible = false, Padding = new Padding(36, 8, 36, 8) };
+    private readonly Label _updateText = new() { AutoSize = false, Dock = DockStyle.Fill, ForeColor = ColorTranslator.FromHtml("#F5DFA6"), TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false };
+    private readonly Button _updateButton = Ui.Button("Cập nhật ngay", primary: true);
+    private readonly Dictionary<Screen, ListView> _projectLists = [];
+    private bool _licensed;
+    private bool _updateStaged;
 
     private MainWindow(IServiceProvider services)
     {
         _services = services;
         _license = services.GetRequiredService<LicenseGuard>();
         _health = services.GetRequiredService<HealthCheck>();
-        _installer = services.GetRequiredService<Installer>();
         _updater = services.GetRequiredService<Updater>();
         _skills = services.GetRequiredService<SkillSync>();
+        _projects = services.GetRequiredService<ProjectFolders>();
         _paths = services.GetRequiredService<AgentPaths>();
 
         Text = "TodoX EditVideo";
@@ -67,92 +72,93 @@ public sealed partial class MainWindow : Form
         BackColor = Ground;
         ForeColor = Ink;
         Font = new Font("Segoe UI", 9.5f);
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(706, Math.Min(900, Screen.FromPoint(Cursor.Position).WorkingArea.Height - 60));
+        MinimumSize = new Size(960, 640);
+        var area = System.Windows.Forms.Screen.FromPoint(Cursor.Position).WorkingArea;
+        ClientSize = new Size(Math.Min(1180, area.Width - 60), Math.Min(760, area.Height - 60));
 
-        // The page is the only thing that scrolls, with TodoX's thin bar, and only when the window is too short.
-        var root = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(28, 20, 28, 20), AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
-        var page = new ScrollHost(root, Ground) { Dock = DockStyle.Fill };
-        page.WheelOwners.Add(_log);
-        Controls.Add(page);
-
-        root.Controls.Add(Header());
-        root.Controls.Add(UpdateBanner());
-        root.Controls.Add(UnsignedNotice());
-
-        root.Controls.Add(Section("License"));
-        root.Controls.Add(_licenseState);
-        var keyRow = Row();
-        keyRow.Controls.Add(_keyBox);
-        keyRow.Controls.Add(Action("Kích hoạt", ActivateAsync, primary: true));
-        root.Controls.Add(keyRow);
-        root.Controls.Add(new Label { Text = LicenseMessages.OneMachineNote, AutoSize = true, MaximumSize = new Size(640, 0), ForeColor = Muted, Margin = new Padding(0, 4, 0, 8) });
-
-        root.Controls.Add(Section("Kiểm tra hệ thống"));
-        _checks.Columns.Add("", 26);
-        _checks.Columns.Add("", 210);
-        _checks.Columns.Add("", 400);
-        root.Controls.Add(_checks);
-        var checkRow = Row();
-        checkRow.Controls.Add(Action("Kiểm tra lại", () => RunHealthAsync(untilConnected: true)));
-        checkRow.Controls.Add(Action("Cài lại / sửa lỗi", InstallAsync));
-        checkRow.Controls.Add(Action("Kiểm tra cập nhật", UpdateAsync));
-        root.Controls.Add(checkRow);
-
-        root.Controls.Add(Section("Kết nối trợ lý AI"));
-        root.Controls.Add(_clientsLabel);
-        var clientRow = Row();
-        clientRow.Controls.Add(Action("Kết nối Claude / Codex", ConnectAsync));
-        root.Controls.Add(clientRow);
-
-        root.Controls.Add(Section("Skill TodoX"));
-        root.Controls.Add(_skillsLabel);
-        var skillRow = Row();
-        skillRow.Controls.Add(Action("Cập nhật skill", () => SyncSkillsAsync(notify: false)));
-        skillRow.Controls.Add(new Label { Text = "Tự kiểm tra mỗi", AutoSize = true, ForeColor = Muted, Margin = new Padding(8, 10, 6, 0) });
-        skillRow.Controls.Add(_skillHours);
-        skillRow.Controls.Add(new Label { Text = "giờ", AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 10, 0, 0) });
-        root.Controls.Add(skillRow);
-        var pinRow = Row();
-        pinRow.Controls.Add(_skillPick);
-        pinRow.Controls.Add(_versionPick);
-        pinRow.Controls.Add(Action("Đặt làm mặc định", PinSkillAsync));
-        root.Controls.Add(pinRow);
-        _skillPick.SelectedIndexChanged += (_, _) => FillVersions();
-
-        root.Controls.Add(Section("Thư mục tư liệu dự án"));
-        root.Controls.Add(_resourceLabel);
-        var resourceRow = Row();
-        resourceRow.Controls.Add(Action("Mở thư mục", OpenResourcesAsync));
-        resourceRow.Controls.Add(Action("Đổi thư mục...", ChangeResourcesAsync));
-        root.Controls.Add(resourceRow);
-
-        root.Controls.Add(Section("Nhật ký"));
-        root.Controls.Add(_log);
-
-        var settings = UserSettings.Load(_paths);
-        _skillHours.Value = Math.Clamp(settings.SkillSyncHours, 1, 48);
-        _skillHours.ValueChanged += (_, _) =>
+        _screens[Screen.Home] = HomeScreen();
+        _screens[Screen.Edit] = WorkScreen(Screen.Edit);
+        _screens[Screen.Ai] = WorkScreen(Screen.Ai);
+        foreach (var screen in _screens.Values)
         {
-            var current = UserSettings.Load(_paths);
-            current.SkillSyncHours = (int)_skillHours.Value;
-            current.Save(_paths);
-        };
-        RefreshResources();
-        RefreshSkills();
+            screen.Dock = DockStyle.Fill;
+            screen.Visible = false;
+            _content.Controls.Add(screen);
+        }
+
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 34, BackColor = Ui.Bar };
+        footer.Controls.Add(_status);
+
+        Controls.Add(_content);
+        Controls.Add(UpdateBanner());
+        Controls.Add(TopBar());
+        Controls.Add(footer);
+        Go(Screen.Home);
 
         Shown += async (_, _) =>
         {
-            RefreshClients();
+            if (ShotsDir is { } shots)
+            {
+                await ShotsAsync(shots);
+                return;
+            }
+
             await RefreshLicenseAsync();
             _ = SkillLoopAsync();
             _ = RefreshUpdateBannerAsync();
             _ = _services.GetRequiredService<InstallLogUploader>().UploadPendingAsync(_closing.Token);
-            await RunHealthAsync(untilConnected: true);
+            await RunHealthAsync();
         };
+        Activated += (_, _) => RefreshProjects();
         FormClosing += (_, _) => _closing.Cancel();
+    }
+
+    // Checks only: TODOX_WINDOW_SHOTS=<folder> saves each screen as a PNG drawn by the window itself (off screen),
+    // without background work (skills, updates, uploads), then closes.
+    private static readonly string? ShotsDir = Environment.GetEnvironmentVariable("TODOX_WINDOW_SHOTS") is { Length: > 0 } d ? d : null;
+
+    private async Task ShotsAsync(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        Location = new Point(-6000, 0);
+        void Shot(Control window, string name)
+        {
+            using var bmp = new Bitmap(window.Width, window.Height);
+            window.DrawToBitmap(bmp, new Rectangle(0, 0, window.Width, window.Height));
+            bmp.Save(Path.Combine(dir, name + ".png"));
+        }
+
+        await RefreshLicenseAsync();
+        await Task.Delay(300);
+        Shot(this, "1-home");
+        Go(Screen.Edit);
+        await Task.Delay(300);
+        Shot(this, "2-edit");
+        Go(Screen.Ai);
+        await Task.Delay(300);
+        Shot(this, "3-ai");
+        Go(Screen.Home);
+        WindowState = FormWindowState.Maximized;
+        await Task.Delay(500);
+        Shot(this, "4-home-maximized");
+        WindowState = FormWindowState.Normal;
+        Location = new Point(-6000, 0);
+
+        using var settings = new SettingsForm(_services, SettingsPage.License) { StartPosition = FormStartPosition.Manual, Location = new Point(-6000, 0) };
+        settings.Show(this);
+        await Task.Delay(2500);
+        foreach (var page in Enum.GetValues<SettingsPage>())
+        {
+            settings.Show(page);
+            await Task.Delay(page == SettingsPage.System ? 6000 : 400);
+            Shot(settings, $"5-settings-{(int)page}-{page}");
+        }
+
+        settings.Close();
+        Close();
     }
 
     /// <summary>Hides the console window a double-click (or Windows sign-in) opened.</summary>
@@ -161,7 +167,6 @@ public sealed partial class MainWindow : Form
     public static int Run(IServiceProvider services)
     {
         FreeConsole(); // hide the console window a double-click opened
-        var exit = 0;
         var ui = new Thread(() =>
         {
             Application.EnableVisualStyles();
@@ -171,62 +176,458 @@ public sealed partial class MainWindow : Form
         ui.SetApartmentState(ApartmentState.STA);
         ui.Start();
         ui.Join();
-        return exit;
+        return 0;
     }
 
-    // ------------------------------------------------------------------ actions
+    // ------------------------------------------------------------------ top bar
 
-    private async Task ActivateAsync()
+    private Control TopBar()
     {
-        var key = _keyBox.Text.Trim();
-        if (key.Length == 0)
+        var bar = new Panel { Dock = DockStyle.Top, Height = 96, BackColor = Ui.Bar };
+        if (Ui.Logo() is { } logo)
         {
-            Log("Nhập license key TodoX trước khi kích hoạt.");
+            bar.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Bounds = new Rectangle(28, 18, 120, 60) });
+        }
+
+        var titles = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Location = new Point(158, 16), BackColor = Ui.Bar };
+        titles.Controls.Add(new Label { Text = "TodoX EditVideo", Font = new Font("Segoe UI Semibold", 17), ForeColor = Ink, AutoSize = true, Margin = new Padding(0) });
+        var maker = new LinkLabel
+        {
+            Text = $"Sản phẩm của TodoX AI Automation · todox.vn · phiên bản {StatusService.Version}",
+            AutoSize = true,
+            ForeColor = Muted,
+            LinkColor = Yellow,
+            ActiveLinkColor = Ink,
+            Margin = new Padding(2, 0, 0, 0)
+        };
+        maker.LinkArea = new LinkArea(maker.Text.IndexOf("todox.vn", StringComparison.Ordinal), "todox.vn".Length);
+        maker.LinkClicked += (_, _) => Ui.Open(SupportUrl);
+        titles.Controls.Add(maker);
+        bar.Controls.Add(titles);
+
+        // Right side: license chip (opens Settings › Kích hoạt) and the Settings button.
+        var settings = Ui.Button("   Cài đặt");
+        settings.Height = 40;
+        settings.Margin = new Padding(0);
+        settings.Controls.Add(new LineIcon(TileArt.Gear, 20) { Location = new Point(10, 9), BackColor = Color.Transparent, ForeColor = Ink, Enabled = false });
+        settings.Click += (_, _) => OpenSettings(SettingsPage.License);
+
+        _licenseChip.Controls.Add(_licenseIcon);
+        _licenseChip.Controls.Add(_licenseText);
+        _licenseChip.Paint += (_, e) =>
+        {
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var pen = new Pen(_licenseText.ForeColor, 1.2f);
+            using var path = Ui.Rounded(new RectangleF(0.5f, 0.5f, _licenseChip.Width - 1.5f, _licenseChip.Height - 1.5f), 8);
+            e.Graphics.DrawPath(pen, path);
+        };
+        foreach (Control c in new Control[] { _licenseChip, _licenseText, _licenseIcon })
+        {
+            c.Click += (_, _) => OpenSettings(SettingsPage.License);
+        }
+
+        SetLicense(null);
+        bar.Controls.Add(_licenseChip);
+        bar.Controls.Add(settings);
+        bar.Layout += (_, _) =>
+        {
+            settings.Location = new Point(bar.ClientSize.Width - settings.Width - 28, 28);
+            _licenseChip.Location = new Point(settings.Left - _licenseChip.Width - 12, 28);
+        };
+        return bar;
+    }
+
+    private Control UpdateBanner()
+    {
+        _updateButton.Dock = DockStyle.Right;
+        _updateButton.Margin = new Padding(0);
+        _updateButton.Click += async (_, _) => await UpdateOrRestartAsync();
+        _updateBanner.Controls.Add(_updateText);
+        _updateBanner.Controls.Add(_updateButton);
+        return _updateBanner;
+    }
+
+    // ------------------------------------------------------------------ screens
+
+    private Control HomeScreen()
+    {
+        var home = new TableLayoutPanel { ColumnCount = 2, RowCount = 2, BackColor = Ground, Padding = new Padding(0) };
+        home.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        home.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        home.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        home.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var hello = Ui.Stack();
+        hello.Controls.Add(new Label { Text = "Hôm nay bạn muốn làm gì?", Font = new Font("Segoe UI Semibold", 20), ForeColor = Ink, AutoSize = true, Margin = new Padding(0, 4, 0, 4) });
+        hello.Controls.Add(Ui.Text("Chọn một việc bên dưới. TodoX làm việc cùng Claude / Codex ngay trên máy của bạn.", 10.5f, Muted, width: 900));
+        hello.Margin = new Padding(0, 0, 0, 16);
+        home.Controls.Add(hello, 0, 0);
+        home.SetColumnSpan(hello, 2);
+
+        home.Controls.Add(Tile(TileArt.EditVideo, "Edit video",
+            "Dựng video từ ảnh và clip của bạn: cắt ghép, chuyển cảnh, phụ đề động, nhạc nền, giọng đọc tiếng Việt, mở đầu và kết thúc theo màu thương hiệu.",
+            "Mở Edit video", () => Go(Screen.Edit)), 0, 1);
+        home.Controls.Add(Tile(TileArt.AiVideo, "Tạo video AI",
+            "Biến một bức ảnh hoặc một ý tưởng thành cảnh quay AI: ảnh sản phẩm, cảnh mở đầu, cảnh còn thiếu, phim ngắn doanh nghiệp. Tính điểm theo từng lần tạo.",
+            "Mở Tạo video AI", () => Go(Screen.Ai)), 1, 1);
+        return home;
+    }
+
+    private Control Tile(TileArt art, string title, string text, string action, Action open)
+    {
+        var tile = new Panel { Dock = DockStyle.Fill, BackColor = Ui.Card, Margin = new Padding(0, 0, 16, 0), Padding = new Padding(32), Cursor = Cursors.Hand };
+        var icon = new LineIcon(art, 84) { BackColor = Color.Transparent, Location = new Point(32, 32) };
+        var name = new Label { Text = title, Font = new Font("Segoe UI Semibold", 22), ForeColor = Ink, AutoSize = true, BackColor = Color.Transparent, Location = new Point(32, 136) };
+        var body = new Label { Text = text, Font = new Font("Segoe UI", 11), ForeColor = Muted, AutoSize = true, BackColor = Color.Transparent, Location = new Point(34, 200), UseMnemonic = false };
+        var button = Ui.Button(action, primary: true);
+        button.Height = 42;
+        tile.Controls.AddRange([icon, name, body, button]);
+        tile.Layout += (_, _) =>
+        {
+            body.MaximumSize = new Size(Math.Max(200, tile.ClientSize.Width - 72), 0);
+            button.Location = new Point(32, Math.Max(body.Bottom + 20, tile.ClientSize.Height - button.Height - 32));
+        };
+
+        void Hover(bool on) => tile.BackColor = on ? Ui.CardHover : Ui.Card;
+        foreach (Control c in new Control[] { tile, icon, name, body })
+        {
+            c.Click += (_, _) => open();
+            c.MouseEnter += (_, _) => Hover(true);
+            c.MouseLeave += (_, _) => Hover(tile.ClientRectangle.Contains(tile.PointToClient(Cursor.Position)));
+        }
+
+        button.Click += (_, _) => open();
+        tile.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Ui.Line, 1);
+            e.Graphics.DrawRectangle(pen, 0, 0, tile.Width - 1, tile.Height - 1);
+        };
+        return tile;
+    }
+
+    /// <summary>Edit video / Tạo video AI: projects on the left, how to start with Claude on the right.</summary>
+    private Control WorkScreen(Screen kind)
+    {
+        var ai = kind == Screen.Ai;
+        var screen = new TableLayoutPanel { ColumnCount = 2, RowCount = 2, BackColor = Ground };
+        screen.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        screen.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        screen.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        screen.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        // Header: back, icon, title.
+        var head = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Margin = new Padding(0, 0, 0, 14) };
+        var back = Ui.Button("   Trang chính");
+        back.Controls.Add(new LineIcon(TileArt.Back, 18) { Location = new Point(8, 9), BackColor = Color.Transparent, ForeColor = Ink, Enabled = false });
+        back.Click += (_, _) => Go(Screen.Home);
+        back.Margin = new Padding(0, 6, 18, 0);
+        head.Controls.Add(back);
+        head.Controls.Add(new LineIcon(ai ? TileArt.AiVideo : TileArt.EditVideo, 40) { Margin = new Padding(0, 2, 12, 0) });
+        head.Controls.Add(new Label { Text = ai ? "Tạo video AI" : "Edit video", Font = new Font("Segoe UI Semibold", 20), ForeColor = Ink, AutoSize = true, Margin = new Padding(0, 2, 0, 0) });
+        screen.Controls.Add(head, 0, 0);
+        screen.SetColumnSpan(head, 2);
+
+        // Left: the projects.
+        var left = new Panel { Dock = DockStyle.Fill, BackColor = Ui.Card, Padding = new Padding(20), Margin = new Padding(0, 0, 16, 0) };
+        var list = new ListView
+        {
+            View = View.Details,
+            FullRowSelect = true,
+            MultiSelect = false,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+            BackColor = Ui.Card,
+            ForeColor = Ink,
+            BorderStyle = BorderStyle.None,
+            Font = new Font("Segoe UI", 10.5f),
+            Dock = DockStyle.Fill,
+            OwnerDraw = true
+        };
+        // Dark column headers; rows draw as usual.
+        list.DrawColumnHeader += (_, e) =>
+        {
+            using var back = new SolidBrush(Ui.Panel);
+            e.Graphics.FillRectangle(back, e.Bounds);
+            TextRenderer.DrawText(e.Graphics, e.Header!.Text, new Font("Segoe UI", 9.5f), Rectangle.Inflate(e.Bounds, -4, 0), Muted,
+                TextFormatFlags.VerticalCenter | (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left) | TextFormatFlags.EndEllipsis);
+        };
+        list.DrawItem += (_, e) => e.DrawDefault = true;
+        list.DrawSubItem += (_, e) => e.DrawDefault = true;
+        list.Columns.Add("Dự án", 260);
+        list.Columns.Add("Ảnh", 66, HorizontalAlignment.Right);
+        list.Columns.Add("Video", 74, HorizontalAlignment.Right);
+        list.Columns.Add(ai ? "AI" : "Âm thanh", 100, HorizontalAlignment.Right);
+        list.Columns.Add("Cập nhật", 150);
+        // The name column takes the rest, so the header has no blank (white) end.
+        list.Resize += (_, _) => list.Columns[0].Width = Math.Max(120, list.ClientSize.Width - list.Columns.Cast<ColumnHeader>().Skip(1).Sum(c => c.Width));
+        list.DoubleClick += (_, _) => OpenSelected(list);
+        _projectLists[kind] = list;
+
+        var leftTitle = new Label { Text = "DỰ ÁN CỦA BẠN", Dock = DockStyle.Top, Height = 28, ForeColor = Yellow, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 50, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0, 10, 0, 0), BackColor = Ui.Card };
+        var create = Ui.Button("Dự án mới", primary: true);
+        create.Click += (_, _) => NewProject(list);
+        var open = Ui.Button("Mở thư mục");
+        open.Click += (_, _) => OpenSelected(list);
+        var root = Ui.Button("Thư mục gốc...");
+        root.Click += (_, _) => OpenSettings(SettingsPage.Folders);
+        buttons.Controls.AddRange([create, open, root]);
+        left.Controls.Add(list);
+        left.Controls.Add(leftTitle);
+        left.Controls.Add(buttons);
+        screen.Controls.Add(left, 0, 1);
+
+        // Right: how it works and requests to copy into Claude.
+        var right = Ui.Stack();
+        right.Controls.Add(Ui.Section("Cách làm", top: 0));
+        var steps = ai
+            ? new[]
+            {
+                "Chọn hoặc tạo dự án, bỏ ảnh gốc vào thư mục 01-anh.",
+                "Mở Claude, dán yêu cầu bên dưới (đã chép sẵn khi bấm).",
+                "Claude báo giá điểm, bạn đồng ý thì TodoX tạo; kết quả nằm trong 06-ai."
+            }
+            : new[]
+            {
+                "Chọn hoặc tạo dự án, bỏ ảnh vào 01-anh, clip vào 02-video, kịch bản vào 04-kich-ban.",
+                "Mở Claude, dán yêu cầu bên dưới (đã chép sẵn khi bấm).",
+                "TodoX dựng video ngay trên máy; video xong nằm trong output."
+            };
+        for (var i = 0; i < steps.Length; i++)
+        {
+            var row = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
+            row.Controls.Add(new StatusBadge(BadgeKind.Number, 24) { Number = i + 1, Filled = true, Accent = Yellow, Margin = new Padding(0, 0, 10, 0) });
+            row.Controls.Add(Ui.Text(steps[i], 10.5f, Ink, width: 410));
+            right.Controls.Add(row);
+        }
+
+        right.Controls.Add(Ui.Section("Yêu cầu mẫu (bấm để chép)"));
+        var prompts = ai
+            ? new[]
+            {
+                "Tạo video AI 8 giây từ ảnh sản phẩm trong dự án {0}, khung 9:16, sản phẩm xoay nhẹ, ánh sáng studio.",
+                "Biến ảnh mặt tiền trong dự án {0} thành cảnh quay flycam 6 giây cho phim ngắn doanh nghiệp.",
+                "Tạo 3 ảnh AI bối cảnh cho sản phẩm trong dự án {0} để làm cảnh mở đầu."
+            }
+            : new[]
+            {
+                "Dựng video TikTok 30 giây từ các clip trong dự án {0}, phụ đề động, nhạc nền, giọng đọc nữ miền Nam.",
+                "Làm video giới thiệu thương hiệu 60 giây khung 16:9 từ dự án {0}, mở đầu bằng logo trong 05-thuong-hieu.",
+                "Cắt video dài nhất trong dự án {0} thành 3 video ngắn 15 giây có phụ đề."
+            };
+        foreach (var prompt in prompts)
+        {
+            var copy = new Label
+            {
+                Text = "“" + string.Format(prompt, "…") + "”",
+                AutoSize = true,
+                MaximumSize = new Size(440, 0),
+                ForeColor = Ink,
+                BackColor = Ui.Card,
+                Padding = new Padding(12, 9, 12, 9),
+                Margin = new Padding(0, 0, 0, 8),
+                Cursor = Cursors.Hand,
+                UseMnemonic = false
+            };
+            copy.MouseEnter += (_, _) => copy.BackColor = Ui.CardHover;
+            copy.MouseLeave += (_, _) => copy.BackColor = Ui.Card;
+            copy.Click += (_, _) => CopyRequest(prompt, list);
+            right.Controls.Add(copy);
+        }
+
+        if (ai)
+        {
+            var web = new LinkLabel { Text = "Hoặc tạo trên Dashboard TodoX", AutoSize = true, LinkColor = Yellow, ActiveLinkColor = Ink, Margin = new Padding(0, 6, 0, 0) };
+            web.LinkClicked += (_, _) => Ui.Open(DashboardCreateUrl);
+            right.Controls.Add(web);
+        }
+
+        var rightHost = new ScrollHost(right, Ground) { Dock = DockStyle.Fill, Margin = new Padding(0) };
+        screen.Controls.Add(rightHost, 1, 1);
+        return screen;
+    }
+
+    private void Go(Screen screen)
+    {
+        foreach (var (key, control) in _screens)
+        {
+            control.Visible = key == screen;
+        }
+
+        if (screen != Screen.Home)
+        {
+            RefreshProjects();
+            if (!_licensed)
+            {
+                Say("Máy chưa kích hoạt license: bạn vẫn xem được dự án, nhưng cần kích hoạt để dựng video (bấm ô Chưa kích hoạt).");
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ projects
+
+    private void RefreshProjects()
+    {
+        IReadOnlyList<ProjectFolder> projects;
+        try
+        {
+            projects = _projects.List();
+        }
+        catch (Exception)
+        {
             return;
         }
 
-        Log("Đang kích hoạt...");
-        var result = await _license.ActivateAsync(key, ct: _closing.Token);
-        Log(result.Message);
-        if (result.IsUsable)
+        foreach (var (kind, list) in _projectLists)
         {
-            _keyBox.Clear();
-            await SyncSkillsAsync(notify: false);
-            _ = _services.GetRequiredService<InstallLogUploader>().UploadPendingAsync(_closing.Token);
+            var selected = list.SelectedItems.Count > 0 ? list.SelectedItems[0].Text : null;
+            list.BeginUpdate();
+            list.Items.Clear();
+            foreach (var p in projects)
+            {
+                var ai = kind == Screen.Ai ? CountFiles(Path.Combine(p.Path, ProjectFolders.AiDir)) : p.Audio;
+                var item = new ListViewItem(p.Name) { Tag = p.Path };
+                item.SubItems.Add(p.Images.ToString());
+                item.SubItems.Add(p.Videos.ToString());
+                item.SubItems.Add(ai.ToString());
+                item.SubItems.Add(p.LastChanged?.ToString("dd/MM/yyyy HH:mm") ?? "");
+                item.Selected = item.Text == selected;
+                list.Items.Add(item);
+            }
+
+            if (list.SelectedItems.Count == 0 && list.Items.Count > 0)
+            {
+                list.Items[0].Selected = true;
+            }
+
+            list.EndUpdate();
+        }
+    }
+
+    private static int CountFiles(string dir) =>
+        Directory.Exists(dir) ? Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count() : 0;
+
+    private void NewProject(ListView list)
+    {
+        var name = Prompt("Dự án mới", "Tên dự án (ví dụ: Nhà phố Quận 7, Khách A – TVC tháng 12):");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
         }
 
-        await RefreshLicenseAsync();
-        await RunHealthAsync(untilConnected: false);
+        var (folder, created) = _projects.Find(name, create: true);
+        if (folder is null)
+        {
+            return;
+        }
+
+        RefreshProjects();
+        foreach (ListViewItem item in list.Items)
+        {
+            item.Selected = (string)item.Tag! == folder.Path;
+        }
+
+        ProjectFolders.Open(folder.Path);
+        Say(created
+            ? $"Đã tạo dự án \"{folder.Name}\" với các thư mục 01-anh … output. Bỏ tư liệu vào rồi nhờ Claude dựng."
+            : $"Dự án \"{folder.Name}\" đã có, mở lại thư mục.");
     }
 
-    /// <summary>Opens the setup wizard (update mode, same folder) and closes this window.</summary>
-    private Task InstallAsync()
+    private void OpenSelected(ListView list)
     {
-        Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "setup") { UseShellExecute = false });
-        Close();
-        return Task.CompletedTask;
+        if (list.SelectedItems.Count == 0)
+        {
+            Say("Chọn một dự án trong danh sách, hoặc bấm Dự án mới.");
+            return;
+        }
+
+        ProjectFolders.Open((string)list.SelectedItems[0].Tag!);
     }
 
-    private async Task UpdateAsync()
+    private void CopyRequest(string template, ListView list)
     {
-        Log(await Task.Run(() => _updater.CheckAndApplyAsync(new Progress<string>(Log), _closing.Token)));
-        await RefreshUpdateBannerAsync();
+        var project = list.SelectedItems.Count > 0 ? list.SelectedItems[0].Text : "của tôi";
+        var request = string.Format(template, $"\"{project}\"");
+        try
+        {
+            Clipboard.SetText(request);
+            Say("Đã chép yêu cầu. Mở Claude và dán (Ctrl+V), sửa chi tiết theo ý bạn.");
+        }
+        catch (Exception)
+        {
+            Say(request);
+        }
     }
 
-    /// <summary>Yellow bar under the header: new version with its notes, "Cập nhật ngay", then "Mở lại".</summary>
-    private Control UpdateBanner()
+    private string? Prompt(string title, string question)
     {
-        var stack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Fill };
-        stack.Controls.Add(_updateTitle);
-        stack.Controls.Add(_updateText);
-        var buttons = Row();
-        _updateNow = Action("Cập nhật ngay", UpdateAsync, primary: true);
-        _restartNow = Action("Mở lại TodoX EditVideo", RestartAsync, primary: true);
-        buttons.Controls.Add(_updateNow);
-        buttons.Controls.Add(_restartNow);
-        stack.Controls.Add(buttons);
-        _updateBanner.Controls.Add(stack);
-        return _updateBanner;
+        using var form = new Form
+        {
+            Text = title,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            BackColor = Ground,
+            ForeColor = Ink,
+            Font = Font,
+            ClientSize = new Size(520, 170)
+        };
+        var label = new Label { Text = question, AutoSize = true, MaximumSize = new Size(470, 0), Location = new Point(24, 20) };
+        var box = new TextBox { Location = new Point(24, 64), Width = 470, Font = new Font("Segoe UI", 11), BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle };
+        var ok = Ui.Button("Tạo dự án", primary: true);
+        ok.DialogResult = DialogResult.OK;
+        ok.Location = new Point(24, 112);
+        var cancel = Ui.Button("Huỷ");
+        cancel.DialogResult = DialogResult.Cancel;
+        cancel.Location = new Point(150, 112);
+        form.Controls.AddRange([label, box, ok, cancel]);
+        form.AcceptButton = ok;
+        form.CancelButton = cancel;
+        return form.ShowDialog(this) == DialogResult.OK ? box.Text.Trim() : null;
+    }
+
+    // ------------------------------------------------------------------ license, settings, updates, health
+
+    private void OpenSettings(SettingsPage page)
+    {
+        using var settings = new SettingsForm(_services, page);
+        settings.Changed += () => BeginInvoke(async () =>
+        {
+            await RefreshLicenseAsync();
+            await RefreshUpdateBannerAsync();
+            RefreshProjects();
+        });
+        settings.ShowDialog(this);
+        _ = RefreshLicenseAsync();
+        RefreshProjects();
+    }
+
+    private async Task RefreshLicenseAsync()
+    {
+        try
+        {
+            SetLicense(await _license.EnsureAsync(_closing.Token));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void SetLicense(LicenseStatus? status)
+    {
+        _licensed = status?.IsUsable == true;
+        var (title, detail) = status is null ? ("Đang kiểm tra license...", "") : SettingsForm.LicenseText(status);
+        var color = status is null ? Muted : _licensed ? Ui.Green : Ui.Red;
+        _licenseText.Text = title;
+        _licenseText.ForeColor = color;
+        _licenseIcon.ForeColor = color;
+        _licenseChip.BackColor = status is null || _licensed ? Panel : ColorTranslator.FromHtml("#2A1416");
+        _licenseText.BackColor = _licenseChip.BackColor;
+        _licenseIcon.Invalidate();
+        _licenseChip.Invalidate();
+        var tip = string.IsNullOrEmpty(detail) ? title : $"{title}{Environment.NewLine}{detail}{Environment.NewLine}Bấm để mở Cài đặt › Kích hoạt";
+        _tips.SetToolTip(_licenseChip, tip);
+        _tips.SetToolTip(_licenseText, tip);
     }
 
     private async Task RefreshUpdateBannerAsync()
@@ -247,38 +648,42 @@ public sealed partial class MainWindow : Form
             return;
         }
 
-        _updateTitle.Text = info.BelowMinimum
-            ? $"Bản {info.Current} đã cũ — cần cập nhật lên {info.Latest} để tiếp tục dùng"
-            : $"Có bản mới TodoX EditVideo {info.Latest}";
+        _updateStaged = info.Staged;
+        var head = info.BelowMinimum
+            ? $"Bản {info.Current} đã cũ — cần cập nhật lên {info.Latest} để tiếp tục dùng."
+            : $"Có bản mới TodoX EditVideo {info.Latest}.";
         var notes = Updater.CleanNotes(info.Latest, info.Notes);
-
-        _updateText.Text = (notes.Length > 0 ? notes + Environment.NewLine : "")
-            + (info.Staged ? $"Bản mới đã được tải về máy. {Updater.RestartHint}" : $"Bạn đang dùng bản {info.Current}. Bấm \"Cập nhật ngay\" để tải bản mới.");
+        _updateText.Text = head + (notes.Length > 0 ? " " + notes : "") + (info.Staged ? " " + Updater.RestartHint : "");
+        _updateButton.Text = info.Staged ? "Mở lại TodoX EditVideo" : "Cập nhật ngay";
         _updateBanner.BackColor = ColorTranslator.FromHtml(info.BelowMinimum ? "#4A1A1A" : "#3A2E0A");
-        _updateNow!.Visible = !info.Staged;
-        _restartNow!.Visible = info.Staged;
+        _updateBanner.Height = 56;
         _updateBanner.Visible = true;
     }
 
-    /// <summary>Starts the freshly swapped-in exe and closes this (old) window.</summary>
-    private Task RestartAsync()
+    private async Task UpdateOrRestartAsync()
     {
-        var exe = _updater.InstalledExe;
-        if (File.Exists(exe))
+        if (_updateStaged)
         {
-            Process.Start(new ProcessStartInfo(exe, "app") { UseShellExecute = false });
-            Close();
+            var exe = _updater.InstalledExe;
+            if (File.Exists(exe))
+            {
+                Process.Start(new ProcessStartInfo(exe, "app") { UseShellExecute = false });
+                Close();
+            }
+
+            return;
         }
 
-        return Task.CompletedTask;
-    }
-
-    private Task ConnectAsync()
-    {
-        var done = _installer.Reconnect();
-        Log(done.Count > 0 ? $"Đã kết nối: {string.Join(", ", done)}. Khởi động lại các ứng dụng này." : "Chưa thấy Claude Desktop / Claude Code / Codex trên máy này.");
-        RefreshClients();
-        return Task.CompletedTask;
+        _updateButton.Enabled = false;
+        try
+        {
+            Say(await Task.Run(() => _updater.CheckAndApplyAsync(new Progress<string>(Say), _closing.Token)));
+            await RefreshUpdateBannerAsync();
+        }
+        finally
+        {
+            _updateButton.Enabled = true;
+        }
     }
 
     /// <summary>Skills are checked when the window opens and then every N hours while it stays open.</summary>
@@ -288,8 +693,8 @@ public sealed partial class MainWindow : Form
         {
             while (!_closing.IsCancellationRequested)
             {
-                var ok = await SyncSkillsAsync(notify: true);
-                await Task.Delay(ok ? UserSettings.Load(_paths).SkillSyncInterval : TimeSpan.FromMinutes(30), _closing.Token);
+                var result = await Task.Run(() => _skills.SyncAsync(true, _closing.Token));
+                await Task.Delay(result.Ok ? UserSettings.Load(_paths).SkillSyncInterval : TimeSpan.FromMinutes(30), _closing.Token);
             }
         }
         catch (OperationCanceledException)
@@ -297,278 +702,36 @@ public sealed partial class MainWindow : Form
         }
     }
 
-    private async Task<bool> SyncSkillsAsync(bool notify)
-    {
-        var result = await Task.Run(() => _skills.SyncAsync(notify, _closing.Token));
-        Log(result.Describe());
-        RefreshSkills();
-        return result.Ok;
-    }
-
-    private Task OpenResourcesAsync()
-    {
-        var root = UserSettings.Load(_paths).EffectiveResourceRoot;
-        if (!ProjectFolders.Open(root))
-        {
-            Log($"Không mở được thư mục {root}.");
-        }
-
-        return Task.CompletedTask;
-    }
-
-    private Task ChangeResourcesAsync()
-    {
-        var settings = UserSettings.Load(_paths);
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "Chọn thư mục chứa tư liệu các dự án video (mỗi dự án một thư mục con)",
-            UseDescriptionForTitle = true,
-            InitialDirectory = settings.EffectiveResourceRoot,
-            ShowNewFolderButton = true
-        };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-        {
-            settings.ResourceRoot = dialog.SelectedPath;
-            settings.Save(_paths);
-            Log($"Thư mục tư liệu dự án: {dialog.SelectedPath}");
-            RefreshResources();
-        }
-
-        return Task.CompletedTask;
-    }
-
-    private void RefreshResources()
-    {
-        var root = UserSettings.Load(_paths).EffectiveResourceRoot;
-        Directory.CreateDirectory(root);
-        var projects = Directory.EnumerateDirectories(root).Count();
-        _resourceLabel.Text = $"{root}{Environment.NewLine}{projects} dự án · mỗi dự án một thư mục con; Claude mở đúng thư mục khi bạn nhắc tên dự án.";
-    }
-
-    private sealed record SkillChoice(string Slug, string Text)
-    {
-        public override string ToString() => Text;
-    }
-
-    private sealed record VersionChoice(int? Version, string Text)
-    {
-        public override string ToString() => Text;
-    }
-
-    private void RefreshSkills()
-    {
-        if (InvokeRequired)
-        {
-            BeginInvoke(RefreshSkills);
-            return;
-        }
-
-        var state = _skills.LoadState();
-        var lines = state.Skills.Values.Select(s =>
-            $"• {s.Title}: dùng v{s.Effective}{(s.Pinned is null ? " (luôn bản mới nhất)" : s.Effective != s.Latest ? $" — đã có v{s.Latest}" : "")}").ToList();
-        _skillsLabel.Text = state.LastSync is { } last
-            ? $"{state.Skills.Count} skill · kiểm tra lần cuối {last.ToLocalTime():dd/MM HH:mm}{(lines.Count > 0 ? Environment.NewLine + string.Join(Environment.NewLine, lines) : "")}"
-            : "Chưa tải bộ skill TodoX (cần kích hoạt license và có Claude / Codex trên máy).";
-
-        var selected = (_skillPick.SelectedItem as SkillChoice)?.Slug;
-        _skillPick.Items.Clear();
-        foreach (var (slug, skill) in state.Skills.OrderBy(s => s.Value.Category).ThenBy(s => s.Value.Title))
-        {
-            _skillPick.Items.Add(new SkillChoice(slug, skill.Category is null ? skill.Title : $"{skill.Category} · {skill.Title}"));
-        }
-
-        var index = _skillPick.Items.Cast<SkillChoice>().ToList().FindIndex(c => c.Slug == selected);
-        _skillPick.SelectedIndex = _skillPick.Items.Count == 0 ? -1 : Math.Max(index, 0);
-        if (_skillPick.Items.Count == 0)
-        {
-            _versionPick.Items.Clear();
-        }
-    }
-
-    private void FillVersions()
-    {
-        _versionPick.Items.Clear();
-        if (_skillPick.SelectedItem is not SkillChoice choice || !_skills.LoadState().Skills.TryGetValue(choice.Slug, out var skill))
-        {
-            return;
-        }
-
-        _versionPick.Items.Add(new VersionChoice(null, $"Luôn dùng bản mới nhất (v{skill.Latest})"));
-        foreach (var v in skill.Versions.OrderByDescending(v => v.Version))
-        {
-            _versionPick.Items.Add(new VersionChoice(v.Version, $"v{v.Version} – {v.Name}{(v.CreatedAt is { } at ? $" · {at.ToLocalTime():dd/MM/yyyy}" : "")}"));
-        }
-
-        _versionPick.SelectedIndex = skill.Pinned is { } p ? Math.Max(_versionPick.Items.Cast<VersionChoice>().ToList().FindIndex(c => c.Version == p), 0) : 0;
-    }
-
-    private Task PinSkillAsync()
-    {
-        if (_skillPick.SelectedItem is not SkillChoice skill || _versionPick.SelectedItem is not VersionChoice version)
-        {
-            Log("Chọn skill và phiên bản trước.");
-            return Task.CompletedTask;
-        }
-
-        var (_, message) = _skills.Pin(skill.Slug, version.Version);
-        Log(message + " Mở cuộc trò chuyện mới trong Claude / Codex để dùng.");
-        RefreshSkills();
-        return Task.CompletedTask;
-    }
-
-    private async Task RunHealthAsync(bool untilConnected)
+    private async Task RunHealthAsync()
     {
         try
         {
             // While the window is open an unreachable TodoX is retried every 15 s (with a Windows notification).
-            var report = await _health.RunAsync(untilConnected ? 0 : 1, Log, ct: _closing.Token);
-            _checks.Items.Clear();
-            foreach (var item in report.Items)
-            {
-                var row = new ListViewItem(item.Ok ? "✔" : "✖") { ForeColor = item.Ok ? ColorTranslator.FromHtml("#4ADE80") : ColorTranslator.FromHtml("#F87171") };
-                row.SubItems.Add(item.Name);
-                row.SubItems.Add(item.Ok ? item.Detail : $"{item.Detail} — {item.Fix}");
-                row.ToolTipText = row.SubItems[2].Text;
-                _checks.Items.Add(row);
-            }
-
-            FitChecksHeight();
-
-            Log(report.Ok ? "Hệ thống sẵn sàng." : "Có mục cần xử lý (xem danh sách).");
+            var report = await _health.RunAsync(0, ct: _closing.Token);
+            var problems = report.Items.Where(i => !i.Ok && i.Id != "license").ToList();
+            Say(problems.Count == 0
+                ? "Hệ thống sẵn sàng."
+                : $"Cần xử lý: {string.Join(", ", problems.Select(p => p.Name))} — mở Cài đặt › Hệ thống & cập nhật.");
         }
         catch (OperationCanceledException)
         {
         }
     }
 
-    private async Task RefreshLicenseAsync()
+    private void Say(string message)
     {
-        var s = await _license.EnsureAsync(_closing.Token);
-        _licenseState.Text = s.IsUsable
-            ? $"✔ Đã kích hoạt · gói {s.Payload?.Plan} · {(s.Payload?.Exp is { } exp ? "hết hạn " + DateTimeOffset.FromUnixTimeSeconds(exp).ToLocalTime().ToString("dd/MM/yyyy") : "không thời hạn")}"
-            : $"✖ {s.Message}";
-        _licenseState.ForeColor = s.IsUsable ? ColorTranslator.FromHtml("#4ADE80") : Yellow;
-    }
-
-    private void RefreshClients()
-    {
-        var clients = _installer.Clients;
-        _clientsLabel.Text = string.Join(Environment.NewLine, clients.Select(c =>
-            $"{(c.Registered ? "✔" : c.Detected ? "•" : "–")} {c.Name}: {(c.Registered ? "đã kết nối" : c.Detected ? "có trên máy, chưa kết nối" : "chưa cài")}"));
-    }
-
-    private void Log(string line)
-    {
-        if (InvokeRequired)
+        if (IsDisposed)
         {
-            BeginInvoke(() => Log(line));
             return;
         }
 
-        _log.AppendText($"{DateTime.Now:HH:mm:ss}  {line}{Environment.NewLine}");
-        _log.ScrollToCaret();
-    }
-
-    /// <summary>The check list grows to show every row, so it never needs its own scroll bar.</summary>
-    private void FitChecksHeight()
-    {
-        var rowHeight = _checks.Items.Count > 0 ? _checks.GetItemRect(0).Height : 24;
-        _checks.Height = Math.Max(1, _checks.Items.Count) * rowHeight + 4;
-    }
-
-
-    // ------------------------------------------------------------------ layout helpers
-
-    private Control Header()
-    {
-        var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, Margin = new Padding(0, 0, 0, 10) };
-        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("todox-logo.png");
-        if (stream is not null)
+        if (InvokeRequired)
         {
-            var logo = Image.FromStream(stream);
-            panel.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Width = 150, Height = 54, Margin = new Padding(0, 0, 16, 0) });
+            BeginInvoke(() => Say(message));
+            return;
         }
 
-        var titles = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true };
-        titles.Controls.Add(new Label { Text = "EditVideo", Font = new Font("Segoe UI Semibold", 20), ForeColor = Ink, AutoSize = true });
-        titles.Controls.Add(new Label { Text = $"TODO EXCELLENCE · phiên bản {StatusService.Version}", ForeColor = Yellow, AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold) });
-        panel.Controls.Add(titles);
-        return panel;
-    }
-
-    private static Control UnsignedNotice()
-    {
-        var box = new Panel { Width = 640, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(0, 0, 0, 10), BackColor = ColorTranslator.FromHtml("#2A2210"), Margin = new Padding(0, 0, 0, 8) };
-        var text = new LinkLabel
-        {
-            Text = "Ứng dụng chưa đăng ký chữ ký số với Windows nên Windows có thể cảnh báo khi mở. Đây là phần mềm chính hãng TodoX. Hỗ trợ: " + LicenseMessages.SupportContact + " · todox.vn",
-            LinkColor = Yellow,
-            ActiveLinkColor = Yellow,
-            ForeColor = ColorTranslator.FromHtml("#F5DFA6"),
-            Location = new Point(12, 10),
-            AutoSize = true,
-            MaximumSize = new Size(616, 0)
-        };
-        text.LinkArea = new LinkArea(text.Text.LastIndexOf("todox.vn", StringComparison.Ordinal), "todox.vn".Length);
-        text.LinkClicked += (_, _) => Process.Start(new ProcessStartInfo(SupportUrl) { UseShellExecute = true });
-        box.Controls.Add(text);
-        return box;
-    }
-
-    private static Label Section(string title) => new()
-    {
-        Text = title.ToUpperInvariant(),
-        ForeColor = Yellow,
-        Font = new Font("Segoe UI", 9, FontStyle.Bold),
-        AutoSize = true,
-        Margin = new Padding(0, 14, 0, 6)
-    };
-
-    private static Label Label(string text, float size) => new() { Text = text, AutoSize = true, MaximumSize = new Size(640, 0), Font = new Font("Segoe UI", size), ForeColor = Ink, Margin = new Padding(0, 0, 0, 6) };
-
-    private static FlowLayoutPanel Row() => new() { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = true, MaximumSize = new Size(650, 0), Margin = new Padding(0, 0, 0, 4) };
-
-    private Button Action(string text, Func<Task> handler, bool primary = false)
-    {
-        var button = new Button
-        {
-            Text = text,
-            AutoSize = true,
-            Height = 36,
-            Padding = new Padding(10, 2, 10, 2),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = primary ? Yellow : Panel,
-            ForeColor = primary ? Ground : Ink,
-            Font = new Font("Segoe UI", 9.5f, primary ? FontStyle.Bold : FontStyle.Regular),
-            Cursor = Cursors.Hand,
-            Margin = new Padding(0, 0, 8, 4)
-        };
-        button.FlatAppearance.BorderColor = primary ? Yellow : ColorTranslator.FromHtml("#2C2F38");
-        button.Click += async (_, _) =>
-        {
-            foreach (var b in _actions)
-            {
-                b.Enabled = false;
-            }
-
-            try
-            {
-                await handler();
-            }
-            catch (Exception ex)
-            {
-                Log("Lỗi: " + ex.Message);
-            }
-            finally
-            {
-                foreach (var b in _actions)
-                {
-                    b.Enabled = true;
-                }
-            }
-        };
-        _actions.Add(button);
-        return button;
+        _status.Text = message;
     }
 
     [LibraryImport("kernel32.dll")]
