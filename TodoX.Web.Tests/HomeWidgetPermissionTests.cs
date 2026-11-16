@@ -56,6 +56,29 @@ public sealed class HomeWidgetPermissionTests
         Assert.Equal(HomeWidgets.All.Count, HomeWidgets.All.Select(x => x.Module).Distinct().Count());
     }
 
+    [Fact]
+    public void Points_sold_and_render_jobs_show_real_figures()
+    {
+        var page = Read("TodoX.Web", "Components", "Pages", "AdminDashboard.razor");
+        // The two blocks used to print a fixed 0.
+        Assert.DoesNotContain("Kết nối wallet ở sprint tiếp theo", page);
+        Assert.Contains("Billing.GetSummaryAsync()", page);
+        Assert.Contains("HomeStats.GetRenderJobStatsAsync(", page);
+
+        // "Sold" = points topped up for customers; refunds, vouchers and manual adjustments are not sales.
+        var billing = Read("TodoX.Web", "Services", "BillingRepository.cs");
+        Assert.Contains("t.transaction_type IN ('credit','purchase','topup')", billing);
+
+        // A job is what the customer ordered (same kinds as the job monitor), not the internal per-scene child jobs.
+        var stats = Read("TodoX.Web", "Services", "HomeStatsRepository.cs");
+        Assert.Contains("j.job_type IN ('core_service', 'timelapse')", stats);
+        Assert.Contains("dance_sell.dance_sell_jobs", stats);
+        Assert.DoesNotContain("render_scene_image", stats);
+        Assert.Contains("draft", HomeStatsRepository.NotRunning);
+        Assert.Contains("completed", HomeStatsRepository.NotRunning);
+        Assert.DoesNotContain("rendering", HomeStatsRepository.NotRunning);
+    }
+
     /// <summary>Rule: a new stat on the home page ships with its own permission row, granted per role.</summary>
     [Fact]
     public void Every_home_block_has_a_permission_row_in_a_sql_script()

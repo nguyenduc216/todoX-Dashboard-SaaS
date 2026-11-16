@@ -2,6 +2,8 @@
 @inject AccountService Accounts
 @inject AuthStateService AuthState
 @inject StudioRepository Studio
+@inject BillingRepository Billing
+@inject HomeStatsRepository HomeStats
 @inject ILogger<AdminDashboard> Logger
 
 @* Every block is behind its own permission (HomeWidgets): an account sees only the stats it may see. *@
@@ -62,8 +64,10 @@
                             <MudText Typo="Typo.subtitle2">Điểm đã bán</MudText>
                             <MudIcon Icon="@Icons.Material.Filled.Token" Class="todox-gold" />
                         </MudStack>
-                        <div class="todox-stat-value">0</div>
-                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Kết nối wallet ở sprint tiếp theo</MudText>
+                        <div class="todox-stat-value" data-testid="home-points-sold">@(_points is null ? "—" : Points(_points.SoldTotal))</div>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            @(_points is null ? "Chưa tải được số liệu điểm" : $"Tổng điểm nạp cho khách · khách còn {Points(_points.TotalBalance)} điểm")
+                        </MudText>
                     </MudPaper>
                 </MudItem>
             }
@@ -75,8 +79,18 @@
                             <MudText Typo="Typo.subtitle2">Render Jobs</MudText>
                             <MudIcon Icon="@Icons.Material.Filled.Movie" Class="todox-gold" />
                         </MudStack>
-                        <div class="todox-stat-value">0</div>
-                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt, image, voice, caption, video</MudText>
+                        <div class="todox-stat-value" data-testid="home-render-jobs">@(_jobs?.Total.ToString("#,##0") ?? "—")</div>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            @if (_jobs is null)
+                            {
+                                <span>Chưa tải được số liệu job</span>
+                            }
+                            else
+                            {
+                                <span>@_jobs.ThisMonth trong tháng · @_jobs.Running đang chạy · </span>
+                                <span style="@(_jobs.FailedThisMonth > 0 ? "color:var(--mud-palette-error);font-weight:600" : null)">@_jobs.FailedThisMonth lỗi trong tháng</span>
+                            }
+                        </MudText>
                     </MudPaper>
                 </MudItem>
             }
@@ -158,7 +172,11 @@
     private int _accountCount;
     private (int Vip, int Chasing)? _segmentCounts;
     private IReadOnlyList<VideoPlan>? _openPlans;
+    private TokenSummary? _points;
+    private RenderJobHomeStats? _jobs;
     private bool _loaded;
+
+    private static string Points(decimal value) => value.ToString("#,##0.##");
 
     private bool IsAdmin => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
     private bool See(string module) => HomeWidgets.CanSee(AuthState.CurrentUser, module);
@@ -186,6 +204,19 @@
             var systemUsers = await Accounts.GetSystemUsersAsync();
             var customerAccounts = await Accounts.GetCustomerAccountsAsync();
             _accountCount = systemUsers.Count + customerAccounts.Count;
+        }
+
+        // One failing figure must not take the whole home page down: the block shows "—" instead.
+        if (See(HomeWidgets.PointsSold))
+        {
+            try { _points = await Billing.GetSummaryAsync(); }
+            catch (Exception ex) { Logger.LogWarning(ex, "HOME_POINTS_SOLD_UNAVAILABLE"); }
+        }
+
+        if (See(HomeWidgets.RenderJobs))
+        {
+            try { _jobs = await HomeStats.GetRenderJobStatsAsync(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)); }
+            catch (Exception ex) { Logger.LogWarning(ex, "HOME_RENDER_JOBS_UNAVAILABLE"); }
         }
 
         if ((See(HomeWidgets.VideoPlans) || See(HomeWidgets.MyVideoPlans)) && await Studio.IsReadyAsync())

@@ -28,8 +28,8 @@ public static class HomeWidgets
     [
         new(Customers, "Khách hàng", "Số khách hàng và số khách VIP / bám đuổi."),
         new(Accounts, "Tài khoản", "Số tài khoản quản trị và tài khoản khách hàng."),
-        new(PointsSold, "Điểm đã bán", "Tổng điểm đã bán cho khách."),
-        new(RenderJobs, "Render Jobs", "Số job render."),
+        new(PointsSold, "Điểm đã bán", "Tổng điểm nạp cho khách (không tính hoàn điểm, voucher, điều chỉnh) và số dư khách còn."),
+        new(RenderJobs, "Render Jobs", "Job khách đã tạo: tổng, trong tháng, đang chạy, lỗi trong tháng."),
         new(MyVideoPlans, "Kế hoạch video của tôi", "Kế hoạch video đang giao cho chính tài khoản, sắp đến ngày release."),
         new(VideoPlans, "Tổng quan kế hoạch video", "Kế hoạch đang làm, sắp release trong 7 ngày, trễ hạn."),
         new(Roadmap, "Lộ trình Sprint", "Ghi chú lộ trình phát triển nội bộ.")
