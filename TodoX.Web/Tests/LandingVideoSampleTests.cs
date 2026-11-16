@@ -322,6 +322,12 @@ public sealed class LandingVideoSampleTests
         Assert.Contains("private bool _addToCustomerVideos = true;", dialog);
         Assert.Contains("Label=\"Khách hàng (không bắt buộc)\"", dialog);
         Assert.Contains("CustomerVideos.CreateAsync(", dialog);
+        // A video the customer already has (already charged) is linked and updated, never charged again.
+        Assert.True(dialog.IndexOf("CustomerVideos.FindExistingAsync(customerId", StringComparison.Ordinal)
+                    < dialog.IndexOf("CustomerVideos.CreateAsync(", StringComparison.Ordinal));
+        Assert.Contains("không trừ điểm thêm", dialog);
+        var customerVideos = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Services", "CustomerVideos", "CustomerVideoRepository.cs"));
+        Assert.Contains("v.charge_status IN ('charged', 'free')", customerVideos);
         // The version in use is never listed; deleting one removes its file only when nothing else uses it.
         Assert.Contains("!string.Equals(v.VideoUrl, _model.VideoUrl, StringComparison.OrdinalIgnoreCase)", dialog);
         Assert.Contains("if (!used.Contains(version.VideoUrl)) Media.DeleteSampleUpload(version.VideoUrl);", dialog);

@@ -189,6 +189,25 @@ public sealed class CustomerVideoRepository
     }
 
     /// <summary>
+    /// A video the customer already has (already charged, or given free): same file first, else same title.
+    /// Used so updating a video the customer already paid for never charges again.
+    /// </summary>
+    public async Task<CustomerVideo?> FindExistingAsync(Guid customerId, string? videoUrl, string? title)
+    {
+        RequireAdmin();
+        if (customerId == Guid.Empty) return null;
+        using var conn = await _factory.OpenAsync();
+        return await conn.QueryFirstOrDefaultAsync<CustomerVideo>(SelectVideo + """
+             WHERE v.customer_id=@customerId AND v.charge_status IN ('charged', 'free')
+               AND ((@url IS NOT NULL AND v.video_url=@url)
+                    OR (@title IS NOT NULL AND lower(btrim(v.title))=lower(@title)))
+             ORDER BY (v.video_url IS NOT DISTINCT FROM @url) DESC, v.created_at DESC
+             LIMIT 1;
+            """,
+            new { customerId, url = Blank(videoUrl), title = Blank(title) });
+    }
+
+    /// <summary>
     /// Adds a video to a customer and charges <paramref name="points"/> from their wallet (0 = free).
     /// Nothing is kept when the customer does not have enough points.
     /// </summary>
