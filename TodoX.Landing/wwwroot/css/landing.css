@@ -74,6 +74,8 @@
     }
     h1, h2, h3, p { margin-top: 0; }
     h1 { font-size: clamp(42px, 6vw, 78px); line-height: 1.08; letter-spacing: -.04em; margin-bottom: 22px; }
+    /* Homepage hero title: smaller than the generic h1 so it sits in about two lines beside the phone. */
+    #home .hero-copy h1 { font-size: clamp(32px, 3.6vw, 52px); line-height: 1.1; }
     h2 { font-size: clamp(32px, 4vw, 52px); line-height: 1.16; letter-spacing: -.03em; margin-bottom: 16px; }
     h3 { font-size: 22px; line-height: 1.35; }
     p { color: var(--muted); line-height: 1.8; }

@@ -71,6 +71,10 @@ public sealed class LandingAffiliateVideoTests
         Assert.Contains("<a href=\"/video-ngan\">Video thương hiệu</a>", home);
         // Short hero title: the old 8-word one filled five lines at full size.
         Assert.Contains("<h1>Biến Ảnh Thành Phim Ngắn Thương Hiệu</h1>", home);
+        // ...and a smaller size than the generic 78px h1.
+        Assert.Contains("#home .hero-copy h1 { font-size: clamp(32px, 3.6vw, 52px);", Page("css/landing.css"));
+        Assert.Contains("css/landing.css?v=20261116-1", home);
+        Assert.Contains("<strong>100M+</strong><span>Lượt xem</span>", home);
     }
 
     [Fact]
