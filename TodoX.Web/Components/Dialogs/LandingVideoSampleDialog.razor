@@ -2,7 +2,9 @@
 @using Microsoft.Extensions.Options
 @using System.Diagnostics
 @using TodoX.Web.Models.Catalog
+@using TodoX.Web.Models
 @using TodoX.Web.Services
+@using TodoX.Web.Services.CustomerVideos
 @using TodoX.Web.Services.Landing
 @using TodoX.Web.Services.SharedMedia
 @inject AuthStateService AuthState
@@ -12,6 +14,10 @@
 @inject ISnackbar Snackbar
 @inject ILogger<LandingVideoSampleDialog> Logger
 @inject IOptions<SharedMediaOptions> MediaOptions
+@inject CustomerVideoRepository CustomerVideos
+@inject AccountService Accounts
+@inject WalletService Wallets
+@inject IDialogService DialogService
 
 <MudDialog>
     <TitleContent>
@@ -52,7 +58,7 @@
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="8">
-                    <MudSelect T="string" Label="Nhóm dịch vụ video" @bind-Value="_serviceChoice">
+                    <MudSelect T="string" Label="Nhóm dịch vụ video" Value="_serviceChoice" ValueChanged="ServiceChoiceChanged">
                         @foreach (var service in _services)
                         {
                             <MudSelectItem Value="@service.Id.ToString()">@service.ServiceName</MudSelectItem>
@@ -63,6 +69,38 @@
                         }
                     </MudSelect>
                 </MudItem>
+                @if (_customerReady && CustomerAllowed)
+                {
+                    <MudItem xs="12" sm="@(_customer is null ? 12 : 6)">
+                        <MudAutocomplete T="CustomerProfile" Label="Khách hàng (không bắt buộc)" Value="_customer" ValueChanged="CustomerChangedAsync"
+                                         SearchFunc="SearchCustomersAsync" ToStringFunc="CustomerDisplay" Clearable="true" ResetValueOnEmptyText="true"
+                                         MaxItems="30" Disabled="_busy" autocomplete="off" data-testid="sample-customer"
+                                         HelperText="Video làm cho khách nào thì chọn khách đó; để trống nếu là video mẫu chung." />
+                        @if (_customer is not null && _balance is not null && !Linked && _addToCustomerVideos)
+                        {
+                            <MudText Typo="Typo.caption" Class="mt-1 d-block" Color="@(_balance < _points ? Color.Error : Color.Secondary)">Số dư hiện tại: @_balance.Value.ToString("#,0.##") điểm</MudText>
+                        }
+                    </MudItem>
+                    @if (_customer is not null)
+                    {
+                        <MudItem xs="12" sm="6">
+                            @if (Linked)
+                            {
+                                <MudAlert Severity="Severity.Success" Dense="true">Đã có trong <a href="/customer-videos" target="_blank">Video khách hàng</a>: tiêu đề, video và ảnh bìa được cập nhật theo video mẫu khi lưu.</MudAlert>
+                            }
+                            else if (_customerVideosEnabled)
+                            {
+                                <MudCheckBox T="bool" @bind-Value="_addToCustomerVideos" Color="Color.Warning" Disabled="_busy" data-testid="sample-add-customer-video"
+                                             Label="Thêm luôn vào mục Video khách hàng" />
+                                @if (_addToCustomerVideos)
+                                {
+                                    <MudNumericField T="decimal" Label="Trừ điểm của khách" @bind-Value="_points" Min="0" Format="#,0.##" Disabled="_busy"
+                                                     Margin="Margin.Dense" HelperText="Theo bảng giá Video khách hàng, 0 = miễn phí" />
+                                }
+                            }
+                        </MudItem>
+                    }
+                }
                 <MudItem xs="12" sm="6">
                     <MudStack Spacing="2">
                         <MudText>Video MP4/WebM (tối đa @(LandingIntroVideoMediaService.MaxBytes(MediaOptions.Value, LandingVideoSampleRepository.MediaArea, true) / (1024 * 1024)) MB):</MudText>
@@ -145,6 +183,26 @@
                     }
                 </MudPaper>
             }
+            @if (OlderVersions.Count > 0)
+            {
+                <MudPaper Outlined="true" Class="pa-3" data-testid="sample-versions">
+                    <MudText Typo="Typo.subtitle2">Các phiên bản video trước (@OlderVersions.Count)</MudText>
+                    <MudText Typo="Typo.caption">Bản đang dùng không nằm trong danh sách. "Dùng lại" thay video hiện tại khi bấm Lưu; "Xóa" xóa hẳn file của phiên bản đó.</MudText>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-top:8px">
+                        @foreach (var version in OlderVersions)
+                        {
+                            <div style="border:1px solid var(--mud-palette-lines-default);border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px">
+                                <video src="@version.VideoUrl" poster="@version.PosterUrl" preload="metadata" muted playsinline controls style="width:100%;height:180px;object-fit:contain;background:#000"></video>
+                                <MudText Typo="Typo.caption">@version.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                                <MudStack Row="true" Spacing="1">
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="_busy" OnClick="() => UseVersion(version)">Dùng lại</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" Disabled="_busy" OnClick="() => DeleteVersionAsync(version)">Xóa</MudButton>
+                                </MudStack>
+                            </div>
+                        }
+                    </div>
+                </MudPaper>
+            }
             @if (_busy) { <MudProgressLinear Indeterminate="true" /> }
         </MudStack>
     </DialogContent>
@@ -169,7 +227,7 @@
     private bool _visibilityReady = true;
     private string? _error;
     // Overwrite mode: files of the saved sample that a new version replaced; deleted after a successful save.
-    private bool _overwrite;
+    private bool _overwrite = true;
     private readonly HashSet<string> _replaced = new(StringComparer.OrdinalIgnoreCase);
 
     private const string ImageAccept = ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
@@ -186,6 +244,19 @@
         try { _visibilityReady = await Repository.SupportsVisibilityAsync(); }
         catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample visibility column check failed."); }
 
+        try
+        {
+            _customerReady = await Repository.SupportsCustomerVersionsAsync();
+            _customerVideosEnabled = _customerReady && AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) && await CustomerVideos.IsReadyAsync();
+            if (_customerReady)
+            {
+                _customers = await Accounts.GetCustomersAsync();
+                if (_customerVideosEnabled) _products = await CustomerVideos.GetProductsAsync();
+                if (Source is not null) _versions = (await Repository.ListVersionsAsync(Source.Id, Source.VideoUrl)).ToList();
+            }
+        }
+        catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample customer/version data load failed."); }
+
         if (Source is not null)
         {
             _model = new LandingVideoSample
@@ -193,8 +264,10 @@
                 Id = Source.Id, Title = Source.Title, Description = Source.Description, AspectRatio = Source.AspectRatio,
                 VideoUrl = Source.VideoUrl, PosterUrl = Source.PosterUrl, ServiceId = Source.ServiceId, SampleGroup = Source.SampleGroup,
                 ThumbnailLandscapeUrl = Source.ThumbnailLandscapeUrl, ShareImageUrl = Source.ShareImageUrl,
-                ThumbnailPortraitUrl = Source.ThumbnailPortraitUrl, IsVisible = Source.IsVisible
+                ThumbnailPortraitUrl = Source.ThumbnailPortraitUrl, IsVisible = Source.IsVisible,
+                CustomerId = Source.CustomerId, CustomerName = Source.CustomerName, CustomerVideoId = Source.CustomerVideoId
             };
+            _customer = _customers.FirstOrDefault(c => c.Id == Source.CustomerId);
             // Samples saved before the extra slots existed only have the main poster: show it in its ratio's slot.
             if (_model.ThumbnailPortraitUrl is null && _model.ThumbnailLandscapeUrl is null)
             {
@@ -203,12 +276,112 @@
             }
             _serviceChoice = LandingVideoSampleRepository.ServiceChoiceOf(Source);
         }
+        UpdateDefaultPoints();
+        if (_customer is not null) await LoadBalanceAsync();
 
         // Keep the current service selectable when editing a sample whose service has been paused.
         _services = Services.Where(service => service.Status == TodoXServiceStatuses.Active || service.Id == Source?.ServiceId).ToList();
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    // Customer (optional, built-in groups only) and "Video khách hàng".
+    private bool _customerReady;
+    private bool _customerVideosEnabled;
+    private IReadOnlyList<CustomerProfile> _customers = [];
+    private IReadOnlyList<CustomerVideoProduct> _products = [];
+    private CustomerProfile? _customer;
+    private bool _addToCustomerVideos = true;
+    private decimal _points;
+    private decimal? _balance;
+
+    private bool CustomerAllowed => _serviceChoice is LandingVideoSampleRepository.OtherServiceChoice or LandingVideoSampleRepository.TvcServiceChoice;
+    // Still the customer the saved sample's "Video khách hàng" row belongs to.
+    private bool Linked => _model.CustomerVideoId is not null && _customer?.Id == Source?.CustomerId;
+
+    private void ServiceChoiceChanged(string? choice)
+    {
+        _serviceChoice = choice;
+        UpdateDefaultPoints();
+    }
+
+    private void UpdateDefaultPoints()
+    {
+        var product = _serviceChoice == LandingVideoSampleRepository.TvcServiceChoice ? CustomerVideoRules.Tvc : CustomerVideoRules.Communication;
+        _points = _products.FirstOrDefault(x => x.ProductCode == product)?.Points ?? 0;
+    }
+
+    private static string CustomerDisplay(CustomerProfile? customer)
+        => customer is null ? string.Empty : $"{customer.CompanyName} ({customer.CustomerCode}{(string.IsNullOrWhiteSpace(customer.Email) ? "" : " · " + customer.Email)})";
+
+    private Task<IEnumerable<CustomerProfile>> SearchCustomersAsync(string value, CancellationToken cancellationToken)
+    {
+        IEnumerable<CustomerProfile> result = _customers;
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            var term = value.Trim();
+            result = result.Where(c => c.CompanyName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.CustomerCode.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.Email.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.Phone.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || c.ContactName.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+        return Task.FromResult(result.Take(30));
+    }
+
+    private async Task CustomerChangedAsync(CustomerProfile? customer)
+    {
+        _customer = customer;
+        _addToCustomerVideos = true;
+        await LoadBalanceAsync();
+    }
+
+    private async Task LoadBalanceAsync()
+    {
+        _balance = null;
+        if (_customer is null || !_customerVideosEnabled) return;
+        try { _balance = await Wallets.GetBalanceAsync(_customer.Id); }
+        catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample balance lookup failed {CustomerId}", _customer.Id); }
+    }
+
+    // Older video versions of the saved sample (the one in use is never listed).
+    private List<LandingVideoSampleVersion> _versions = [];
+    private List<LandingVideoSampleVersion> OlderVersions
+        => _versions.Where(v => !string.Equals(v.VideoUrl, _model.VideoUrl, StringComparison.OrdinalIgnoreCase)
+                                && !_replaced.Contains(v.VideoUrl)).ToList();
+
+    private void UseVersion(LandingVideoSampleVersion version)
+    {
+        RememberReplaced(ImageSlot.Video, version.VideoUrl);
+        _model.VideoUrl = version.VideoUrl;
+        Snackbar.Add("Đã chọn lại phiên bản cũ. Nhấn Lưu video mẫu để áp dụng.", Severity.Success);
+    }
+
+    private async Task DeleteVersionAsync(LandingVideoSampleVersion version)
+    {
+        if (_busy || Source is null) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync("Xóa phiên bản video",
+            $"Xóa phiên bản tải lên lúc {version.CreatedAt.ToLocalTime():dd/MM/yyyy HH:mm}? File video sẽ bị xóa và không khôi phục được.",
+            yesText: "Xóa", cancelText: "Hủy");
+        if (confirmed != true) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Repository.RemoveVersionsAsync(Source.Id, [version.VideoUrl]);
+            _versions.Remove(version);
+            // The file goes only when nothing else (another sample, version or customer video) still uses it.
+            var used = await Repository.ReferencedMediaUrlsAsync();
+            if (!used.Contains(version.VideoUrl)) Media.DeleteSampleUpload(version.VideoUrl);
+            Snackbar.Add("Đã xóa phiên bản video.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video sample version delete failed. Version={VersionId}", version.Id);
+            _error = "Không xóa được phiên bản video. Vui lòng thử lại.";
+        }
+        finally { _busy = false; }
+    }
 
     // Library: reuse a file uploaded earlier (e.g. the dialog was closed after the video upload) instead of uploading again.
     private ImageSlot? _librarySlot;
@@ -323,18 +496,81 @@
         try
         {
             LandingVideoSampleRepository.ApplyServiceChoice(_model, _serviceChoice);
-            await Repository.SaveAsync(_model, AuthState.CurrentUser.UserId.ToString());
+            _model.CustomerId = _customerReady && LandingVideoSampleRepository.AllowsCustomer(_model) ? _customer?.Id : null;
+            // Another customer (or none): the old "Video khách hàng" row stays with its customer, this sample is unlinked.
+            if (_model.CustomerId is null || _model.CustomerId != Source?.CustomerId) _model.CustomerVideoId = null;
+            LandingVideoSampleRepository.Normalize(_model);
+            LandingVideoSampleRepository.Validate(_model);
+
+            var customerVideoNote = await SyncCustomerVideoAsync();
+            if (customerVideoNote is null) return;
+            try
+            {
+                await Repository.SaveAsync(_model, AuthState.CurrentUser.UserId.ToString());
+            }
+            catch when (_createdCustomerVideo is { } created)
+            {
+                // Nothing half-done: the customer video added (and charged) for this save is removed and refunded.
+                try { await CustomerVideos.DeleteAsync(created); }
+                catch (Exception undo) { Logger.LogError(undo, "Customer video {Id} could not be undone after a failed sample save.", created); }
+                _model.CustomerVideoId = null;
+                _createdCustomerVideo = null;
+                throw;
+            }
+            await Repository.RemoveVersionsAsync(_model.Id, _replaced);
             var removed = await RemoveReplacedFilesAsync();
-            Snackbar.Add(removed > 0 ? $"Đã lưu video mẫu và thay {removed} file cũ." : "Đã lưu video mẫu.", Severity.Success);
+            var message = removed > 0 ? $"Đã lưu video mẫu và thay {removed} file cũ." : "Đã lưu video mẫu.";
+            Snackbar.Add(customerVideoNote.Length > 0 ? $"{message} {customerVideoNote}" : message, Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         }
         catch (ArgumentException ex) { _error = ex.Message.Split(" (Parameter")[0]; }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Landing video sample save failed.");
             _error = "Không thể lưu video mẫu. Kiểm tra database và script landing.video_samples.";
         }
         finally { _busy = false; }
+    }
+
+    private Guid? _createdCustomerVideo;
+
+    /// <summary>
+    /// Adds the sample to the customer's "Video khách hàng" (charging the points set) or keeps the linked one in sync.
+    /// Returns a note for the success message, or null when adding failed (the error is shown and nothing is saved).
+    /// </summary>
+    private async Task<string?> SyncCustomerVideoAsync()
+    {
+        _createdCustomerVideo = null;
+        if (_model.CustomerId is not { } customerId || !_customerVideosEnabled) return string.Empty;
+        if (_model.CustomerVideoId is { } linkedId)
+        {
+            var linked = await CustomerVideos.GetAsync(linkedId, AuthState.CurrentUser);
+            if (linked is null) { _model.CustomerVideoId = null; return string.Empty; }
+            linked.Title = _model.Title;
+            linked.VideoUrl = _model.VideoUrl;
+            linked.PosterUrl = _model.PosterUrl;
+            var updated = await CustomerVideos.UpdateAsync(linked);
+            if (!updated.Ok) Logger.LogWarning("Linked customer video {Id} was not updated: {Error}", linkedId, updated.Error);
+            return updated.Ok ? "Đã cập nhật Video khách hàng." : string.Empty;
+        }
+        if (!_addToCustomerVideos) return string.Empty;
+        var result = await CustomerVideos.CreateAsync(new CustomerVideo
+        {
+            CustomerId = customerId,
+            ProductCode = LandingVideoSampleRepository.CustomerVideoProduct(_model),
+            Title = _model.Title,
+            VideoUrl = _model.VideoUrl,
+            PosterUrl = _model.PosterUrl,
+            Note = string.IsNullOrWhiteSpace(_model.Description) ? null : _model.Description
+        }, _points);
+        if (!result.Ok || result.Id is null)
+        {
+            _error = $"Chưa lưu: không thêm được vào Video khách hàng — {result.Error}";
+            return null;
+        }
+        _model.CustomerVideoId = _createdCustomerVideo = result.Id;
+        return _points > 0 ? $"Đã thêm vào Video khách hàng và trừ {_points:#,0.##} điểm." : "Đã thêm vào Video khách hàng (miễn phí).";
     }
 
     /// <summary>Deletes the replaced files that no sample uses any more (a file picked for several samples stays).</summary>
