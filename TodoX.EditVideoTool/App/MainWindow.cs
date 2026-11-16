@@ -31,7 +31,8 @@ public sealed partial class MainWindow : Form
     {
         Home,
         Edit,
-        Ai
+        Ai,
+        Library
     }
 
     private readonly IServiceProvider _services;
@@ -84,6 +85,7 @@ public sealed partial class MainWindow : Form
         _screens[Screen.Home] = HomeScreen();
         _screens[Screen.Edit] = WorkScreen(Screen.Edit);
         _screens[Screen.Ai] = WorkScreen(Screen.Ai);
+        _screens[Screen.Library] = LibraryScreen();
         foreach (var screen in _screens.Values)
         {
             screen.Dock = DockStyle.Fill;
@@ -143,6 +145,15 @@ public sealed partial class MainWindow : Form
         Go(Screen.Ai);
         await Task.Delay(300);
         Shot(this, "3-ai");
+        Go(Screen.Library);
+        await LoadLibraryAsync(refresh: false);
+        foreach (var tab in Enum.GetValues<LibraryTab>())
+        {
+            ShowLibrary(tab);
+            await Task.Delay(300);
+            Shot(this, $"3-library-{(int)tab}-{tab}");
+        }
+
         Go(Screen.Home);
         WindowState = FormWindowState.Maximized;
         await Task.Delay(500);
@@ -254,9 +265,10 @@ public sealed partial class MainWindow : Form
 
     private Control HomeScreen()
     {
-        var home = new TableLayoutPanel { ColumnCount = 2, RowCount = 2, BackColor = Ground, Padding = new Padding(0) };
-        home.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        home.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        var home = new TableLayoutPanel { ColumnCount = 3, RowCount = 2, BackColor = Ground, Padding = new Padding(0) };
+        home.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        home.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
+        home.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
         home.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         home.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -265,7 +277,7 @@ public sealed partial class MainWindow : Form
         hello.Controls.Add(Ui.Text("Chọn một việc bên dưới. TodoX làm việc cùng Claude / Codex ngay trên máy của bạn.", 10.5f, Muted, width: 900));
         hello.Margin = new Padding(0, 0, 0, 16);
         home.Controls.Add(hello, 0, 0);
-        home.SetColumnSpan(hello, 2);
+        home.SetColumnSpan(hello, 3);
 
         home.Controls.Add(Tile(TileArt.EditVideo, "Edit video",
             "Dựng video từ ảnh và clip của bạn: cắt ghép, chuyển cảnh, phụ đề động, nhạc nền, giọng đọc tiếng Việt, mở đầu và kết thúc theo màu thương hiệu.",
@@ -273,22 +285,25 @@ public sealed partial class MainWindow : Form
         home.Controls.Add(Tile(TileArt.AiVideo, "Tạo video AI",
             "Biến một bức ảnh hoặc một ý tưởng thành cảnh quay AI: ảnh sản phẩm, cảnh mở đầu, cảnh còn thiếu, phim ngắn doanh nghiệp. Tính điểm theo từng lần tạo.",
             "Mở Tạo video AI", () => Go(Screen.Ai)), 1, 1);
+        home.Controls.Add(Tile(TileArt.Skills, "Thư viện",
+            "Nhân vật AI, giọng đọc, nhạc nền, nhạc AI và hiệu ứng VFX của tài khoản TodoX — tải sẵn về máy để dùng khi dựng video.",
+            "Mở thư viện", () => Go(Screen.Library)), 2, 1);
         return home;
     }
 
     private Control Tile(TileArt art, string title, string text, string action, Action open)
     {
-        var tile = new Panel { Dock = DockStyle.Fill, BackColor = Ui.Card, Margin = new Padding(0, 0, 16, 0), Padding = new Padding(32), Cursor = Cursors.Hand };
-        var icon = new LineIcon(art, 84) { BackColor = Color.Transparent, Location = new Point(32, 32) };
-        var name = new Label { Text = title, Font = new Font("Segoe UI Semibold", 22), ForeColor = Ink, AutoSize = true, BackColor = Color.Transparent, Location = new Point(32, 136) };
-        var body = new Label { Text = text, Font = new Font("Segoe UI", 11), ForeColor = Muted, AutoSize = true, BackColor = Color.Transparent, Location = new Point(34, 200), UseMnemonic = false };
+        var tile = new Panel { Dock = DockStyle.Fill, BackColor = Ui.Card, Margin = new Padding(0, 0, 16, 0), Padding = new Padding(28), Cursor = Cursors.Hand };
+        var icon = new LineIcon(art, 64) { BackColor = Color.Transparent, Location = new Point(28, 28) };
+        var name = new Label { Text = title, Font = new Font("Segoe UI Semibold", 20), ForeColor = Ink, AutoSize = true, BackColor = Color.Transparent, Location = new Point(28, 104) };
+        var body = new Label { Text = text, Font = new Font("Segoe UI", 10.5f), ForeColor = Muted, AutoSize = true, BackColor = Color.Transparent, Location = new Point(30, 158), UseMnemonic = false };
         var button = Ui.Button(action, primary: true);
         button.Height = 42;
         tile.Controls.AddRange([icon, name, body, button]);
         tile.Layout += (_, _) =>
         {
-            body.MaximumSize = new Size(Math.Max(200, tile.ClientSize.Width - 72), 0);
-            button.Location = new Point(32, Math.Max(body.Bottom + 20, tile.ClientSize.Height - button.Height - 32));
+            body.MaximumSize = new Size(Math.Max(200, tile.ClientSize.Width - 60), 0);
+            button.Location = new Point(28, Math.Max(body.Bottom + 16, tile.ClientSize.Height - button.Height - 28));
         };
 
         void Hover(bool on) => tile.BackColor = on ? Ui.CardHover : Ui.Card;
@@ -500,7 +515,11 @@ public sealed partial class MainWindow : Form
             control.Visible = key == screen;
         }
 
-        if (screen != Screen.Home)
+        if (screen == Screen.Library)
+        {
+            _ = LoadLibraryAsync(refresh: false);
+        }
+        else if (screen != Screen.Home)
         {
             RefreshProjects();
             if (!_licensed)
