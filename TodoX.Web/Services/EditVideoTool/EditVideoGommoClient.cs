@@ -50,6 +50,10 @@ public interface IEditVideoGommoClient
 {
     /// <summary>POSTs a form to Gommo with TodoX's own access token; the token never leaves this class.</summary>
     Task<JsonNode> PostAsync(string path, IReadOnlyDictionary<string, string?> fields, CancellationToken ct = default);
+
+    /// <summary>JSON POST to a Gommo V2 path on the AI host (projects). Test doubles may leave it unsupported.</summary>
+    Task<JsonNode> PostJsonAsync(string hostPath, IDictionary<string, object?> body, CancellationToken ct = default) =>
+        throw new NotSupportedException("Gommo V2 JSON calls are not available.");
 }
 
 /// <summary>Thin form-POST client for Gommo (79AI) REST, authenticated with TodoX's stored 79ai credential.</summary>
@@ -116,6 +120,53 @@ public sealed class EditVideoGommoClient : IEditVideoGommoClient
                 $"http_{(int)response.StatusCode}",
                 EditVideoGommoJson.ErrorMessage(json) ?? $"Gommo returned HTTP {(int)response.StatusCode}.",
                 response.StatusCode);
+        }
+
+        return json;
+    }
+
+    /// <summary>
+    /// JSON call to a Gommo V2 path on the same host as the AI base URL (for example /api/v2/ai-projects). The token
+    /// goes both as Bearer and as access_token, the two ways Gommo's V2 endpoints accept it.
+    /// </summary>
+    public async Task<JsonNode> PostJsonAsync(string hostPath, IDictionary<string, object?> body, CancellationToken ct = default)
+    {
+        ResolvedProviderCredential credential;
+        try
+        {
+            credential = await _credentials.ResolveAsync("79ai", "access_token", ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new EditVideoGommoException("not_configured", ex.Message);
+        }
+
+        var options = _options.CurrentValue;
+        var baseUrl = FirstNonBlank(options.BaseUrl, _configuration["TimelapseProviderWorkers:Default79AiBaseUrl"])
+            ?? throw new EditVideoGommoException("not_configured", "Gommo base URL is not configured.");
+        var host = new Uri(baseUrl).GetLeftPart(UriPartial.Authority);
+        var payload = new Dictionary<string, object?>(body) { ["access_token"] = credential.Secret };
+        using var request = new HttpRequestMessage(HttpMethod.Post, host + "/" + hostPath.TrimStart('/'))
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential.Secret);
+        using var response = await _http.SendAsync(request, ct);
+        var text = (await response.Content.ReadAsStringAsync(ct)).Replace(credential.Secret, "***", StringComparison.Ordinal);
+        JsonNode? json;
+        try
+        {
+            json = string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+        }
+        catch (JsonException)
+        {
+            json = null;
+        }
+
+        if (!response.IsSuccessStatusCode || json is null)
+        {
+            throw new EditVideoGommoException($"http_{(int)response.StatusCode}",
+                EditVideoGommoJson.ErrorMessage(json) ?? $"Gommo returned HTTP {(int)response.StatusCode}.", response.StatusCode);
         }
 
         return json;

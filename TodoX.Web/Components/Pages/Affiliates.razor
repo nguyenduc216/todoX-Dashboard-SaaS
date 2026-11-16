@@ -1,6 +1,7 @@
 @page "/affiliates"
 @using TodoX.Web.Services.Affiliate
 @inject AffiliateRepository AffiliateRepo
+@inject TodoX.Web.Services.EditVideoTool.PackageEntitlementService Entitlements
 @inject AccountService Accounts
 @inject AuditRepository Audit
 @inject AuthStateService AuthState
@@ -73,6 +74,8 @@
                         <MudItem xs="6" sm="3" md="2"><MudNumericField T="decimal" Label="Giá gói (VND)" @bind-Value="_package.PriceAmount" Min="0" Format="N0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                         <MudItem xs="6" sm="3" md="1"><MudNumericField T="int" Label="Chu kỳ (tháng)" @bind-Value="_package.CycleMonths" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                         <MudItem xs="6" sm="3" md="2"><MudNumericField T="decimal" Label="Hoa hồng đại lý (%)" @bind-Value="_package.CommissionPercent" Min="0" Max="100" Step="0.5m" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="6" sm="3" md="2"><MudNumericField T="int" Label="Điểm tặng khi mua" @bind-Value="_package.PointsGranted" Min="0" Format="N0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                        <MudItem xs="6" sm="3" md="2"><MudNumericField T="int" Label="Lưu trữ EditVideo (MB)" @bind-Value="_package.StorageMb" Min="0" Step="256" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                         <MudItem xs="6" sm="3" md="1"><MudNumericField T="int" Label="Thứ tự" @bind-Value="_package.SortOrder" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                         <MudItem xs="12" sm="3" md="1" Class="d-flex align-center"><MudSwitch T="bool" @bind-Value="_package.IsActive" Label="Bật" Color="Color.Success" /></MudItem>
                         <MudItem xs="12"><MudTextField T="string" Label="Mô tả" @bind-Value="_package.Description" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
@@ -80,6 +83,7 @@
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">
                         Hoa hồng dự kiến mỗi lần mua: @Money(AffiliateRules.CalculateCommission(_package.PriceAmount, _package.CommissionPercent)).
                         Đổi tỷ lệ chỉ áp dụng cho các lần mua sau; hoa hồng đã phát sinh giữ nguyên.
+                        Mỗi lần ghi nhận mua gói: cộng điểm vào ví khách, cấp hoặc gia hạn license TodoX EditVideo theo chu kỳ gói và đặt dung lượng lưu trữ.
                     </MudText>
                     <MudStack Row="true" Spacing="2" Class="mt-3">
                         <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" OnClick="SavePackageAsync">Lưu gói</MudButton>
@@ -97,6 +101,8 @@
                             <MudTh>Tên gói</MudTh>
                             <MudTh Style="text-align:right">Giá</MudTh>
                             <MudTh>Chu kỳ</MudTh>
+                            <MudTh Style="text-align:right">Điểm</MudTh>
+                            <MudTh Style="text-align:right">Lưu trữ</MudTh>
                             <MudTh Style="text-align:right">Hoa hồng</MudTh>
                             <MudTh Style="text-align:right">Tiền hoa hồng / lần</MudTh>
                             <MudTh>Trạng thái</MudTh>
@@ -107,6 +113,8 @@
                             <MudTd DataLabel="Tên gói">@context.PackageName</MudTd>
                             <MudTd DataLabel="Giá" Style="text-align:right">@Money(context.PriceAmount, context.Currency)</MudTd>
                             <MudTd DataLabel="Chu kỳ">@(context.CycleMonths > 0 ? $"{context.CycleMonths} tháng" : "Không thời hạn")</MudTd>
+                            <MudTd DataLabel="Điểm" Style="text-align:right">@context.PointsGranted.ToString("N0")</MudTd>
+                            <MudTd DataLabel="Lưu trữ" Style="text-align:right">@(context.StorageMb >= 1024 ? $"{context.StorageMb / 1024.0:0.#} GB" : $"{context.StorageMb} MB")</MudTd>
                             <MudTd DataLabel="Hoa hồng" Style="text-align:right">@context.CommissionPercent.ToString("0.##")%</MudTd>
                             <MudTd DataLabel="Tiền hoa hồng / lần" Style="text-align:right">@Money(AffiliateRules.CalculateCommission(context.PriceAmount, context.CommissionPercent), context.Currency)</MudTd>
                             <MudTd DataLabel="Trạng thái">
@@ -599,7 +607,9 @@
         CommissionPercent = p.CommissionPercent,
         Description = p.Description,
         IsActive = p.IsActive,
-        SortOrder = p.SortOrder
+        SortOrder = p.SortOrder,
+        PointsGranted = p.PointsGranted,
+        StorageMb = p.StorageMb
     };
 
     private async Task SavePackageAsync()
@@ -702,7 +712,14 @@
             _purchase.CustomerId = _purchaseCustomer.Id;
             _purchase.PurchasedAt = PurchaseMoment(_purchaseDate);
             var (ok, message) = await AffiliateRepo.RecordPurchaseAsync(_purchase, ActorId);
-            Snackbar.Add(message, ok ? Severity.Success : Severity.Warning);
+            if (ok)
+            {
+                // Points, EditVideo license and storage come with the package.
+                var granted = await Entitlements.ApplyLatestPurchaseAsync(_purchaseCustomer.Id, ActorId);
+                message = string.IsNullOrWhiteSpace(granted) ? message : message + " " + granted;
+            }
+
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Warning, o => o.VisibleStateDuration = 20000);
             if (ok)
             {
                 await Audit.LogAsync(AuthState.CurrentUser, "affiliates", "purchase_record", entityDisplay: _purchaseCustomer.CompanyName);

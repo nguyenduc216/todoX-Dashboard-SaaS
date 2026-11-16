@@ -24,9 +24,11 @@ public sealed class EditVideoAiCreateRequest
     public List<string>? VideoUrls { get; init; }
     /// <summary>The tool's retry key: the same key returns the same task instead of paying twice.</summary>
     public string? ClientKey { get; init; }
+    /// <summary>The customer's project (folder name); the task goes into that project's own 79AI project.</summary>
+    public string? Project { get; init; }
 }
 
-public sealed record EditVideoAiUploadRequest(string? FileName, string? Data);
+public sealed record EditVideoAiUploadRequest(string? FileName, string? Data, string? Project = null);
 
 public sealed record EditVideoAiTask(
     Guid Id, string Kind, string Model, string Status, decimal Points, bool Charged,
@@ -56,8 +58,9 @@ public sealed class EditVideoAiService
 
     public EditVideoAiService(TodoXConnectionFactory factory, TenantContext tenant, IEditVideoGommoClient gommo, WalletService wallets,
         EditVideoUsageService usage, IMemoryCache cache, IOptionsMonitor<EditVideoAiOptions> options, IConfiguration configuration,
-        ILogger<EditVideoAiService> logger)
+        ILogger<EditVideoAiService> logger, EditVideoAiProjectService? projects = null)
     {
+        _projects = projects;
         _factory = factory;
         _tenant = tenant;
         _gommo = gommo;
@@ -70,6 +73,13 @@ public sealed class EditVideoAiService
     }
 
     private EditVideoAiOptions Options => _options.CurrentValue;
+
+    private readonly EditVideoAiProjectService? _projects;
+
+    private async Task<string> ProviderProjectAsync(EditVideoLicenseRow? license, string? project, CancellationToken ct) =>
+        license is not null && _projects is not null && !string.IsNullOrWhiteSpace(project)
+            ? await _projects.ResolveAsync(license, project, ct)
+            : Options.ProjectId;
 
     public decimal ToPoints(decimal credits) => EditVideoGommoJson.Points(
         credits, Options.VndPerCredit, Options.Markup, Options.VndPerPoint ?? _configuration.GetValue("AiImageBilling:TodoXVndPerPoint", 10000m));
@@ -164,18 +174,19 @@ public sealed class EditVideoAiService
 
         var taskId = Guid.NewGuid();
         var modelCode = EditVideoGommoJson.Str(model, "model")!;
+        var providerProject = await ProviderProjectAsync(license, request.Project, ct);
         using (var conn = await _factory.OpenAsync(ct))
         {
             var inserted = await conn.ExecuteAsync(
                 """
-                INSERT INTO editvideo.ai_tasks (id, tenant_id, license_id, device_id, customer_id, kind, client_key, model, options, credits, points)
-                VALUES (@taskId, @tenantId, @licenseId, @deviceId, @customerId, @kind, @clientKey, @modelCode, CAST(@options AS jsonb), @credits, @points)
+                INSERT INTO editvideo.ai_tasks (id, tenant_id, license_id, device_id, customer_id, kind, client_key, model, options, credits, points, provider_project_id)
+                VALUES (@taskId, @tenantId, @licenseId, @deviceId, @customerId, @kind, @clientKey, @modelCode, CAST(@options AS jsonb), @credits, @points, @providerProject)
                 ON CONFLICT (license_id, client_key) WHERE client_key IS NOT NULL DO NOTHING;
                 """,
                 new
                 {
                     taskId, tenantId = _tenant.TenantId, licenseId = license.Id, deviceId = device.Id, customerId = license.CustomerId,
-                    kind, clientKey, modelCode, options = JsonSerializer.Serialize(quote.Selection), credits = quote.Credits, points
+                    kind, clientKey, modelCode, options = JsonSerializer.Serialize(quote.Selection), credits = quote.Credits, points, providerProject
                 });
             if (inserted == 0 && clientKey is not null && await FindByClientKeyAsync(license.Id, clientKey, ct) is { } raced)
             {
@@ -185,7 +196,7 @@ public sealed class EditVideoAiService
 
         try
         {
-            var created = await _gommo.PostAsync(kind == "image" ? "/generateImage" : "/create-video", CreateFields(kind, modelCode, request, quote.Selection), ct);
+            var created = await _gommo.PostAsync(kind == "image" ? "/generateImage" : "/create-video", CreateFields(kind, modelCode, request, quote.Selection, providerProject), ct);
             var idBase = EditVideoGommoJson.IdBase(created)
                 ?? throw new EditVideoGommoException("no_task_id", EditVideoGommoJson.ErrorMessage(created) ?? "Gommo did not return a task id.");
             await UpdateAsync(taskId, "running", idBase, null, null, null, ct);
@@ -253,7 +264,7 @@ public sealed class EditVideoAiService
     /// Passes a local image from the customer's machine to Gommo's own upload and returns the hosted URL;
     /// nothing is written on TodoX's server.
     /// </summary>
-    public async Task<EditVideoResult<object>> UploadAsync(EditVideoAiUploadRequest request, CancellationToken ct = default)
+    public async Task<EditVideoResult<object>> UploadAsync(EditVideoAiUploadRequest request, CancellationToken ct = default, EditVideoLicenseRow? license = null)
     {
         if (Disabled() is { } off)
         {
@@ -286,7 +297,7 @@ public sealed class EditVideoAiService
             var uploaded = await _gommo.PostAsync("/image-upload", new Dictionary<string, string?>
             {
                 ["data"] = request.Data,
-                ["project_id"] = Options.ProjectId,
+                ["project_id"] = await ProviderProjectAsync(license, request.Project, ct),
                 ["file_name"] = fileName,
                 ["size"] = bytes.Length.ToString()
             }, ct);
@@ -305,7 +316,7 @@ public sealed class EditVideoAiService
         }
     }
 
-    internal static Dictionary<string, string?> CreateFields(string kind, string model, EditVideoAiCreateRequest request, EditVideoAiSelection selection)
+    internal static Dictionary<string, string?> CreateFields(string kind, string model, EditVideoAiCreateRequest request, EditVideoAiSelection selection, string projectId = "default")
     {
         var images = Urls(request.Images);
         var references = Urls(request.References);
@@ -317,7 +328,7 @@ public sealed class EditVideoAiService
             ["resolution"] = selection.Resolution,
             ["mode"] = selection.Mode,
             ["privacy"] = "PRIVATE",
-            ["project_id"] = "default"
+            ["project_id"] = string.IsNullOrWhiteSpace(projectId) ? "default" : projectId
         };
 
         if (kind == "image")
@@ -404,9 +415,10 @@ public sealed class EditVideoAiService
             }
             else
             {
-                var fields = new Dictionary<string, string?> { ["id_base"] = row.GommoIdBase, ["videoId"] = row.GommoIdBase, ["project_id"] = Options.ProjectId };
+                var project = row.ProviderProjectId ?? Options.ProjectId;
+                var fields = new Dictionary<string, string?> { ["id_base"] = row.GommoIdBase, ["videoId"] = row.GommoIdBase, ["project_id"] = project };
                 task = EditVideoGommoJson.FindTask(await _gommo.PostAsync("/video", fields, ct), row.GommoIdBase!)
-                    ?? EditVideoGommoJson.FindTask(await _gommo.PostAsync("/videos", new Dictionary<string, string?> { ["project_id"] = Options.ProjectId }, ct), row.GommoIdBase!);
+                    ?? EditVideoGommoJson.FindTask(await _gommo.PostAsync("/videos", new Dictionary<string, string?> { ["project_id"] = project }, ct), row.GommoIdBase!);
             }
         }
         catch (Exception ex) when (ex is EditVideoGommoException or HttpRequestException or TaskCanceledException)
@@ -536,7 +548,7 @@ public sealed class EditVideoAiService
             """
             SELECT id AS Id, license_id AS LicenseId, customer_id AS CustomerId, kind AS Kind, model AS Model, points AS Points,
                    status AS Status, gommo_id_base AS GommoIdBase, outputs::text AS OutputsJson, error_code AS ErrorCode,
-                   error_message AS ErrorMessage, charged AS Charged, created_at AS CreatedAt
+                   error_message AS ErrorMessage, charged AS Charged, created_at AS CreatedAt, provider_project_id AS ProviderProjectId
               FROM editvideo.ai_tasks WHERE id = @id AND tenant_id = @tenantId;
             """,
             new { id, tenantId = _tenant.TenantId });
@@ -588,5 +600,6 @@ public sealed class EditVideoAiService
         public string? ErrorMessage { get; init; }
         public bool Charged { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
+        public string? ProviderProjectId { get; init; }
     }
 }

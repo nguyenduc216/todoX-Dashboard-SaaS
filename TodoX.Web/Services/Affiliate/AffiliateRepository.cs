@@ -344,7 +344,8 @@ public sealed class AffiliateRepository
             SELECT id AS Id, package_code AS PackageCode, package_name AS PackageName,
                    price_amount AS PriceAmount, currency AS Currency, cycle_months AS CycleMonths,
                    commission_percent AS CommissionPercent, description AS Description,
-                   is_active AS IsActive, sort_order AS SortOrder
+                   is_active AS IsActive, sort_order AS SortOrder,
+                   points_granted AS PointsGranted, storage_mb AS StorageMb
               FROM affiliate.packages
              WHERE tenant_id=@tenant AND (NOT @activeOnly OR is_active)
              ORDER BY sort_order, package_code;
@@ -370,6 +371,11 @@ public sealed class AffiliateRepository
             return (false, "Tỷ lệ hoa hồng phải trong khoảng 0–100%.");
         }
 
+        if (p.PointsGranted < 0 || p.StorageMb < 0)
+        {
+            return (false, "Số điểm và dung lượng lưu trữ không được âm.");
+        }
+
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var duplicate = await conn.ExecuteScalarAsync<bool>(
@@ -393,6 +399,8 @@ public sealed class AffiliateRepository
             description = Blank(p.Description),
             active = p.IsActive,
             sort = p.SortOrder,
+            points = p.PointsGranted,
+            storage = p.StorageMb,
             actorUserId
         };
 
@@ -402,9 +410,9 @@ public sealed class AffiliateRepository
                 """
                 INSERT INTO affiliate.packages
                     (id, tenant_id, package_code, package_name, price_amount, currency, cycle_months,
-                     commission_percent, description, is_active, sort_order, created_by, updated_by)
+                     commission_percent, description, is_active, sort_order, points_granted, storage_mb, created_by, updated_by)
                 VALUES (@id, @tenant, @code, @name, @price, @currency, @cycle,
-                        @percent, @description, @active, @sort, @actorUserId, @actorUserId);
+                        @percent, @description, @active, @sort, @points, @storage, @actorUserId, @actorUserId);
                 """, args);
             return (true, "Đã thêm gói.");
         }
@@ -414,7 +422,8 @@ public sealed class AffiliateRepository
             UPDATE affiliate.packages
                SET package_code=@code, package_name=@name, price_amount=@price, currency=@currency,
                    cycle_months=@cycle, commission_percent=@percent, description=@description,
-                   is_active=@active, sort_order=@sort, updated_at=now(), updated_by=@actorUserId
+                   is_active=@active, sort_order=@sort, points_granted=@points, storage_mb=@storage,
+                   updated_at=now(), updated_by=@actorUserId
              WHERE id=@id AND tenant_id=@tenant;
             """, args);
         return (true, "Đã cập nhật gói. Tỷ lệ mới chỉ áp dụng cho các lần mua gói sau.");
@@ -452,7 +461,7 @@ public sealed class AffiliateRepository
             """
             SELECT id AS Id, package_code AS PackageCode, package_name AS PackageName, price_amount AS PriceAmount,
                    currency AS Currency, cycle_months AS CycleMonths, commission_percent AS CommissionPercent,
-                   is_active AS IsActive
+                   is_active AS IsActive, points_granted AS PointsGranted, storage_mb AS StorageMb
               FROM affiliate.packages
              WHERE id=@id AND tenant_id=@tenant;
             """, new { id = request.PackageId, tenant = _tenant.TenantId }, tx);
@@ -482,9 +491,9 @@ public sealed class AffiliateRepository
             """
             INSERT INTO affiliate.package_purchases
                 (id, tenant_id, customer_id, package_id, package_code, package_name, amount, currency,
-                 purchased_at, cycle_start, cycle_end, status, note, created_by)
+                 purchased_at, cycle_start, cycle_end, status, note, created_by, points_granted, storage_mb)
             VALUES (@purchaseId, @tenant, @customerId, @packageId, @code, @name, @amount, @currency,
-                    @purchasedAt, @cycleStart::date, @cycleEnd::date, 'paid', @note, @actorUserId);
+                    @purchasedAt, @cycleStart::date, @cycleEnd::date, 'paid', @note, @actorUserId, @points, @storage);
             """,
             new
             {
@@ -500,7 +509,9 @@ public sealed class AffiliateRepository
                 cycleStart = DateTime.SpecifyKind(cycleStart, DateTimeKind.Unspecified),
                 cycleEnd = cycleEnd is DateTime e ? DateTime.SpecifyKind(e, DateTimeKind.Unspecified) : (DateTime?)null,
                 note = Blank(request.Note),
-                actorUserId
+                actorUserId,
+                points = package.PointsGranted,
+                storage = package.StorageMb
             }, tx);
 
         var agent = await conn.QuerySingleOrDefaultAsync<AgentRow>(

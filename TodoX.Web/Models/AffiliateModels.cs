@@ -57,6 +57,10 @@ public sealed class AffiliatePackage
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; }
+    /// <summary>Points added to the customer's wallet each time the package is bought.</summary>
+    public int PointsGranted { get; set; }
+    /// <summary>TodoX EditVideo server storage while the package is active (MB).</summary>
+    public int StorageMb { get; set; } = 1024;
 }
 
 public sealed class AffiliatePurchaseView
