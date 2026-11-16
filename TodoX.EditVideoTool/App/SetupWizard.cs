@@ -25,7 +25,6 @@ public sealed class SetupWizard : Form
     private static readonly Color Green = ColorTranslator.FromHtml("#4ADE80");
     private static readonly Color Red = ColorTranslator.FromHtml("#F87171");
     private static readonly string[] StepNames = ["Giới thiệu", "Tùy chọn", "Cài đặt", "License", "Hoàn tất"];
-    private static readonly string[] Spinner = ["◐", "◓", "◑", "◒"];
 
     // Preview (for screenshots and checks): TODOX_SETUP_PREVIEW=1 (or "new" to act as a first install) walks the
     // wizard with a simulated install that touches nothing; TODOX_SETUP_PREVIEW_PAGE jumps to a page on open.
@@ -34,8 +33,13 @@ public sealed class SetupWizard : Form
     private readonly IReadOnlyList<ClientStatus> _assistants = new ClientRegistrar().Detect(string.Empty).Where(c => c.Detected).ToList();
     private readonly CancellationTokenSource _cancel = new();
     private readonly List<Label> _stepLabels = [];
+    private readonly List<StatusBadge> _stepBadges = [];
     private readonly List<Control> _pages = [];
+    // _page is the step the setup has reached; _view is the step on screen. A finished step can be opened again from
+    // the step bar (while installing too) to look at it, but its choices are locked.
     private int _page;
+    private int _view;
+    private Button? _browse;
 
     // footer
     private readonly Button _back;
@@ -54,12 +58,11 @@ public sealed class SetupWizard : Form
     private readonly Label _installTitle = Caption("Đang cài đặt...", 15, Ink, bold: true);
     // Two columns of steps; the height follows the number of rows (no scroll bar of its own).
     private readonly FlowLayoutPanel _stepList = new() { FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Width = ContentWidth, Height = 26, Margin = new Padding(0, 6, 0, 8) };
-    private readonly Dictionary<string, (Label Icon, Label Text)> _stepRows = [];
-    private readonly RichTextBox _logBox = new() { ReadOnly = true, ScrollBars = RichTextBoxScrollBars.None, Width = ContentWidth, Height = 150, BackColor = PanelColor, ForeColor = Muted, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 9), DetectUrls = false };
+    // Each install step as a row; the detailed log goes only to the file in {folder}\logs.
+    private readonly Dictionary<string, (StatusBadge Icon, Label Text, string Title)> _stepRows = [];
     private readonly LinkLabel _logLink = new() { AutoSize = true, MaximumSize = new Size(ContentWidth, 0), UseMnemonic = false, LinkColor = Yellow, ActiveLinkColor = Yellow, ForeColor = Muted, Visible = false, Margin = new Padding(0, 6, 0, 0) };
     private readonly ToolTip _tips = new();
     private readonly System.Windows.Forms.Timer _spin = new() { Interval = 130 };
-    private int _spinFrame;
 
     // page 4
     private readonly Label _licenseState = Caption("", 10.5f, Ink);
@@ -111,8 +114,6 @@ public sealed class SetupWizard : Form
             body.Controls.Add(host);
         }
 
-        ((ScrollHost)_pages[2]).WheelOwners.Add(_logBox);
-
         Controls.Add(body);
         Controls.Add(Footer());
         Controls.Add(Stepper());
@@ -132,16 +133,26 @@ public sealed class SetupWizard : Form
     public static int Run()
     {
         MainWindow.HideConsole();
+        // Two TodoX setups at once would overwrite each other's files: the second one only says so and closes.
+        // The preview touches nothing, so it skips the lock (TODOX_SETUP_PREVIEW_BUSY=1 shows the message instead).
+        using var installLock = PreviewMode is null ? Installer.TryLockInstall() : null;
+        var busy = PreviewMode is null ? installLock is null : Environment.GetEnvironmentVariable("TODOX_SETUP_PREVIEW_BUSY") == "1";
         var ui = new Thread(() =>
         {
             Application.EnableVisualStyles();
             Application.SetHighDpiMode(HighDpiMode.SystemAware);
+            if (busy)
+            {
+                MessageBox.Show(Installer.BusyMessage, "TodoX EditVideo đang cài đặt", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             Application.Run(new SetupWizard());
         });
         ui.SetApartmentState(ApartmentState.STA);
         ui.Start();
         ui.Join();
-        return 0;
+        return busy ? 1 : 0;
     }
 
     private bool IsUpdate => _existing is not null;
@@ -154,6 +165,21 @@ public sealed class SetupWizard : Form
     {
         var page = Stack();
         page.Controls.Add(Caption("Chào mừng bạn đến với TodoX EditVideo", 16, Ink, bold: true));
+        const string maker = "Sản phẩm của TodoX AI Automation · ";
+        var site = new LinkLabel
+        {
+            Text = maker + "todox.vn",
+            AutoSize = true,
+            UseMnemonic = false,
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+            ForeColor = Yellow,
+            LinkColor = Yellow,
+            ActiveLinkColor = Ink,
+            LinkArea = new LinkArea(maker.Length, "todox.vn".Length),
+            Margin = new Padding(0, 4, 0, 0)
+        };
+        site.LinkClicked += (_, _) => TryStart(new ProcessStartInfo(MainWindow.SupportUrl) { UseShellExecute = true });
+        page.Controls.Add(site);
         page.Controls.Add(Caption(
             "TodoX EditVideo là trợ lý dựng video chạy ngay trên máy tính của bạn, do TodoX — Todo Excellence phát triển. " +
             "Bạn chỉ cần nói với Claude hoặc Codex điều mình muốn, ví dụ “Dựng video TikTok 30 giây từ các clip trong dự án " +
@@ -168,7 +194,7 @@ public sealed class SetupWizard : Form
                  })
         {
             var row = Row();
-            row.Controls.Add(new Label { Text = "✦", ForeColor = Yellow, AutoSize = true, Font = new Font("Segoe UI", 10), Margin = new Padding(0, 4, 6, 0) });
+            row.Controls.Add(new StatusBadge(BadgeKind.Bullet, 16) { Accent = Yellow, Margin = new Padding(0, 8, 8, 0) });
             row.Controls.Add(Caption(line, 10, Ink, top: 4, width: ContentWidth - 30));
             page.Controls.Add(row);
         }
@@ -198,6 +224,7 @@ public sealed class SetupWizard : Form
         browse.Margin = new Padding(8, 0, 0, 0);
         browse.Height = 30;
         browse.Click += (_, _) => BrowseFolder();
+        _browse = browse;
         folderRow.Controls.Add(browse);
         page.Controls.Add(folderRow);
         page.Controls.Add(_folderNote);
@@ -240,8 +267,6 @@ public sealed class SetupWizard : Form
         var page = Stack();
         page.Controls.Add(_installTitle);
         page.Controls.Add(_stepList);
-        page.Controls.Add(Section("Nhật ký cài đặt", top: 4));
-        page.Controls.Add(_logBox);
         page.Controls.Add(_logLink);
         _logLink.LinkClicked += (_, _) => OpenLog();
         return page;
@@ -275,7 +300,7 @@ public sealed class SetupWizard : Form
     {
         var page = Stack();
         var title = Row();
-        title.Controls.Add(new Label { Text = "✔", ForeColor = Green, AutoSize = true, Font = new Font("Segoe UI", 26, FontStyle.Bold), Margin = new Padding(0, 0, 12, 0) });
+        title.Controls.Add(new StatusBadge(BadgeKind.Done, 44) { Margin = new Padding(0, 4, 14, 0) });
         title.Controls.Add(_doneTitle);
         _doneTitle.Margin = new Padding(0, 12, 0, 0);
         page.Controls.Add(title);
@@ -293,18 +318,49 @@ public sealed class SetupWizard : Form
     private void Show(int index)
     {
         _page = Math.Clamp(index, 0, _pages.Count - 1);
+        View(_page);
+    }
+
+    private void View(int index)
+    {
+        _view = Math.Clamp(index, 0, _page);
         for (var i = 0; i < _pages.Count; i++)
         {
-            _pages[i].Visible = i == _page;
+            _pages[i].Visible = i == _view;
         }
 
         for (var i = 0; i < _stepLabels.Count; i++)
         {
-            _stepLabels[i].Text = i < _page ? $"✔ {StepNames[i]}" : $"{i + 1}  {StepNames[i]}";
-            _stepLabels[i].ForeColor = i == _page ? Yellow : i < _page ? Ink : Muted;
-            _stepLabels[i].Font = new Font("Segoe UI", 9.5f, i == _page ? FontStyle.Bold : FontStyle.Regular);
+            var label = _stepLabels[i];
+            label.Text = StepNames[i];
+            var badge = _stepBadges[i];
+            badge.Kind = i < _page && i != _view ? BadgeKind.Done : BadgeKind.Number;
+            badge.Number = i + 1;
+            badge.Filled = i == _view;
+            badge.Accent = Yellow;
+            badge.ForeColor = i == _page ? Yellow : Muted;
+            badge.Cursor = i <= _page && i != _view ? Cursors.Hand : Cursors.Default;
+            badge.Invalidate();
+            label.ForeColor = i == _view || i == _page ? Yellow : i < _page ? Ink : Muted;
+            label.Font = new Font("Segoe UI", 9.5f,
+                (i == _view ? FontStyle.Bold : FontStyle.Regular) | (i < _page && i != _view ? FontStyle.Underline : FontStyle.Regular));
+            label.Cursor = i <= _page && i != _view ? Cursors.Hand : Cursors.Default;
         }
 
+        // Once the install has started, what was chosen before it can be looked at but not changed.
+        var locked = _page >= 2;
+        _folder.ReadOnly = locked || IsUpdate;
+        if (_browse is not null)
+        {
+            _browse.Visible = !locked && !IsUpdate;
+        }
+
+        foreach (var box in new[] { _claude, _codex, _startup, _desktop })
+        {
+            box.Enabled = !locked;
+        }
+
+        _keyRow.Enabled = _skipLicense.Enabled = _page < 4;
         RefreshButtons();
     }
 
@@ -314,6 +370,13 @@ public sealed class SetupWizard : Form
         _close.Visible = _page < 4;
         _close.Text = _page == 3 ? "Đóng" : "Huỷ";
         _next.Enabled = true;
+        if (_view != _page)
+        {
+            _back.Visible = false;
+            _next.Text = $"Về bước {_page + 1}";
+            return;
+        }
+
         _next.Text = _page switch
         {
             0 => "Tiếp tục",
@@ -334,6 +397,12 @@ public sealed class SetupWizard : Form
 
     private async Task NextAsync()
     {
+        if (_view != _page)
+        {
+            View(_page);
+            return;
+        }
+
         switch (_page)
         {
             case 0:
@@ -381,7 +450,7 @@ public sealed class SetupWizard : Form
         {
             _log = new InstallLog(IsUpdate ? "update" : "install", _existing?.Version, Root, options);
             _log.StepChanged += step => OnUi(() => ShowStep(step));
-            _log.Line += entry => OnUi(() => AppendLog(entry));
+            _log.Line += entry => OnUi(() => ShowProgress(entry));
         }
 
         _installing = true;
@@ -417,7 +486,10 @@ public sealed class SetupWizard : Form
         _installed = ok;
         _installTitle.Text = ok
             ? IsUpdate ? "Đã cập nhật xong — bấm Tiếp tục để kiểm tra license" : "Đã cài xong — bấm Tiếp tục để nhập license"
-            : "Cài đặt chưa xong. Xem dòng báo lỗi bên dưới rồi bấm \"Thử lại\".";
+            : _log.Steps.LastOrDefault(s => s.State == StepState.Failed) is { } failed
+                ? $"Cài đặt chưa xong: {failed.Title} — {failed.Detail}. Bấm \"Thử lại\"."
+                : "Cài đặt chưa xong. Bấm \"Thử lại\".";
+        _logLink.Visible = !ok && _logPath is not null;
         _installTitle.ForeColor = ok ? Green : Red;
         RefreshButtons();
     }
@@ -427,33 +499,27 @@ public sealed class SetupWizard : Form
         if (!_stepRows.TryGetValue(step.Id, out var row))
         {
             var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Width = ContentWidth / 2, Height = 26, Margin = new Padding(0) };
-            var icon = new Label { Width = 24, Height = 24, Font = new Font("Segoe UI Symbol", 10.5f), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0) };
-            var text = new Label { Width = ContentWidth / 2 - 30, Height = 24, UseMnemonic = false, ForeColor = Ink, BackColor = Ground, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0) };
+            var icon = new StatusBadge(BadgeKind.Pending, 18) { Accent = Yellow, Margin = new Padding(0, 3, 8, 3) };
+            var text = new Label { Width = ContentWidth / 2 - 32, Height = 24, UseMnemonic = false, ForeColor = Ink, BackColor = Ground, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0) };
             panel.Controls.Add(icon);
             panel.Controls.Add(text);
             _stepList.Controls.Add(panel);
             _stepList.Height = (_stepList.Controls.Count + 1) / 2 * 26;
-            row = (icon, text);
+            row = (icon, text, step.Title);
             _stepRows[step.Id] = row;
         }
 
-        row.Icon.Text = step.State switch
+        row = (row.Icon, row.Text, step.Title);
+        _stepRows[step.Id] = row;
+        row.Icon.Kind = step.State switch
         {
-            StepState.Running => Spinner[_spinFrame % Spinner.Length],
-            StepState.Done => "✔",
-            StepState.Failed => "✖",
-            StepState.Skipped => "–",
-            _ => "○"
+            StepState.Running => BadgeKind.Running,
+            StepState.Done => BadgeKind.Done,
+            StepState.Failed => BadgeKind.Failed,
+            StepState.Skipped => BadgeKind.Skipped,
+            _ => BadgeKind.Pending
         };
-        row.Icon.ForeColor = step.State switch
-        {
-            StepState.Running => Yellow,
-            StepState.Done => Green,
-            StepState.Failed => Red,
-            _ => Muted
-        };
-        row.Icon.Tag = step.State;
-        // The row shows the step; its result is in the tooltip and the log below.
+        // The row shows the step; its result is in the tooltip, the full log in the file.
         row.Text.Text = Fit(step.Title, row.Text);
         var full = step.Detail is null ? step.Title : $"{step.Title} · {step.Detail}";
         row.Text.ForeColor = step.State switch
@@ -483,28 +549,24 @@ public sealed class SetupWizard : Form
 
     private void Spin()
     {
-        _spinFrame++;
-        foreach (var (icon, _) in _stepRows.Values)
+        foreach (var (icon, _, _) in _stepRows.Values)
         {
-            if (icon.Tag is StepState.Running)
-            {
-                icon.Text = Spinner[_spinFrame % Spinner.Length];
-            }
+            icon.Advance();
         }
     }
 
-    private void AppendLog(InstallLogEntry entry)
+    /// <summary>Download progress ("... 40%") shows next to the running step instead of in a log on screen.</summary>
+    private void ShowProgress(InstallLogEntry entry)
     {
-        var start = _logBox.TextLength;
-        _logBox.AppendText($"{entry.At.ToLocalTime():HH:mm:ss}  {entry.Message}{Environment.NewLine}");
-        if (entry.Level is "error" or "warn")
+        if (entry.Step is null || !_stepRows.TryGetValue(entry.Step, out var row) || row.Icon.Kind != BadgeKind.Running)
         {
-            _logBox.Select(start, _logBox.TextLength - start);
-            _logBox.SelectionColor = entry.Level == "error" ? Red : Yellow;
-            _logBox.Select(_logBox.TextLength, 0);
+            return;
         }
 
-        _logBox.ScrollToCaret();
+        if (System.Text.RegularExpressions.Regex.Match(entry.Message, @"(\d{1,3})%\s*$") is { Success: true } m)
+        {
+            row.Text.Text = Fit($"{row.Title} · {m.Groups[1].Value}%", row.Text);
+        }
     }
 
     // ------------------------------------------------------------------ step 4: license
@@ -628,6 +690,12 @@ public sealed class SetupWizard : Form
 
     private async Task PreviewJumpAsync()
     {
+        if (PreviewMode is not null && Environment.GetEnvironmentVariable("TODOX_SETUP_PREVIEW_SHOTS") is { Length: > 0 } shots)
+        {
+            await PreviewShotsAsync(shots);
+            return;
+        }
+
         if (PreviewMode is null || !int.TryParse(Environment.GetEnvironmentVariable("TODOX_SETUP_PREVIEW_PAGE"), out var target) || target < 1)
         {
             return;
@@ -650,6 +718,43 @@ public sealed class SetupWizard : Form
         }
     }
 
+    /// <summary>Preview only: walks every page (and looks back at earlier steps mid-install), saving each as a PNG
+    /// drawn by the window itself, so checks never capture the rest of the screen.</summary>
+    private async Task PreviewShotsAsync(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        Location = new Point(-5000, 0); // off screen: nothing is shown over what the person is doing
+        void Shot(string name)
+        {
+            using var bmp = new Bitmap(Width, Height);
+            DrawToBitmap(bmp, new Rectangle(0, 0, Width, Height));
+            bmp.Save(Path.Combine(dir, name + ".png"));
+        }
+
+        await Task.Delay(300);
+        Shot("0-welcome");
+        Show(1);
+        await Task.Delay(100);
+        Shot("1-options");
+        var install = NextAsync();
+        await Task.Delay(6000);
+        Shot("2-installing");
+        View(0);
+        await Task.Delay(100);
+        Shot("2a-look-back-welcome");
+        View(1);
+        await Task.Delay(100);
+        Shot("2b-look-back-options");
+        View(_page);
+        await install;
+        Shot("2c-installed");
+        await EnterLicensePageAsync();
+        Shot("3-license");
+        await EnterFinishPageAsync();
+        Shot("4-finish");
+        Close();
+    }
+
     private static async Task<bool> SimulateInstallAsync(InstallLog log, InstallOptions options)
     {
         var delay = int.TryParse(Environment.GetEnvironmentVariable("TODOX_SETUP_PREVIEW_DELAY"), out var ms) ? ms : 0;
@@ -662,11 +767,18 @@ public sealed class SetupWizard : Form
 
         await Step("copy", "Chép chương trình TodoX EditVideo", @"C:\...\TodoX EditVideo\app\todox-editvideo.exe");
         await Step("server", "Kết nối máy chủ TodoX", "bản mới nhất " + StatusService.Version);
-        await Step("component-ffmpeg", "Cài Bộ ghép & xử lý video", "đã cài bản 7.1");
-        await Step("component-node", "Cài Bộ chạy nền TodoX", "đã cài bản 22.11");
-        log.Info("Đang tải 96 MB...", "component-remotion");
-        await Step("component-remotion", "Cài Bộ hiệu ứng & dựng hình", "đã cài bản 4.0");
-        await Step("component-whisper", "Cài Bộ nghe lại lời thoại", "đã có bản mới nhất");
+        await Step("bo-xu-ly-video", "Cài Bộ ghép & xử lý video", "đã cài xong");
+        await Step("bo-chay-nen", "Cài Bộ chạy nền TodoX", "đã cài xong");
+        log.Start("bo-hieu-ung", "Cài Bộ hiệu ứng & dựng hình");
+        log.Info("Đang tải 96 MB...", "bo-hieu-ung");
+        for (var pct = 0; pct < 100; pct += 20)
+        {
+            log.Info($"Tải Bộ hiệu ứng & dựng hình: {pct}%", "bo-hieu-ung");
+            await Task.Delay(delay / 3);
+        }
+
+        log.Done("bo-hieu-ung", "đã cài xong");
+        await Step("bo-nghe-loi-thoai", "Cài Bộ nghe lại lời thoại", "đã có bản mới nhất");
         await Step("browser", "Tải trình duyệt dựng hình", "đã tải xong");
         await Step("resources", "Tạo thư mục tư liệu dự án", @"C:\Users\...\Documents\TodoX EditVideo");
         await Step("claude", "Kết nối vào Claude", "Claude Desktop, Claude Code — tắt hẳn rồi mở lại để dùng TodoX");
@@ -719,11 +831,10 @@ public sealed class SetupWizard : Form
             _logPath = _log.Save(_services.GetRequiredService<AgentPaths>());
             _logLink.Text = $"Nhật ký đã lưu: {_logPath}";
             _logLink.LinkArea = new LinkArea("Nhật ký đã lưu: ".Length, _logPath.Length);
-            _logLink.Visible = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            AppendLog(new InstallLogEntry(DateTimeOffset.Now, "warn", null, "Không lưu được nhật ký: " + ex.Message));
+            _log.Warn("Không lưu được nhật ký: " + ex.Message);
         }
     }
 
@@ -832,16 +943,29 @@ public sealed class SetupWizard : Form
 
     private Control Stepper()
     {
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 42, Padding = new Padding(34, 11, 20, 0), BackColor = ColorTranslator.FromHtml("#0E1014"), WrapContents = false };
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 46, Padding = new Padding(32, 10, 20, 0), BackColor = ColorTranslator.FromHtml("#0E1014"), WrapContents = false };
         for (var i = 0; i < StepNames.Length; i++)
         {
             if (i > 0)
             {
-                bar.Controls.Add(new Label { Text = "›", ForeColor = Muted, AutoSize = true, Margin = new Padding(6, 0, 6, 0) });
+                bar.Controls.Add(new StatusBadge(BadgeKind.Chevron, 14) { ForeColor = Muted, Margin = new Padding(8, 6, 8, 0) });
             }
 
-            var label = new Label { AutoSize = true, Margin = new Padding(0) };
+            var badge = new StatusBadge(BadgeKind.Number, 22) { Margin = new Padding(0, 2, 7, 0) };
+            var label = new Label { AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
+            var step = i;
+            EventHandler open = (_, _) =>
+            {
+                if (step <= _page)
+                {
+                    View(step);
+                }
+            };
+            badge.Click += open;
+            label.Click += open;
+            _stepBadges.Add(badge);
             _stepLabels.Add(label);
+            bar.Controls.Add(badge);
             bar.Controls.Add(label);
         }
 
@@ -851,7 +975,19 @@ public sealed class SetupWizard : Form
     private Control Footer()
     {
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = ColorTranslator.FromHtml("#101318") };
-        footer.Controls.Add(new Label { Text = "todox.vn · " + LicenseMessages.SupportContact, ForeColor = Muted, AutoSize = true, Location = new Point(34, 24) });
+        var contact = new LinkLabel
+        {
+            Text = "todox.vn · " + LicenseMessages.SupportContact,
+            LinkArea = new LinkArea(0, "todox.vn".Length),
+            UseMnemonic = false,
+            ForeColor = Muted,
+            LinkColor = Yellow,
+            ActiveLinkColor = Ink,
+            AutoSize = true,
+            Location = new Point(34, 24)
+        };
+        contact.LinkClicked += (_, _) => TryStart(new ProcessStartInfo(MainWindow.SupportUrl) { UseShellExecute = true });
+        footer.Controls.Add(contact);
         var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right | AnchorStyles.Top };
         buttons.Controls.Add(_close);
         buttons.Controls.Add(_next);

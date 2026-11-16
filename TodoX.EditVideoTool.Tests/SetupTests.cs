@@ -84,16 +84,16 @@ public sealed class SetupTests : IDisposable
 
         log.Start("copy", "Chép chương trình TodoX EditVideo");
         log.Done("copy", "xong");
-        log.Start("component-ffmpeg", "Cài Bộ ghép & xử lý video");
-        log.ProgressFor("component-ffmpeg").Report("Đang tải 50%");
-        log.Fail("component-ffmpeg", "mất mạng");
+        log.Start(ComponentNames.StepId("ffmpeg"), "Cài Bộ ghép & xử lý video");
+        log.ProgressFor(ComponentNames.StepId("ffmpeg")).Report("Đang tải 50%");
+        log.Fail(ComponentNames.StepId("ffmpeg"), "mất mạng");
         log.Skip("skills", "Tải bộ skill TodoX", "sẽ tải sau khi nhập license");
         log.Finish(ok: false);
         var text = log.Save(paths);
 
         Assert.Equal([StepState.Running, StepState.Done, StepState.Running, StepState.Failed, StepState.Skipped], changes.Select(c => c.State));
         Assert.Equal("Chép chương trình TodoX EditVideo", log.Steps.Single(s => s.Id == "copy").Title);
-        Assert.Contains(log.Record.Entries, e => e.Step == "component-ffmpeg" && e.Message == "Đang tải 50%");
+        Assert.Contains(log.Record.Entries, e => e.Step == ComponentNames.StepId("ffmpeg") && e.Message == "Đang tải 50%");
         Assert.Contains(log.Record.Entries, e => e.Level == "error" && e.Message.Contains("mất mạng"));
 
         var saved = JsonSerializer.Deserialize<InstallRecord>(File.ReadAllText(Path.ChangeExtension(text, ".json")), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
@@ -105,7 +105,7 @@ public sealed class SetupTests : IDisposable
 
         var readable = File.ReadAllText(text);
         Assert.Contains("cập nhật bản", readable);
-        Assert.Contains("[component-ffmpeg] LỖI: mất mạng", readable);
+        Assert.Contains("[bo-xu-ly-video] LỖI: mất mạng", readable);
         Assert.Contains("Kết quả: lỗi", readable);
     }
 
@@ -122,5 +122,33 @@ public sealed class SetupTests : IDisposable
 
         Assert.Equal(0, sent);
         Assert.Single(Directory.GetFiles(paths.LogsDir, "install-*.json"));
+    }
+
+    [Theory]
+    [InlineData("node")]
+    [InlineData("ffmpeg")]
+    [InlineData("ffprobe")]
+    [InlineData("remotion")]
+    [InlineData("whisper")]
+    public void Install_log_names_components_after_TodoX_parts(string component)
+    {
+        var id = ComponentNames.StepId(component);
+
+        Assert.DoesNotContain(component, id, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("bo-", id);
+    }
+
+    [Fact]
+    public void Only_one_TodoX_setup_installs_at_a_time()
+    {
+        // A downloaded setup may be open on this machine, so only the lock itself is checked here.
+        using (var first = Installer.TryLockInstall(checkOtherSetups: false))
+        {
+            Assert.NotNull(first);
+            Assert.Null(Installer.TryLockInstall(checkOtherSetups: false));
+        }
+
+        using var again = Installer.TryLockInstall(checkOtherSetups: false);
+        Assert.NotNull(again);
     }
 }

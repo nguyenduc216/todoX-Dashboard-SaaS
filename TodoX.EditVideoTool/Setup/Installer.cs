@@ -51,6 +51,59 @@ public sealed class Installer
     public IReadOnlyList<ClientStatus> Clients => _clients.Detect(InstalledExe);
 
     /// <summary>The install Windows knows about, else one in the pre-1.1 or default folder.</summary>
+    public const string BusyMessage =
+        "Đang có một bộ cài TodoX EditVideo khác chạy trên máy này. Hãy đợi bộ cài đó xong (hoặc đóng nó) rồi mở lại.";
+
+    /// <summary>
+    /// Holds the machine's TodoX install lock while setup runs; null when another TodoX setup already holds it, or a
+    /// downloaded TodoX setup (older ones have no lock) is still open.
+    /// </summary>
+    public static IDisposable? TryLockInstall(bool checkOtherSetups = true)
+    {
+        // A semaphore, not a mutex: it is not tied to a thread, and Windows drops it when the process holding it exits.
+        var gate = new Semaphore(1, 1, @"Local\TodoX.EditVideo.Install");
+        if (!gate.WaitOne(0))
+        {
+            gate.Dispose();
+            return null;
+        }
+
+        if (checkOtherSetups && OtherSetupRunning())
+        {
+            gate.Release();
+            gate.Dispose();
+            return null;
+        }
+
+        return new InstallLock(gate);
+    }
+
+    private static bool OtherSetupRunning()
+    {
+        var self = Environment.ProcessId;
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                if (process.Id != self && process.ProcessName.StartsWith("TodoX-EditVideo-Setup", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private sealed class InstallLock(Semaphore gate) : IDisposable
+    {
+        public void Dispose()
+        {
+            gate.Release();
+            gate.Dispose();
+        }
+    }
+
     public static ExistingInstall? FindExisting()
     {
         var candidates = new[] { AgentPaths.RegisteredRoot(), AgentPaths.LegacyRoot, AgentPaths.DefaultInstallRoot };
@@ -143,7 +196,7 @@ public sealed class Installer
 
         foreach (var file in manifest!.Components)
         {
-            var id = "component-" + file.Component;
+            var id = ComponentNames.StepId(file.Component);
             var title = $"Cài {ComponentNames.Of(file.Component)}";
             if (!await StepAsync(log, id, title, async () =>
                 {
@@ -154,7 +207,7 @@ public sealed class Installer
 
                     log.Info($"Đang tải {file.Size / 1048576.0:0} MB...", id);
                     await _components.InstallComponentAsync(file, log.ProgressFor(id), ct);
-                    return file.Version is null ? "đã cài" : $"đã cài bản {file.Version}";
+                    return "đã cài xong";
                 }))
             {
                 return false;

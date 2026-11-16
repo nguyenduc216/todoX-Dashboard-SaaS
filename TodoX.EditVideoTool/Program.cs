@@ -105,6 +105,13 @@ switch (command)
     }
     case "install":
     {
+        using var installLock = Installer.TryLockInstall();
+        if (installLock is null)
+        {
+            Console.WriteLine(Installer.BusyMessage);
+            return 1;
+        }
+
         using var services = BuildServices();
         var ok = await services.GetRequiredService<Installer>().InstallAsync(new Progress<string>(Console.WriteLine), CancellationToken.None);
         return ok ? 0 : 1;
