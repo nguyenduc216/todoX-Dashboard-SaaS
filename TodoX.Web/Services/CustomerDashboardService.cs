@@ -15,6 +15,35 @@ namespace TodoX.Web.Services;
 public interface ICustomerDashboardService
 {
     Task<CustomerDashboardDto> GetDashboardAsync(CurrentUserSession user, int recentLimit = 5, CancellationToken ct = default);
+
+    /// <summary>How often the signed-in customer used each service (jobs created), for ordering the home services.</summary>
+    Task<IReadOnlyDictionary<Guid, ServiceUsage>> GetServiceUsageAsync(CurrentUserSession user, CancellationToken ct = default);
+}
+
+/// <summary>Jobs a customer created with one service: in the last 30 days, in total, and the latest one.</summary>
+public sealed record ServiceUsage(Guid ServiceId, int Last30Days, int Total, DateTime LastUsedAt)
+{
+    /// <summary>Weight of the service: recent use counts three times as much as older use.</summary>
+    public int Score => Last30Days * 3 + Total;
+}
+
+/// <summary>Orders the customer's home services: most used first (weighted), then the catalog order.</summary>
+public static class ServiceUsageRanking
+{
+    /// <summary>Services used at least this many times are marked "Hay dùng".</summary>
+    public const int FrequentMinimum = 2;
+
+    public static IReadOnlyList<CatalogServiceView> Order(IEnumerable<CatalogServiceView> services, IReadOnlyDictionary<Guid, ServiceUsage> usage)
+        => services
+            .OrderByDescending(s => usage.TryGetValue(s.Id, out var u) ? u.Score : 0)
+            .ThenByDescending(s => usage.TryGetValue(s.Id, out var u) ? u.LastUsedAt : DateTime.MinValue)
+            .ThenBy(s => s.SortOrder)
+            .ThenBy(s => s.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>Badge on a service card, or null when the customer rarely used it.</summary>
+    public static string? Badge(CatalogServiceView service, IReadOnlyDictionary<Guid, ServiceUsage> usage)
+        => usage.TryGetValue(service.Id, out var u) && u.Total >= FrequentMinimum ? $"Hay dùng · {u.Total} lần" : null;
 }
 
 public sealed class CustomerDashboardDto
@@ -207,6 +236,62 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
         };
         _logger.LogInformation("CUSTOMER_DASHBOARD_LOAD_DONE elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
             stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
+        return result;
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, ServiceUsage>> GetServiceUsageAsync(CurrentUserSession user, CancellationToken ct = default)
+    {
+        var result = new Dictionary<Guid, ServiceUsage>();
+        if (user is not { IsAuthenticated: true, IsCustomer: true } || user.CustomerId is null) return result;
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var since = DateTime.UtcNow.AddDays(-30);
+        var rows = new List<ServiceUsage>();
+
+        // Parent jobs only (scene/child jobs would count one video many times); a draft means the customer opened the service.
+        rows.AddRange(await conn.QueryAsync<ServiceUsage>(new CommandDefinition(
+            """
+            SELECT service_id AS ServiceId,
+                   count(*) FILTER (WHERE created_at >= @since)::int AS Last30Days,
+                   count(*)::int AS Total,
+                   max(created_at) AS LastUsedAt
+              FROM render.render_jobs
+             WHERE tenant_id = @tenantId AND customer_id = @customerId
+               AND service_id IS NOT NULL
+               AND job_type = ANY(@jobTypes)
+             GROUP BY service_id;
+            """,
+            new { tenantId = _tenant.TenantId, customerId = user.CustomerId, since, jobTypes = CustomerDashboardWorkflowRules.SupportedRenderJobTypes },
+            cancellationToken: ct)));
+
+        try
+        {
+            rows.AddRange(await conn.QueryAsync<ServiceUsage>(new CommandDefinition(
+                """
+                SELECT (request_json->>'serviceId')::uuid AS ServiceId,
+                       count(*) FILTER (WHERE created_at >= @since)::int AS Last30Days,
+                       count(*)::int AS Total,
+                       max(created_at) AS LastUsedAt
+                  FROM dance_sell.dance_sell_jobs
+                 WHERE tenant_id = @tenantId AND customer_id = @customerId
+                   AND request_json->>'serviceId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                 GROUP BY 1;
+                """,
+                new { tenantId = _tenant.TenantId, customerId = user.CustomerId, since },
+                cancellationToken: ct)));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "CUSTOMER_DASHBOARD_DANCE_USAGE_FAILED customerId={CustomerId}", user.CustomerId);
+        }
+
+        foreach (var row in rows)
+        {
+            result[row.ServiceId] = result.TryGetValue(row.ServiceId, out var existing)
+                ? new ServiceUsage(row.ServiceId, existing.Last30Days + row.Last30Days, existing.Total + row.Total,
+                    existing.LastUsedAt > row.LastUsedAt ? existing.LastUsedAt : row.LastUsedAt)
+                : row;
+        }
         return result;
     }
 
