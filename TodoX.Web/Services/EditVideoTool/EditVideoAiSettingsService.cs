@@ -48,6 +48,12 @@ public sealed record EditVideoAiSettings
 
     public bool FallbackEnabled { get; init; } = true;
 
+    /// <summary>
+    /// Ask older desktop apps (before 1.1.3, no confirmation window) to confirm too — they then cannot create until
+    /// updated. Apps from 1.1.3 always confirm every paid command.
+    /// </summary>
+    public bool RequireConsent { get; init; }
+
     /// <summary>Models tried in order when the chosen one is rejected by the provider (same as the web).</summary>
     public string VideoFallback { get; init; } = DefaultVideoFallback;
     public string ImageFallback { get; init; } = DefaultImageFallback;
@@ -178,6 +184,7 @@ public sealed class EditVideoAiSettingsService
             CostFloorMarkup = rows.ContainsKey("cost_floor_markup") ? Dec(Get("cost_floor_markup")) is > 0 and var f ? f : null : defaults.CostFloorMarkup,
             MusicModel = Get("music_model") ?? defaults.MusicModel,
             FallbackEnabled = !string.Equals(Get("fallback_enabled"), "false", StringComparison.OrdinalIgnoreCase),
+            RequireConsent = string.Equals(Get("require_consent"), "true", StringComparison.OrdinalIgnoreCase),
             VideoFallback = Get("video_fallback") ?? defaults.VideoFallback,
             ImageFallback = Get("image_fallback") ?? defaults.ImageFallback
         };
@@ -225,6 +232,7 @@ public sealed class EditVideoAiSettingsService
             ["cost_floor_markup"] = s.CostFloorMarkup is > 0 ? s.CostFloorMarkup.Value.ToString(CultureInfo.InvariantCulture) : "",
             ["music_model"] = (s.MusicModel ?? "").Trim(),
             ["fallback_enabled"] = s.FallbackEnabled ? "true" : "false",
+            ["require_consent"] = s.RequireConsent ? "true" : "false",
             ["video_fallback"] = string.Join(", ", EditVideoAiSettings.List(s.VideoFallback)),
             ["image_fallback"] = string.Join(", ", EditVideoAiSettings.List(s.ImageFallback))
         };

@@ -21,7 +21,7 @@ public sealed partial class VideoTools
         await ReadyProblemAsync(null, ct) ?? await _ai.ModelsAsync(type, model, ct);
 
     [McpServerTool(Name = "todox_image_create", Destructive = false)]
-    [Description("Make an AI image with TodoX (costs points; confirm model, options and price with the user first). Input images can be files on this computer or https links. Waits for the result and saves it on this computer; returns the local file path, or a task id to check with todox_image_status.")]
+    [Description("Make an AI image with TodoX (costs points; confirm model and options with the user first; TodoX then shows its price in a confirmation window that the person must accept, and if they refuse nothing is made or charged - do not retry unless they ask). Input images can be files on this computer or https links. Waits for the result and saves it on this computer; returns the local file path, or a task id to check with todox_image_status.")]
     public Task<string> AiImageCreate(
         [Description("Model id from todox_ai_models.")] string model,
         [Description("What the image should show.")] string prompt,
@@ -37,7 +37,7 @@ public sealed partial class VideoTools
             project, TimeSpan.FromMinutes(4), progress, ct);
 
     [McpServerTool(Name = "todox_video_create", Destructive = false)]
-    [Description("Make an AI video with TodoX (costs points; confirm model, options and price with the user first). Start/end frames and reference images can be files on this computer or https links; source videos must be https links. Waits a few minutes; if the video is not ready yet it returns a task id to check with todox_video_status. Finished videos are saved on this computer and the local path is returned.")]
+    [Description("Make an AI video with TodoX (costs points; confirm model and options with the user first; TodoX then shows its price in a confirmation window that the person must accept, and if they refuse nothing is made or charged - do not retry unless they ask). Start/end frames and reference images can be files on this computer or https links; source videos must be https links. Waits a few minutes; if the video is not ready yet it returns a task id to check with todox_video_status. Finished videos are saved on this computer and the local path is returned.")]
     public Task<string> AiVideoCreate(
         [Description("Model id from todox_ai_models.")] string model,
         IProgress<ProgressNotificationValue> progress,
@@ -82,7 +82,7 @@ public sealed partial class VideoTools
     }
 
     [McpServerTool(Name = "todox_music_create", Destructive = false)]
-    [Description("Make AI music (Suno) with TodoX for a video: background music or a song with lyrics. Costs the TodoX music price in points (see todox_ai_models type music); confirm name, style and price with the user first. Usually returns two versions, saved into the project's 03-am-thanh folder; or a task id to check with todox_music_status.")]
+    [Description("Make AI music (Suno) with TodoX for a video: background music or a song with lyrics. Costs the TodoX music price in points (see todox_ai_models type music); confirm name and style with the user first; TodoX then shows its price in a confirmation window that the person must accept, and if they refuse nothing is made or charged - do not retry unless they ask. Usually returns two versions, saved into the project's 03-am-thanh folder; or a task id to check with todox_music_status.")]
     public async Task<string> AiMusicCreate(
         [Description("Song / track title, at least 4 characters.")] string name,
         [Description("Style: genre, mood, instruments, tempo (BPM), vocal tone, e.g. upbeat pop, guitar, 120 BPM, bright female vocal.")] string styles,

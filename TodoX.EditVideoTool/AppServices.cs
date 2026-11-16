@@ -26,7 +26,8 @@ public static class AppServices
             sp.GetRequiredService<LicenseVerifier>(),
             sp.GetRequiredService<IDeviceIdentity>(),
             sp.GetRequiredService<LicenseApiClient>()));
-        services.AddSingleton(sp => new TodoXServerClient(http, sp.GetRequiredService<LicenseStore>(), sp.GetRequiredService<IDeviceIdentity>()));
+        services.AddSingleton(sp => new TodoXServerClient(http, sp.GetRequiredService<LicenseStore>(), sp.GetRequiredService<IDeviceIdentity>(),
+            new DesktopPriceConsent()));
         services.AddSingleton<INotifier, WindowsNotifier>();
         services.AddSingleton(sp => new ServerConnectivity(sp.GetRequiredService<TodoXServerClient>(), sp.GetRequiredService<INotifier>()));
         services.AddSingleton<StatusService>();

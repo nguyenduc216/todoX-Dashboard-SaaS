@@ -106,7 +106,7 @@ public sealed partial class VideoTools
     }
 
     [McpServerTool(Name = "todox_voice_tts", Destructive = false)]
-    [Description("Turn narration text into a voiceover audio file with a TodoX voice (costs points; price from todox_voice_list). Returns the local audio file path.")]
+    [Description("Turn narration text into a voiceover audio file with a TodoX voice (costs points; TodoX shows its price in a confirmation window that the person must accept; if they refuse nothing is made or charged). Returns the local audio file path.")]
     public async Task<string> VoiceTts(
         [Description("Narration text, up to 3000 characters.")] string text,
         IProgress<ProgressNotificationValue> progress,
@@ -391,7 +391,8 @@ public sealed partial class VideoTools
     private static string Explain<T>(ServerResult<T> r) => r.ErrorCode switch
     {
         LicenseApiClient.NetworkError => ServerConnectivity.OfflineText,
-        "insufficient_points" or "voice_service_unavailable" or "voice_not_found" => r.Message ?? r.ErrorCode,
+        "insufficient_points" or "voice_service_unavailable" or "voice_not_found"
+            or TodoXServerClient.ConfirmRequired or TodoXServerClient.PriceDeclined => r.Message ?? r.ErrorCode,
         _ => LicenseMessages.ForServerError(r.ErrorCode, r.Message)
     };
 

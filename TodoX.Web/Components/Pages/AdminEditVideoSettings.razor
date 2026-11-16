@@ -40,6 +40,16 @@ else
         </MudPaper>
 
         <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-1">Xác nhận giá trước khi trừ điểm</MudText>
+            <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
+                Mỗi lệnh tốn điểm (video, ảnh, nhạc, giọng đọc) đều được TodoX báo giá trước; TodoX EditVideo từ bản 1.1.3 hiện cửa sổ
+                "Đồng ý trừ điểm" cho người dùng bấm — trợ lý AI không tự đồng ý được. Mọi lần báo giá và đồng ý được ghi log theo license.
+            </MudText>
+            <MudSwitch T="bool" @bind-Value="_requireConsent" Color="Color.Warning"
+                       Label="Bắt buộc cả với bản EditVideo cũ (trước 1.1.3): bản cũ phải cập nhật mới tạo được nội dung tốn điểm" />
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
             <MudText Typo="Typo.h6" Class="mb-1">Model dự phòng</MudText>
             <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
                 Khi 79AI từ chối model khách chọn (lỗi model, hết tài nguyên, thời lượng không hợp lệ), TodoX thử lần lượt các model khác theo thứ tự
@@ -85,6 +95,7 @@ else
     }
     private string _musicModel = "suno-v5.5";
     private bool _fallback = true;
+    private bool _requireConsent;
     private string? _videoFallback;
     private string? _imageFallback;
 
@@ -114,6 +125,7 @@ else
         _costFloor = _form.CostFloorMarkup;
         _musicModel = _form.MusicModel;
         _fallback = _form.FallbackEnabled;
+        _requireConsent = _form.RequireConsent;
         _videoFallback = _form.VideoFallback;
         _imageFallback = _form.ImageFallback;
         _missing = new[] { prices.Missing("image", ""), prices.Missing("video", ""), prices.Missing("music", "") }
@@ -139,6 +151,7 @@ else
                 CostFloorMarkup = _costFloor,
                 MusicModel = _musicModel,
                 FallbackEnabled = _fallback,
+                RequireConsent = _requireConsent,
                 VideoFallback = _videoFallback ?? "",
                 ImageFallback = _imageFallback ?? ""
             });

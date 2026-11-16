@@ -53,11 +53,11 @@ public sealed class ModelPriceBookTests
             Models = [new ModelPriceEntry { Kind = "video", Model = "veo_omni" }, new ModelPriceEntry { Kind = "video", Model = "kling_4_0", Markup = 5m },
                 new ModelPriceEntry { Kind = "video", Model = "cheap", Markup = 1.2m }]
         };
-        Assert.Equal(6m, book.PointsForCredits("video", "veo_omni", 2400m));    // 2.400đ × 2,5 = 6 điểm
+        Assert.Equal(4.8m, book.PointsForCredits("video", "veo_omni", 2400m));  // 2.400đ × 2 = 4,8 điểm
         Assert.Equal(43.2m, book.PointsForCredits("video", "kling_4_0", 14400m)); // markup 5 is capped at 3
         Assert.Equal(2m, book.PointsForCredits("video", "cheap", 1000m));       // markup 1,2 is raised to the minimum 2
         Assert.Equal(0.1m, book.Points(10m, 2.5m));                              // never below 0.1
-        Assert.Equal(2.5m, book.PointsForCredits("voice", "vbee", 1000m));       // Vbee 1.000đ/voice → 2,5 điểm
+        Assert.Equal(2m, book.PointsForCredits("voice", "vbee", 1000m));         // Vbee 1.000đ/voice → 2 điểm
 
         var quote = new ModelPriceQuote("video", "veo_omni", null, 2400m, 2.5m, 6m, 8);
         Assert.Equal(0.75m, quote.PerSecond);
@@ -108,9 +108,9 @@ public sealed class ModelPriceBookTests
     {
         var book = ModelPriceService.Parse(null);
         var prices = new EditVideoAiPrices(new EditVideoAiSettings(), new Dictionary<string, decimal>(), book);
-        Assert.Equal(7.5m, prices.For("music", "suno-v5.5", null, 3000m));
-        Assert.Equal(10m, prices.For("music", "suno-v6.0", null, 4000m));
-        Assert.Equal(36m, prices.For("video", "kling_4_0", "8", 14400m));
+        Assert.Equal(6m, prices.For("music", "suno-v5.5", null, 3000m));
+        Assert.Equal(8m, prices.For("music", "suno-v6.0", null, 4000m));
+        Assert.Equal(28.8m, prices.For("video", "kling_4_0", "8", 14400m));
         Assert.Null(prices.Missing("video", "kling_4_0"));
         Assert.Equal(60m, prices.For("video", "kling_video_motion_3", "20", 30000m)); // RDance motion ×2: 20 s × 1.500đ
     }
@@ -131,8 +131,8 @@ public sealed class ModelPriceBookTests
     {
         var book = ModelPriceService.Parse(null);
         var samples = ModelPriceSamples.For("video", VeoOmni, book, book.Find("video", "veo_omni"));
-        Assert.Contains(samples, s => s.Label == "720p · 8s" && s.CostVnd == 2400m && s.Points == 6m);
+        Assert.Contains(samples, s => s.Label == "720p · 8s" && s.CostVnd == 2400m && s.Points == 4.8m);
         var vbee = ModelPriceSamples.For("voice", null, book, book.Find("voice", "vbee"));
-        Assert.Equal(2.5m, Assert.Single(vbee).Points);
+        Assert.Equal(2m, Assert.Single(vbee).Points);
     }
 }

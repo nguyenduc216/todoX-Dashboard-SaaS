@@ -25,7 +25,8 @@ public static class ServerGuide
         (images: todox_image_status). todox_ai_tasks lists recent tasks. Local photos can be used as inputs.
         AI music (Suno, costs points): todox_music_create (title, style, optional lyrics), saved into the project's
         03-am-thanh; todox_music_status for one still running. VFX on a clip: a video model with the edit ability
-        and the clip as source video. Every price is TodoX's point price shown by todox_ai_models.
+        and the clip as source video. Every price is TodoX's point price; before anything paid
+        (image, video, music, voice) TodoX shows it in a confirmation window the person must accept - refused = nothing made.
         TodoX skills (todox-...): start them with todox_skill_start and follow the steps it returns.
         """;
 }

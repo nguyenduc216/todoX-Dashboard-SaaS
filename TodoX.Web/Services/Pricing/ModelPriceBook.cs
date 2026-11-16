@@ -81,7 +81,7 @@ public sealed record ModelPriceBook
 {
     public decimal VndPerPoint { get; init; } = 1000m;
     public decimal VndPerCredit { get; init; } = 1m;
-    public decimal DefaultMarkup { get; init; } = 2.5m;
+    public decimal DefaultMarkup { get; init; } = 2m;
     public decimal MinMarkup { get; init; } = 2m;
     public decimal MaxMarkup { get; init; } = 3m;
     public IReadOnlyList<ModelPriceEntry> Models { get; init; } = [];

@@ -27,6 +27,10 @@ public sealed class EditVideoAiCreateRequest
     public string? ClientKey { get; init; }
     /// <summary>The customer's project (folder name); the task goes into that project's own 79AI project.</summary>
     public string? Project { get; init; }
+    /// <summary>The quote the person agreed to in the app's confirmation window (see EditVideoConsentService).</summary>
+    public string? ConfirmQuoteId { get; init; }
+    public string? ConsentMethod { get; init; }
+    public string? ConsentUser { get; init; }
 }
 
 public sealed record EditVideoAiUploadRequest(string? FileName, string? Data, string? Project = null);
@@ -42,6 +46,10 @@ public sealed class EditVideoAiMusicRequest
     public string? Model { get; init; }
     public string? ClientKey { get; init; }
     public string? Project { get; init; }
+    /// <summary>The quote the person agreed to in the app's confirmation window (see EditVideoConsentService).</summary>
+    public string? ConfirmQuoteId { get; init; }
+    public string? ConsentMethod { get; init; }
+    public string? ConsentUser { get; init; }
 }
 
 public sealed record EditVideoAiTask(
@@ -72,8 +80,10 @@ public sealed class EditVideoAiService
 
     public EditVideoAiService(TodoXConnectionFactory factory, TenantContext tenant, IEditVideoGommoClient gommo, WalletService wallets,
         EditVideoUsageService usage, IMemoryCache cache, IOptionsMonitor<EditVideoAiOptions> options, IConfiguration configuration,
-        ILogger<EditVideoAiService> logger, EditVideoAiProjectService? projects = null, EditVideoAiSettingsService? settings = null)
+        ILogger<EditVideoAiService> logger, EditVideoAiProjectService? projects = null, EditVideoAiSettingsService? settings = null,
+        EditVideoConsentService? consent = null)
     {
+        _consent = consent;
         _projects = projects;
         _settings = settings;
         _factory = factory;
@@ -91,6 +101,14 @@ public sealed class EditVideoAiService
 
     private readonly EditVideoAiProjectService? _projects;
     private readonly EditVideoAiSettingsService? _settings;
+    private readonly EditVideoConsentService? _consent;
+
+    private static EditVideoConsentInfo ConsentInfo(string? method, string? user, string? quoteId) =>
+        new(string.IsNullOrWhiteSpace(method) ? (quoteId is null ? null : "app") : method.Trim()[..Math.Min(40, method.Trim().Length)],
+            string.IsNullOrWhiteSpace(user) ? null : user.Trim()[..Math.Min(80, user.Trim().Length)], null);
+
+    private static EditVideoResult<EditVideoAiTask> ConfirmFirst(EditVideoPriceQuote quote) =>
+        Fail(EditVideoConsentService.ConfirmRequired, EditVideoConsentService.Message(quote), quote);
 
     /// <summary>TodoX point prices; without the settings service (tests) the old credit conversion is used.</summary>
     private async Task<EditVideoAiPrices?> PricesAsync(CancellationToken ct) => _settings is null ? null : await _settings.PricesAsync(ct);
@@ -220,6 +238,27 @@ public sealed class EditVideoAiService
             return Fail("insufficient_points", $"Không đủ point để tạo {KindLabel(kind)} AI (cần {points:0.#}, còn khả dụng {Math.Max(0, available):0.#}). Nạp thêm point trên dashboard TodoX.");
         }
 
+        // The person confirms this exact TodoX price in the app before anything is made or charged.
+        EditVideoConsentTicket? consent = null;
+        if (_consent is not null)
+        {
+            var s = quote.Selection;
+            var summary = kind == "video"
+                ? $"Video AI {modelCode} · {s.Resolution ?? "mặc định"} · {s.Duration ?? "?"} giây · khung {s.Ratio ?? "mặc định"}"
+                : $"Ảnh AI {modelCode} · {s.Resolution ?? "mặc định"} · khung {s.Ratio ?? "mặc định"}";
+            var fingerprint = EditVideoConsentService.Fingerprint(kind, modelCode, s.Ratio, s.Resolution, s.Mode, s.Duration,
+                Clean(request.Prompt), request.Images, request.References, request.VideoUrls, Clean(request.Project));
+            var (ticket, ask) = await _consent.CheckAsync(license, device, kind, modelCode, summary, fingerprint, points,
+                prices?.Book?.VndPerPoint ?? prices?.VndPerPoint ?? 1000m, available, Clean(request.ConfirmQuoteId),
+                ConsentInfo(request.ConsentMethod, request.ConsentUser, Clean(request.ConfirmQuoteId)), ct);
+            if (ask is not null)
+            {
+                return ConfirmFirst(ask);
+            }
+
+            consent = ticket;
+        }
+
         var taskId = Guid.NewGuid();
         var providerProject = await ProviderProjectAsync(license, request.Project, ct);
         using (var conn = await _factory.OpenAsync(ct))
@@ -239,6 +278,11 @@ public sealed class EditVideoAiService
             {
                 return await GetAsync(raced, license.Id, ct);
             }
+        }
+
+        if (consent is not null)
+        {
+            await _consent!.LogConsentAsync(license, device, consent, kind, taskId, ct);
         }
 
         // The chosen model first; when the provider rejects it before accepting the job, the next model of the
@@ -375,6 +419,21 @@ public sealed class EditVideoAiService
             return Fail("insufficient_points", $"Không đủ point để tạo nhạc AI (cần {points:0.#}, còn khả dụng {Math.Max(0, available):0.#}). Nạp thêm point trên dashboard TodoX.");
         }
 
+        EditVideoConsentTicket? consent = null;
+        if (_consent is not null)
+        {
+            var fingerprint = EditVideoConsentService.Fingerprint("music", modelCode, name, styles, Clean(request.Lyrics), Clean(request.Gender), Clean(request.Project));
+            var (ticket, ask) = await _consent.CheckAsync(license, device, "music", modelCode, $"Nhạc AI {modelCode} · bài \"{name}\" (2 bản)", fingerprint, points,
+                prices?.Book?.VndPerPoint ?? prices?.VndPerPoint ?? 1000m, available, Clean(request.ConfirmQuoteId),
+                ConsentInfo(request.ConsentMethod, request.ConsentUser, Clean(request.ConfirmQuoteId)), ct);
+            if (ask is not null)
+            {
+                return ConfirmFirst(ask);
+            }
+
+            consent = ticket;
+        }
+
         var taskId = Guid.NewGuid();
         var providerProject = await ProviderProjectAsync(license, request.Project, ct);
         using (var conn = await _factory.OpenAsync(ct))
@@ -395,6 +454,11 @@ public sealed class EditVideoAiService
             {
                 return await GetAsync(raced, license.Id, ct);
             }
+        }
+
+        if (consent is not null)
+        {
+            await _consent!.LogConsentAsync(license, device, consent, "music", taskId, ct);
         }
 
         try

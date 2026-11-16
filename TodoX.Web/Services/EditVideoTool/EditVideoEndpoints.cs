@@ -16,7 +16,7 @@ public static class EditVideoEndpoints
     public sealed record SessionStartRequest(string? Tool, string? AppVersion, string? Client);
     public sealed record SessionLogsRequest(List<EditVideoLogEntry>? Entries);
     public sealed record SessionEndRequest(string? Status, JsonElement? Summary);
-    public sealed record VoiceRequest(string? Text, string? VoiceCode, Guid? SessionId);
+    public sealed record VoiceRequest(string? Text, string? VoiceCode, Guid? SessionId, string? ConfirmQuoteId = null, string? ConsentMethod = null, string? ConsentUser = null);
     public sealed record SkillRunStartRequest(string? Skill, int? Version);
     public sealed record SkillRunNextRequest(string? Run, bool Repeat = false);
 
@@ -252,7 +252,7 @@ public static class EditVideoEndpoints
                 return ToResult(auth);
             }
 
-            return ToResult(await voices.SubmitAsync(auth.Value.License, auth.Value.Device, body.Text, body.VoiceCode, body.SessionId, ct));
+            return ToResult(await voices.SubmitAsync(auth.Value.License, auth.Value.Device, body.Text, body.VoiceCode, body.SessionId, ct, body.ConfirmQuoteId, body.ConsentMethod, body.ConsentUser));
         }).DisableAntiforgery();
 
         group.MapGet("/tts/{jobId:guid}", async (Guid jobId, HttpContext http, EditVideoLicenseService licenses, EditVideoVoiceService voices, CancellationToken ct) =>
@@ -349,6 +349,7 @@ public static class EditVideoEndpoints
         EditVideoErrorCodes.InvalidLicense or "not_found" or "voice_not_found" or "model_not_found" => StatusCodes.Status404NotFound,
         EditVideoErrorCodes.DeviceLimitReached => StatusCodes.Status409Conflict,
         "insufficient_points" => StatusCodes.Status402PaymentRequired,
+        EditVideoConsentService.ConfirmRequired => StatusCodes.Status409Conflict,
         "price_not_configured" => StatusCodes.Status503ServiceUnavailable,
         EditVideoErrorCodes.SigningUnavailable or "voice_service_unavailable" or "ai_service_unavailable" => StatusCodes.Status503ServiceUnavailable,
         "voice_failed" or "ai_failed" => StatusCodes.Status502BadGateway,
