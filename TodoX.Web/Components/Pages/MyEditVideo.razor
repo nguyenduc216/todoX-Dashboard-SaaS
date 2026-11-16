@@ -53,7 +53,14 @@
         {
             <MudPaper Class="todox-card pa-4">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                    <MudText Typo="Typo.h6">License @EditVideoLicenseKeys.Mask(license.KeyPrefix + "????", 8, 0) · gói @license.PlanCode</MudText>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudText Typo="Typo.h6">License @EditVideoLicenseKeys.Mask(license.KeyPrefix + "????", 8, 0) · gói @license.PlanCode</MudText>
+                        @* Only the key's hash is stored: without a key issued on this visit, copying issues a new one (after a confirm). *@
+                        <MudTooltip Text="@(_newKeys.ContainsKey(license.Id) ? "Sao chép license key" : "Sao chép license key (cấp key mới để sao chép)")">
+                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Warning" Disabled="_busyKey"
+                                           aria-label="Sao chép license key" OnClick="@(() => CopyLicenseKeyAsync(license))" />
+                        </MudTooltip>
+                    </MudStack>
                     <MudChip T="string" Size="Size.Small" Color="@(license.Status == EditVideoLicenseStatuses.Active ? Color.Success : Color.Warning)">@StatusLabel(license.Status)</MudChip>
                 </MudStack>
                 @if (_newKeys.TryGetValue(license.Id, out var newKey))
@@ -122,20 +129,39 @@
     private readonly Dictionary<Guid, string> _newKeys = new();
     private bool _busyKey;
 
-    private async Task NewKeyAsync(EditVideoLicenseRow license)
+    // TodoX keeps only a hash of the key, so a key can be copied only right after it is issued.
+    private async Task CopyLicenseKeyAsync(EditVideoLicenseRow license)
     {
-        if (_customerId is not { } customerId)
+        if (_newKeys.TryGetValue(license.Id, out var key))
         {
+            await CopyKeyAsync(key);
             return;
         }
 
-        var hasKey = _newKeys.ContainsKey(license.Id);
+        if (await NewKeyAsync(license,
+                "Vì an toàn, TodoX không lưu key đầy đủ nên không xem lại được key cũ. Cấp key mới để sao chép? " +
+                "Key cũ không kích hoạt thêm máy được nữa; máy đã kích hoạt vẫn dùng bình thường.",
+                "Cấp key mới và sao chép") is { } issued)
+        {
+            await CopyKeyAsync(issued);
+        }
+    }
+
+    private Task NewKeyAsync(EditVideoLicenseRow license) => NewKeyAsync(license, null, null);
+
+    private async Task<string?> NewKeyAsync(EditVideoLicenseRow license, string? message, string? yesText)
+    {
+        if (_customerId is not { } customerId)
+        {
+            return null;
+        }
+
         var confirm = await DialogService.ShowMessageBoxAsync("Cấp license key mới",
-            "TodoX sẽ tạo key mới cho license này. Key cũ không kích hoạt thêm máy được nữa; máy đã kích hoạt vẫn dùng bình thường. Tiếp tục?",
-            yesText: "Cấp key mới", cancelText: "Hủy");
+            message ?? "TodoX sẽ tạo key mới cho license này. Key cũ không kích hoạt thêm máy được nữa; máy đã kích hoạt vẫn dùng bình thường. Tiếp tục?",
+            yesText: yesText ?? "Cấp key mới", cancelText: "Hủy");
         if (confirm != true)
         {
-            return;
+            return null;
         }
 
         _busyKey = true;
@@ -147,11 +173,11 @@
                 _newKeys[license.Id] = key;
                 await Reload();
                 Snackbar.Add("Đã cấp license key mới. Bấm Sao chép để lấy key.", Severity.Success);
+                return key;
             }
-            else
-            {
-                Snackbar.Add("Không cấp được key mới cho license này. Liên hệ TodoX.", Severity.Error);
-            }
+
+            Snackbar.Add("Không cấp được key mới cho license này. Liên hệ TodoX.", Severity.Error);
+            return null;
         }
         finally
         {
