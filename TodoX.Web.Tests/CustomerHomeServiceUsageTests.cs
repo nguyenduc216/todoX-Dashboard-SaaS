@@ -31,7 +31,7 @@ public sealed class CustomerHomeServiceUsageTests
         var ordered = ServiceUsageRanking.Order([brand, expert, koc, unused], usage);
 
         Assert.Equal(new[] { koc, brand, expert, unused }, ordered);
-        Assert.Equal("Hay dùng · 3 lần", ServiceUsageRanking.Badge(koc, usage));
+        Assert.Equal("3 lần", ServiceUsageRanking.Badge(koc, usage));
         Assert.Null(ServiceUsageRanking.Badge(expert, usage));
         Assert.Null(ServiceUsageRanking.Badge(unused, usage));
     }

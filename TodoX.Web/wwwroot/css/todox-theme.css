@@ -1854,9 +1854,23 @@ html body ::-webkit-scrollbar-button {
     gap: 16px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    scroll-behavior: smooth;
     scrollbar-width: none;
-    padding: 4px 2px 8px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    padding: 8px 2px 12px;
+}
+
+.todox-slider-track.is-gliding {
+    scroll-snap-type: none;
+}
+
+.todox-slider-item > .todox-service-card {
+    transition: transform .25s ease, box-shadow .25s ease;
+}
+
+.todox-slider-item > .todox-service-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .45);
 }
 
 .todox-slider-track::-webkit-scrollbar {
@@ -1897,7 +1911,11 @@ html body ::-webkit-scrollbar-button {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background .15s ease, opacity .15s ease;
+    transition: background .2s ease, color .2s ease, opacity .2s ease, transform .2s ease;
+}
+
+.todox-slider-arrow:active:not(:disabled) {
+    transform: translateY(-50%) scale(.92);
 }
 
 .todox-slider-arrow:hover:not(:disabled) {
@@ -1922,18 +1940,18 @@ html body ::-webkit-scrollbar-button {
 }
 
 .todox-service-badge {
+    /* Small usage count in the card's top-right corner, clear of the artwork. */
     position: absolute;
-    top: 10px;
-    left: 10px;
+    top: 6px;
+    right: 6px;
     z-index: 2;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px 4px 6px;
+    padding: 1px 7px;
     border-radius: 999px;
-    background: linear-gradient(135deg, #ffb700, #ff7a00);
-    color: #05080d;
-    font-size: 12px;
-    font-weight: 700;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
+    background: rgba(5, 8, 13, .72);
+    border: 1px solid rgba(255, 183, 0, .55);
+    color: #ffb700;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    pointer-events: none;
 }
