@@ -116,6 +116,21 @@ public sealed class AccountRepository
             new { e = email, id = excludeId });
     }
 
+    /// <summary>Who already logs in with this phone (name, email, account type), so the admin knows where to change it.</summary>
+    public async Task<(string Name, string? Email, string UserType)?> FindPhoneOwnerAsync(string phone, Guid? excludeId = null)
+    {
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<(string Name, string? Email, string UserType)>(
+            """
+            SELECT COALESCE(full_name, display_name, username, email, '') AS name, email, COALESCE(user_type, '') AS user_type
+              FROM auth.app_users
+             WHERE phone = @p AND (@id IS NULL OR id <> @id)
+             LIMIT 1;
+            """, new { p = phone, id = excludeId });
+        var list = rows.ToList();
+        return list.Count == 0 ? null : list[0];
+    }
+
     public async Task<bool> PhoneExistsAsync(string phone, Guid? excludeId = null)
     {
         using var conn = await _factory.OpenAsync();

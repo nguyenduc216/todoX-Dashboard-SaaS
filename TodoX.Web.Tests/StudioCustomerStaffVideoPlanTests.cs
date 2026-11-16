@@ -115,8 +115,21 @@ public sealed class StudioCustomerStaffVideoPlanTests
 
         // A duplicate phone is reported in words instead of a database error.
         var service = Read("TodoX.Web", "Services", "AccountService.cs");
-        Assert.Contains("Số điện thoại đã được dùng cho tài khoản khác.", service);
+        Assert.Contains("Mỗi số chỉ dùng cho một tài khoản đăng nhập", service);
         Assert.Contains("STAFF_SAVE_FAILED", Read("TodoX.Web", "Components", "Pages", "StaffMembers.razor"));
+    }
+
+    /// <summary>A phone already used by another login names that account, so the admin knows where to change it.</summary>
+    [Fact]
+    public void A_taken_phone_says_which_account_holds_it()
+    {
+        var customer = AccountService.PhoneTakenMessage("0888578074", "Nguyễn Văn A", "a@x.vn", "customer");
+        Assert.Contains("0888578074", customer);
+        Assert.Contains("tài khoản khách hàng Nguyễn Văn A (a@x.vn)", customer);
+        Assert.Contains("để trống số điện thoại", customer);
+
+        Assert.Contains("tài khoản quản trị / nhân viên b@x.vn.", AccountService.PhoneTakenMessage("0901", null, "b@x.vn", "admin"));
+        Assert.Contains("FindPhoneOwnerAsync(model.Phone", Read("TodoX.Web", "Services", "AccountService.cs"));
     }
 
     /// <summary>Rule (user, 2026-11-16): the browser must never auto-fill a saved login into a dashboard form.

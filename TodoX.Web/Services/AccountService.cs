@@ -266,9 +266,10 @@ public sealed class AccountService
         model.Phone = model.Phone?.Trim() ?? string.Empty;
 
         // auth.app_users has a unique phone index: check it here so the user gets a clear message instead of a DB error.
-        if (model.Phone.Length > 0 && await _accounts.PhoneExistsAsync(model.Phone, model.Id == Guid.Empty ? null : model.Id))
+        if (model.Phone.Length > 0
+            && await _accounts.FindPhoneOwnerAsync(model.Phone, model.Id == Guid.Empty ? null : model.Id) is { } owner)
         {
-            return (false, "Số điện thoại đã được dùng cho tài khoản khác.");
+            return (false, PhoneTakenMessage(model.Phone, owner.Name, owner.Email, owner.UserType));
         }
 
         if (model.Id == Guid.Empty)
@@ -285,6 +286,20 @@ public sealed class AccountService
         var newHash = string.IsNullOrWhiteSpace(model.Password) ? null : _passwords.Hash(model.Password);
         await _accounts.UpdateSystemUserAsync(model, newHash);
         return (true, "Đã cập nhật quản trị viên.");
+    }
+
+    /// <summary>Each phone logs in one account (unique index on auth.app_users.phone): say which account holds it.</summary>
+    internal static string PhoneTakenMessage(string phone, string? ownerName, string? ownerEmail, string? userType)
+    {
+        var kind = userType switch
+        {
+            "customer" => "tài khoản khách hàng",
+            "root" or "admin" => "tài khoản quản trị / nhân viên",
+            _ => "tài khoản"
+        };
+        var who = string.IsNullOrWhiteSpace(ownerName) ? ownerEmail : ownerName;
+        var email = !string.IsNullOrWhiteSpace(ownerEmail) && ownerEmail != who ? $" ({ownerEmail})" : string.Empty;
+        return $"Số điện thoại {phone} đã dùng cho {kind} {who}{email}. Mỗi số chỉ dùng cho một tài khoản đăng nhập: để trống số điện thoại hoặc đổi số ở tài khoản kia.";
     }
 
     public Task SetSystemUserStatusAsync(Guid id, TodoXAccountStatus status)
