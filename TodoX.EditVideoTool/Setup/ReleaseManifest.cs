@@ -18,6 +18,17 @@ public static class ComponentNames
         "whisper" => "Bộ nghe lại lời thoại",
         _ => "thành phần TodoX"
     };
+
+    /// <summary>Step id of a component in the install log, named after the TodoX part, not the tool inside it.</summary>
+    public static string StepId(string? component) => component switch
+    {
+        "node" => "bo-chay-nen",
+        "ffmpeg" => "bo-xu-ly-video",
+        "ffprobe" => "bo-doc-video",
+        "remotion" => "bo-hieu-ung",
+        "whisper" => "bo-nghe-loi-thoai",
+        _ => "thanh-phan-todox"
+    };
 }
 
 public sealed record ReleaseManifest(string Version, string MinSupported, DateTimeOffset PublishedAt, string? Notes, IReadOnlyList<ReleaseFile> Files)
