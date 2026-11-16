@@ -119,14 +119,17 @@ public sealed partial class MainWindow
         _libraryBody.Controls.Add(tab switch
         {
             LibraryTab.Characters => CharacterGrid(),
-            LibraryTab.Voices => LibraryList(Items("voices"), "Chưa có giọng đọc.", "Bấm đúp để nghe giọng mẫu.",
-                [("Giọng", 260), ("Mã", 200), ("Giới tính", 110), ("Ngôn ngữ", 110)],
-                v => [S(v, "name") + (v["isDefault"]?.GetValue<bool>() == true ? "  (mặc định)" : ""), S(v, "code"), Gender(S(v, "gender")), S(v, "language")]),
+            LibraryTab.Voices => LibraryList(Items("voices"), "Chưa có giọng đọc.", "Bấm đúp để nghe giọng mẫu (giọng có chữ \"Có\" ở cột Nghe thử).",
+                [("Giọng", 260), ("Mã", 200), ("Giới tính", 100), ("Ngôn ngữ", 100), ("Nghe thử", 130)],
+                v => [S(v, "name") + (v["isDefault"]?.GetValue<bool>() == true ? "  (mặc định)" : ""), S(v, "code"), Gender(S(v, "gender")), S(v, "language"),
+                    HasFile(v) ? "Có" : "Chưa có mẫu"],
+                "Giọng này chưa có file nghe thử trên Dashboard TodoX. Quản trị viên tải file mẫu ở Dashboard › AI Studio › Giọng đọc, rồi bấm Tải lại từ Dashboard."),
             LibraryTab.Music => LibraryList(Items("music"), "Chưa có nhạc. Tạo nhạc AI bằng skill todox-nhac-suno hoặc nhờ TodoX thêm nhạc nền.",
                 "Bấm đúp để nghe. Nhờ Claude dùng bài này làm nhạc nền (todox_library).",
                 [("Bài nhạc", 330), ("Nguồn", 130), ("Thể loại", 130), ("Thời lượng", 110)],
                 m => [S(m, "name"), S(m, "source") == "ai" ? "Nhạc AI của bạn" : "Nhạc TodoX", S(m, "category"),
-                    m["durationSeconds"] is JsonValue d && d.TryGetValue<int>(out var sec) ? $"{sec / 60}:{sec % 60:00}" : ""]),
+                    m["durationSeconds"] is JsonValue d && d.TryGetValue<int>(out var sec) ? $"{sec / 60}:{sec % 60:00}" : ""],
+                "Chưa tải được file bài nhạc này về máy. Bấm Tải lại từ Dashboard."),
             _ => LibraryList(Items("vfx"), "Chưa có model VFX nào bật cho EditVideo.", "Nhờ Claude dùng VFX với một clip (skill todox-vfx); giá hiện khi tạo.",
                 [("Hiệu ứng (model)", 330), ("Mã model", 260), ("Hạng", 120)],
                 x => [S(x, "name"), S(x, "model"), S(x, "tier")])
@@ -197,7 +200,10 @@ public sealed partial class MainWindow
         return host;
     }
 
-    private Control LibraryList(JsonObject[] items, string empty, string hint, (string Title, int Width)[] columns, Func<JsonObject, string[]> cells)
+    private static bool HasFile(JsonObject o) => S(o, "localPath") is { Length: > 0 } f && File.Exists(f);
+
+    private Control LibraryList(JsonObject[] items, string empty, string hint, (string Title, int Width)[] columns, Func<JsonObject, string[]> cells,
+        string? noFile = null)
     {
         if (items.Length == 0)
         {
@@ -246,9 +252,18 @@ public sealed partial class MainWindow
 
         list.DoubleClick += (_, _) =>
         {
-            if (list.SelectedItems.Count > 0 && list.SelectedItems[0].Tag is string { Length: > 0 } file && File.Exists(file))
+            if (list.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
+            if (list.SelectedItems[0].Tag is string { Length: > 0 } file && File.Exists(file))
             {
                 Ui.Open(file);
+            }
+            else if (noFile is not null)
+            {
+                MessageBox.Show(this, noFile, "TodoX EditVideo", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         };
         var tip = new Label { Text = hint, Dock = DockStyle.Bottom, Height = 30, ForeColor = Muted, TextAlign = ContentAlignment.BottomLeft, UseMnemonic = false };
