@@ -140,7 +140,12 @@
         _roles = await PermRepo.GetRolesAsync();
         _allPerms = await PermRepo.GetAllPermissionsAsync();
         _allPermIds = _allPerms.Select(p => p.Id).ToHashSet();
-        _modules = _allPerms.Select(p => p.Module).Distinct().OrderBy(x => x).ToList();
+        // Home page blocks first and together, in their on-page order; the rest alphabetically as before.
+        _modules = _allPerms.Select(p => p.Module).Distinct()
+            .OrderBy(x => HomeWidgets.Find(x) is null ? 1 : 0)
+            .ThenBy(x => HomeWidgets.All.ToList().FindIndex(w => w.Module == x))
+            .ThenBy(x => x)
+            .ToList();
 
         var order = new[] { "view", "create", "update", "delete", "approve", "reject", "activate", "deactivate", "assign_role", "assign_permission", "reset_password", "run", "test", "export", "import", "adjust" };
         var present = _allPerms.Select(p => p.Action).Distinct().ToHashSet();
@@ -299,6 +304,9 @@
         "dashboard" => "Dashboard",
         "llm_gateway" => "LLM Gateway",
         "prompt_templates" => "Quản lý prompt",
+        "video_plans" => "Kế hoạch video",
+        "staff_members" => "Nhân viên TodoX",
+        _ when HomeWidgets.Find(m) is { } widget => $"Trang chủ · {widget.Title}",
         _ => m
     };
 }

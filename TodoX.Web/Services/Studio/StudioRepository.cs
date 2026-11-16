@@ -238,6 +238,20 @@ public sealed class StudioRepository
         return rows.ToList();
     }
 
+    /// <summary>Open plans for the home page blocks (no script/content text needed there).</summary>
+    public async Task<IReadOnlyList<VideoPlan>> ListOpenPlansForHomeAsync()
+    {
+        var user = _auth.CurrentUser;
+        if (!HomeWidgets.CanSee(user, HomeWidgets.MyVideoPlans) && !HomeWidgets.CanSee(user, HomeWidgets.VideoPlans))
+            throw new UnauthorizedAccessException("Bạn không có quyền xem kế hoạch video trên trang chủ.");
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<VideoPlan>(
+            PlanSelect + " WHERE c.tenant_id = @tenant AND p.status NOT IN ('released', 'cancelled') ORDER BY p.release_date NULLS LAST, p.created_at;",
+            new { tenant = _tenant.TenantId });
+        return rows.ToList();
+    }
+
     public async Task<VideoPlan?> GetPlanAsync(Guid id)
     {
         Require("video_plans.view");
