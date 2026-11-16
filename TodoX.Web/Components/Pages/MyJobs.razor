@@ -1,6 +1,7 @@
 @page "/jobs"
 @implements IDisposable
 @using TodoX.Web.Models.Timelapse
+@using TodoX.Web.Services.CustomerJobs
 @using TodoX.Web.Services.DanceSell
 @using TodoX.Web.Services.Timelapse
 @using TodoX.Web.Services.VideoRender
@@ -62,7 +63,52 @@
         {
             <MudAlert Severity="Severity.Warning" Dense="true">@_error</MudAlert>
         }
-        <MudTable Items="_jobs" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" Loading="_loading" LoadingProgressColor="Color.Warning">
+        @* Search: filters the loaded rows; while a filter is on, older pages load by themselves (FillFilteredAsync). *@
+        <MudPaper Class="todox-card pa-3" rounded="true">
+            <MudGrid Spacing="2" Class="align-center">
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string" Value="_filter.Text" ValueChanged="OnTextChanged" Label="Tìm theo tiêu đề" Placeholder="Nhập tiêu đề (gõ không dấu cũng được)"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" DebounceInterval="350"
+                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" autocomplete="off" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudSelect T="string" Value="_filter.Service" ValueChanged="OnServiceChanged" Label="Dịch vụ" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        @foreach (var service in ServiceOptions)
+                        {
+                            <MudSelectItem T="string" Value="@service">@service</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="6" sm="3" md="2">
+                    <MudDatePicker Label="Từ ngày" Date="_filter.From" DateChanged="OnFromChanged" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd/MM/yyyy" Clearable="true" MaxDate="_filter.To" />
+                </MudItem>
+                <MudItem xs="6" sm="3" md="2">
+                    <MudDatePicker Label="Đến ngày" Date="_filter.To" DateChanged="OnToChanged" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd/MM/yyyy" Clearable="true" MinDate="_filter.From" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudSelect T="string" Value="_filter.Status" ValueChanged="OnStatusChanged" Label="Trạng thái" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        @foreach (var status in MyJobsStatus.All)
+                        {
+                            <MudSelectItem T="string" Value="@status">@status</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+            @if (_filter.IsActive)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2 gap-2 flex-wrap">
+                    <MudText Typo="Typo.body2">
+                        Tìm thấy @_visible.Count job@(_hasMore ? (_searching ? " — đang tìm thêm job cũ…" : " trong các job đã tải") : "")
+                    </MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ClearFilterAsync">Xóa bộ lọc</MudButton>
+                </MudStack>
+            }
+        </MudPaper>
+        @if (_filter.IsActive && _visible.Count == 0 && !_loading && !_searching)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">Không có job nào khớp bộ lọc.</MudAlert>
+        }
+        <MudTable Items="_visible" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" Loading="_loading" LoadingProgressColor="Color.Warning">
             <HeaderContent>
                 <MudTh>Tiêu đề</MudTh>
                 <MudTh>Dịch vụ</MudTh>
@@ -98,7 +144,20 @@
     internal const int PageSize = 20;
     private const int CoreMaxPageSize = 100;
 
-    private IReadOnlyList<CustomerJobRow> _jobs = Array.Empty<CustomerJobRow>();
+    private IReadOnlyList<CustomerJobRow> _allJobs = Array.Empty<CustomerJobRow>();
+    // Every change of the loaded rows re-applies the search filter.
+    private IReadOnlyList<CustomerJobRow> _jobs
+    {
+        get => _allJobs;
+        set { _allJobs = value; ApplyFilter(); }
+    }
+    // Rows shown in the table: _jobs narrowed by the search filter.
+    private IReadOnlyList<CustomerJobRow> _visible = Array.Empty<CustomerJobRow>();
+    private readonly MyJobsFilter _filter = new();
+    // A filter loads older pages until a page of matches is found, but never more than this many jobs per source.
+    internal const int FilterMaxTake = 500;
+    private DateTime? _frontier;
+    private bool _searching;
     private IReadOnlyDictionary<string, TodoX.Web.Services.Platform.CoreServiceView>? _catalog;
     private readonly Dictionary<Guid, string> _dancePoints = new();
     private readonly Dictionary<Guid, RVideoJobListSummary?> _rvideoSummaries = new();
@@ -140,6 +199,60 @@
         _jobs = Array.Empty<CustomerJobRow>();
         _loaded = false;
         await LoadJobsAsync();
+    }
+
+    private void ApplyFilter()
+        => _visible = _filter.IsActive
+            ? _allJobs.Where(x => _filter.Matches(x.Title, x.ServiceLabel, StatusGroup(x), x.CreatedAt)).ToList()
+            : _allJobs;
+
+    // Timelapse rows keep the raw step as their stage, so their status label is the one to group.
+    internal static string StatusGroup(CustomerJobRow row)
+        => MyJobsStatus.Group(row.Route.StartsWith("/jobs/timelapse/", StringComparison.Ordinal) ? row.StatusLabel : row.StageLabel);
+
+    private IEnumerable<string> ServiceOptions
+        => _allJobs.Select(x => x.ServiceLabel)
+            .Concat(_catalog?.Values.Select(x => x.Name) ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.CurrentCultureIgnoreCase);
+
+    private Task OnTextChanged(string? value) { _filter.Text = value; return FilterChangedAsync(); }
+    private Task OnServiceChanged(string? value) { _filter.Service = value; return FilterChangedAsync(); }
+    private Task OnStatusChanged(string? value) { _filter.Status = value; return FilterChangedAsync(); }
+    private Task OnFromChanged(DateTime? value) { _filter.From = value; return FilterChangedAsync(); }
+    private Task OnToChanged(DateTime? value) { _filter.To = value; return FilterChangedAsync(); }
+    private Task ClearFilterAsync() { _filter.Clear(); return FilterChangedAsync(); }
+
+    private async Task FilterChangedAsync()
+    {
+        ApplyFilter();
+        StateHasChanged();
+        await FillFilteredAsync();
+    }
+
+    // Older jobs are only in pages not loaded yet: load more until a page of matches shows, the "from" day is
+    // reached, or the cap is hit. "Tải thêm" still loads further pages by hand.
+    private async Task FillFilteredAsync()
+    {
+        if (_searching) return;
+        _searching = true;
+        try
+        {
+            while (_filter.IsActive && _hasMore && !_disposed && _visible.Count < PageSize && _take < FilterMaxTake
+                   && !(_filter.FromUtc is { } fromUtc && _frontier is { } frontier && frontier < fromUtc))
+            {
+                var before = _take;
+                _take = Math.Min(FilterMaxTake, _take + PageSize * 2);
+                await LoadJobsAsync();
+                if (_take == before) break;
+            }
+        }
+        finally
+        {
+            _searching = false;
+            if (!_disposed) StateHasChanged();
+        }
     }
 
     private Task LoadMoreAsync()
@@ -210,6 +323,7 @@
 
                 _jobs = rows;
                 _hasMore = frontier is not null;
+                _frontier = frontier;
             }
             else
             {
