@@ -117,7 +117,10 @@ public enum TileArt
     Key,
     Gear,
     Folder,
-    Back
+    Back,
+    Assistant,
+    Skills,
+    System
 }
 
 /// <summary>Line icons drawn with anti-aliasing (film strip, AI sparkle, key, gear, folder, back arrow).</summary>
@@ -176,10 +179,58 @@ public sealed class LineIcon : Control
             }
             case TileArt.Key:
             {
-                g.DrawEllipse(pen, P(0.12f), P(0.3f), P(0.36f), P(0.36f));
-                g.DrawLine(pen, P(0.48f), P(0.48f), P(0.88f), P(0.48f));
-                g.DrawLine(pen, P(0.74f), P(0.48f), P(0.74f), P(0.64f));
-                g.DrawLine(pen, P(0.86f), P(0.48f), P(0.86f), P(0.6f));
+                // Shield with a check: the license that protects this machine.
+                using var shield = new GraphicsPath();
+                shield.AddLines([
+                    new PointF(P(0.5f), P(0.08f)), new PointF(P(0.86f), P(0.22f)), new PointF(P(0.86f), P(0.48f))
+                ]);
+                shield.AddBezier(P(0.86f), P(0.48f), P(0.86f), P(0.72f), P(0.68f), P(0.86f), P(0.5f), P(0.93f));
+                shield.AddBezier(P(0.5f), P(0.93f), P(0.32f), P(0.86f), P(0.14f), P(0.72f), P(0.14f), P(0.48f));
+                shield.AddLines([new PointF(P(0.14f), P(0.48f)), new PointF(P(0.14f), P(0.22f))]);
+                shield.CloseFigure();
+                g.DrawPath(pen, shield);
+                g.DrawLines(pen, [new PointF(P(0.34f), P(0.5f)), new PointF(P(0.46f), P(0.62f)), new PointF(P(0.67f), P(0.38f))]);
+                break;
+            }
+            case TileArt.Assistant:
+            {
+                // Chat bubble with a small sparkle inside.
+                using var bubble = new GraphicsPath();
+                var r = new RectangleF(P(0.1f), P(0.14f), P(0.8f), P(0.56f));
+                var d = P(0.2f);
+                bubble.AddArc(r.X, r.Y, d, d, 180, 90);
+                bubble.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                bubble.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+                bubble.AddLine(r.Right - d / 2, r.Bottom, P(0.42f), r.Bottom);
+                bubble.AddLine(P(0.42f), r.Bottom, P(0.24f), P(0.88f));
+                bubble.AddLine(P(0.24f), P(0.88f), P(0.27f), r.Bottom);
+                bubble.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                bubble.CloseFigure();
+                g.DrawPath(pen, bubble);
+                Sparkle(g, brush, P(0.5f), P(0.42f), P(0.17f));
+                break;
+            }
+            case TileArt.Skills:
+            {
+                // Three stacked layers: the skill library.
+                PointF[] Layer(float y) => [new PointF(P(0.5f), y), new PointF(P(0.9f), y + P(0.18f)), new PointF(P(0.5f), y + P(0.36f)), new PointF(P(0.1f), y + P(0.18f))];
+                g.DrawPolygon(pen, Layer(P(0.1f)));
+                g.DrawLines(pen, [new PointF(P(0.1f), P(0.48f)), new PointF(P(0.5f), P(0.66f)), new PointF(P(0.9f), P(0.48f))]);
+                g.DrawLines(pen, [new PointF(P(0.1f), P(0.66f)), new PointF(P(0.5f), P(0.84f)), new PointF(P(0.9f), P(0.66f))]);
+                break;
+            }
+            case TileArt.System:
+            {
+                // Monitor with a refresh arrow: system and updates.
+                using (var screen = Ui.Rounded(new RectangleF(P(0.08f), P(0.14f), P(0.84f), P(0.56f)), P(0.06f)))
+                {
+                    g.DrawPath(pen, screen);
+                }
+
+                g.DrawLine(pen, P(0.5f), P(0.7f), P(0.5f), P(0.84f));
+                g.DrawLine(pen, P(0.32f), P(0.86f), P(0.68f), P(0.86f));
+                g.DrawArc(pen, P(0.36f), P(0.28f), P(0.28f), P(0.28f), 200, 290);
+                g.FillPolygon(brush, [new PointF(P(0.31f), P(0.3f)), new PointF(P(0.43f), P(0.36f)), new PointF(P(0.31f), P(0.44f))]);
                 break;
             }
             case TileArt.Gear:

@@ -4,6 +4,9 @@
 @inject EditVideoUsageService Usage
 @inject EditVideoReleaseService Releases
 @inject AuthStateService AuthState
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
 
 <PageTitle>TodoX EditVideo</PageTitle>
 
@@ -50,19 +53,22 @@
         {
             <MudPaper Class="todox-card pa-4">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                    <MudText Typo="Typo.h6">License @license.KeyPrefix… · gói @license.PlanCode</MudText>
+                    <MudText Typo="Typo.h6">License @EditVideoLicenseKeys.Mask(license.KeyPrefix + "????", 8, 0) · gói @license.PlanCode</MudText>
                     <MudChip T="string" Size="Size.Small" Color="@(license.Status == EditVideoLicenseStatuses.Active ? Color.Success : Color.Warning)">@StatusLabel(license.Status)</MudChip>
                 </MudStack>
                 @if (_newKeys.TryGetValue(license.Id, out var newKey))
                 {
                     <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">
-                        License key mới (chỉ hiện một lần, hãy lưu lại):
-                        <MudTextField T="string" Value="@newKey" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-1" />
+                        License key mới — bấm Sao chép rồi dán vào TodoX EditVideo. Key chỉ hiện trong lần này, tải lại trang sẽ không xem lại được.
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-2 flex-wrap">
+                            <code style="font-size:1.05rem;letter-spacing:.04em;padding:6px 10px;border:1px solid var(--mud-palette-lines-default);border-radius:6px">@EditVideoLicenseKeys.Mask(newKey)</code>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyKeyAsync(newKey))">Sao chép</MudButton>
+                        </MudStack>
                     </MudAlert>
                 }
                 <MudStack Row="true" Spacing="2" Class="mb-2 flex-wrap">
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Key" Disabled="_busyKey" OnClick="@(() => NewKeyAsync(license))">Lấy license key</MudButton>
-                    <MudText Typo="Typo.caption" Class="todox-page-subtitle" Style="align-self:center">Nhập key này (hoặc đăng nhập tài khoản TodoX) trong TodoX EditVideo. Lấy key mới thì key cũ hết dùng; máy đã kích hoạt vẫn chạy.</MudText>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Autorenew" Disabled="_busyKey" OnClick="@(() => NewKeyAsync(license))">Cấp license key mới</MudButton>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle" Style="align-self:center">Dùng key này (hoặc đăng nhập tài khoản TodoX) trong TodoX EditVideo. Cấp key mới thì key cũ hết dùng; máy đã kích hoạt vẫn chạy.</MudText>
                 </MudStack>
                 <MudText Typo="Typo.body2" Class="mb-2">
                     Máy tính @license.ActiveDesktopDevices/@license.MaxDesktopDevices · Điện thoại @license.ActiveMobileDevices/@license.MaxMobileDevices ·
@@ -123,6 +129,15 @@
             return;
         }
 
+        var hasKey = _newKeys.ContainsKey(license.Id);
+        var confirm = await DialogService.ShowMessageBoxAsync("Cấp license key mới",
+            "TodoX sẽ tạo key mới cho license này. Key cũ không kích hoạt thêm máy được nữa; máy đã kích hoạt vẫn dùng bình thường. Tiếp tục?",
+            yesText: "Cấp key mới", cancelText: "Hủy");
+        if (confirm != true)
+        {
+            return;
+        }
+
         _busyKey = true;
         try
         {
@@ -131,11 +146,29 @@
             {
                 _newKeys[license.Id] = key;
                 await Reload();
+                Snackbar.Add("Đã cấp license key mới. Bấm Sao chép để lấy key.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Không cấp được key mới cho license này. Liên hệ TodoX.", Severity.Error);
             }
         }
         finally
         {
             _busyKey = false;
+        }
+    }
+
+    private async Task CopyKeyAsync(string key)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", key);
+            Snackbar.Add("Đã sao chép license key.", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Trình duyệt không cho sao chép. Thử lại hoặc dùng trình duyệt khác.", Severity.Warning);
         }
     }
     private readonly Dictionary<Guid, IReadOnlyList<EditVideoDeviceRow>> _devices = new();

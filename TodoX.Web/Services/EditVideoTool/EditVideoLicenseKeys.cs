@@ -76,6 +76,20 @@ public static partial class EditVideoLicenseKeys
     public static string Hash(string normalizedKey) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedKey))).ToLowerInvariant();
 
+    /// <summary>
+    /// Key shown on screen with its middle hidden ("tdxv_zv5•••••••••••cw41"), so a screenshot or someone looking over
+    /// the shoulder does not leak it; the copy button copies the whole key.
+    /// </summary>
+    public static string Mask(string key, int head = 8, int tail = 4)
+    {
+        if (string.IsNullOrEmpty(key) || key.Length <= head + tail + 2)
+        {
+            return new string('\u2022', Math.Max(6, key?.Length ?? 0));
+        }
+
+        return key[..head] + new string('\u2022', key.Length - head - tail) + key[^tail..];
+    }
+
     /// <summary>Displayable prefix, e.g. "tdxv_3k9qm2" or "TDXV-ABCDE".</summary>
     public static string DisplayPrefix(string normalizedKey) =>
         normalizedKey.StartsWith(TokenPrefix, StringComparison.Ordinal) ? normalizedKey[..11] : normalizedKey[..10];

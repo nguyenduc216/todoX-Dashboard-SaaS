@@ -53,4 +53,16 @@ public sealed class EditVideoPackageStorageTests
         Assert.Equal("proj-123", fields["project_id"]);
         Assert.Equal("default", EditVideoAiService.CreateFields("image", "m", new EditVideoAiCreateRequest { Prompt = "p" }, new EditVideoAiSelection(null, null, null, null))["project_id"]);
     }
+
+    [Fact]
+    public void LicenseKeyOnScreenHidesItsMiddle()
+    {
+        const string key = "tdxv_zv5c3wz6t75fb8rrbs5n071scw41";
+        var shown = EditVideoLicenseKeys.Mask(key);
+        Assert.Equal(key.Length, shown.Length);
+        Assert.StartsWith("tdxv_zv5", shown);
+        Assert.EndsWith("cw41", shown);
+        Assert.DoesNotContain("t75fb8rrbs5n071", shown);
+        Assert.DoesNotContain("zv5c", EditVideoLicenseKeys.Mask("short"));
+    }
 }

@@ -29,9 +29,9 @@ public sealed class SettingsForm : Form
     [
         (SettingsPage.License, "Kích hoạt", TileArt.Key),
         (SettingsPage.Folders, "Thư mục dự án", TileArt.Folder),
-        (SettingsPage.Assistants, "Trợ lý AI", TileArt.AiVideo),
-        (SettingsPage.Skills, "Skill TodoX", TileArt.EditVideo),
-        (SettingsPage.System, "Hệ thống & cập nhật", TileArt.Gear)
+        (SettingsPage.Assistants, "Trợ lý AI", TileArt.Assistant),
+        (SettingsPage.Skills, "Skill TodoX", TileArt.Skills),
+        (SettingsPage.System, "Hệ thống & cập nhật", TileArt.System)
     ];
 
     private readonly IServiceProvider _services;
@@ -48,7 +48,8 @@ public sealed class SettingsForm : Form
     private readonly Dictionary<SettingsPage, Button> _nav = [];
     private readonly Label _status = new() { AutoSize = false, Dock = DockStyle.Fill, ForeColor = Ui.Muted, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false, Padding = new Padding(28, 0, 0, 0) };
 
-    private readonly Label _licenseState = Ui.Text("", 12, bold: true);
+    private readonly Label _licenseState = new() { AutoSize = true, Font = new Font("Segoe UI Semibold", 12), ForeColor = Ui.Ink, UseMnemonic = false, Margin = new Padding(0, 2, 0, 0) };
+    private readonly StatusBadge _licenseBadge = new(BadgeKind.Pending, 22) { Margin = new Padding(0, 3, 10, 0) };
     private readonly Label _licenseDetail = Ui.Text("", 10, Ui.Muted);
     private readonly TextBox _keyBox = new() { Width = 470, Font = new Font("Segoe UI", 10.5f), BackColor = Ui.Panel, ForeColor = Ui.Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Dán license key TodoX (tdxv_...)", Margin = new Padding(0, 4, 8, 0) };
     private readonly FlowLayoutPanel _keyRow = Ui.Row();
@@ -58,7 +59,7 @@ public sealed class SettingsForm : Form
     private readonly FlowLayoutPanel _accountCard = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, BackColor = Ui.Card, Padding = new Padding(16, 12, 16, 12), Margin = new Padding(0, 6, 0, 8), MinimumSize = new Size(640, 0), Visible = false };
     private readonly Label _accountText = Ui.Text("", 11);
     private readonly Label _resourceLabel = Ui.Text("", 10.5f);
-    private readonly Label _clientsLabel = Ui.Text("", 10.5f);
+    private readonly FlowLayoutPanel _clients = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, BackColor = Ui.Card, Padding = new Padding(12, 8, 12, 8), Margin = new Padding(0, 0, 0, 8), MinimumSize = new Size(640, 0) };
     private readonly Label _skillsLabel = Ui.Text("", 10);
     private readonly NumericUpDown _skillHours = new() { Minimum = 1, Maximum = 48, Width = 60, BackColor = Ui.Panel, ForeColor = Ui.Ink, Font = new Font("Segoe UI", 10), Margin = new Padding(0, 6, 8, 0) };
     private readonly ComboBox _skillPick = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, BackColor = Ui.Panel, ForeColor = Ui.Ink, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 8, 0) };
@@ -123,7 +124,10 @@ public sealed class SettingsForm : Form
     {
         var page = Ui.Stack(660);
         page.Controls.Add(Title("Kích hoạt"));
-        page.Controls.Add(_licenseState);
+        var stateRow = Ui.Row();
+        stateRow.Controls.Add(_licenseBadge);
+        stateRow.Controls.Add(_licenseState);
+        page.Controls.Add(stateRow);
         page.Controls.Add(_licenseDetail);
         _accountCard.Controls.Add(_accountText);
         page.Controls.Add(_accountCard);
@@ -210,7 +214,7 @@ public sealed class SettingsForm : Form
         page.Controls.Add(Title("Trợ lý AI"));
         page.Controls.Add(Ui.Text("TodoX được thêm vào làm công cụ cho Claude / Codex; các cài đặt khác của trợ lý được giữ nguyên.", 10, Ui.Muted));
         page.Controls.Add(Ui.Section("Trạng thái kết nối", top: 8));
-        page.Controls.Add(_clientsLabel);
+        page.Controls.Add(_clients);
         var row = Ui.Row();
         row.Controls.Add(Action("Kết nối Claude / Codex", ConnectAsync, primary: true));
         page.Controls.Add(row);
@@ -387,7 +391,8 @@ public sealed class SettingsForm : Form
     {
         var s = await _license.EnsureAsync(_closing.Token);
         var (title, detail) = LicenseText(s);
-        _licenseState.Text = (s.IsUsable ? "✔  " : "✖  ") + title;
+        _licenseState.Text = title;
+        _licenseBadge.Kind = s.IsUsable ? BadgeKind.Done : BadgeKind.Failed;
         _licenseState.ForeColor = s.IsUsable ? Ui.Green : Ui.Red;
         _licenseDetail.Text = detail;
         _signIn.Visible = !s.IsUsable;
@@ -476,8 +481,15 @@ public sealed class SettingsForm : Form
 
     private void RefreshClients()
     {
-        _clientsLabel.Text = string.Join(Environment.NewLine, _installer.Clients.Select(c =>
-            $"{(c.Registered ? "✔" : c.Detected ? "•" : "–")}  {c.Name}: {(c.Registered ? "đã kết nối" : c.Detected ? "có trên máy, chưa kết nối" : "chưa cài")}"));
+        _clients.Controls.Clear();
+        foreach (var c in _installer.Clients)
+        {
+            var row = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Margin = new Padding(0, 2, 0, 2) };
+            row.Controls.Add(new StatusBadge(c.Registered ? BadgeKind.Done : c.Detected ? BadgeKind.Pending : BadgeKind.Skipped, 18) { Margin = new Padding(0, 3, 10, 0) });
+            row.Controls.Add(new Label { Text = c.Name, AutoSize = false, Width = 200, Height = 24, ForeColor = Ui.Ink, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false });
+            row.Controls.Add(new Label { Text = c.Registered ? "đã kết nối" : c.Detected ? "có trên máy, chưa kết nối" : "chưa cài", AutoSize = false, Width = 300, Height = 24, ForeColor = c.Registered ? Ui.Muted : c.Detected ? Ui.Yellow : Ui.Muted, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false });
+            _clients.Controls.Add(row);
+        }
     }
 
     private async Task SyncSkillsAsync(bool notify)
