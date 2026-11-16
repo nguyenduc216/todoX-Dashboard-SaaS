@@ -112,7 +112,18 @@ public sealed class LicenseGuard
     public async Task<LicenseStatus> ActivateAsync(string licenseKey, string deviceKind = "desktop", string? serverUrl = null, CancellationToken ct = default)
     {
         var server = serverUrl ?? LicenseApiClient.DefaultServerUrl;
-        var result = await _api.ActivateAsync(server, licenseKey, _device, deviceKind, AppVersion, ct);
+        return Keep(server, await _api.ActivateAsync(server, licenseKey, _device, deviceKind, AppVersion, ct));
+    }
+
+    /// <summary>Activates this machine with the customer's TodoX account (username or email, and password).</summary>
+    public async Task<LicenseStatus> ActivateWithAccountAsync(string username, string password, CancellationToken ct = default)
+    {
+        var server = LicenseApiClient.DefaultServerUrl;
+        return Keep(server, await _api.ActivateAccountAsync(server, username.Trim(), password, _device, "desktop", AppVersion, ct));
+    }
+
+    private LicenseStatus Keep(string server, LicenseApiResult<DeviceSession> result)
+    {
         if (!result.Ok)
         {
             return new LicenseStatus(LicenseState.NotActivated, LicenseMessages.ForServerError(result.ErrorCode, result.Message, result.Detail));
