@@ -41,5 +41,8 @@ public sealed record PointPricingEstimateRequest(
     string VideoQuality,
     int VoiceCount,
     string VoiceQuality,
-    bool VoiceEnabled = true);
+    bool VoiceEnabled = true,
+    TodoX.Web.Services.Pricing.ModelPriceQuery? VideoModel = null,
+    TodoX.Web.Services.Pricing.ModelPriceQuery? ImageModel = null,
+    TodoX.Web.Services.Pricing.ModelPriceQuery? VoiceModel = null);
 

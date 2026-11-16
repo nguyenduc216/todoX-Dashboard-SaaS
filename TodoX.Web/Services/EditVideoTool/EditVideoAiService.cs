@@ -5,6 +5,7 @@ using Dapper;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Data;
+using TodoX.Web.Services.Pricing;
 
 namespace TodoX.Web.Services.EditVideoTool;
 
@@ -138,6 +139,9 @@ public sealed class EditVideoAiService
                 var catalog = await CatalogAsync(k, ct);
                 list.AddRange(EditVideoGommoJson.Models(catalog)
                     .Where(m => model is null || string.Equals(EditVideoGommoJson.Str(m, "model"), model.Trim(), StringComparison.OrdinalIgnoreCase))
+                    // The price book decides which models EditVideo offers and in which order.
+                    .Where(m => prices?.Book is not { } book || book.IsAllowed(k, EditVideoGommoJson.Str(m, "model"), ModelPriceEnvs.EditVideo))
+                    .OrderBy(m => prices?.Book?.Rank(k, EditVideoGommoJson.Str(m, "model")) ?? 0)
                     .Select(m => prices is null
                         ? EditVideoGommoJson.Shape(m, k, ToPoints, withPrices: model is not null)
                         : EditVideoGommoJson.Shape(m, k, prices, withPrices: model is not null)));
@@ -200,6 +204,11 @@ public sealed class EditVideoAiService
 
         var modelCode = EditVideoGommoJson.Str(model, "model")!;
         var prices = await PricesAsync(ct);
+        if (prices?.Book is { } allowedBook && !allowedBook.IsAllowed(kind, modelCode, ModelPriceEnvs.EditVideo))
+        {
+            return Fail("model_not_found", $"Model {kind} '{modelCode}' đang tắt trên TodoX EditVideo. Dùng todox_ai_models để xem danh sách.");
+        }
+
         if (PriceOf(prices, kind, modelCode, quote) is not { } points)
         {
             return await PriceMissingAsync(prices!, kind, modelCode, ct);
@@ -246,7 +255,13 @@ public sealed class EditVideoAiService
             {
             }
 
-            foreach (var next in prices.Settings.FallbackFor(kind).Where(m => !string.Equals(m, modelCode, StringComparison.OrdinalIgnoreCase)))
+            var fallback = prices.Book is { } book
+                ? (prices.Settings.FallbackEnabled
+                    ? book.Ordered(kind, ModelPriceEnvs.EditVideo).Select(e => e.Model)
+                        .Where(m => ModelPriceBook.Group(m) == ModelPriceBook.Group(modelCode)).ToList()
+                    : [])
+                : prices.Settings.FallbackFor(kind);
+            foreach (var next in fallback.Where(m => !string.Equals(m, modelCode, StringComparison.OrdinalIgnoreCase)))
             {
                 if (EditVideoGommoJson.FindModel(catalog, next) is not { } alt)
                 {

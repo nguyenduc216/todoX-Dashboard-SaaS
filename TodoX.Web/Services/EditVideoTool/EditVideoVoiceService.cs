@@ -57,6 +57,9 @@ public sealed class EditVideoVoiceService
         _logger = logger;
     }
 
+    /// <summary>Vbee is priced by the model price book (fixed cost per voice × markup).</summary>
+    private static readonly TodoX.Web.Services.Pricing.ModelPriceQuery VbeePrice = new("vbee");
+
     public async Task<(IReadOnlyList<EditVideoVoice> Voices, decimal PointsPerJob, decimal Balance)> ListAsync(Guid customerId, CancellationToken ct = default)
     {
         var voices = (await _catalog.ListVoicesAsync(activeOnly: true, ct: ct))
@@ -64,7 +67,7 @@ public sealed class EditVideoVoiceService
             .OrderByDescending(v => v.IsDefault).ThenBy(v => v.SortOrder)
             .Select(v => new EditVideoVoice(v.Code, v.Name, v.Gender, v.LanguageCode, v.PreviewFileUrl, v.IsDefault))
             .ToList();
-        var rate = await _pricing.ResolveRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, ct);
+        var rate = await _pricing.ResolveModelRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, VbeePrice, ct);
         return (voices, rate.Rate, await _wallets.GetBalanceAsync(customerId));
     }
 
@@ -88,7 +91,7 @@ public sealed class EditVideoVoiceService
             return Fail("voice_not_found", "Không tìm thấy giọng đọc này. Dùng todox_voice_list để xem danh sách.");
         }
 
-        var rate = (await _pricing.ResolveRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, ct)).Rate;
+        var rate = (await _pricing.ResolveModelRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, VbeePrice, ct)).Rate;
         var balance = await _wallets.GetBalanceAsync(license.CustomerId);
         if (balance < rate)
         {

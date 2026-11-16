@@ -347,7 +347,9 @@ public sealed class RVideoSceneVideoRenderAction : IRVideoSceneVideoRenderAction
             // Same configured route tier and points service as the canonical scene-video handler.
             // Provider catalog cost is not the customer's point rate; do not convert or invent a markup.
             var tier = SceneVideoRenderHandler.ResolveQualityTier(route);
-            var rate = await _pointPricing.ResolveRateAsync(request.ServiceId, PointPricingResourceTypes.Video, tier, ct);
+            // Model price book: this model/mode/resolution/length's 79AI cost x markup (flat tier rate if unknown).
+            var rate = await _pointPricing.ResolveModelRateAsync(request.ServiceId, PointPricingResourceTypes.Video, tier,
+                RVideoVideoModelPolicy.PriceQuery(modelCode, mode, resolution, duration), ct);
             if (rate.Rate <= 0 || !string.Equals(rate.Unit, "per_second", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Video point rate must be configured per_second.");
             var settings = await _settings.GetAsync(project.Id, ct);

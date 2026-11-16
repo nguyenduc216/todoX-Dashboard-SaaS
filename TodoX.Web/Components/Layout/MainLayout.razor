@@ -685,6 +685,7 @@
         EnsureAiStudioItem(list, existingCodes, BuildAiStudioMusicItem());
         EnsureAiStudioItem(list, existingCodes, BuildEditVideoSkillsItem());
         EnsureAiStudioItem(list, existingCodes, BuildEditVideoSettingsItem());
+        EnsureAiStudioItem(list, existingCodes, BuildModelPricesItem());
 
         // Ensure "AI Providers" is always reachable even if the DB menu has not been seeded with it.
         if (!existingCodes.Contains("ai_providers"))
@@ -918,6 +919,20 @@
             SortOrder = 38
         };
 
+    private static NavigationMenuItemDto BuildModelPricesItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "admin_model_prices",
+            Title = "Bảng giá model AI",
+            Href = "/admin/model-prices",
+            IconKey = "PriceChange",
+            ModuleKeys = Array.Empty<string>(),
+            VisibilityPolicy = "admin_job_monitor",
+            MatchAll = false,
+            SortOrder = 39
+        };
+
     private static NavigationMenuItemDto BuildEditVideoSettingsItem()
         => new()
         {
@@ -1073,6 +1088,7 @@
         "Memory" => Icons.Material.Filled.Memory,
         "Handshake" => Icons.Material.Filled.Handshake,
         "Payments" => Icons.Material.Filled.Payments,
+        "PriceChange" => Icons.Material.Filled.PriceChange,
         "Badge" => Icons.Material.Filled.Badge,
         "EventNote" => Icons.Material.Filled.EventNote,
         _ => Icons.Material.Filled.Circle

@@ -20,92 +20,32 @@ else
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Cài đặt EditVideo</MudText>
             <MudText Class="todox-page-subtitle">
-                Điểm trừ cho mỗi lệnh của TodoX EditVideo (ảnh, video, nhạc, giọng đọc) và model dự phòng khi tạo video/ảnh AI.
-                Ảnh, video và giọng đọc dùng chung bảng giá điểm của web; nhạc có giá riêng ở đây.
+                Model nhạc mặc định và bật/tắt model dự phòng khi TodoX EditVideo tạo video/ảnh AI.
             </MudText>
         </div>
 
-        @if (_missing.Count > 0)
-        {
-            <MudAlert Severity="Severity.Warning">
-                Còn thiếu cấu hình — khách sẽ không tạo được phần tương ứng:
-                <ul class="mb-0">
-                    @foreach (var m in _missing)
-                    {
-                        <li>@m</li>
-                    }
-                </ul>
-            </MudAlert>
-        }
-
-        <MudPaper Class="todox-card pa-4">
-            <MudText Typo="Typo.h6" Class="mb-2">Bảng giá điểm (chung với web)</MudText>
-            <MudSimpleTable Dense="true" Class="todox-table">
-                <thead><tr><th>Loại</th><th>Hạng thường</th><th>Hạng cao cấp</th><th>Đơn vị</th></tr></thead>
-                <tbody>
-                    <tr><td>Ảnh AI</td><td>@Rate("image:standard")</td><td>@Rate("image:premium")</td><td>mỗi ảnh</td></tr>
-                    <tr><td>Video AI</td><td>@Rate("video:standard")</td><td>@Rate("video:premium")</td><td>mỗi giây video</td></tr>
-                    <tr><td>Nhạc AI (Suno)</td><td colspan="2">@MusicPriceText()</td><td>mỗi lần tạo (ra 1–2 bài)</td></tr>
-                </tbody>
-            </MudSimpleTable>
-            <MudText Typo="Typo.caption" Class="mt-2" Style="display:block">
-                Sửa giá ảnh, video, giọng đọc ở <MudLink Href="/wallets">Ví điểm › Bảng giá điểm</MudLink>. Ví dụ video 8 giây hạng thường = 8 × @Rate("video:standard") điểm.
-            </MudText>
-        </MudPaper>
-
-        <MudPaper Class="todox-card pa-4">
-            <MudText Typo="Typo.h6" Class="mb-1">Quy đổi và giá sàn</MudText>
-            <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
-                Ảnh và video lấy giá theo bảng điểm, nhưng không bao giờ thấp hơn chi phí 79AI × hệ số giá sàn (để model đắt không bị bán lỗ).
-            </MudText>
-            <MudStack Row="true" Spacing="3" Class="flex-wrap">
-                <MudNumericField T="decimal" @bind-Value="_vndPerPoint" Label="1 điểm = ? đồng" Variant="Variant.Outlined" Min="1" Style="min-width:200px" HelperText="1.400.000đ = 1.400 điểm → 1.000" />
-                <MudNumericField T="decimal" @bind-Value="_vndPerCredit" Label="1 credit 79AI = ? đồng" Variant="Variant.Outlined" Min="0.01m" Style="min-width:200px" />
-                <MudNumericField T="decimal?" @bind-Value="_costFloor" Label="Giá sàn = chi phí 79AI ×" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:200px" HelperText="Để trống = không có giá sàn" />
-            </MudStack>
-        </MudPaper>
-
-        <MudPaper Class="todox-card pa-4">
-            <MudText Typo="Typo.h6" Class="mb-3">Hạng giá</MudText>
-            <MudStack Row="true" Spacing="3" Class="flex-wrap">
-                <MudSelect T="string" @bind-Value="_imageTier" Label="Ảnh AI tính theo hạng" Variant="Variant.Outlined" Style="min-width:220px">
-                    <MudSelectItem Value="@("standard")">Thường</MudSelectItem>
-                    <MudSelectItem Value="@("premium")">Cao cấp</MudSelectItem>
-                </MudSelect>
-                <MudSelect T="string" @bind-Value="_videoTier" Label="Video AI tính theo hạng" Variant="Variant.Outlined" Style="min-width:220px">
-                    <MudSelectItem Value="@("standard")">Thường</MudSelectItem>
-                    <MudSelectItem Value="@("premium")">Cao cấp</MudSelectItem>
-                </MudSelect>
-            </MudStack>
-            <MudTextField @bind-Value="_premiumModels" Label="Model luôn tính giá cao cấp" Variant="Variant.Outlined" Class="mt-3"
-                          HelperText="Mã model 79AI, cách nhau bằng dấu phẩy. Ví dụ: veo_omni, kling_4_0" />
-        </MudPaper>
+        <MudAlert Severity="Severity.Info">
+            Giá ảnh, video, nhạc và giọng đọc của EditVideo nay lấy từ <MudLink Href="/admin/model-prices"><b>Bảng giá model AI</b></MudLink>
+            (chung với Dashboard): giá = chi phí 79AI × hệ số. Thứ tự model, model nào bật cho EditVideo và thứ tự dự phòng cũng sửa ở đó.
+        </MudAlert>
 
         <MudPaper Class="todox-card pa-4">
             <MudText Typo="Typo.h6" Class="mb-3">Nhạc AI (Suno)</MudText>
-            <MudStack Row="true" Spacing="3" Class="flex-wrap">
-                <MudNumericField T="decimal?" @bind-Value="_musicMarkup" Label="Hệ số nhân giá 79AI" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:220px"
-                                 HelperText="2 = bán gấp đôi chi phí 79AI, tính theo từng model (Suno 5.5: 3.000 credit → 6 điểm)." />
-                <MudNumericField T="decimal?" @bind-Value="_musicPoints" Label="Hoặc giá cố định (điểm)" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:220px"
-                                 HelperText="Chỉ dùng khi không đặt hệ số. Để trống cả hai = chưa mở tạo nhạc." />
-                <MudSelect T="string" @bind-Value="_musicModel" Label="Model mặc định" Variant="Variant.Outlined" Style="min-width:220px">
-                    @foreach (var m in MusicModels)
-                    {
-                        <MudSelectItem Value="@m">@m</MudSelectItem>
-                    }
-                </MudSelect>
-            </MudStack>
+            <MudSelect T="string" @bind-Value="_musicModel" Label="Model mặc định" Variant="Variant.Outlined" Style="max-width:260px">
+                @foreach (var m in MusicModels)
+                {
+                    <MudSelectItem Value="@m">@m</MudSelectItem>
+                }
+            </MudSelect>
         </MudPaper>
 
         <MudPaper Class="todox-card pa-4">
             <MudText Typo="Typo.h6" Class="mb-1">Model dự phòng</MudText>
             <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
-                Khi 79AI từ chối model khách chọn (lỗi model, hết tài nguyên, thời lượng không hợp lệ), TodoX thử lần lượt các model dưới đây —
-                chỉ model có cùng lựa chọn khung/độ phân giải/thời lượng và giá không cao hơn. Khách chỉ bị trừ điểm khi có kết quả.
+                Khi 79AI từ chối model khách chọn (lỗi model, hết tài nguyên, thời lượng không hợp lệ), TodoX thử lần lượt các model khác theo thứ tự
+                của Bảng giá model AI — chỉ model cùng loại, bật cho EditVideo, có cùng khung/độ phân giải/thời lượng và giá không cao hơn. Khách chỉ bị trừ điểm khi có kết quả.
             </MudText>
             <MudSwitch T="bool" @bind-Value="_fallback" Color="Color.Warning" Label="Bật model dự phòng" />
-            <MudTextField @bind-Value="_videoFallback" Label="Thứ tự dự phòng video" Variant="Variant.Outlined" Class="mt-2" Disabled="!_fallback" />
-            <MudTextField @bind-Value="_imageFallback" Label="Thứ tự dự phòng ảnh" Variant="Variant.Outlined" Class="mt-2" Disabled="!_fallback" />
         </MudPaper>
 
         <div>

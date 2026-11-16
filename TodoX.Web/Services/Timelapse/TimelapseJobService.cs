@@ -554,9 +554,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
     public async Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
-        var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
-            PointPricingResourceTypes.Image,
-            TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+        var rate = await SnapshotRateAsync(view, PointPricingResourceTypes.Image, ct);
         var imageCount = ResolveImageRerenderBillingCount(view.Snapshot.SceneCount, progressPercent);
         var requiredPoints = ResolveImageRerenderPoints(rate.Rate, imageCount);
         var charge = await _wallets.ChargeAsync(
@@ -583,9 +581,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         if (rerender)
         {
-            var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
-                PointPricingResourceTypes.Image,
-                TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+            var rate = await SnapshotRateAsync(view, PointPricingResourceTypes.Image, ct);
             var stage = view.Workflow.Images.FirstOrDefault(x => x.Id == imageStageId)
                 ?? throw new InvalidOperationException("Không tìm thấy ảnh Timelapse thuộc job này.");
             var imageCount = ResolveImageRerenderBillingCount(view.Snapshot.SceneCount, stage.ProgressPercent);
@@ -615,9 +611,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         var duration = view.Snapshot.SellPrice?.ClipDurationsSeconds.ElementAtOrDefault(clipIndex - 1);
         if (duration is not > 0) throw new InvalidOperationException("TIMELAPSE_CLIP_DURATION_REQUIRED");
-        var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
-            PointPricingResourceTypes.Video,
-            TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+        var rate = await SnapshotRateAsync(view, PointPricingResourceTypes.Video, ct);
         var charge = await _wallets.ChargeAsync(
             currentUser.CustomerId, currentUser.UserId, duration.Value * rate.Rate, 1,
             "timelapse_user_rerender_video", "todox", "point_pricing", "timelapse",
@@ -716,6 +710,29 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private static string NormalizeTitle(string? title)
         => string.IsNullOrWhiteSpace(title) ? "Video Timelapse" : title.Trim();
 
+    /// <summary>
+    /// Rerenders are billed at the rate snapshotted when the job was created (price changes apply only to new jobs);
+    /// jobs from before the snapshot existed fall back to the current rate.
+    /// </summary>
+    private async Task<PointPricingRate> SnapshotRateAsync(TimelapseJobView view, string resourceType, CancellationToken ct)
+    {
+        var tier = TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode);
+        var snapshot = resourceType == PointPricingResourceTypes.Image ? view.Snapshot.SellPrice?.ImageRate : view.Snapshot.SellPrice?.VideoRatePerSecond;
+        if (snapshot is > 0)
+        {
+            return new PointPricingRate(resourceType, tier, snapshot.Value,
+                resourceType == PointPricingResourceTypes.Image ? "per_render" : "per_second", "job_snapshot", view.Snapshot.ServiceId);
+        }
+
+        return await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId, resourceType, tier, ct);
+    }
+
+    /// <summary>Model price book queries for Timelapse: its image model and Seedance 2.0 in the job's mode at 720p.</summary>
+    internal static (TodoX.Web.Services.Pricing.ModelPriceQuery Image, TodoX.Web.Services.Pricing.ModelPriceQuery Video) PriceModels(string videoMode, int clipSeconds)
+        => (new("google_image_gen_banana_2", "vip", "2k"),
+            new("seedance_20_pro", string.IsNullOrWhiteSpace(videoMode) ? TimelapseRequestRules.FastMode : videoMode.Trim().ToLowerInvariant(), "720p",
+                clipSeconds > 0 ? clipSeconds : null));
+
     private async Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, bool hasStartImage, CancellationToken ct)
     {
         var quality = TimelapseSellPricing.QualityTierForMode(videoMode);
@@ -726,6 +743,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var plan = new PreRenderUsagePlan(serviceId, imageCount, quality,
             graph.VideoClips.Select(x => new PreRenderVideoScene(x.ClipIndex, x.DurationSeconds)).ToArray(),
             quality, 0, quality, false).Validate();
+        var models = PriceModels(videoMode, graph.VideoClips.Count > 0 ? graph.VideoClips.Max(x => x.DurationSeconds) : 0);
+        plan = plan with { ImageModel = models.Image, VideoModel = models.Video };
         return await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
     }
 

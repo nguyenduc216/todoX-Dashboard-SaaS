@@ -82,6 +82,7 @@ builder.Services.AddHttpClient<IServicePromptProviderClient, ServicePrompt79AiCl
 builder.Services.AddScoped<IAiStudioCatalogService, AiStudioCatalogService>();
 builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();
 builder.Services.AddScoped<IPointPricingService, PointPricingService>();
+builder.Services.AddScoped<TodoX.Web.Services.Pricing.ModelPriceService>();
 builder.Services.AddScoped<ITimelapseProfileRepository, TimelapseProfileRepository>();
 builder.Services.AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>();
 builder.Services.AddScoped<ITimelapseJobService, TimelapseJobService>();

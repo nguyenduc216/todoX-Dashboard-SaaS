@@ -115,6 +115,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IAiProviderModelService _models;
     private readonly IConfiguration _config;
     private readonly ILogger<SceneVideoRenderHandler> _logger;
+    private readonly TodoX.Web.Services.Pricing.ModelPriceService? _modelPrices;
 
     public string JobType => JobTypeName;
 
@@ -136,8 +137,10 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IRVideoTrustedPayerContextService payers,
         IAiProviderModelService models,
         IConfiguration config,
-        ILogger<SceneVideoRenderHandler> logger)
+        ILogger<SceneVideoRenderHandler> logger,
+        TodoX.Web.Services.Pricing.ModelPriceService? modelPrices = null)
     {
+        _modelPrices = modelPrices;
         _repo = repo;
         _versions = versions;
         _settings = settings;
@@ -233,7 +236,8 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                         : _versions.GetSelectedImageVersionAsync(scene.Id, token),
                     qualityTier,
                     qualityTier,
-                    ServiceSellPriceQualityTiers.Standard),
+                    ServiceSellPriceQualityTiers.Standard,
+                    DefaultVideoPriceQuery(route, input, scenes)),
                 ct)
             : await EstimateSceneVideoRerenderPointsAsync(job, input, project, scenes, qualityTier, billingOperationId, ct);
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
@@ -434,6 +438,8 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             requestedDuration);
         var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
         var qualityTier = ResolveQualityTier(route);
+        // Price snapshot of this clip: the model price book (79AI cost of this model/mode/resolution/length x
+        // markup). Charged at this rate on success, so later price changes never touch it.
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             pointServiceId,
             0,
@@ -442,7 +448,8 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             qualityTier,
             0,
             ServiceSellPriceQualityTiers.Standard,
-            false), ct);
+            false,
+            RVideoVideoModelPolicy.PriceQuery(requestedModel, requestedMode, input.Resolution, requestedDuration)), ct);
 
         await _repo.UpdateVideoOperationSceneAsync(
             parentJob.Id, scene.Id,
@@ -498,7 +505,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             BillingOperationId = input.BillingOperationId ?? RVideoParentBillingState.ResolveBillingOperationId(project, parentJob.Id),
             EstimatedUsd = resolvedPrice.ProviderEstimatedCostUsd,
             EstimatedPoints = 0,
-            VideoModelOrder = await ResolveServiceVideoModelOrderAsync(pointServiceId, ct),
+            VideoModelOrder = await ResolveServiceVideoModelOrderAsync(pointServiceId, ct)
+                ?? (_modelPrices is null ? null : RVideoVideoModelPolicy.BookOrder(await _modelPrices.GetAsync(ct))),
+            ExcludedModelKeys = _modelPrices is null ? null : NullIfEmpty(RVideoVideoModelPolicy.BookExcluded(await _modelPrices.GetAsync(ct))),
             PricingMode = resolvedPrice.Mode,
             PricingRuleKey = resolvedPrice.RuleKey,
             TariffSnapshotJson = resolvedPrice.TariffSnapshotJson,
@@ -572,6 +581,20 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         return true;
     }
 
+    private static List<string>? NullIfEmpty(List<string> keys) => keys.Count == 0 ? null : keys;
+
+    /// <summary>Model the batch will most likely use (requested override, else the route's model), for its estimate.</summary>
+    private static TodoX.Web.Services.Pricing.ModelPriceQuery DefaultVideoPriceQuery(
+        VideoProviderRoute? route, SceneVideoRenderInput input, IReadOnlyList<VideoProjectSceneDto> scenes)
+    {
+        var model = string.IsNullOrWhiteSpace(input.RequestedModelCode) ? route?.ModelName : input.RequestedModelCode;
+        var policy = ResolveRequestedPolicy(route?.ProviderCode ?? RVideoVideoModelPolicy.ProviderCode, model, input.RequestedMode);
+        var seconds = input.RequestedDurationSeconds is > 0
+            ? input.RequestedDurationSeconds
+            : scenes.Count > 0 ? scenes.Max(s => s.DurationSeconds) : null;
+        return RVideoVideoModelPolicy.PriceQuery(policy.Model, policy.Mode ?? input.RequestedMode, input.Resolution, seconds);
+    }
+
     private static RVideoVideoModelPolicyEntry ResolveRequestedPolicy(string providerCode, string? model, string? mode)
     {
         var requestedModel = string.IsNullOrWhiteSpace(model)
@@ -641,7 +664,10 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             qualityTier,
             0,
             ServiceSellPriceQualityTiers.Standard,
-            false).Validate();
+            false).Validate() with
+        {
+            VideoModel = DefaultVideoPriceQuery(null, input, scenes)
+        };
         var pricing = await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
         var customerId = input.CustomerId ?? job.CustomerId;
         var available = customerId is Guid id

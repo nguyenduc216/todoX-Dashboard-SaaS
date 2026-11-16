@@ -3717,6 +3717,25 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         nextInput.ReuseExistingSceneVideoVersion = false;
         nextInput.CreatedAtUtc = DateTimeOffset.UtcNow;
         nextInput.LogicalRequestId = BuildModelFallbackLogicalRequestId(input.LogicalRequestId, excluded.Count);
+        if (!input.StrictRequestedSettings && _pointPricing is not null)
+        {
+            // Not a confirmed quote: the clip is billed at the price of the model that actually makes it
+            // (model price book), so a fallback to a dearer model is never sold below its cost x markup.
+            try
+            {
+                var rate = await _pointPricing.ResolveModelRateAsync(null, PointPricingResourceTypes.Video,
+                    string.IsNullOrWhiteSpace(input.CustomerPointQuality) ? ServiceSellPriceQualityTiers.Standard : input.CustomerPointQuality,
+                    RVideoVideoModelPolicy.PriceQuery(next.Policy.Model, next.Policy.Mode, input.Resolution, input.DurationSeconds), ct);
+                if (rate.Source == TodoX.Web.Services.Pricing.ModelPriceSources.ModelPrice && rate.Rate > 0)
+                {
+                    nextInput.CustomerPointRate = rate.Rate;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "RVIDEO_FALLBACK_REPRICE_FAILED sceneId={SceneId}", input.SceneId);
+            }
+        }
 
         var (nextJob, _) = await _jobs.EnqueueForLogCodeIfNoneActiveAsync(new RenderJobCreateModel
         {

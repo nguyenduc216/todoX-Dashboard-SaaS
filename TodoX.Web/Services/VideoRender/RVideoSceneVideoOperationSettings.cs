@@ -25,8 +25,9 @@ public sealed record RVideoSceneVideoOperationSettings(
             && RVideoSceneVideoCompletionService.CalculateActualVideoPoints(DurationSeconds, rate.Rate) == EstimatedPoints;
 
     public async Task<bool> IsPriceCurrentAsync(IPointPricingService? pricing, CancellationToken ct = default)
-        => pricing is not null && MatchesRate(await pricing.ResolveRateAsync(
-            ServiceId, PointPricingResourceTypes.Video, QualityTier, ct));
+        => pricing is not null && MatchesRate(await pricing.ResolveModelRateAsync(
+            ServiceId, PointPricingResourceTypes.Video, QualityTier,
+            RVideoVideoModelPolicy.PriceQuery(ModelCode, Mode, Resolution, DurationSeconds), ct));
 
     public static string CaptureSceneConfig(VideoProjectSceneDto scene)
         => JsonSerializer.Serialize(new { scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt, scene.DurationSeconds,

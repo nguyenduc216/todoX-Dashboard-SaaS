@@ -62,7 +62,8 @@ public sealed record EditVideoAiSettings
 }
 
 /// <summary>Point prices EditVideo charges, resolved from the settings and TodoX's point table.</summary>
-public sealed record EditVideoAiPrices(EditVideoAiSettings Settings, IReadOnlyDictionary<string, decimal> Rates)
+public sealed record EditVideoAiPrices(EditVideoAiSettings Settings, IReadOnlyDictionary<string, decimal> Rates,
+    TodoX.Web.Services.Pricing.ModelPriceBook? Book = null)
 {
     public decimal VndPerPoint => Settings.VndPerPoint > 0 ? Settings.VndPerPoint : 1000m;
     public decimal VndPerCredit => Settings.VndPerCredit > 0 ? Settings.VndPerCredit : 1m;
@@ -77,6 +78,12 @@ public sealed record EditVideoAiPrices(EditVideoAiSettings Settings, IReadOnlyDi
     /// </summary>
     public decimal? For(string kind, string model, string? duration, decimal? credits = null)
     {
+        // The shared model price book: 79AI cost of this exact generation × the model's markup.
+        if (Book is not null && credits is > 0)
+        {
+            return Book.PointsForCredits(kind, model, credits.Value);
+        }
+
         if (kind == "music")
         {
             if (Settings.MusicMarkup is > 0 && credits is > 0)
@@ -105,6 +112,11 @@ public sealed record EditVideoAiPrices(EditVideoAiSettings Settings, IReadOnlyDi
     /// <summary>What is missing for this kind, for the admin and the error message.</summary>
     public string? Missing(string kind, string model)
     {
+        if (Book is not null)
+        {
+            return null;
+        }
+
         if (kind == "music")
         {
             return Settings.MusicPoints is > 0 || Settings.MusicMarkup is > 0 ? null : "giá điểm cho tạo nhạc (Cài đặt EditVideo › Nhạc AI)";
@@ -125,10 +137,13 @@ public sealed class EditVideoAiSettingsService
     private readonly IMemoryCache _cache;
     private readonly IConfiguration? _configuration;
     private readonly Microsoft.Extensions.Options.IOptionsMonitor<EditVideoAiOptions>? _options;
+    private readonly TodoX.Web.Services.Pricing.ModelPriceService? _models;
 
     public EditVideoAiSettingsService(TodoXConnectionFactory factory, IPointPricingService pricing, IMemoryCache cache,
-        IConfiguration? configuration = null, Microsoft.Extensions.Options.IOptionsMonitor<EditVideoAiOptions>? options = null)
+        IConfiguration? configuration = null, Microsoft.Extensions.Options.IOptionsMonitor<EditVideoAiOptions>? options = null,
+        TodoX.Web.Services.Pricing.ModelPriceService? models = null)
     {
+        _models = models;
         _factory = factory;
         _pricing = pricing;
         _cache = cache;
@@ -193,7 +208,7 @@ public sealed class EditVideoAiSettingsService
             }
         }
 
-        return new EditVideoAiPrices(settings, rates);
+        return new EditVideoAiPrices(settings, rates, _models is null ? null : await _models.GetAsync(ct));
     }
 
     public async Task SaveAsync(EditVideoAiSettings s, CancellationToken ct = default)
