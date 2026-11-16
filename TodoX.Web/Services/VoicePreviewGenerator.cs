@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Memory;
 using TodoX.Web.Models;
 using TodoX.Web.Services.EditVideoTool;
 using TodoX.Web.Services.VideoRender;
@@ -20,10 +21,12 @@ public sealed class VoicePreviewGenerator
     private readonly IHttpClientFactory _http;
     private readonly IConfiguration _configuration;
     private readonly ILogger<VoicePreviewGenerator> _logger;
+    private readonly IMemoryCache _cache;
 
     public VoicePreviewGenerator(IAiStudioCatalogService catalog, IVbeeVoiceClient vbee, IVbeeRuntimeConfigProvider config,
-        IHttpClientFactory http, IConfiguration configuration, ILogger<VoicePreviewGenerator> logger)
+        IHttpClientFactory http, IConfiguration configuration, ILogger<VoicePreviewGenerator> logger, IMemoryCache cache)
     {
+        _cache = cache;
         _catalog = catalog;
         _vbee = vbee;
         _config = config;
@@ -53,10 +56,14 @@ public sealed class VoicePreviewGenerator
         var callback = VbeeOptions.BuildAuthorizedCallbackUriOrNull($"{publicBase}/api/editvideo/v1/vbee-callback?job={Guid.NewGuid()}", options.CallbackSecret)?.ToString()
                        ?? $"{publicBase}/api/editvideo/v1/vbee-callback";
 
+        // A request Vbee is still working on (an earlier click that timed out) is waited for again, not paid twice.
+        var pendingKey = "voice-preview-pending:" + voice.Id;
         VbeeVoiceSubmitResult submitted;
         try
         {
-            submitted = await _vbee.SubmitAsync(new VbeeVoiceSubmitRequest(
+            submitted = _cache.TryGetValue(pendingKey, out string? pendingId) && !string.IsNullOrWhiteSpace(pendingId)
+                ? new VbeeVoiceSubmitResult(pendingId, null, "resumed", null)
+                : await _vbee.SubmitAsync(new VbeeVoiceSubmitRequest(
                 voiceId, SampleText, voice.DefaultRate, null, callback, null,
                 options.ResolveSampleRate(voiceId), options.DefaultBitrate, options.DefaultSpeedRate, options.AppId), options, ct);
         }
@@ -65,8 +72,13 @@ public sealed class VoicePreviewGenerator
             throw new InvalidOperationException($"Vbee từ chối giọng \"{voiceId}\": {ex.ErrorMessage ?? ex.Message}. Kiểm tra lại mã giọng (Provider voice id).");
         }
 
+        if (!string.IsNullOrWhiteSpace(submitted.RequestId))
+        {
+            _cache.Set(pendingKey, submitted.RequestId, TimeSpan.FromMinutes(30));
+        }
+
         var audioUrl = submitted.AudioUrl;
-        var deadline = DateTime.UtcNow.AddSeconds(90);
+        var deadline = DateTime.UtcNow.AddSeconds(180);
         while (string.IsNullOrWhiteSpace(audioUrl) && !string.IsNullOrWhiteSpace(submitted.RequestId) && DateTime.UtcNow < deadline)
         {
             await Task.Delay(TimeSpan.FromSeconds(3), ct);
@@ -75,6 +87,7 @@ public sealed class VoicePreviewGenerator
             var state = EditVideoVoiceService.FindString(status, "status", "state")?.ToUpperInvariant();
             if (state is "FAILURE" or "FAILED" or "ERROR")
             {
+                _cache.Remove(pendingKey);
                 throw new InvalidOperationException("Vbee không đọc được giọng này: " +
                     (EditVideoVoiceService.FindString(status, "error_message", "message") ?? "lỗi không rõ"));
             }
@@ -82,9 +95,10 @@ public sealed class VoicePreviewGenerator
 
         if (string.IsNullOrWhiteSpace(audioUrl))
         {
-            throw new InvalidOperationException("Vbee chưa trả file sau 90 giây. Thử lại sau ít phút.");
+            throw new InvalidOperationException("Vbee vẫn đang đọc giọng này (đã chờ 3 phút). Bấm lại sau ít phút: TodoX tiếp tục chờ đúng yêu cầu cũ, không tốn thêm tiền.");
         }
 
+        _cache.Remove(pendingKey);
         var bytes = await _http.CreateClient().GetByteArrayAsync(audioUrl, ct);
         _logger.LogInformation("VOICE_PREVIEW_GENERATED voice={Code} bytes={Bytes}", voice.Code, bytes.Length);
         return await _catalog.UploadVoicePreviewAsync(voice.Id, bytes, $"preview-{voice.Code}.mp3", "audio/mpeg", user, ct);
