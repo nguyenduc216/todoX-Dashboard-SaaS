@@ -43,7 +43,7 @@ public static class ServiceUsageRanking
 
     /// <summary>Badge on a service card, or null when the customer rarely used it.</summary>
     public static string? Badge(CatalogServiceView service, IReadOnlyDictionary<Guid, ServiceUsage> usage)
-        => usage.TryGetValue(service.Id, out var u) && u.Total >= FrequentMinimum ? $"Hay dùng · {u.Total} lần" : null;
+        => usage.TryGetValue(service.Id, out var u) && u.Total >= FrequentMinimum ? $"{u.Total} lần" : null;
 }
 
 public sealed class CustomerDashboardDto

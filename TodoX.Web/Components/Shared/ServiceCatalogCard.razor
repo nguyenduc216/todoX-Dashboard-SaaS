@@ -10,7 +10,7 @@
          aria-label="Mở dịch vụ @Service.DisplayName">
         @if (!string.IsNullOrWhiteSpace(Badge))
         {
-            <span class="todox-service-badge"><MudIcon Icon="@Icons.Material.Filled.LocalFireDepartment" Size="Size.Small" />@Badge</span>
+            <span class="todox-service-badge" title="Số lần bạn đã dùng dịch vụ này">@Badge</span>
         }
         @if (!string.IsNullOrWhiteSpace(Service.ThumbnailUrl))
         {
@@ -72,7 +72,7 @@
 @code {
     [Parameter, EditorRequired] public CatalogServiceView Service { get; set; } = default!;
     [Parameter] public bool ShowFavorite { get; set; }
-    /// <summary>Optional label over the image (e.g. "Hay dùng · 12 lần" on the customer home).</summary>
+    /// <summary>Optional label over the image (e.g. "12 lần" on the customer home, top-right corner).</summary>
     [Parameter] public string? Badge { get; set; }
     [Parameter] public bool IsFavorite { get; set; }
     [Parameter] public bool ShowPrice { get; set; }
