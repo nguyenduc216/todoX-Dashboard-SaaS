@@ -53,6 +53,17 @@
                     <MudText Typo="Typo.h6">License @license.KeyPrefix… · gói @license.PlanCode</MudText>
                     <MudChip T="string" Size="Size.Small" Color="@(license.Status == EditVideoLicenseStatuses.Active ? Color.Success : Color.Warning)">@StatusLabel(license.Status)</MudChip>
                 </MudStack>
+                @if (_newKeys.TryGetValue(license.Id, out var newKey))
+                {
+                    <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">
+                        License key mới (chỉ hiện một lần, hãy lưu lại):
+                        <MudTextField T="string" Value="@newKey" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-1" />
+                    </MudAlert>
+                }
+                <MudStack Row="true" Spacing="2" Class="mb-2 flex-wrap">
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Key" Disabled="_busyKey" OnClick="@(() => NewKeyAsync(license))">Lấy license key</MudButton>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle" Style="align-self:center">Nhập key này (hoặc đăng nhập tài khoản TodoX) trong TodoX EditVideo. Lấy key mới thì key cũ hết dùng; máy đã kích hoạt vẫn chạy.</MudText>
+                </MudStack>
                 <MudText Typo="Typo.body2" Class="mb-2">
                     Máy tính @license.ActiveDesktopDevices/@license.MaxDesktopDevices · Điện thoại @license.ActiveMobileDevices/@license.MaxMobileDevices ·
                     @(license.ExpiresAt?.ToLocalTime().ToString("'Hết hạn' dd/MM/yyyy") ?? "Không thời hạn")
@@ -102,6 +113,31 @@
 @code {
     private Guid? _customerId;
     private IReadOnlyList<EditVideoLicenseRow> _licenses = [];
+    private readonly Dictionary<Guid, string> _newKeys = new();
+    private bool _busyKey;
+
+    private async Task NewKeyAsync(EditVideoLicenseRow license)
+    {
+        if (_customerId is not { } customerId)
+        {
+            return;
+        }
+
+        _busyKey = true;
+        try
+        {
+            var key = await Licenses.RegenerateKeyAsync(license.Id, customerId, AuthState.CurrentUser?.UserId);
+            if (key is not null)
+            {
+                _newKeys[license.Id] = key;
+                await Reload();
+            }
+        }
+        finally
+        {
+            _busyKey = false;
+        }
+    }
     private readonly Dictionary<Guid, IReadOnlyList<EditVideoDeviceRow>> _devices = new();
     private readonly Dictionary<Guid, IReadOnlyList<EditVideoSessionRow>> _sessions = new();
     private EditVideoReleaseManifest? _release;

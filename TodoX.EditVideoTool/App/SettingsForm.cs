@@ -131,20 +131,21 @@ public sealed class SettingsForm : Form
         // Two ways to register this app, one shown at a time: the TodoX account (its package gives the license) or the
         // license key that TodoX syncs to the same account.
         _signIn.Controls.Add(Ui.Section("Đăng ký ứng dụng bằng"));
-        var byAccount = Choice("Tài khoản TodoX", true);
-        var byKey = Choice("License key", false);
+        var byKey = Choice("License key", true);
+        var byAccount = Choice("Tài khoản TodoX", false);
         var choices = Ui.Row();
-        choices.Controls.AddRange([byAccount, byKey]);
+        choices.Controls.AddRange([byKey, byAccount]);
         _signIn.Controls.Add(choices);
 
         var account = Ui.Stack();
         account.Controls.Add(Ui.Text("Tài khoản (tên đăng nhập hoặc email)", 9.5f, Ui.Muted));
         account.Controls.Add(_user);
         account.Controls.Add(Ui.Text("Mật khẩu", 9.5f, Ui.Muted));
-        var passwordRow = Ui.Row();
-        passwordRow.Controls.Add(_password);
-        passwordRow.Controls.Add(Action("Đăng nhập", SignInAsync, primary: true));
-        account.Controls.Add(passwordRow);
+        account.Controls.Add(_password);
+        var signIn = Action("Đăng nhập", SignInAsync, primary: true);
+        signIn.Margin = new Padding(0, 4, 0, 4);
+        account.Controls.Add(signIn);
+        account.Visible = false;
         _password.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -155,11 +156,10 @@ public sealed class SettingsForm : Form
         };
 
         var key = Ui.Stack();
-        key.Controls.Add(Ui.Text("License key TodoX (dạng tdxv_...), đã gắn với tài khoản của bạn.", 9.5f, Ui.Muted));
+        key.Controls.Add(Ui.Text("License key TodoX (dạng tdxv_...), lấy trên Dashboard TodoX › EditVideo của tôi.", 9.5f, Ui.Muted));
         _keyRow.Controls.Add(_keyBox);
         _keyRow.Controls.Add(Action("Kích hoạt", ActivateAsync, primary: true));
         key.Controls.Add(_keyRow);
-        key.Visible = false;
 
         byAccount.CheckedChanged += (_, _) =>
         {

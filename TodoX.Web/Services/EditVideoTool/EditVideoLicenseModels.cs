@@ -41,6 +41,7 @@ public static class EditVideoEventTypes
     public const string SelfReleaseRefused = "self_release_refused";
     public const string PackageApplied = "package_applied";
     public const string AccountSignIn = "account_sign_in";
+    public const string KeyRegenerated = "key_regenerated";
 }
 
 /// <summary>Stable error codes returned to the local tool; the exe maps them to Vietnamese messages.</summary>

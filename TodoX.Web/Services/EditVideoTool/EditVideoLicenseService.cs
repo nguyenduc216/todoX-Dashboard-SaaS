@@ -341,6 +341,30 @@ public sealed class EditVideoLicenseService
         return (issued, $"Đã cấp license TodoX EditVideo (gói {packageCode}). Khách đăng nhập tài khoản TodoX trong ứng dụng để dùng, hoặc nhập key {issued.LicenseKey}.");
     }
 
+    /// <summary>
+    /// Gives the customer a new key for their license (only a hash is stored, so the old key cannot be shown again).
+    /// Machines already activated keep working; the old key can no longer activate a machine. Null when the license
+    /// is not the customer's or is revoked.
+    /// </summary>
+    public async Task<string?> RegenerateKeyAsync(Guid licenseId, Guid customerId, Guid? actorUserId, CancellationToken ct = default)
+    {
+        var key = EditVideoLicenseKeys.Generate();
+        using var conn = await _factory.OpenAsync(ct);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE editvideo.licenses SET license_key_hash = @hash, key_prefix = @prefix, updated_at = now()
+             WHERE id = @licenseId AND customer_id = @customerId AND tenant_id = @tenantId AND status <> 'revoked';
+            """,
+            new { licenseId, customerId, tenantId = _tenant.TenantId, hash = EditVideoLicenseKeys.Hash(key), prefix = EditVideoLicenseKeys.DisplayPrefix(key) });
+        if (changed == 0)
+        {
+            return null;
+        }
+
+        await InsertEventAsync(conn, null, licenseId, null, EditVideoEventTypes.KeyRegenerated, null, null, actorUserId);
+        return key;
+    }
+
     public async Task<IReadOnlyList<EditVideoLicenseRow>> ListForCustomerAsync(Guid customerId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
