@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Form
     private readonly Panel _updateBanner = new() { Dock = DockStyle.Top, Height = 0, BackColor = ColorTranslator.FromHtml("#3A2E0A"), Visible = false, Padding = new Padding(36, 8, 36, 8) };
     private readonly Label _updateText = new() { AutoSize = false, Dock = DockStyle.Fill, ForeColor = ColorTranslator.FromHtml("#F5DFA6"), TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false };
     private readonly Button _updateButton = Ui.Button("Cập nhật ngay", primary: true);
+    private readonly UpdateOverlay _updateOverlay = new();
     private readonly Dictionary<Screen, ListView> _projectLists = [];
     private readonly Dictionary<Screen, ListView> _videoLists = [];
     private bool _syncing;
@@ -100,6 +101,7 @@ public sealed partial class MainWindow : Form
         Controls.Add(UpdateBanner());
         Controls.Add(TopBar());
         Controls.Add(footer);
+        Controls.Add(_updateOverlay);
         Go(Screen.Home);
 
         Shown += async (_, _) =>
@@ -159,6 +161,12 @@ public sealed partial class MainWindow : Form
         await Task.Delay(500);
         Shot(this, "4-home-maximized");
         WindowState = FormWindowState.Normal;
+        await Task.Delay(300);
+        _updateOverlay.Show("Đang cập nhật TodoX EditVideo…");
+        _updateOverlay.Report("Tải TodoX EditVideo: 42%");
+        await Task.Delay(400);
+        Shot(_updateOverlay, "4-updating-overlay");
+        _updateOverlay.Hide();
         Location = new Point(-6000, 0);
 
         using var settings = new SettingsForm(_services, SettingsPage.License) { StartPosition = FormStartPosition.Manual, Location = new Point(-6000, 0) };
@@ -864,6 +872,7 @@ public sealed partial class MainWindow : Form
             var exe = _updater.InstalledExe;
             if (File.Exists(exe))
             {
+                _updateOverlay.Show("Đang mở lại TodoX EditVideo…");
                 Process.Start(new ProcessStartInfo(exe, "app") { UseShellExecute = false });
                 Close();
             }
@@ -872,13 +881,20 @@ public sealed partial class MainWindow : Form
         }
 
         _updateButton.Enabled = false;
+        _updateOverlay.Show("Đang cập nhật TodoX EditVideo…");
         try
         {
-            Say(await Task.Run(() => _updater.CheckAndApplyAsync(new Progress<string>(Say), _closing.Token)));
+            var progress = new Progress<string>(message =>
+            {
+                Say(message);
+                _updateOverlay.Report(message);
+            });
+            Say(await Task.Run(() => _updater.CheckAndApplyAsync(progress, _closing.Token)));
             await RefreshUpdateBannerAsync();
         }
         finally
         {
+            _updateOverlay.Hide();
             _updateButton.Enabled = true;
         }
     }
