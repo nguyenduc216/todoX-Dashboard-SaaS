@@ -1,0 +1,176 @@
+@page "/admin/editvideo-settings"
+@using TodoX.Web.Services.EditVideoTool
+@inject EditVideoAiSettingsService Settings
+@inject AuthStateService AuthState
+@inject ISnackbar Snackbar
+
+<PageTitle>Cài đặt EditVideo</PageTitle>
+
+@if (!_initialized)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else if (!_admin)
+{
+    <MudAlert Severity="Severity.Error">Chỉ quản trị viên mới sửa được cài đặt EditVideo.</MudAlert>
+}
+else
+{
+    <MudStack Spacing="3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Cài đặt EditVideo</MudText>
+            <MudText Class="todox-page-subtitle">
+                Điểm trừ cho mỗi lệnh của TodoX EditVideo (ảnh, video, nhạc, giọng đọc) và model dự phòng khi tạo video/ảnh AI.
+                Ảnh, video và giọng đọc dùng chung bảng giá điểm của web; nhạc có giá riêng ở đây.
+            </MudText>
+        </div>
+
+        @if (_missing.Count > 0)
+        {
+            <MudAlert Severity="Severity.Warning">
+                Còn thiếu cấu hình — khách sẽ không tạo được phần tương ứng:
+                <ul class="mb-0">
+                    @foreach (var m in _missing)
+                    {
+                        <li>@m</li>
+                    }
+                </ul>
+            </MudAlert>
+        }
+
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">Bảng giá điểm (chung với web)</MudText>
+            <MudSimpleTable Dense="true" Class="todox-table">
+                <thead><tr><th>Loại</th><th>Hạng thường</th><th>Hạng cao cấp</th><th>Đơn vị</th></tr></thead>
+                <tbody>
+                    <tr><td>Ảnh AI</td><td>@Rate("image:standard")</td><td>@Rate("image:premium")</td><td>mỗi ảnh</td></tr>
+                    <tr><td>Video AI</td><td>@Rate("video:standard")</td><td>@Rate("video:premium")</td><td>mỗi giây video</td></tr>
+                    <tr><td>Nhạc AI (Suno)</td><td colspan="2">@(_form.MusicPoints is { } mp ? $"{mp:0.##}" : "chưa đặt")</td><td>mỗi lần tạo</td></tr>
+                </tbody>
+            </MudSimpleTable>
+            <MudText Typo="Typo.caption" Class="mt-2" Style="display:block">
+                Sửa giá ảnh, video, giọng đọc ở <MudLink Href="/wallets">Ví điểm › Bảng giá điểm</MudLink>. Ví dụ video 8 giây hạng thường = 8 × @Rate("video:standard") điểm.
+            </MudText>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">Hạng giá</MudText>
+            <MudStack Row="true" Spacing="3" Class="flex-wrap">
+                <MudSelect T="string" @bind-Value="_imageTier" Label="Ảnh AI tính theo hạng" Variant="Variant.Outlined" Style="min-width:220px">
+                    <MudSelectItem Value="@("standard")">Thường</MudSelectItem>
+                    <MudSelectItem Value="@("premium")">Cao cấp</MudSelectItem>
+                </MudSelect>
+                <MudSelect T="string" @bind-Value="_videoTier" Label="Video AI tính theo hạng" Variant="Variant.Outlined" Style="min-width:220px">
+                    <MudSelectItem Value="@("standard")">Thường</MudSelectItem>
+                    <MudSelectItem Value="@("premium")">Cao cấp</MudSelectItem>
+                </MudSelect>
+            </MudStack>
+            <MudTextField @bind-Value="_premiumModels" Label="Model luôn tính giá cao cấp" Variant="Variant.Outlined" Class="mt-3"
+                          HelperText="Mã model 79AI, cách nhau bằng dấu phẩy. Ví dụ: veo_omni, kling_4_0" />
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">Nhạc AI (Suno)</MudText>
+            <MudStack Row="true" Spacing="3" Class="flex-wrap">
+                <MudNumericField T="decimal?" @bind-Value="_musicPoints" Label="Điểm mỗi lần tạo nhạc" Variant="Variant.Outlined" Min="0" Step="0.5m" Style="min-width:220px"
+                                 HelperText="Mỗi lần tạo ra 1–2 bản nhạc. Để trống = chưa mở tạo nhạc." />
+                <MudSelect T="string" @bind-Value="_musicModel" Label="Model mặc định" Variant="Variant.Outlined" Style="min-width:220px">
+                    @foreach (var m in MusicModels)
+                    {
+                        <MudSelectItem Value="@m">@m</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-1">Model dự phòng</MudText>
+            <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
+                Khi 79AI từ chối model khách chọn (lỗi model, hết tài nguyên, thời lượng không hợp lệ), TodoX thử lần lượt các model dưới đây —
+                chỉ model có cùng lựa chọn khung/độ phân giải/thời lượng và giá không cao hơn. Khách chỉ bị trừ điểm khi có kết quả.
+            </MudText>
+            <MudSwitch T="bool" @bind-Value="_fallback" Color="Color.Warning" Label="Bật model dự phòng" />
+            <MudTextField @bind-Value="_videoFallback" Label="Thứ tự dự phòng video" Variant="Variant.Outlined" Class="mt-2" Disabled="!_fallback" />
+            <MudTextField @bind-Value="_imageFallback" Label="Thứ tự dự phòng ảnh" Variant="Variant.Outlined" Class="mt-2" Disabled="!_fallback" />
+        </MudPaper>
+
+        <div>
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_saving" OnClick="SaveAsync">Lưu cài đặt</MudButton>
+        </div>
+    </MudStack>
+}
+
+@code {
+    private static readonly string[] MusicModels = ["suno-v6.0", "suno-v5.5", "suno-v5.0", "suno-v4.5"];
+
+    private bool _initialized;
+    private bool _admin;
+    private bool _saving;
+    private EditVideoAiSettings _form = new();
+    private IReadOnlyDictionary<string, decimal> _rates = new Dictionary<string, decimal>();
+    private List<string> _missing = [];
+
+    private string _imageTier = "standard";
+    private string _videoTier = "standard";
+    private string? _premiumModels;
+    private decimal? _musicPoints;
+    private string _musicModel = "suno-v5.5";
+    private bool _fallback = true;
+    private string? _videoFallback;
+    private string? _imageFallback;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _admin = AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
+        if (_admin)
+        {
+            await LoadAsync();
+        }
+
+        _initialized = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        var prices = await Settings.PricesAsync();
+        _form = prices.Settings;
+        _rates = prices.Rates;
+        _imageTier = _form.ImageTier;
+        _videoTier = _form.VideoTier;
+        _premiumModels = _form.PremiumModels;
+        _musicPoints = _form.MusicPoints;
+        _musicModel = _form.MusicModel;
+        _fallback = _form.FallbackEnabled;
+        _videoFallback = _form.VideoFallback;
+        _imageFallback = _form.ImageFallback;
+        _missing = new[] { prices.Missing("image", ""), prices.Missing("video", ""), prices.Missing("music", "") }
+            .Where(m => m is not null).Select(m => "Chưa có " + m).ToList();
+    }
+
+    private string Rate(string key) => _rates.TryGetValue(key, out var r) ? r.ToString("0.##") : "chưa đặt";
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            await Settings.SaveAsync(new EditVideoAiSettings
+            {
+                ImageTier = _imageTier,
+                VideoTier = _videoTier,
+                PremiumModels = _premiumModels ?? "",
+                MusicPoints = _musicPoints,
+                MusicModel = _musicModel,
+                FallbackEnabled = _fallback,
+                VideoFallback = _videoFallback ?? "",
+                ImageFallback = _imageFallback ?? ""
+            });
+            await LoadAsync();
+            Snackbar.Add("Đã lưu cài đặt EditVideo.", Severity.Success);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

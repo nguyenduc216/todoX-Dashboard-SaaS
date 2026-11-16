@@ -16,7 +16,7 @@ public sealed class AiGenerator
 {
     public const long MaxUploadBytes = 10 * 1024 * 1024;
     private static readonly string[] ImageExtensions = [".jpg", ".jpeg", ".png", ".webp"];
-    private static readonly string[] OutputExtensions = [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm"];
+    private static readonly string[] OutputExtensions = [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".m4a"];
 
     private readonly TodoXServerClient _server;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -80,6 +80,44 @@ public sealed class AiGenerator
         while (Status(task) == "running" && DateTime.UtcNow < deadline)
         {
             progress?.Invoke(input.Kind == "video" ? "Đang chờ AI tạo video" : "Đang chờ AI tạo ảnh");
+            await _delay(PollInterval, ct);
+            var polled = await _server.AiTaskAsync(task.GetProperty("id").GetGuid(), ct);
+            if (!polled.Ok)
+            {
+                return Explain(polled);
+            }
+
+            task = polled.Value;
+        }
+
+        return await ResultAsync(task, folder, ct);
+    }
+
+    /// <summary>AI music (Suno) through TodoX; the songs (usually two versions) are saved into the folder.</summary>
+    public async Task<string> CreateMusicAsync(string name, string styles, string? lyrics, string? gender, string? model, string? project,
+        string folder, TimeSpan wait, Action<string>? progress, CancellationToken ct)
+    {
+        progress?.Invoke("TodoX đang gửi yêu cầu tạo nhạc");
+        var created = await _server.AiMusicAsync(new
+        {
+            name,
+            styles,
+            lyrics,
+            gender,
+            model,
+            project,
+            clientKey = "exe-" + Guid.NewGuid().ToString("N")
+        }, ct);
+        if (!created.Ok)
+        {
+            return Explain(created);
+        }
+
+        var task = created.Value;
+        var deadline = DateTime.UtcNow + wait;
+        while (Status(task) == "running" && DateTime.UtcNow < deadline)
+        {
+            progress?.Invoke("Đang chờ AI tạo nhạc");
             await _delay(PollInterval, ct);
             var polled = await _server.AiTaskAsync(task.GetProperty("id").GetGuid(), ct);
             if (!polled.Ok)
@@ -173,7 +211,7 @@ public sealed class AiGenerator
             files,
             message = Text(task, "message"),
             next = status == "running"
-                ? $"Still generating. Call todox_{kind}_status with this task in about {(kind == "video" ? "a minute" : "20 seconds")}."
+                ? $"Still generating. Call todox_{kind}_status with this task in about {(kind == "image" ? "20 seconds" : "a minute")}."
                 : null
         }, Json);
     }
@@ -240,7 +278,7 @@ public sealed class AiGenerator
         var ext = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? Path.GetExtension(uri.AbsolutePath).ToLowerInvariant() : string.Empty;
         if (!OutputExtensions.Contains(ext))
         {
-            ext = kind == "video" ? ".mp4" : ".png";
+            ext = kind switch { "video" => ".mp4", "music" => ".mp3", _ => ".png" };
         }
 
         return $"todox-ai-{kind}-{task.ToString("N")[..8]}{(index > 0 ? $"-{index + 1}" : string.Empty)}{ext}";
@@ -257,7 +295,7 @@ public sealed class AiGenerator
     private static string Explain<T>(ServerResult<T> r) => r.ErrorCode switch
     {
         LicenseApiClient.NetworkError => ServerConnectivity.OfflineText,
-        "insufficient_points" or "invalid_request" or "ai_option_required" or "model_not_found" or "ai_service_unavailable"
+        "insufficient_points" or "invalid_request" or "ai_option_required" or "model_not_found" or "ai_service_unavailable" or "price_not_configured"
             or "ai_failed" or "not_found" => r.Message ?? r.ErrorCode,
         _ => LicenseMessages.ForServerError(r.ErrorCode, r.Message)
     };

@@ -325,6 +325,7 @@ builder.Services.AddScoped<EditVideoVoiceService>();
 builder.Services.Configure<EditVideoAiOptions>(builder.Configuration.GetSection(EditVideoAiOptions.SectionName));
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient<IEditVideoGommoClient, EditVideoGommoClient>(client => client.Timeout = TimeSpan.FromSeconds(90));
+builder.Services.AddScoped<EditVideoAiSettingsService>();
 builder.Services.AddScoped<EditVideoAiService>();
 builder.Services.AddScoped<EditVideoSkillService>();
 builder.Services.AddScoped<EditVideoSkillRunService>();

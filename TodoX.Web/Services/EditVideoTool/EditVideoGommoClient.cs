@@ -20,6 +20,9 @@ public sealed class EditVideoAiOptions
 
     public string ProjectId { get; set; } = "default";
 
+    /// <summary>Gommo V2 jobs host (music: POST /ai/jobs/music/{model}, poll POST /ai/jobs/{id}?media=music).</summary>
+    public string V2BaseUrl { get; set; } = "https://v2.api.gommo.net";
+
     /// <summary>What one Gommo credit costs TodoX, in VND.</summary>
     public decimal VndPerCredit { get; set; } = 1m;
 
@@ -54,6 +57,10 @@ public interface IEditVideoGommoClient
     /// <summary>JSON POST to a Gommo V2 path on the AI host (projects). Test doubles may leave it unsupported.</summary>
     Task<JsonNode> PostJsonAsync(string hostPath, IDictionary<string, object?> body, CancellationToken ct = default) =>
         throw new NotSupportedException("Gommo V2 JSON calls are not available.");
+
+    /// <summary>Form POST to the Gommo V2 jobs host (Bearer token), e.g. /ai/jobs/music/suno-v5.5.</summary>
+    Task<JsonNode> PostV2Async(string path, IReadOnlyDictionary<string, string?> fields, CancellationToken ct = default) =>
+        throw new NotSupportedException("Gommo V2 jobs are not available.");
 }
 
 /// <summary>Thin form-POST client for Gommo (79AI) REST, authenticated with TodoX's stored 79ai credential.</summary>
@@ -164,6 +171,55 @@ public sealed class EditVideoGommoClient : IEditVideoGommoClient
         }
 
         if (!response.IsSuccessStatusCode || json is null)
+        {
+            throw new EditVideoGommoException($"http_{(int)response.StatusCode}",
+                EditVideoGommoJson.ErrorMessage(json) ?? $"Gommo returned HTTP {(int)response.StatusCode}.", response.StatusCode);
+        }
+
+        return json;
+    }
+
+    public async Task<JsonNode> PostV2Async(string path, IReadOnlyDictionary<string, string?> fields, CancellationToken ct = default)
+    {
+        ResolvedProviderCredential credential;
+        try
+        {
+            credential = await _credentials.ResolveAsync("79ai", "access_token", ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new EditVideoGommoException("not_configured", ex.Message);
+        }
+
+        var options = _options.CurrentValue;
+        var domain = FirstNonBlank(options.Domain, ReadDomain((await _accounts.GetAccountByIdAsync(credential.ProviderAccountId, ct))?.ConfigJson), "79ai.net")!;
+        var form = new Dictionary<string, string> { ["access_token"] = credential.Secret, ["domain"] = domain };
+        foreach (var (key, value) in fields)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                form[key] = value;
+            }
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, (options.V2BaseUrl ?? "https://v2.api.gommo.net").TrimEnd('/') + "/" + path.TrimStart('/'))
+        {
+            Content = new FormUrlEncodedContent(form)
+        };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential.Secret);
+        using var response = await _http.SendAsync(request, ct);
+        var text = (await response.Content.ReadAsStringAsync(ct)).Replace(credential.Secret, "***", StringComparison.Ordinal);
+        JsonNode? json;
+        try
+        {
+            json = string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+        }
+        catch (JsonException)
+        {
+            json = null;
+        }
+
+        if (!response.IsSuccessStatusCode || json is null || json["success"] is JsonValue ok && ok.TryGetValue<bool>(out var success) && !success)
         {
             throw new EditVideoGommoException($"http_{(int)response.StatusCode}",
                 EditVideoGommoJson.ErrorMessage(json) ?? $"Gommo returned HTTP {(int)response.StatusCode}.", response.StatusCode);

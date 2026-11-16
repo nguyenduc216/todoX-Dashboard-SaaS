@@ -28,8 +28,9 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 | What is said in a clip | `todox_transcribe` |
 | Make a file widely playable | `todox_convert` |
 | Public link for a local file (kept 7 days in the customer's TodoX storage) | `todox_upload` |
-| AI image / AI video (costs points) | `todox_ai_models`, `todox_image_create`, `todox_video_create` |
-| Check / fetch an AI result, recent AI tasks | `todox_image_status`, `todox_video_status`, `todox_ai_tasks` |
+| AI image / AI video / VFX on a clip (costs points) | `todox_ai_models`, `todox_image_create`, `todox_video_create` |
+| AI music, Suno (costs points) | `todox_music_create` |
+| Check / fetch an AI result, recent AI tasks | `todox_image_status`, `todox_video_status`, `todox_music_status`, `todox_ai_tasks` |
 
 1. `todox_status` once if a tool reports a license or component problem; relay its message.
 2. Footage lives in the TodoX resource folder, one sub-folder per project. When the user names a project
@@ -59,6 +60,14 @@ write code to process media, even if they are installed — if a `todox_*` tool 
    `todox_probe` and the edit. A video that is not ready yet returns a `task`: check it with
    `todox_video_status` about once a minute (images: `todox_image_status`). If a tool says an option is
    required, ask the user to pick from the values it lists.
+8. Music: use the user's file from `03-am-thanh` when there is one. Otherwise offer AI music:
+   `todox_music_create` with a title, a style (genre, mood, instruments, BPM) and lyrics only for a song;
+   tell the user the point price from `todox_ai_models` (type music) first. The songs land in `03-am-thanh`;
+   let the user pick one, then pass it as the music of the edit.
+9. VFX (an effect on an existing clip: weather, light, magic, transform): `todox_ai_models` type video, pick a
+   model with the edit ability, pass the clip as `videos` with the effect as the prompt, and confirm the price.
+   Points always follow TodoX's price list; if a tool says TodoX has no price yet, tell the user it is not
+   available yet instead of retrying.
 
 Do not try to reproduce or inspect how the tools edit; just pass the user's intent.
 Other TodoX skills (named todox-...) cover specific kinds of video with these same tools. Run one with

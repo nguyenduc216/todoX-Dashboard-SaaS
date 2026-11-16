@@ -13,10 +13,10 @@ public sealed partial class VideoTools
     private const string AiFolderParams = "Where the result is saved: a project name (its TodoX resource folder) or omit for Documents\\TodoX\\ai.";
 
     [McpServerTool(Name = "todox_ai_models", ReadOnly = true, Idempotent = true)]
-    [Description("List TodoX AI models for making images or videos: options (ratios, resolutions, modes, durations), abilities and the point price, plus the customer's point balance. Pass model to see that model's full price table. Call before todox_image_create / todox_video_create.")]
+    [Description("List TodoX AI models for making images, videos or music: options (ratios, resolutions, modes, durations), abilities and the TodoX point price, plus the customer's point balance. Pass model to see that model's price for each length. Call before todox_image_create / todox_video_create / todox_music_create. VFX (effects on an existing clip) uses the video models with the edit ability (withEdit) and the clip as a source video.")]
     public async Task<string> AiModels(
         CancellationToken ct,
-        [Description("image or video; omit for both.")] string? type = null,
+        [Description("image, video or music; omit for all.")] string? type = null,
         [Description("A model id to see its full price table.")] string? model = null) =>
         await ReadyProblemAsync(null, ct) ?? await _ai.ModelsAsync(type, model, ct);
 
@@ -81,6 +81,38 @@ public sealed partial class VideoTools
             }, StatusTools.Json);
     }
 
+    [McpServerTool(Name = "todox_music_create", Destructive = false)]
+    [Description("Make AI music (Suno) with TodoX for a video: background music or a song with lyrics. Costs the TodoX music price in points (see todox_ai_models type music); confirm name, style and price with the user first. Usually returns two versions, saved into the project's 03-am-thanh folder; or a task id to check with todox_music_status.")]
+    public async Task<string> AiMusicCreate(
+        [Description("Song / track title, at least 4 characters.")] string name,
+        [Description("Style: genre, mood, instruments, tempo (BPM), vocal tone, e.g. upbeat pop, guitar, 120 BPM, bright female vocal.")] string styles,
+        IProgress<ProgressNotificationValue> progress,
+        CancellationToken ct,
+        [Description("Lyrics with [Intro], [Verse], [Chorus], [Bridge], [Outro] tags; omit for instrumental background music.")] string? lyrics = null,
+        [Description("Singer's voice: m or f.")] string? gender = null,
+        [Description("Music model from todox_ai_models type music; omit for TodoX's default.")] string? model = null,
+        [Description("Project name: the songs go into its 03-am-thanh folder.")] string? project = null)
+    {
+        await using var session = await SessionLogger.StartAsync(_server, _paths, "ai_music", ct);
+        if (await ReadyProblemAsync(session, ct) is { } problem)
+        {
+            return problem;
+        }
+
+        var result = await _ai.CreateMusicAsync(name, styles, lyrics, gender, model, string.IsNullOrWhiteSpace(project) ? null : project.Trim(),
+            MusicFolder(project), TimeSpan.FromMinutes(4), message => Report(progress, 50, message), ct);
+        session.Info("ai_create", null, new { kind = "music", model });
+        return result;
+    }
+
+    [McpServerTool(Name = "todox_music_status", Destructive = false, Idempotent = true)]
+    [Description("Check an AI music task from todox_music_create; when it is finished the songs are saved on this computer and the local paths returned.")]
+    public async Task<string> AiMusicStatus(
+        [Description("Task id returned by todox_music_create or todox_ai_tasks.")] string task,
+        CancellationToken ct,
+        [Description("Project name: the songs go into its 03-am-thanh folder.")] string? project = null) =>
+        await ReadyProblemAsync(null, ct) ?? await _ai.StatusAsync(task, MusicFolder(project), ct);
+
     [McpServerTool(Name = "todox_image_status", Destructive = false, Idempotent = true)]
     [Description("Check an AI image task from todox_image_create; when it is finished the image is saved on this computer and the local path returned.")]
     public Task<string> AiImageStatus(
@@ -101,7 +133,7 @@ public sealed partial class VideoTools
     [Description("List this customer's recent AI image/video tasks with status and points.")]
     public async Task<string> AiTasks(
         CancellationToken ct,
-        [Description("image or video; omit for both.")] string? type = null,
+        [Description("image, video or music; omit for all.")] string? type = null,
         [Description("How many, up to 50 (default 20).")] int limit = 20) =>
         await ReadyProblemAsync(null, ct) ?? await _ai.TasksAsync(type, limit, ct);
 
@@ -120,6 +152,11 @@ public sealed partial class VideoTools
 
     private async Task<string> AiStatusAsync(string task, string? project, CancellationToken ct) =>
         await ReadyProblemAsync(null, ct) ?? await _ai.StatusAsync(task, AiFolder(project), ct);
+
+    private string MusicFolder(string? project) =>
+        string.IsNullOrWhiteSpace(project)
+            ? AiGenerator.DefaultFolder()
+            : _projects.Find(project, create: true).Folder?.Path is { } dir ? Path.Combine(dir, Projects.ProjectFolders.AudioDir) : AiGenerator.DefaultFolder();
 
     private string AiFolder(string? project) =>
         string.IsNullOrWhiteSpace(project)
