@@ -33,37 +33,52 @@
         </MudAlert>
     }
 
-    <MudGrid>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Tổng khách hàng</MudText>
-                <div class="todox-stat-value">@_customers.Count</div>
+    @* Every card filters the list; clicking the selected card again shows everyone. *@
+    <div class="todox-stat-grid" data-testid="customer-stat-cards">
+        @foreach (var card in Cards)
+        {
+            <MudPaper Class="@($"todox-card todox-stat-card pa-4{(_card == card.Filter ? " is-selected" : "")}")"
+                      @onclick="@(() => SelectCard(card.Filter))" role="button" tabindex="0" title="Bấm để lọc danh sách">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">@card.Title</MudText>
+                    <MudIcon Icon="@card.Icon" Size="Size.Small" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value" style="@(card.Filter == CustomerCardFilter.NeedVideo && card.Count > 0 ? "color:var(--mud-palette-error)" : null)">@card.Count</div>
+                @if (!string.IsNullOrEmpty(card.Caption))
+                {
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@card.Caption</MudText>
+                }
             </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Đang hoạt động</MudText>
-                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Active)</div>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Chờ duyệt</MudText>
-                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Pending)</div>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Đã khóa</MudText>
-                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Locked)</div>
-            </MudPaper>
-        </MudItem>
-    </MudGrid>
+        }
+    </div>
 
     <MudPaper Class="todox-table-card pa-4" rounded="true">
-        <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, mã, email..."
-                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                      Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <div class="d-flex align-center gap-2 mb-3 flex-wrap">
+            <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, mã, email, số điện thoại..."
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                          autocomplete="off" name="customer-search" Style="flex:1;min-width:240px" />
+            <MudBadge Content="@_advanced.Describe().Count" Visible="@(!_advanced.IsEmpty)" Color="Color.Warning" Overlap="true">
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ManageSearch"
+                           OnClick="OpenAdvancedSearch" data-testid="customer-advanced-search">Tìm kiếm chi tiết</MudButton>
+            </MudBadge>
+        </div>
+
+        @if (!_advanced.IsEmpty || _card != CustomerCardFilter.All)
+        {
+            <div class="d-flex align-center gap-1 mb-3 flex-wrap" data-testid="customer-active-filters">
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle mr-1">Đang lọc (@Filtered.Count() khách):</MudText>
+                @if (_card != CustomerCardFilter.All)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" OnClose="@(_ => SelectCard(CustomerCardFilter.All))">@Cards.First(x => x.Filter == _card).Title</MudChip>
+                }
+                @foreach (var label in _advanced.Describe())
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">@label</MudChip>
+                }
+                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ClearFilters">Xóa lọc</MudButton>
+            </div>
+        }
 
         @if (_studioReady)
         {
@@ -213,6 +228,57 @@
 
     private CustomerVideoCounts Counts(Guid customerId) => _videoCounts.TryGetValue(customerId, out var c) ? c : NoVideos;
 
+    private CustomerCardFilter _card = CustomerCardFilter.All;
+    private CustomerSearchFilter _advanced = new();
+
+    private sealed record StatCard(CustomerCardFilter Filter, string Title, string Icon, int Count, string? Caption);
+
+    private IReadOnlyList<StatCard> Cards
+    {
+        get
+        {
+            var cards = new List<StatCard>
+            {
+                new(CustomerCardFilter.All, "Tổng khách hàng", Icons.Material.Filled.Groups, _customers.Count, null),
+                new(CustomerCardFilter.Active, "Đang hoạt động", Icons.Material.Filled.CheckCircle, _customers.Count(x => x.Status == TodoXAccountStatus.Active), null),
+                new(CustomerCardFilter.Pending, "Chờ duyệt", Icons.Material.Filled.HourglassTop, _customers.Count(x => x.Status == TodoXAccountStatus.Pending), null),
+                new(CustomerCardFilter.Locked, "Đã khóa", Icons.Material.Filled.Lock, _customers.Count(x => x.Status == TodoXAccountStatus.Locked), null)
+            };
+            if (_studioReady)
+            {
+                var chasing = _customers.Count(x => x.Segment == CustomerSegments.Chasing);
+                cards.Add(new(CustomerCardFilter.NeedVideo, "Khách cần làm video", Icons.Material.Filled.VideoCall,
+                    _customers.Count(x => CustomerSearchFilter.NeedsVideo(x, Counts(x.Id))),
+                    $"Bám đuổi, chưa có video nào · {chasing} khách bám đuổi"));
+            }
+            return cards;
+        }
+    }
+
+    private void SelectCard(CustomerCardFilter card) => _card = _card == card ? CustomerCardFilter.All : card;
+
+    private void ClearFilters()
+    {
+        _card = CustomerCardFilter.All;
+        _advanced = new CustomerSearchFilter();
+        _segmentFilter = string.Empty;
+        _search = string.Empty;
+    }
+
+    private async Task OpenAdvancedSearch()
+    {
+        var parameters = new DialogParameters<CustomerSearchDialog>
+        {
+            { x => x.Current, _advanced },
+            { x => x.SegmentEnabled, _studioReady },
+            { x => x.AffiliateEnabled, _affiliateReady }
+        };
+        var dialog = await DialogService.ShowAsync<CustomerSearchDialog>("Tìm kiếm chi tiết", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: CustomerSearchFilter filter }) _advanced = filter;
+    }
+
     private static Color SegmentColor(string? segment) => CustomerSegments.Normalize(segment) switch
     {
         CustomerSegments.Vip => Color.Warning,
@@ -357,7 +423,9 @@
     {
         get
         {
-            IEnumerable<CustomerProfile> list = _customers;
+            IEnumerable<CustomerProfile> list = _customers
+                .Where(x => CustomerSearchFilter.MatchesCard(_card, x, Counts(x.Id)))
+                .Where(x => _advanced.Matches(x, Counts(x.Id)));
             if (_studioReady && !string.IsNullOrEmpty(_segmentFilter))
             {
                 list = list.Where(x => x.Segment == _segmentFilter);
@@ -374,6 +442,7 @@
                 x.CustomerCode.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 x.ContactName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 x.Email.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (x.Phone ?? string.Empty).Replace(" ", "").Contains(q.Replace(" ", ""), StringComparison.OrdinalIgnoreCase) ||
                 (x.AgentCode ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 (x.ReferralCode ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
         }

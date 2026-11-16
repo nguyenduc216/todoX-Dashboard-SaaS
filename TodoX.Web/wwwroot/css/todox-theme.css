@@ -1826,3 +1826,19 @@ html body ::-webkit-scrollbar-button {
     .todox-table-sticky tbody tr:hover td:first-child,
     .todox-table-sticky tbody tr:hover td:last-child { background: #18212c; }
 }
+
+/* Customer list stat cards: one row on wide screens, each card is a filter button. */
+.todox-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 16px;
+}
+.todox-stat-card {
+    cursor: pointer;
+    transition: border-color .15s, transform .15s;
+}
+.todox-stat-card:hover { border-color: rgba(255, 183, 0, .55) !important; transform: translateY(-1px); }
+.todox-stat-card.is-selected {
+    border: 2px solid #ffb700 !important;
+    box-shadow: 0 0 0 3px rgba(255, 183, 0, .15), 0 18px 45px rgba(0, 0, 0, .28) !important;
+}
