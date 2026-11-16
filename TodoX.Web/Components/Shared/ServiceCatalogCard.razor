@@ -8,6 +8,10 @@
          @onclick="OpenServiceAsync"
          @onkeydown="HandleMediaKeyDownAsync"
          aria-label="Mở dịch vụ @Service.DisplayName">
+        @if (!string.IsNullOrWhiteSpace(Badge))
+        {
+            <span class="todox-service-badge"><MudIcon Icon="@Icons.Material.Filled.LocalFireDepartment" Size="Size.Small" />@Badge</span>
+        }
         @if (!string.IsNullOrWhiteSpace(Service.ThumbnailUrl))
         {
             <img src="@Service.ThumbnailUrl" alt="@Service.DisplayName" />
@@ -71,6 +75,8 @@
 @code {
     [Parameter, EditorRequired] public CatalogServiceView Service { get; set; } = default!;
     [Parameter] public bool ShowFavorite { get; set; }
+    /// <summary>Optional label over the image (e.g. "Hay dùng · 12 lần" on the customer home).</summary>
+    [Parameter] public string? Badge { get; set; }
     [Parameter] public bool IsFavorite { get; set; }
     [Parameter] public bool ShowPrice { get; set; } = true;
     [Parameter] public string PrimaryActionLabel { get; set; } = "Tạo video";

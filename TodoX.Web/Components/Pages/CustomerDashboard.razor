@@ -48,17 +48,27 @@
         }
         else
         {
-            <MudGrid Class="todox-service-grid">
-                @foreach (var service in _services)
-                {
-                    <MudItem xs="12" sm="6" lg="4">
-                        <ServiceCatalogCard Service="service"
-                                            ShowFavorite="false"
-                                            PrimaryActionLabel="Tạo ngay"
-                                            OnPrimaryAction="OpenServiceAsync" />
-                    </MudItem>
-                }
-            </MudGrid>
+            @* Slider: most used services first; the arrows and swipe are handled by js/todox-slider.js (no server round trip). *@
+            <div class="todox-slider" data-todox-slider>
+                <button type="button" class="todox-slider-arrow is-prev" data-todox-slide="-1" aria-label="Dịch vụ trước">
+                    <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" />
+                </button>
+                <div class="todox-slider-track" data-todox-slider-track>
+                    @foreach (var service in _services)
+                    {
+                        <div class="todox-slider-item">
+                            <ServiceCatalogCard Service="service"
+                                                ShowFavorite="false"
+                                                Badge="@ServiceUsageRanking.Badge(service, _usage)"
+                                                PrimaryActionLabel="Tạo ngay"
+                                                OnPrimaryAction="OpenServiceAsync" />
+                        </div>
+                    }
+                </div>
+                <button type="button" class="todox-slider-arrow is-next" data-todox-slide="1" aria-label="Dịch vụ tiếp theo">
+                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                </button>
+            </div>
         }
 
         <MudGrid>
@@ -130,6 +140,7 @@
 
 @code {
     private IReadOnlyList<CatalogServiceView> _services = Array.Empty<CatalogServiceView>();
+    private IReadOnlyDictionary<Guid, ServiceUsage> _usage = new Dictionary<Guid, ServiceUsage>();
     private IReadOnlyList<CustomerRecentJobDto> _recentJobs = Array.Empty<CustomerRecentJobDto>();
     private DashboardLoadState _state = DashboardLoadState.Loading;
     private string? _error;
@@ -191,10 +202,22 @@
                 services = Array.Empty<CatalogServiceView>();
             }
 
-            _services = services
-                .OrderBy(x => x.SortOrder)
-                .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            try
+            {
+                _usage = await Dashboard.GetServiceUsageAsync(user, ct).WaitAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Without usage the services keep the catalog order.
+                Logger.LogWarning(ex, "CUSTOMER_DASHBOARD_USAGE_FAILED userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
+                _usage = new Dictionary<Guid, ServiceUsage>();
+            }
+
+            _services = ServiceUsageRanking.Order(services, _usage);
             _recentJobs = dashboard.RecentJobs;
             _processingCount = dashboard.ProcessingCount;
             _completedThisMonthCount = dashboard.CompletedThisMonthCount;

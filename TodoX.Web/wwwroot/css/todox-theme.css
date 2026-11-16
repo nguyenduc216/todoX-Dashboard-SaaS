@@ -1842,3 +1842,98 @@ html body ::-webkit-scrollbar-button {
     border: 2px solid #ffb700 !important;
     box-shadow: 0 0 0 3px rgba(255, 183, 0, .15), 0 18px 45px rgba(0, 0, 0, .28) !important;
 }
+
+/* Customer home: services as a slider (most used first), arrows on both sides. */
+.todox-slider {
+    position: relative;
+    padding: 0 44px;
+}
+
+.todox-slider-track {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    scrollbar-width: none;
+    padding: 4px 2px 8px;
+}
+
+.todox-slider-track::-webkit-scrollbar {
+    display: none;
+}
+
+.todox-slider-item {
+    flex: 0 0 calc((100% - 32px) / 3);
+    scroll-snap-align: start;
+    display: flex;
+}
+
+.todox-slider-item > .todox-service-card {
+    width: 100%;
+}
+
+@media (max-width: 1279px) {
+    .todox-slider-item { flex-basis: calc((100% - 16px) / 2); }
+}
+
+@media (max-width: 599px) {
+    .todox-slider { padding: 0 34px; }
+    .todox-slider-item { flex-basis: 100%; }
+}
+
+.todox-slider-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 3;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 183, 0, .45);
+    background: rgba(5, 8, 13, .85);
+    color: #ffb700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background .15s ease, opacity .15s ease;
+}
+
+.todox-slider-arrow:hover:not(:disabled) {
+    background: #ffb700;
+    color: #05080d;
+}
+
+.todox-slider-arrow:disabled {
+    opacity: .3;
+    cursor: default;
+}
+
+.todox-slider-arrow.is-prev { left: 0; }
+.todox-slider-arrow.is-next { right: 0; }
+
+.todox-slider.is-static .todox-slider-arrow {
+    display: none;
+}
+
+@media (max-width: 599px) {
+    .todox-slider-arrow { width: 32px; height: 32px; }
+}
+
+.todox-service-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px 4px 6px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #ffb700, #ff7a00);
+    color: #05080d;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
+}
