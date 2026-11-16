@@ -319,7 +319,7 @@ public sealed partial class ChibiAvatarService
             _logger.LogInformation("CHIBI_RENDER_RERENDER_FAILED model={Model} status=failed logCode={LogCode}", "imagen-3.0-generate-002", logCode);
             await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
                 new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage>(), logs, charge.Error, ct);
-            throw new InvalidOperationException(charge.Error ?? "KhÃ´ng Ä‘á»§ Ä‘iá»ƒm.");
+            throw new InvalidOperationException(charge.Error ?? "Không đủ điểm.");
         }
 
         AddLog("GEMINI_IMAGE_REQUEST", "Calling image render service for one rerender.", new { renderId, generationId, promptLength = rerenderPrompt.Length, referenceCount = refs.Count });
@@ -639,7 +639,7 @@ public sealed partial class ChibiAvatarService
             var owns = await conn.ExecuteScalarAsync<bool>(
                 "SELECT EXISTS(SELECT 1 FROM media.media_files WHERE id=@m AND user_id=@u);",
                 new { m = mediaId, u = userId });
-            if (!owns) throw new InvalidOperationException("áº¢nh khÃ´ng thuá»™c vá» ngÆ°á»i dÃ¹ng.");
+            if (!owns) throw new InvalidOperationException("Ảnh không thuộc về người dùng.");
 
             await conn.ExecuteAsync(
                 "UPDATE auth.user_chibi_generations SET status='selected', selected_media_id=@media, selected_at=now() WHERE id=@id AND user_id=@uid;",

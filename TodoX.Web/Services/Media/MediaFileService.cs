@@ -177,13 +177,13 @@ public sealed class MediaFileService : IMediaFileService
     {
         mimeType = NormalizeMimeType(mimeType, originalFileName);
         fileCategory = NormalizeDbText(fileCategory, "media");
-        if (content.Length == 0) throw new InvalidOperationException("Tá»‡p rá»—ng.");
-        if (content.Length > GetMaxBytesForMime(mimeType)) throw new InvalidOperationException("Tá»‡p vÆ°á»£t quÃ¡ 10MB.");
+        if (content.Length == 0) throw new InvalidOperationException("Tệp rỗng.");
+        if (content.Length > GetMaxBytesForMime(mimeType)) throw new InvalidOperationException("Tệp vượt quá 10MB.");
         if (IsAllowedImageMime(mimeType))
         {
             mimeType = ImageUploadValidation.Validate(content, originalFileName, mimeType, GetMaxImageBytes());
         }
-        if (!IsPersistableMime(mimeType)) throw new InvalidOperationException("Chá»‰ cháº¥p nháº­n media há»£p lá»‡.");
+        if (!IsPersistableMime(mimeType)) throw new InvalidOperationException("Chỉ chấp nhận media hợp lệ.");
 
         objectKey = NormalizeObjectKey(objectKey);
         var existingMedia = await TryGetExistingImmutableMediaAsync(objectKey, tenantId, mimeType, fileCategory, ct);
@@ -204,7 +204,7 @@ public sealed class MediaFileService : IMediaFileService
         var absPath = Path.GetFullPath(Path.Combine(absRoot, objectKey.Replace('/', Path.DirectorySeparatorChar)));
         if (!absPath.StartsWith(absRoot, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Storage key khÃ´ng há»£p lá»‡.");
+            throw new InvalidOperationException("Storage key không hợp lệ.");
         }
 
         var absDir = Path.GetDirectoryName(absPath) ?? absRoot;
@@ -372,16 +372,16 @@ public sealed class MediaFileService : IMediaFileService
         Guid userId, CancellationToken ct = default)
     {
         var media = await GetAsync(mediaId, ct)
-            ?? throw new InvalidOperationException("KhÃ´ng tÃ¬m tháº¥y áº£nh cáº§n lÆ°u.");
+            ?? throw new InvalidOperationException("Không tìm thấy ảnh cần lưu.");
         if (media.UserId is Guid owner && owner != userId)
         {
-            throw new InvalidOperationException("Báº¡n khÃ´ng cÃ³ quyá»n sá»­a áº£nh nÃ y.");
+            throw new InvalidOperationException("Bạn không có quyền sửa ảnh này.");
         }
 
         mimeType = ImageUploadValidation.Validate(content, media.FileName, mimeType, GetMaxImageBytes());
         if (string.IsNullOrWhiteSpace(media.ObjectKey))
         {
-            throw new InvalidOperationException("áº¢nh khÃ´ng cÃ³ Ä‘Æ°á»ng dáº«n lÆ°u trá»¯ Ä‘á»ƒ ghi Ä‘Ã¨.");
+            throw new InvalidOperationException("Ảnh không có đường dẫn lưu trữ để ghi đè.");
         }
 
         var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
@@ -676,7 +676,7 @@ public sealed class MediaFileService : IMediaFileService
         var mimeType = ResolveDownloadedBinaryMime(expectedMimeType, responseMime, originalFileName);
         if (!IsPersistableMime(mimeType))
         {
-            throw new InvalidOperationException($"URL khÃ´ng tráº£ vá» media há»£p lá»‡. Content-Type: {responseMime}.");
+            throw new InvalidOperationException($"URL không trả về media hợp lệ. Content-Type: {responseMime}.");
         }
 
         var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
@@ -684,7 +684,7 @@ public sealed class MediaFileService : IMediaFileService
         var absPath = Path.GetFullPath(Path.Combine(absRoot, objectKey.Replace('/', Path.DirectorySeparatorChar)));
         if (!absPath.StartsWith(absRoot, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Storage key khÃ´ng há»£p lá»‡.");
+            throw new InvalidOperationException("Storage key không hợp lệ.");
         }
 
         var absDir = Path.GetDirectoryName(absPath) ?? absRoot;
@@ -718,7 +718,7 @@ public sealed class MediaFileService : IMediaFileService
                     totalBytes += read;
                     if (totalBytes > GetMaxVideoBytes())
                     {
-                        throw new InvalidOperationException("File media tá»« URL vÆ°á»£t quÃ¡ 10MB.");
+                        throw new InvalidOperationException("File media từ URL vượt quá 10MB.");
                     }
 
                     await file.WriteAsync(buffer.AsMemory(0, read), ct);
@@ -727,18 +727,18 @@ public sealed class MediaFileService : IMediaFileService
 
             if (totalBytes == 0)
             {
-                throw new InvalidOperationException("URL media tráº£ vá» tá»‡p rá»—ng.");
+                throw new InvalidOperationException("URL media trả về tệp rỗng.");
             }
 
             var payload = sniff.AsSpan(0, sniffCount);
             if (string.Equals(mimeType, "video/mp4", StringComparison.OrdinalIgnoreCase)
                 && !LooksLikeMp4(payload))
             {
-                throw new InvalidOperationException("URL media khÃ´ng tráº£ vá» video MP4 há»£p lá»‡.");
+                throw new InvalidOperationException("URL media không trả về video MP4 hợp lệ.");
             }
             if (IsAudioMime(mimeType) && !LooksLikeAudio(payload, mimeType))
             {
-                throw new InvalidOperationException("URL media khÃ´ng tráº£ vá» audio há»£p lá»‡.");
+                throw new InvalidOperationException("URL media không trả về audio hợp lệ.");
             }
 
             if (File.Exists(absPath))
@@ -1026,7 +1026,7 @@ public sealed class MediaFileService : IMediaFileService
             || normalized.Contains("..", StringComparison.Ordinal)
             || Path.IsPathRooted(normalized))
         {
-            throw new InvalidOperationException("Storage key khÃ´ng há»£p lá»‡.");
+            throw new InvalidOperationException("Storage key không hợp lệ.");
         }
 
         return normalized;

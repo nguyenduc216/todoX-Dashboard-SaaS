@@ -223,4 +223,19 @@ public sealed class StudioCustomerStaffVideoPlanTests
         Assert.Contains("AddScoped<TodoX.Web.Services.Studio.StudioRepository>()", Read("TodoX.Web", "Program.cs"));
         Assert.Contains("@page \"/video-plans/{PlanId:guid}\"", Read("TodoX.Web", "Components", "Pages", "VideoPlanDetail.razor"));
     }
+
+    [Fact]
+    public void Vietnamese_text_in_the_dashboard_is_not_garbled()
+    {
+        // UTF-8 text once saved as Windows-1252 shows up as "KhÃ´ng Ä‘á»§ Ä‘iá»ƒm" on screen.
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var markers = new[] { "Ã´", "Ä‘", "á»", "áº" };
+        var garbled = Directory.EnumerateFiles(Path.Combine(root, "TodoX.Web"), "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".cs") || f.EndsWith(".razor"))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(f => markers.Any(File.ReadAllText(f).Contains))
+            .Select(f => Path.GetRelativePath(root, f))
+            .ToList();
+        Assert.Empty(garbled);
+    }
 }

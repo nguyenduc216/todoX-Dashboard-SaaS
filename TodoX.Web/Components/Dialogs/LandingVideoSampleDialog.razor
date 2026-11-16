@@ -566,7 +566,8 @@
         }, _points);
         if (!result.Ok || result.Id is null)
         {
-            _error = $"Chưa lưu: không thêm được vào Video khách hàng — {result.Error}";
+            _error = $"Chưa lưu: không thêm được vào Video khách hàng — {result.Error} "
+                + "Có thể nạp thêm điểm cho khách, giảm số điểm trừ (0 = miễn phí) hoặc bỏ tích \"Thêm luôn vào mục Video khách hàng\".";
             return null;
         }
         _model.CustomerVideoId = _createdCustomerVideo = result.Id;

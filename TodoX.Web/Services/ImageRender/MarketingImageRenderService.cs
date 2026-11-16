@@ -64,7 +64,7 @@ public sealed class MarketingImageRenderService
 
         try
         {
-            Add("01_RENDER_REQUEST_RECEIVED", "Nháº­n yÃªu cáº§u render", "User submitted service image brief.",
+            Add("01_RENDER_REQUEST_RECEIVED", "Nhận yêu cầu render", "User submitted service image brief.",
                 input: BuildRequestLog(request),
                 metadata: new { result.RenderJobId, result.LogCode });
             Add("02_BRIEF_ANALYSIS_STARTED", "Bắt đầu phân tích brief", "Brief analyzer started.",
@@ -188,7 +188,7 @@ public sealed class MarketingImageRenderService
 
             if (request.PreserveFixedAssets || !string.IsNullOrWhiteSpace(request.BrandRobotImageUrl))
             {
-                Add("08_FIXED_ASSET_PIPELINE_SELECTED", "Chá»n pipeline fixed asset", "Brand robot will be composited by code and not sent to the model.",
+                Add("08_FIXED_ASSET_PIPELINE_SELECTED", "Chọn pipeline fixed asset", "Brand robot will be composited by code and not sent to the model.",
                     output: new
                     {
                         pipeline = ImageRenderRequestModel.PipelineBackgroundThenComposite,
@@ -197,7 +197,7 @@ public sealed class MarketingImageRenderService
                     });
             }
 
-            Add("09_BACKGROUND_RENDER_REQUEST", "Gá»i API render ná»n", "Calling background render pipeline.",
+            Add("09_BACKGROUND_RENDER_REQUEST", "Gọi API render nền", "Calling background render pipeline.",
                 input: new
                 {
                     provider = "google-vertex-ai",
@@ -228,7 +228,7 @@ public sealed class MarketingImageRenderService
             }, ct);
             renderSw.Stop();
 
-            Add("10_BACKGROUND_RENDER_RESPONSE", "Nháº­n pháº£n há»“i render ná»n", thumb.Ok ? "Render service returned an image." : "Render service failed.",
+            Add("10_BACKGROUND_RENDER_RESPONSE", "Nhận phản hồi render nền", thumb.Ok ? "Render service returned an image." : "Render service failed.",
                 output: new
                 {
                     ok = thumb.Ok,
@@ -250,7 +250,7 @@ public sealed class MarketingImageRenderService
 
             result.ImageUrl = thumb.ImageUrl;
 
-            Add("16_FINAL_IMAGE_STORED", "LÆ°u áº£nh cuá»‘i", "Final image stored.",
+            Add("16_FINAL_IMAGE_STORED", "Lưu ảnh cuối", "Final image stored.",
                 output: new
                 {
                     finalMediaId = thumb.ImageMediaId,
@@ -283,7 +283,7 @@ public sealed class MarketingImageRenderService
             result.Ok = false;
             result.Status = "failed";
             result.Error = ex.Message;
-            Add("19_RENDER_FAILED", "Render lá»—i", "Marketing image render failed.",
+            Add("19_RENDER_FAILED", "Render lỗi", "Marketing image render failed.",
                 level: "error",
                 error: ex.Message,
                 metadata: new { exceptionType = ex.GetType().Name });
@@ -624,7 +624,7 @@ public sealed class MarketingImageRenderService
         if (mentionsVideoPromptCharacter) return "ai_video_from_prompt_character";
         if (text.Contains("video")) return "video_generation";
         if (text.Contains("avatar") || text.Contains("chibi")) return "avatar_generation";
-        if (text.Contains("content") || text.Contains("bÃ i viáº¿t") || text.Contains("bai viet")) return "content_automation";
+        if (text.Contains("content") || text.Contains("bài viết") || text.Contains("bai viet")) return "content_automation";
         return "general_service";
     }
 
@@ -659,8 +659,8 @@ public sealed class MarketingImageRenderService
         return new List<string>
         {
             "Tự động hóa quy trình",
-            "Tiáº¿t kiá»‡m thá»i gian váº­n hÃ nh",
-            "Theo dÃµi hiá»‡u quáº£ trÃªn dashboard"
+            "Tiết kiệm thời gian vận hành",
+            "Theo dõi hiệu quả trên dashboard"
         };
     }
 
