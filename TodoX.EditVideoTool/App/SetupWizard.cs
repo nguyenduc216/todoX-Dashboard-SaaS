@@ -71,7 +71,11 @@ public sealed class SetupWizard : Form
     private readonly TextBox _user = new() { Width = 340, Font = new Font("Segoe UI", 10.5f), BackColor = PanelColor, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Tên đăng nhập hoặc email TodoX", Margin = new Padding(0, 4, 0, 6) };
     private readonly TextBox _password = new() { Width = 340, Font = new Font("Segoe UI", 10.5f), BackColor = PanelColor, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Mật khẩu", UseSystemPasswordChar = true, Margin = new Padding(0) };
     private readonly FlowLayoutPanel _accountBox = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
-    private readonly Label _keyTitle = Section("Hoặc nhập license key", top: 14);
+    // One way to register the app at a time: the TodoX account, or the license key synced to that account.
+    private readonly FlowLayoutPanel _choiceRow = Row();
+    private readonly RadioButton _byKey = new() { Text = "License key", Checked = true, AutoSize = true, ForeColor = Ink, Font = new Font("Segoe UI", 10.5f), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 28, 6) };
+    private readonly RadioButton _byAccount = new() { Text = "Tài khoản TodoX", AutoSize = true, ForeColor = Ink, Font = new Font("Segoe UI", 10.5f), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 0, 6) };
+    private bool _licenseUsable;
     private readonly CheckBox _skipLicense = Check("Bỏ qua, tôi sẽ nhập license sau", false);
     private readonly Label _licenseActivity = Caption("", 9.5f, Muted);
     private Button? _activate;
@@ -279,18 +283,23 @@ public sealed class SetupWizard : Form
     {
         var page = Stack();
         page.Controls.Add(Caption("Kích hoạt TodoX EditVideo", 17, Ink, bold: true));
-        page.Controls.Add(Caption("Đăng nhập bằng tài khoản TodoX: tài khoản đã có gói dịch vụ tự có license, không cần key. " + LicenseMessages.OneMachineNote, 10, Muted, top: 8));
+        page.Controls.Add(Caption("Mỗi tài khoản TodoX đã có sẵn license. Nhập license key (lấy trên Dashboard TodoX › EditVideo của tôi), hoặc đăng nhập bằng tài khoản TodoX. " + LicenseMessages.OneMachineNote, 10, Muted, top: 8));
         page.Controls.Add(_licenseState);
         _licenseState.Margin = new Padding(0, 14, 0, 8);
+
+        page.Controls.Add(Section("Đăng ký ứng dụng bằng", top: 4));
+        _choiceRow.Controls.Add(_byKey);
+        _choiceRow.Controls.Add(_byAccount);
+        page.Controls.Add(_choiceRow);
+        _byAccount.CheckedChanged += (_, _) => ShowLicenseChoice();
 
         _accountBox.Controls.Add(Caption("Tài khoản (tên đăng nhập hoặc email)", 9.5f, Muted));
         _accountBox.Controls.Add(_user);
         _accountBox.Controls.Add(Caption("Mật khẩu", 9.5f, Muted));
-        var passwordRow = Row();
-        passwordRow.Controls.Add(_password);
+        _accountBox.Controls.Add(_password);
         var signIn = FooterButton("Đăng nhập", primary: true);
-        signIn.Margin = new Padding(8, 0, 0, 0);
-        signIn.Height = 30;
+        signIn.Margin = new Padding(0, 8, 0, 0);
+        signIn.Height = 32;
         signIn.Click += async (_, _) => await SignInAsync(signIn);
         _password.KeyDown += async (_, e) =>
         {
@@ -300,18 +309,17 @@ public sealed class SetupWizard : Form
                 await SignInAsync(signIn);
             }
         };
-        passwordRow.Controls.Add(signIn);
-        _accountBox.Controls.Add(passwordRow);
+        _accountBox.Controls.Add(signIn);
         page.Controls.Add(_accountBox);
-        page.Controls.Add(_keyTitle);
 
         _keyRow.Controls.Add(_key);
-        _activate = FooterButton("Kích hoạt", primary: false);
+        _activate = FooterButton("Kích hoạt", primary: true);
         _activate.Margin = new Padding(8, 0, 0, 0);
         _activate.Height = 30;
         _activate.Click += async (_, _) => await ActivateAsync();
         _keyRow.Controls.Add(_activate);
         page.Controls.Add(_keyRow);
+        ShowLicenseChoice();
         page.Controls.Add(_skipLicense);
         _skipLicense.Margin = new Padding(0, 14, 0, 2);
         _skipLicense.CheckedChanged += (_, _) => RefreshButtons();
@@ -610,11 +618,17 @@ public sealed class SetupWizard : Form
               (status.Payload?.Exp is { } exp ? "hết hạn " + DateTimeOffset.FromUnixTimeSeconds(exp).ToLocalTime().ToString("dd/MM/yyyy") : "không thời hạn")
             : status.State == LicenseState.NotActivated ? "Máy này chưa có license." : $"✖ {status.Message}";
         _licenseState.ForeColor = status.IsUsable ? Green : status.State == LicenseState.NotActivated ? Ink : Red;
-        _keyRow.Visible = !status.IsUsable;
-        _accountBox.Visible = !status.IsUsable;
-        _keyTitle.Visible = !status.IsUsable;
+        _licenseUsable = status.IsUsable;
+        ShowLicenseChoice();
         _skipLicense.Visible = !status.IsUsable;
         RefreshButtons();
+    }
+
+    private void ShowLicenseChoice()
+    {
+        _choiceRow.Visible = !_licenseUsable;
+        _accountBox.Visible = !_licenseUsable && _byAccount.Checked;
+        _keyRow.Visible = !_licenseUsable && !_byAccount.Checked;
     }
 
     private async Task SignInAsync(Button button)

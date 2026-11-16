@@ -128,16 +128,24 @@ public sealed class SettingsForm : Form
         _accountCard.Controls.Add(_accountText);
         page.Controls.Add(_accountCard);
 
-        // Customers with a TodoX package sign in with their account; the key is for licenses issued by hand.
-        _signIn.Controls.Add(Ui.Section("Đăng nhập tài khoản TodoX"));
-        _signIn.Controls.Add(Ui.Text("Tài khoản đã có gói dịch vụ TodoX tự có license, không cần nhập key.", 9.5f, Ui.Muted));
-        _signIn.Controls.Add(Ui.Text("Tài khoản (tên đăng nhập hoặc email)", 9.5f, Ui.Muted));
-        _signIn.Controls.Add(_user);
-        _signIn.Controls.Add(Ui.Text("Mật khẩu", 9.5f, Ui.Muted));
-        var passwordRow = Ui.Row();
-        passwordRow.Controls.Add(_password);
-        passwordRow.Controls.Add(Action("Đăng nhập", SignInAsync, primary: true));
-        _signIn.Controls.Add(passwordRow);
+        // Two ways to register this app, one shown at a time: the TodoX account (its package gives the license) or the
+        // license key that TodoX syncs to the same account.
+        _signIn.Controls.Add(Ui.Section("Đăng ký ứng dụng bằng"));
+        var byKey = Choice("License key", true);
+        var byAccount = Choice("Tài khoản TodoX", false);
+        var choices = Ui.Row();
+        choices.Controls.AddRange([byKey, byAccount]);
+        _signIn.Controls.Add(choices);
+
+        var account = Ui.Stack();
+        account.Controls.Add(Ui.Text("Tài khoản (tên đăng nhập hoặc email)", 9.5f, Ui.Muted));
+        account.Controls.Add(_user);
+        account.Controls.Add(Ui.Text("Mật khẩu", 9.5f, Ui.Muted));
+        account.Controls.Add(_password);
+        var signIn = Action("Đăng nhập", SignInAsync, primary: true);
+        signIn.Margin = new Padding(0, 4, 0, 4);
+        account.Controls.Add(signIn);
+        account.Visible = false;
         _password.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -146,10 +154,20 @@ public sealed class SettingsForm : Form
                 await SignInAsync();
             }
         };
-        _signIn.Controls.Add(Ui.Section("Hoặc nhập license key"));
+
+        var key = Ui.Stack();
+        key.Controls.Add(Ui.Text("License key TodoX (dạng tdxv_...), lấy trên Dashboard TodoX › EditVideo của tôi.", 9.5f, Ui.Muted));
         _keyRow.Controls.Add(_keyBox);
-        _keyRow.Controls.Add(Action("Kích hoạt", ActivateAsync));
-        _signIn.Controls.Add(_keyRow);
+        _keyRow.Controls.Add(Action("Kích hoạt", ActivateAsync, primary: true));
+        key.Controls.Add(_keyRow);
+
+        byAccount.CheckedChanged += (_, _) =>
+        {
+            account.Visible = byAccount.Checked;
+            key.Visible = !byAccount.Checked;
+        };
+        _signIn.Controls.Add(account);
+        _signIn.Controls.Add(key);
         page.Controls.Add(_signIn);
         page.Controls.Add(Ui.Text(LicenseMessages.OneMachineNote, 9.5f, Ui.Muted));
         page.Controls.Add(Ui.Text("Chưa có license? Liên hệ TodoX: " + LicenseMessages.SupportContact, 9.5f, Ui.Muted));
@@ -591,6 +609,17 @@ public sealed class SettingsForm : Form
 
         _status.Text = message;
     }
+
+    private static RadioButton Choice(string text, bool on) => new()
+    {
+        Text = text,
+        Checked = on,
+        AutoSize = true,
+        ForeColor = Ui.Ink,
+        Font = new Font("Segoe UI", 10.5f),
+        Cursor = Cursors.Hand,
+        Margin = new Padding(0, 0, 28, 8)
+    };
 
     private static Label Title(string text) => new()
     {
