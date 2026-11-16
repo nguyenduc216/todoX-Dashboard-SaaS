@@ -36,10 +36,10 @@
                     <MudTextField T="string" Label="Tên công ty (không bắt buộc)" Variant="Variant.Outlined" @bind-Value="_model.CompanyName" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Mật khẩu (ít nhất 8 ký tự)" Variant="Variant.Outlined" @bind-Value="_model.Password" InputType="InputType.Password" Required="true" />
+                    <MudTextField T="string" Label="Mật khẩu (ít nhất 8 ký tự)" Variant="Variant.Outlined" @bind-Value="_model.Password" InputType="InputType.Password" autocomplete="new-password" Required="true" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudTextField T="string" Label="Nhập lại mật khẩu" Variant="Variant.Outlined" @bind-Value="_model.ConfirmPassword" InputType="InputType.Password" Required="true"
+                    <MudTextField T="string" Label="Nhập lại mật khẩu" Variant="Variant.Outlined" @bind-Value="_model.ConfirmPassword" InputType="InputType.Password" autocomplete="new-password" Required="true"
                                   OnKeyDown="OnKeyDown" />
                 </MudItem>
                 <MudItem xs="12">

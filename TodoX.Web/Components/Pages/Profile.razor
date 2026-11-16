@@ -112,13 +112,13 @@
                 <MudDivider Class="my-3" />
                 <MudGrid>
                     <MudItem xs="12" sm="4">
-                        <MudTextField T="string" Label="Mật khẩu hiện tại" @bind-Value="_currentPassword" InputType="InputType.Password" Variant="Variant.Outlined" />
+                        <MudTextField T="string" Label="Mật khẩu hiện tại" @bind-Value="_currentPassword" InputType="InputType.Password" autocomplete="new-password" Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" sm="4">
-                        <MudTextField T="string" Label="Mật khẩu mới" @bind-Value="_newPassword" InputType="InputType.Password" Variant="Variant.Outlined" />
+                        <MudTextField T="string" Label="Mật khẩu mới" @bind-Value="_newPassword" InputType="InputType.Password" autocomplete="new-password" Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" sm="4">
-                        <MudTextField T="string" Label="Xác nhận mật khẩu mới" @bind-Value="_confirmPassword" InputType="InputType.Password" Variant="Variant.Outlined" />
+                        <MudTextField T="string" Label="Xác nhận mật khẩu mới" @bind-Value="_confirmPassword" InputType="InputType.Password" autocomplete="new-password" Variant="Variant.Outlined" />
                     </MudItem>
                 </MudGrid>
                 <MudButton Class="todox-primary-btn mt-4" OnClick="ChangePassword" Disabled="_busy">Đổi mật khẩu</MudButton>

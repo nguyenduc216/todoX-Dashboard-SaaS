@@ -119,6 +119,34 @@ public sealed class StudioCustomerStaffVideoPlanTests
         Assert.Contains("STAFF_SAVE_FAILED", Read("TodoX.Web", "Components", "Pages", "StaffMembers.razor"));
     }
 
+    /// <summary>Rule (user, 2026-11-16): the browser must never auto-fill a saved login into a dashboard form.
+    /// Only the login page keeps auto-fill.</summary>
+    [Fact]
+    public void No_password_box_outside_the_login_page_accepts_browser_autofill()
+    {
+        var components = Path.Combine(Root, "TodoX.Web", "Components");
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories))
+        {
+            if (file.EndsWith(Path.Combine("Pages", "Login.razor"), StringComparison.OrdinalIgnoreCase)) continue;
+            var text = File.ReadAllText(file);
+            foreach (System.Text.RegularExpressions.Match tag in System.Text.RegularExpressions.Regex.Matches(text, @"<MudTextField\b[^>]*?/?>", System.Text.RegularExpressions.RegexOptions.Singleline))
+            {
+                if (tag.Value.Contains("InputType=\"InputType.Password\"") && !tag.Value.Contains("autocomplete=\"new-password\""))
+                    offenders.Add(Path.GetFileName(file));
+            }
+        }
+        Assert.Empty(offenders);
+
+        // Account fields beside a password box are not filled either.
+        Assert.Contains("Label=\"Username\" @bind-Value=\"_model.Username\" Variant=\"Variant.Outlined\" Required=\"true\" autocomplete=\"off\"",
+            Read("TodoX.Web", "Components", "Dialogs", "SystemUserDialog.razor"));
+        Assert.Contains("Label=\"Email đăng nhập\" @bind-Value=\"_model.Email\" Variant=\"Variant.Outlined\" Required=\"true\" autocomplete=\"off\"",
+            Read("TodoX.Web", "Components", "Dialogs", "CustomerAccountDialog.razor"));
+        Assert.Contains("Label=\"Tài khoản đăng nhập\" Variant=\"Variant.Outlined\" autocomplete=\"off\"",
+            Read("TodoX.Web", "Components", "Pages", "Settings.razor"));
+    }
+
     [Fact]
     public void Pages_menu_and_customer_list_are_wired()
     {
