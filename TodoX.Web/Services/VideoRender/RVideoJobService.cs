@@ -491,6 +491,9 @@ public sealed class RVideoJobService : IRVideoJobService
         if (view.Settings is { } persisted)
             RVideoRules.PreserveValidUploadedCharacterSnapshot(request.Settings, persisted);
         await _settings.SaveAsync(view.Project.Id, request.Settings, ct);
+
+        // Still "Video mới" but the video now has content: give it a short title from that content.
+        await RVideoTitleRules.FillPlaceholderAsync(conn, _tenant.TenantId, jobId: jobId);
     }
 
     public async Task<DateTimeOffset> SaveDraftInputAsync(Guid jobId, string text, CurrentUserSession user, CancellationToken ct = default)
@@ -517,6 +520,7 @@ public sealed class RVideoJobService : IRVideoJobService
                 jobType = RenderJobTypes.CoreService
             });
         if (rows == 0) throw new InvalidOperationException("RVIDEO_JOB_NOT_FOUND");
+        await RVideoTitleRules.FillPlaceholderAsync(conn, _tenant.TenantId, jobId: jobId);
         return savedAt;
     }
 

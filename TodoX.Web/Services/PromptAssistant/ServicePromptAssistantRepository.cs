@@ -491,6 +491,8 @@ public sealed class ServicePromptAssistantRepository
         }
 
         tx.Commit();
+        // A generated script carries its own title: use it while the video is still "Video mới".
+        await TodoX.Web.Services.VideoRender.RVideoTitleRules.FillPlaceholderAsync(conn, _tenant.TenantId, projectId: videoProjectId);
         return true;
     }
 
