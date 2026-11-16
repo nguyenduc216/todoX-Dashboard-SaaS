@@ -116,11 +116,11 @@ public sealed class AccountRepository
             new { e = email, id = excludeId });
     }
 
-    public async Task<bool> PhoneExistsAsync(string phone)
+    public async Task<bool> PhoneExistsAsync(string phone, Guid? excludeId = null)
     {
         using var conn = await _factory.OpenAsync();
         return await conn.ExecuteScalarAsync<bool>(
-            "SELECT EXISTS(SELECT 1 FROM auth.app_users WHERE phone=@p);", new { p = phone });
+            "SELECT EXISTS(SELECT 1 FROM auth.app_users WHERE phone=@p AND (@id IS NULL OR id<>@id));", new { p = phone, id = excludeId });
     }
 
     /// <summary>Insert an admin/operator user and assign the matching role. Returns new id.</summary>

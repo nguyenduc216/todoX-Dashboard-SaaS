@@ -263,6 +263,13 @@ public sealed class AccountService
 
         model.Username = model.Username.Trim();
         model.Email = model.Email.Trim();
+        model.Phone = model.Phone?.Trim() ?? string.Empty;
+
+        // auth.app_users has a unique phone index: check it here so the user gets a clear message instead of a DB error.
+        if (model.Phone.Length > 0 && await _accounts.PhoneExistsAsync(model.Phone, model.Id == Guid.Empty ? null : model.Id))
+        {
+            return (false, "Số điện thoại đã được dùng cho tài khoản khác.");
+        }
 
         if (model.Id == Guid.Empty)
         {

@@ -12,17 +12,17 @@
                 <MudTextField T="string" Label="Họ tên" @bind-Value="_model.FullName" Variant="Variant.Outlined" Required="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Tên đăng nhập" @bind-Value="_model.Username" Variant="Variant.Outlined" Required="true" />
+                <MudTextField T="string" Label="Tên đăng nhập" @bind-Value="_model.Username" Variant="Variant.Outlined" Required="true" autocomplete="off" name="staff-new-username" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Email" @bind-Value="_model.Email" Variant="Variant.Outlined" Required="true" />
+                <MudTextField T="string" Label="Email" @bind-Value="_model.Email" Variant="Variant.Outlined" Required="true" autocomplete="off" name="staff-new-email" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_model.Phone" Variant="Variant.Outlined" />
+                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_model.Phone" Variant="Variant.Outlined" autocomplete="off" name="staff-new-phone" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField T="string" Label="@(_isNew ? "Mật khẩu" : "Mật khẩu mới (để trống nếu không đổi)")" @bind-Value="_model.Password"
-                              InputType="InputType.Password" Variant="Variant.Outlined" Required="@_isNew" />
+                              InputType="InputType.Password" Variant="Variant.Outlined" Required="@_isNew" autocomplete="new-password" name="staff-new-password" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="bool" Label="Trạng thái" @bind-Value="_model.IsActive" Variant="Variant.Outlined">

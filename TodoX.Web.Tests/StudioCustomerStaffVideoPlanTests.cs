@@ -100,6 +100,25 @@ public sealed class StudioCustomerStaffVideoPlanTests
         Assert.True(File.Exists(Path.Combine(Root, "database", "manual", "studio", "20261116_customer_segments_staff_video_plans.test.sql")));
     }
 
+    /// <summary>
+    /// Bug 2026-11-16: opening "Thêm nhân viên" let the browser's password manager put the saved admin login
+    /// into the page search box (the list showed "Chưa có nhân viên nào") and into the new account's username,
+    /// so the second staff account failed with "Username đã tồn tại".
+    /// </summary>
+    [Fact]
+    public void Adding_staff_is_not_hijacked_by_browser_autofill()
+    {
+        var dialog = Read("TodoX.Web", "Components", "Dialogs", "StaffMemberDialog.razor");
+        Assert.Contains("autocomplete=\"new-password\"", dialog);
+        Assert.Contains("name=\"staff-new-username\"", dialog);
+        Assert.Contains("autocomplete=\"off\" name=\"staff-search\"", Read("TodoX.Web", "Components", "Pages", "StaffMembers.razor").Replace("\r\n", "\n").Replace("\n                          ", " "));
+
+        // A duplicate phone is reported in words instead of a database error.
+        var service = Read("TodoX.Web", "Services", "AccountService.cs");
+        Assert.Contains("Số điện thoại đã được dùng cho tài khoản khác.", service);
+        Assert.Contains("STAFF_SAVE_FAILED", Read("TodoX.Web", "Components", "Pages", "StaffMembers.razor"));
+    }
+
     [Fact]
     public void Pages_menu_and_customer_list_are_wired()
     {

@@ -7,6 +7,7 @@
 @inject AuditRepository Audit
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject ILogger<StaffMembers> Logger
 
 <PageTitle>Nhân viên TodoX</PageTitle>
 
@@ -62,7 +63,8 @@
         <MudPaper Class="todox-table-card pa-4" rounded="true">
             <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, mã nhân viên, email, bộ phận..."
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                          Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                          Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                          autocomplete="off" name="staff-search" />
             <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
                 <HeaderContent>
                     <MudTh>Mã NV</MudTh>
@@ -213,15 +215,25 @@
             }
 
             await Audit.LogAsync(AuthState.CurrentUser, "staff_members", isNew ? "create" : "update", entityDisplay: account.FullName);
-            await Reload();
         }
         catch (UnauthorizedAccessException ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation)
+        {
+            Logger.LogWarning(ex, "STAFF_SAVE_DUPLICATE constraint={Constraint}", ex.ConstraintName);
+            Snackbar.Add($"Không lưu được: trùng dữ liệu với tài khoản khác ({ex.ConstraintName}). Kiểm tra tên đăng nhập, email, số điện thoại, mã nhân viên.", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "STAFF_SAVE_FAILED");
+            Snackbar.Add($"Không lưu được nhân viên: {ex.Message}", Severity.Error);
+        }
         finally
         {
             _busy = false;
+            await Reload();
         }
     }
 
