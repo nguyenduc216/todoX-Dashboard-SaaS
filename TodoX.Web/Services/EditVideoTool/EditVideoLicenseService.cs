@@ -57,12 +57,16 @@ public sealed class EditVideoLicenseService
 
     // ---------------------------------------------------------------- device API (called by the exe)
 
-    public async Task<EditVideoResult<EditVideoDeviceSession>> ActivateAsync(EditVideoActivateRequest request, string? ip, CancellationToken ct = default)
+    /// <summary>
+    /// Binds this machine to a license: by its key, or — when <paramref name="customerId"/> is given because the
+    /// customer signed in with the TodoX account — to that customer's license (one per customer, from their package).
+    /// </summary>
+    public async Task<EditVideoResult<EditVideoDeviceSession>> ActivateAsync(EditVideoActivateRequest request, string? ip, CancellationToken ct = default, Guid? customerId = null)
     {
         var key = EditVideoLicenseKeys.Normalize(request.LicenseKey);
         var kind = EditVideoDeviceKinds.Normalize(request.DeviceKind);
         var deviceHash = request.DeviceHash?.Trim().ToLowerInvariant();
-        if (key is null || kind is null || !EditVideoLicenseKeys.IsValidDeviceHash(deviceHash))
+        if ((key is null && customerId is null) || kind is null || !EditVideoLicenseKeys.IsValidDeviceHash(deviceHash))
         {
             return EditVideoResult<EditVideoDeviceSession>.Fail(EditVideoErrorCodes.InvalidRequest, "License key, device hash or device kind is invalid.");
         }
@@ -82,14 +86,21 @@ public sealed class EditVideoLicenseService
             SELECT {LicenseColumns}
               FROM editvideo.licenses l
               LEFT JOIN crm.customers c ON c.id = l.customer_id
-             WHERE l.license_key_hash = @hash AND l.tenant_id = @tenantId
+             WHERE l.tenant_id = @tenantId
+               AND (CASE WHEN CAST(@customerId AS uuid) IS NULL THEN l.license_key_hash = @hash
+                         ELSE l.customer_id = @customerId AND l.status <> 'revoked' END)
+             ORDER BY l.created_at
+             LIMIT 1
                FOR UPDATE OF l;
             """,
-            new { hash = EditVideoLicenseKeys.Hash(key), tenantId = _tenant.TenantId }, tx);
+            new { hash = key is null ? string.Empty : EditVideoLicenseKeys.Hash(key), customerId, tenantId = _tenant.TenantId }, tx);
 
         if (license is null)
         {
-            return EditVideoResult<EditVideoDeviceSession>.Fail(EditVideoErrorCodes.InvalidLicense, "License key not found.");
+            return customerId is null
+                ? EditVideoResult<EditVideoDeviceSession>.Fail(EditVideoErrorCodes.InvalidLicense, "License key not found.")
+                : EditVideoResult<EditVideoDeviceSession>.Fail(EditVideoErrorCodes.NoPackage,
+                    "Tài khoản chưa có gói dịch vụ TodoX. Mua gói tại todox.vn hoặc liên hệ TodoX để được kích hoạt.");
         }
 
         var blocker = EditVideoDevicePolicy.LicenseBlocker(license, now);
@@ -162,7 +173,7 @@ public sealed class EditVideoLicenseService
                     name = Trim(request.DeviceName, 120), os = Trim(request.Os, 120), version = Trim(request.AppVersion, 40),
                     tokenHash, tokenExpires, now, ip
                 }, tx);
-            await InsertEventAsync(conn, tx, license.Id, deviceId, EditVideoEventTypes.Activated, ip, new { deviceKind = kind });
+            await InsertEventAsync(conn, tx, license.Id, deviceId, EditVideoEventTypes.Activated, ip, new { deviceKind = kind, byAccount = customerId is not null });
         }
 
         tx.Commit();
@@ -293,6 +304,41 @@ public sealed class EditVideoLicenseService
         await InsertEventAsync(conn, tx, id, null, EditVideoEventTypes.Issued, null, new { request.PlanCode }, actorUserId);
         tx.Commit();
         return new EditVideoIssuedLicense(id, key, prefix);
+    }
+
+    /// <summary>
+    /// A bought package gives the customer the EditVideo license: issues one when the customer has none (the key is
+    /// returned once; the customer can also sign in with the TodoX account instead), otherwise sets the plan to the
+    /// package and moves the expiry to the end of the paid cycle (never earlier). A null cycle end means no expiry.
+    /// </summary>
+    public async Task<(EditVideoIssuedLicense? Issued, string Message)> EnsureForPackageAsync(
+        Guid customerId, string packageCode, DateTimeOffset? cycleEnd, Guid? actorUserId, CancellationToken ct = default)
+    {
+        using (var conn = await _factory.OpenAsync(ct))
+        {
+            var current = await conn.QuerySingleOrDefaultAsync<(Guid Id, DateTimeOffset? ExpiresAt, string Status)?>(
+                """
+                SELECT id, expires_at, status FROM editvideo.licenses
+                 WHERE tenant_id = @tenantId AND customer_id = @customerId AND status <> 'revoked'
+                 ORDER BY created_at LIMIT 1;
+                """,
+                new { tenantId = _tenant.TenantId, customerId });
+            if (current is { } license)
+            {
+                var expires = cycleEnd is null || license.ExpiresAt is null ? null
+                    : license.ExpiresAt > cycleEnd ? license.ExpiresAt : cycleEnd;
+                await conn.ExecuteAsync(
+                    "UPDATE editvideo.licenses SET plan_code = @plan, expires_at = @expires, updated_at = now() WHERE id = @id;",
+                    new { id = license.Id, plan = packageCode, expires });
+                await InsertEventAsync(conn, null, license.Id, null, EditVideoEventTypes.PackageApplied, null, new { packageCode, expiresAt = expires }, actorUserId);
+                return (null, expires is null
+                    ? $"License TodoX EditVideo: gói {packageCode}, không thời hạn."
+                    : $"License TodoX EditVideo: gói {packageCode}, dùng đến {expires.Value.ToLocalTime():dd/MM/yyyy}.");
+            }
+        }
+
+        var issued = await IssueAsync(new EditVideoIssueLicenseRequest(customerId, packageCode, 1, 1, cycleEnd, "Tự cấp khi mua gói " + packageCode), actorUserId, ct);
+        return (issued, $"Đã cấp license TodoX EditVideo (gói {packageCode}). Khách đăng nhập tài khoản TodoX trong ứng dụng để dùng, hoặc nhập key {issued.LicenseKey}.");
     }
 
     public async Task<IReadOnlyList<EditVideoLicenseRow>> ListForCustomerAsync(Guid customerId, CancellationToken ct = default)

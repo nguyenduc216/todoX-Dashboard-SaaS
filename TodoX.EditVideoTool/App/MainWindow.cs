@@ -45,9 +45,9 @@ public sealed partial class MainWindow : Form
 
     private readonly Panel _content = new() { Dock = DockStyle.Fill, BackColor = Ground, Padding = new Padding(36, 24, 36, 16) };
     private readonly Dictionary<Screen, Control> _screens = [];
-    private readonly Panel _licenseChip = new() { Height = 40, Width = 300, Cursor = Cursors.Hand, BackColor = Panel };
+    private readonly Panel _licenseChip = new() { Height = 40, Width = 420, Cursor = Cursors.Hand, BackColor = Panel };
     private readonly LineIcon _licenseIcon = new(TileArt.Key, 22) { Location = new Point(12, 9), BackColor = Color.Transparent };
-    private readonly Label _licenseText = new() { AutoSize = false, Location = new Point(42, 0), Height = 40, Width = 250, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10, FontStyle.Bold), BackColor = Color.Transparent, Cursor = Cursors.Hand };
+    private readonly Label _licenseText = new() { AutoSize = false, Location = new Point(42, 0), Height = 40, Width = 370, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10, FontStyle.Bold), BackColor = Color.Transparent, Cursor = Cursors.Hand };
     private readonly ToolTip _tips = new();
     private readonly Label _status = new() { AutoSize = false, Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false, Padding = new Padding(36, 0, 0, 0) };
     private readonly Panel _updateBanner = new() { Dock = DockStyle.Top, Height = 0, BackColor = ColorTranslator.FromHtml("#3A2E0A"), Visible = false, Padding = new Padding(36, 8, 36, 8) };
@@ -606,7 +606,18 @@ public sealed partial class MainWindow : Form
     {
         try
         {
-            SetLicense(await _license.EnsureAsync(_closing.Token));
+            var status = await _license.EnsureAsync(_closing.Token);
+            SetLicense(status);
+            if (status.IsUsable && await AccountInfo.LoadAsync(_services.GetRequiredService<Server.TodoXServerClient>(), _closing.Token) is { } account)
+            {
+                // Package, days left and points in the top bar.
+                var parts = new[] { account.Package, account.DaysLeftText, account.PointsText }.Where(p => !string.IsNullOrWhiteSpace(p));
+                _licenseText.Text = string.Join(" · ", parts);
+                var tip = $"Gói: {account.Package ?? "—"}{(account.Ends is { } end ? $", đến {end.ToLocalTime():dd/MM/yyyy}" : "")}{Environment.NewLine}"
+                          + $"Điểm: {account.PointsText}{Environment.NewLine}Lưu trữ: {account.StorageText}{Environment.NewLine}Bấm để mở Cài đặt › Kích hoạt";
+                _tips.SetToolTip(_licenseChip, tip);
+                _tips.SetToolTip(_licenseText, tip);
+            }
         }
         catch (OperationCanceledException)
         {

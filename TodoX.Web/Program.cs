@@ -314,6 +314,11 @@ builder.Services.Configure<EditVideoToolOptions>(builder.Configuration.GetSectio
 builder.Services.AddSingleton<EditVideoLicenseSigner>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<EditVideoLicenseService>();
+builder.Services.AddScoped<TodoX.Web.Services.EditVideoTool.PackageEntitlementService>();
+builder.Services.Configure<TodoX.Web.Services.EditVideoTool.EditVideoStorageOptions>(builder.Configuration.GetSection(TodoX.Web.Services.EditVideoTool.EditVideoStorageOptions.SectionName));
+builder.Services.AddScoped<TodoX.Web.Services.EditVideoTool.EditVideoStorageService>();
+builder.Services.AddScoped<TodoX.Web.Services.EditVideoTool.EditVideoAiProjectService>();
+builder.Services.AddHostedService<TodoX.Web.Services.EditVideoTool.EditVideoStoragePurgeWorker>();
 builder.Services.AddScoped<EditVideoUsageService>();
 builder.Services.AddScoped<EditVideoPlanService>();
 builder.Services.AddScoped<EditVideoVoiceService>();

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TodoX.Web.Models;
 using TodoX.EditVideo.Planning;
 using TodoX.Web.Services.VideoRender;
 
@@ -40,6 +41,77 @@ public static class EditVideoEndpoints
         group.MapPost("/activate", async (HttpContext http, EditVideoActivateRequest body, EditVideoLicenseService licenses, CancellationToken ct) =>
             ToResult(await licenses.ActivateAsync(body, ClientIp(http), ct)))
             .DisableAntiforgery();
+
+        // Sign in with the TodoX account: the customer's package gives the license, no key to type.
+        group.MapPost("/activate-account", async (HttpContext http, EditVideoActivateRequest body, AccountService accounts, EditVideoLicenseService licenses, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrEmpty(body.Password))
+            {
+                return Error(EditVideoErrorCodes.InvalidRequest, "Nhập tên đăng nhập (hoặc email) và mật khẩu TodoX.");
+            }
+
+            var session = await accounts.LoginAsync(new LoginRequest { UsernameOrEmail = body.Username, Password = body.Password });
+            if (session is null)
+            {
+                await Task.Delay(800, ct); // slows down password guessing
+                return Error(EditVideoErrorCodes.InvalidAccount, "Sai tên đăng nhập hoặc mật khẩu TodoX.");
+            }
+
+            if (session.CustomerId is not { } customerId)
+            {
+                return Error(EditVideoErrorCodes.NoPackage, "Tài khoản này không phải tài khoản khách hàng TodoX.");
+            }
+
+            return ToResult(await licenses.ActivateAsync(body, ClientIp(http), ct, customerId));
+        }).DisableAntiforgery();
+
+        // Package, points and storage of the signed-in machine's customer (shown in the app's top bar).
+        group.MapGet("/account", async (HttpContext http, EditVideoLicenseService licenses, PackageEntitlementService entitlements,
+            WalletService wallets, EditVideoStorageService storage, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return Error(auth.ErrorCode!, auth.Message!);
+            }
+
+            var license = auth.Value.License;
+            var package = await entitlements.GetAsync(license.CustomerId, ct);
+            var used = await storage.UsedBytesAsync(license.CustomerId, ct);
+            return Results.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    customerName = license.CustomerName,
+                    package = package.PackageName ?? license.PlanCode,
+                    packageCode = package.PackageCode ?? license.PlanCode,
+                    packageEnds = package.CycleEnd ?? license.ExpiresAt,
+                    licenseExpiresAt = license.ExpiresAt,
+                    points = await wallets.GetBalanceAsync(license.CustomerId),
+                    storage = new { usedBytes = used, limitBytes = package.StorageBytes }
+                }
+            });
+        });
+
+        // A file for the AI provider, sent in chunks (body = raw bytes, at most 8 MB each); the last chunk returns the link.
+        group.MapPost("/files/chunk", async (HttpContext http, Guid upload, string project, string name, long size, long offset,
+            EditVideoLicenseService licenses, EditVideoStorageService storage, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return Error(auth.ErrorCode!, auth.Message!);
+            }
+
+            var result = await storage.AppendAsync(auth.Value.License, upload, project, name, size, offset, http.Request.Body, ct);
+            if (!result.Ok)
+            {
+                return ToResult(result);
+            }
+
+            return Results.Json(new { success = true, data = result.Value is { } file ? (object)new { done = true, file } : new { done = false } });
+        }).DisableAntiforgery();
 
         group.MapPost("/heartbeat", async (HttpContext http, EditVideoHeartbeatRequest body, EditVideoLicenseService licenses, CancellationToken ct) =>
             ToResult(await licenses.HeartbeatAsync(BearerToken(http.Request), body, ClientIp(http), ct)))
@@ -243,7 +315,7 @@ public static class EditVideoEndpoints
         ai.MapPost("/uploads", async (HttpContext http, EditVideoAiUploadRequest body, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
         {
             var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
-            return auth.Ok ? ToResult(await service.UploadAsync(body, ct)) : ToResult(auth);
+            return auth.Ok ? ToResult(await service.UploadAsync(body, ct, auth.Value.License)) : ToResult(auth);
         }).DisableAntiforgery();
 
         // ---- releases & downloads (public: the installer runs before activation)
@@ -267,7 +339,7 @@ public static class EditVideoEndpoints
     internal static int StatusFor(string code) => code switch
     {
         EditVideoErrorCodes.InvalidRequest or "ai_option_required" => StatusCodes.Status400BadRequest,
-        EditVideoErrorCodes.InvalidToken or EditVideoErrorCodes.DeviceMismatch => StatusCodes.Status401Unauthorized,
+        EditVideoErrorCodes.InvalidToken or EditVideoErrorCodes.DeviceMismatch or EditVideoErrorCodes.InvalidAccount => StatusCodes.Status401Unauthorized,
         EditVideoErrorCodes.InvalidLicense or "not_found" or "voice_not_found" or "model_not_found" => StatusCodes.Status404NotFound,
         EditVideoErrorCodes.DeviceLimitReached => StatusCodes.Status409Conflict,
         "insufficient_points" => StatusCodes.Status402PaymentRequired,

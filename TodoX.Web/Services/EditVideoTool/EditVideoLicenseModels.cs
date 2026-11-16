@@ -39,6 +39,8 @@ public static class EditVideoEventTypes
     public const string StatusChanged = "status_changed";
     public const string LimitsChanged = "limits_changed";
     public const string SelfReleaseRefused = "self_release_refused";
+    public const string PackageApplied = "package_applied";
+    public const string AccountSignIn = "account_sign_in";
 }
 
 /// <summary>Stable error codes returned to the local tool; the exe maps them to Vietnamese messages.</summary>
@@ -57,6 +59,10 @@ public static class EditVideoErrorCodes
     public const string SelfReleaseDisabled = "self_release_disabled";
     /// <summary>The app is older than the release manifest's minSupported; the customer must restart to update.</summary>
     public const string AppOutdated = "app_outdated";
+    /// <summary>The TodoX account has no package (so no EditVideo license) yet.</summary>
+    public const string NoPackage = "no_package";
+    /// <summary>Wrong username or password when signing in with the TodoX account.</summary>
+    public const string InvalidAccount = "invalid_account";
 }
 
 public sealed class EditVideoLicenseRow
@@ -130,6 +136,9 @@ public sealed class EditVideoLicenseExistsException(string keyPrefix)
 public sealed class EditVideoActivateRequest
 {
     public string? LicenseKey { get; init; }
+    /// <summary>Sign in with the TodoX account instead of a key (POST /activate-account).</summary>
+    public string? Username { get; init; }
+    public string? Password { get; init; }
     public string? DeviceHash { get; init; }
     public string? DeviceKind { get; init; }
     public string? DeviceName { get; init; }

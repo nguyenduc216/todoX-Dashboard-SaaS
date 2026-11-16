@@ -68,6 +68,10 @@ public sealed class SetupWizard : Form
     private readonly Label _licenseState = Caption("", 10.5f, Ink);
     private readonly TextBox _key = new() { Width = 560, Font = new Font("Segoe UI", 10.5f), BackColor = PanelColor, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Dán license key TodoX (tdxv_...)" };
     private readonly FlowLayoutPanel _keyRow = Row();
+    private readonly TextBox _user = new() { Width = 340, Font = new Font("Segoe UI", 10.5f), BackColor = PanelColor, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Tên đăng nhập hoặc email TodoX", Margin = new Padding(0, 4, 0, 6) };
+    private readonly TextBox _password = new() { Width = 340, Font = new Font("Segoe UI", 10.5f), BackColor = PanelColor, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "Mật khẩu", UseSystemPasswordChar = true, Margin = new Padding(0) };
+    private readonly FlowLayoutPanel _accountBox = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+    private readonly Label _keyTitle = Section("Hoặc nhập license key", top: 14);
     private readonly CheckBox _skipLicense = Check("Bỏ qua, tôi sẽ nhập license sau", false);
     private readonly Label _licenseActivity = Caption("", 9.5f, Muted);
     private Button? _activate;
@@ -274,12 +278,35 @@ public sealed class SetupWizard : Form
     private Control LicensePage()
     {
         var page = Stack();
-        page.Controls.Add(Caption("Nhập license key", 17, Ink, bold: true));
-        page.Controls.Add(Caption("License key do TodoX cấp sau khi bạn đăng ký (bắt đầu bằng tdxv_). " + LicenseMessages.OneMachineNote, 10, Muted, top: 8));
+        page.Controls.Add(Caption("Kích hoạt TodoX EditVideo", 17, Ink, bold: true));
+        page.Controls.Add(Caption("Đăng nhập bằng tài khoản TodoX: tài khoản đã có gói dịch vụ tự có license, không cần key. " + LicenseMessages.OneMachineNote, 10, Muted, top: 8));
         page.Controls.Add(_licenseState);
         _licenseState.Margin = new Padding(0, 14, 0, 8);
+
+        _accountBox.Controls.Add(Caption("Tài khoản (tên đăng nhập hoặc email)", 9.5f, Muted));
+        _accountBox.Controls.Add(_user);
+        _accountBox.Controls.Add(Caption("Mật khẩu", 9.5f, Muted));
+        var passwordRow = Row();
+        passwordRow.Controls.Add(_password);
+        var signIn = FooterButton("Đăng nhập", primary: true);
+        signIn.Margin = new Padding(8, 0, 0, 0);
+        signIn.Height = 30;
+        signIn.Click += async (_, _) => await SignInAsync(signIn);
+        _password.KeyDown += async (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                await SignInAsync(signIn);
+            }
+        };
+        passwordRow.Controls.Add(signIn);
+        _accountBox.Controls.Add(passwordRow);
+        page.Controls.Add(_accountBox);
+        page.Controls.Add(_keyTitle);
+
         _keyRow.Controls.Add(_key);
-        _activate = FooterButton("Kích hoạt", primary: true);
+        _activate = FooterButton("Kích hoạt", primary: false);
         _activate.Margin = new Padding(8, 0, 0, 0);
         _activate.Height = 30;
         _activate.Click += async (_, _) => await ActivateAsync();
@@ -584,8 +611,51 @@ public sealed class SetupWizard : Form
             : status.State == LicenseState.NotActivated ? "Máy này chưa có license." : $"✖ {status.Message}";
         _licenseState.ForeColor = status.IsUsable ? Green : status.State == LicenseState.NotActivated ? Ink : Red;
         _keyRow.Visible = !status.IsUsable;
+        _accountBox.Visible = !status.IsUsable;
+        _keyTitle.Visible = !status.IsUsable;
         _skipLicense.Visible = !status.IsUsable;
         RefreshButtons();
+    }
+
+    private async Task SignInAsync(Button button)
+    {
+        if (string.IsNullOrWhiteSpace(_user.Text) || _password.Text.Length == 0)
+        {
+            _licenseState.Text = "Nhập tên đăng nhập (hoặc email) và mật khẩu TodoX.";
+            _licenseState.ForeColor = Yellow;
+            return;
+        }
+
+        button.Enabled = false;
+        _next.Enabled = false;
+        _licenseState.Text = "Đang đăng nhập...";
+        _licenseState.ForeColor = Ink;
+        try
+        {
+            var result = await _services!.GetRequiredService<LicenseGuard>().ActivateWithAccountAsync(_user.Text, _password.Text, _cancel.Token);
+            _password.Clear();
+            _log?.Info(result.IsUsable ? "Đã kích hoạt bằng tài khoản TodoX." : $"Đăng nhập chưa được: {result.Message}", "license");
+            if (!result.IsUsable)
+            {
+                _licenseState.Text = "✖ " + result.Message;
+                _licenseState.ForeColor = Red;
+                return;
+            }
+
+            ShowLicense(await _services!.GetRequiredService<LicenseGuard>().EnsureAsync(_cancel.Token));
+            _licenseActivity.Text = "Đang tải bộ skill TodoX vào Claude / Codex...";
+            var installer = _services!.GetRequiredService<Installer>();
+            _licenseActivity.Text = await Task.Run(() => installer.InstallSkillsAsync(_log!, _cancel.Token));
+            SaveLog();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            button.Enabled = true;
+            RefreshButtons();
+        }
     }
 
     private async Task ActivateAsync()

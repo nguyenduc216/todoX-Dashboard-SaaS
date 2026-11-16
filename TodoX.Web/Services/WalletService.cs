@@ -67,6 +67,31 @@ public sealed class WalletService
         return await MutateAsync(customerId, -Math.Abs(amount), "adjust_minus", description, note, actor.UserId);
     }
 
+    /// <summary>
+    /// Points that come with a package purchase. The purchase screen has its own permission, so no wallet permission
+    /// is checked here; a purchase is credited at most once (its id is the transaction's reference).
+    /// </summary>
+    public async Task<WalletMutationResult?> GrantPackagePointsAsync(Guid customerId, decimal amount, string description, Guid purchaseId, Guid? actorUserId)
+    {
+        if (amount <= 0)
+        {
+            return null;
+        }
+
+        using (var conn = await _factory.OpenAsync())
+        {
+            var done = await conn.ExecuteScalarAsync<bool>(
+                "SELECT EXISTS (SELECT 1 FROM billing.token_transactions WHERE reference_id = @purchaseId AND amount > 0);",
+                new { purchaseId });
+            if (done)
+            {
+                return null;
+            }
+        }
+
+        return await MutateAsync(customerId, amount, "topup", description, "package", actorUserId, purchaseId);
+    }
+
     public async Task<WalletMutationResult> RefundAsync(Guid customerId, decimal amount, string? description, string? note, CurrentUserSession actor, Guid? referenceId = null)
     {
         PointModuleAuthorization.Require(actor, PointModulePermissions.WalletRefund);

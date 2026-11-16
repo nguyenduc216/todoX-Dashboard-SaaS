@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.ComponentModel;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
@@ -53,6 +54,33 @@ public sealed partial class VideoTools
         AiCreateAsync(new AiCreateInput("video", model, prompt, ratio, resolution, mode, duration, images, references, videos),
             project, TimeSpan.FromMinutes(4), progress, ct);
 
+    [McpServerTool(Name = "todox_upload", Destructive = false)]
+    [Description("Put a photo, clip or audio file from this computer into the customer's TodoX storage and get a public https link, e.g. a source video for an AI model that only takes links. Files stay 7 days and count against the package's storage (1 GB by default). todox_image_create / todox_video_create already do this for local files when a project is given, so use this only when a link itself is needed.")]
+    public async Task<string> Upload(
+        [Description("File on this computer.")] string path,
+        [Description("Project name (the project folder), e.g. \"Nhà phố Quận 7\".")] string project,
+        IProgress<ProgressNotificationValue> progress,
+        CancellationToken ct)
+    {
+        if (await ReadyProblemAsync(null, ct) is { } problem)
+        {
+            return problem;
+        }
+
+        var (file, error) = await new StorageUploader(_server).UploadAsync(path, project,
+            new Progress<double>(p => Report(progress, (int)(p * 100), $"Đang tải lên TodoX {p:P0}")), ct);
+        return JsonSerializer.Serialize(file is null
+            ? new { ok = false, message = error, url = (string?)null, expires = (string?)null, storage = (string?)null }
+            : new
+            {
+                ok = true,
+                message = (string?)$"Đã tải {file.FileName} lên kho TodoX; link dùng được 7 ngày.",
+                url = (string?)file.Url,
+                expires = (string?)file.ExpiresAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm"),
+                storage = (string?)$"{StorageUploader.Size(file.UsedBytes)} / {StorageUploader.Size(file.LimitBytes)}"
+            }, StatusTools.Json);
+    }
+
     [McpServerTool(Name = "todox_image_status", Destructive = false, Idempotent = true)]
     [Description("Check an AI image task from todox_image_create; when it is finished the image is saved on this computer and the local path returned.")]
     public Task<string> AiImageStatus(
@@ -85,7 +113,7 @@ public sealed partial class VideoTools
             return problem;
         }
 
-        var result = await _ai.CreateAsync(input, AiFolder(project), wait, message => Report(progress, 50, message), ct);
+        var result = await _ai.CreateAsync(input with { Project = string.IsNullOrWhiteSpace(project) ? null : project.Trim() }, AiFolder(project), wait, message => Report(progress, 50, message), ct);
         session.Info("ai_create", null, new { kind = input.Kind, model = input.Model });
         return result;
     }

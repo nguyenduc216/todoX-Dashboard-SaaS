@@ -27,6 +27,7 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 | Voice: list / make / check | `todox_voice_list`, `todox_voice_tts`, `todox_voice_check` |
 | What is said in a clip | `todox_transcribe` |
 | Make a file widely playable | `todox_convert` |
+| Public link for a local file (kept 7 days in the customer's TodoX storage) | `todox_upload` |
 | AI image / AI video (costs points) | `todox_ai_models`, `todox_image_create`, `todox_video_create` |
 | Check / fetch an AI result, recent AI tasks | `todox_image_status`, `todox_video_status`, `todox_ai_tasks` |
 
@@ -52,8 +53,9 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 7. AI images and videos (e.g. a missing shot, an intro scene, a product photo): call `todox_ai_models` first
    and use only option values listed for the chosen model (ratio, resolution, mode, duration) that the user
    confirmed — never guess them. Tell the user the point price and get a yes before `todox_image_create` /
-   `todox_video_create`. Photos on this computer can be passed directly as `images` / `references`; source
-   videos must be https links. Pass `project` to save the result into that project's folder, ready for
+   `todox_video_create`. Always pass `project`: files on this computer (photos, and clips as source videos) are
+   then sent through the customer's TodoX storage automatically, the task goes into that project's own 79AI
+   project, and the result is saved into the project's `06-ai` folder, ready for
    `todox_probe` and the edit. A video that is not ready yet returns a `task`: check it with
    `todox_video_status` about once a minute (images: `todox_image_status`). If a tool says an option is
    required, ask the user to pick from the values it lists.

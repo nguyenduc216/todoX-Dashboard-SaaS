@@ -41,6 +41,19 @@ public sealed class LicenseApiClient
             appVersion
         }, ct);
 
+    /// <summary>Signs in with the TodoX account: the customer's package gives the license, no key needed.</summary>
+    public Task<LicenseApiResult<DeviceSession>> ActivateAccountAsync(string serverUrl, string username, string password, IDeviceIdentity device, string deviceKind, string appVersion, CancellationToken ct = default) =>
+        SendAsync<DeviceSession>(HttpMethod.Post, serverUrl, "activate-account", null, device.DeviceHash, new
+        {
+            username,
+            password,
+            deviceHash = device.DeviceHash,
+            deviceKind,
+            deviceName = device.DeviceName,
+            os = device.Os,
+            appVersion
+        }, ct);
+
     public Task<LicenseApiResult<DeviceSession>> HeartbeatAsync(string serverUrl, string accessToken, IDeviceIdentity device, string appVersion, CancellationToken ct = default) =>
         SendAsync<DeviceSession>(HttpMethod.Post, serverUrl, "heartbeat", accessToken, device.DeviceHash,
             new { deviceHash = device.DeviceHash, appVersion }, ct);

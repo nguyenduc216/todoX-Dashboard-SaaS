@@ -5,7 +5,7 @@ namespace TodoX.EditVideoTool.Server;
 
 public sealed record AiCreateInput(
     string Kind, string Model, string? Prompt, string? Ratio, string? Resolution, string? Mode, string? Duration,
-    string[]? Images, string[]? References, string[]? Videos);
+    string[]? Images, string[]? References, string[]? Videos, string? Project = null);
 
 /// <summary>
 /// AI images/videos through TodoX: local input images are handed to TodoX (which passes them on without
@@ -37,19 +37,19 @@ public sealed class AiGenerator
 
     public async Task<string> CreateAsync(AiCreateInput input, string folder, TimeSpan wait, Action<string>? progress, CancellationToken ct)
     {
-        var images = await ResolveInputsAsync(input.Images, input.Kind, ct);
+        var images = await ResolveInputsAsync(input.Images, input.Kind, ct, input.Project);
         if (images.Error is not null)
         {
             return images.Error;
         }
 
-        var references = await ResolveInputsAsync(input.References, input.Kind, ct);
+        var references = await ResolveInputsAsync(input.References, input.Kind, ct, input.Project);
         if (references.Error is not null)
         {
             return references.Error;
         }
 
-        var videos = await ResolveInputsAsync(input.Videos, "video-source", ct);
+        var videos = await ResolveInputsAsync(input.Videos, "video-source", ct, input.Project);
         if (videos.Error is not null)
         {
             return videos.Error;
@@ -67,7 +67,8 @@ public sealed class AiGenerator
             images = images.Urls,
             references = references.Urls,
             videoUrls = videos.Urls,
-            clientKey = "exe-" + Guid.NewGuid().ToString("N")
+            clientKey = "exe-" + Guid.NewGuid().ToString("N"),
+            project = input.Project
         }, ct);
         if (!created.Ok)
         {
@@ -177,7 +178,11 @@ public sealed class AiGenerator
         }, Json);
     }
 
-    internal async Task<(List<string> Urls, string? Error)> ResolveInputsAsync(string[]? items, string kind, CancellationToken ct)
+    /// <summary>
+    /// Turns inputs into https links: links pass as they are; small photos go to the AI provider through TodoX; clips
+    /// and large photos of a project go to the customer's TodoX storage (kept 7 days) and their link is used.
+    /// </summary>
+    internal async Task<(List<string> Urls, string? Error)> ResolveInputsAsync(string[]? items, string kind, CancellationToken ct, string? project = null)
     {
         var urls = new List<string>();
         foreach (var raw in (items ?? []).Where(i => !string.IsNullOrWhiteSpace(i)).Select(i => i.Trim()))
@@ -199,18 +204,26 @@ public sealed class AiGenerator
                 return ([], $"Không tìm thấy file: {path}");
             }
 
-            if (kind == "video-source" || !ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-            {
-                return ([], $"Chỉ ảnh .jpg/.png/.webp trên máy được dùng làm đầu vào; video đầu vào cần là link https công khai: {Path.GetFileName(path)}");
-            }
-
+            var isImage = ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
             var size = new FileInfo(path).Length;
-            if (size > MaxUploadBytes)
+            if (kind == "video-source" || !isImage || size > MaxUploadBytes)
             {
-                return ([], $"Ảnh {Path.GetFileName(path)} lớn hơn 10 MB; hãy dùng ảnh nhỏ hơn.");
+                if (string.IsNullOrWhiteSpace(project))
+                {
+                    return ([], $"File {Path.GetFileName(path)} cần tải lên kho lưu trữ TodoX trước: truyền tên dự án (project), hoặc dùng todox_upload rồi đưa link https.");
+                }
+
+                var (stored, error) = await new StorageUploader(_server).UploadAsync(path, project, null, ct);
+                if (stored is null)
+                {
+                    return ([], error!);
+                }
+
+                urls.Add(stored.Url);
+                continue;
             }
 
-            var uploaded = await _server.AiUploadAsync(Path.GetFileName(path), Convert.ToBase64String(await File.ReadAllBytesAsync(path, ct)), ct);
+            var uploaded = await _server.AiUploadAsync(Path.GetFileName(path), Convert.ToBase64String(await File.ReadAllBytesAsync(path, ct)), ct, project);
             if (!uploaded.Ok)
             {
                 return ([], Explain(uploaded));

@@ -82,8 +82,8 @@ public sealed class TodoXServerClient
     public Task<ServerResult<JsonElement>> AiTasksAsync(string? type, int limit, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"ai/tasks?type={Uri.EscapeDataString(type ?? string.Empty)}&limit={limit}", null, true, ct, TimeSpan.FromSeconds(120));
 
-    public Task<ServerResult<JsonElement>> AiUploadAsync(string fileName, string base64, CancellationToken ct = default) =>
-        SendAsync<JsonElement>(HttpMethod.Post, "ai/uploads", new { fileName, data = base64 }, true, ct, TimeSpan.FromSeconds(180));
+    public Task<ServerResult<JsonElement>> AiUploadAsync(string fileName, string base64, CancellationToken ct = default, string? project = null) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "ai/uploads", new { fileName, data = base64, project }, true, ct, TimeSpan.FromSeconds(180));
 
     public Task<ServerResult<JsonElement>> SkillsAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "skills", null, true, ct, TimeSpan.FromSeconds(30));
@@ -118,7 +118,17 @@ public sealed class TodoXServerClient
         File.Move(tmp, destination, overwrite: true);
     }
 
-    private async Task<ServerResult<T>> SendAsync<T>(HttpMethod method, string path, object? body, bool authenticated, CancellationToken ct, TimeSpan? timeout = null)
+    /// <summary>Package, its end date, points and storage of this machine's customer.</summary>
+    public Task<ServerResult<JsonElement>> AccountAsync(CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, "account", null, true, ct, TimeSpan.FromSeconds(20));
+
+    /// <summary>One chunk (at most 8 MB) of a file going to the customer's TodoX storage; the last one returns the link.</summary>
+    public Task<ServerResult<JsonElement>> StorageChunkAsync(Guid upload, string project, string name, long size, long offset, byte[] data, int count, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post,
+            $"files/chunk?upload={upload}&project={Uri.EscapeDataString(project)}&name={Uri.EscapeDataString(name)}&size={size}&offset={offset}",
+            null, true, ct, TimeSpan.FromMinutes(3), new ByteArrayContent(data, 0, count));
+
+    private async Task<ServerResult<T>> SendAsync<T>(HttpMethod method, string path, object? body, bool authenticated, CancellationToken ct, TimeSpan? timeout = null, HttpContent? raw = null)
     {
         using var request = new HttpRequestMessage(method, $"{ServerUrl}/api/editvideo/v1/{path}");
         // Lets TodoX stop versions it no longer supports (release manifest "minSupported").
@@ -135,7 +145,11 @@ public sealed class TodoXServerClient
             request.Headers.Add("X-TodoX-Device", _device.DeviceHash);
         }
 
-        if (body is not null)
+        if (raw is not null)
+        {
+            request.Content = raw;
+        }
+        else if (body is not null)
         {
             request.Content = JsonContent.Create(body, options: Json);
         }
