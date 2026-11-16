@@ -324,7 +324,7 @@ public sealed class EditVideoVoiceService
 
     private static EditVideoResult<EditVideoVoiceJob> Fail(string code, string message) => EditVideoResult<EditVideoVoiceJob>.Fail(code, message);
 
-    private static string? FindString(JsonNode? node, params string[] keys)
+    internal static string? FindString(JsonNode? node, params string[] keys)
     {
         switch (node)
         {

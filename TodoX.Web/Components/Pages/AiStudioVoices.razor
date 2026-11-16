@@ -5,6 +5,7 @@
 @inject IDialogService DialogService
 @inject IAiStudioCatalogService Catalog
 @inject ISnackbar Snackbar
+@inject TodoX.Web.Services.VoicePreviewGenerator PreviewGenerator
 
 <PageTitle>AI Studio - Giọng đọc</PageTitle>
 
@@ -90,6 +91,19 @@
                         <MudTd>
                             <MudTooltip Text="Edit"><MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(v))" /></MudTooltip>
                             <MudTooltip Text="Enable / Disable"><MudIconButton Icon="@(v.IsActive ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)" Size="Size.Small" OnClick="@(() => Toggle(v))" /></MudTooltip>
+                            @if (string.Equals(v.ProviderCode, "vbee", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <MudTooltip Text="@(string.IsNullOrWhiteSpace(v.PreviewFileUrl) ? "Tạo giọng mẫu bằng Vbee (khoảng 1.000đ, một lần)" : "Tạo lại giọng mẫu bằng Vbee (khoảng 1.000đ)")">
+                                    @if (_generating == v.Id)
+                                    {
+                                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Warning" />
+                                    }
+                                    else
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.RecordVoiceOver" Size="Size.Small" Color="Color.Warning" Disabled="_generating is not null" OnClick="@(() => GeneratePreview(v))" />
+                                    }
+                                </MudTooltip>
+                            }
                         </MudTd>
                     </RowTemplate>
                 </MudTable>
@@ -197,6 +211,40 @@
         var dialog = await DialogService.ShowAsync<Components.Dialogs.AiStudioVoiceDialog>(editing ? "Sửa giọng" : "Thêm giọng", parameters, options);
         var result = await dialog.Result;
         return result is { Canceled: false };
+    }
+
+    private Guid? _generating;
+
+    // Vbee reads one fixed sentence; the file becomes this voice's preview (paid once, then free to listen to).
+    private async Task GeneratePreview(AiStudioVoiceDto voice)
+    {
+        var again = !string.IsNullOrWhiteSpace(voice.PreviewFileUrl);
+        var ok = await DialogService.ShowMessageBoxAsync(
+            again ? "Tạo lại giọng mẫu" : "Tạo giọng mẫu",
+            $"Vbee sẽ đọc một câu mẫu bằng giọng \"{voice.Name}\" và lưu làm file nghe thử" + (again ? " (thay file hiện có)" : "") +
+            ". Chi phí khoảng 1.000đ Vbee, tính một lần cho TodoX; sau đó mọi người nghe miễn phí.",
+            yesText: "Tạo", cancelText: "Hủy");
+        if (ok != true || AuthState.CurrentUser is not { } user)
+        {
+            return;
+        }
+
+        _generating = voice.Id;
+        StateHasChanged();
+        try
+        {
+            await PreviewGenerator.GenerateAsync(voice, user);
+            Snackbar.Add($"Đã tạo giọng mẫu cho \"{voice.Name}\".", Severity.Success);
+            await Reload();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _generating = null;
+        }
     }
 
     private async Task Toggle(AiStudioVoiceDto voice)
