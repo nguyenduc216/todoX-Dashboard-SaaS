@@ -111,7 +111,7 @@ public sealed class StudioRepository
             """
             SELECT u.id AS UserId, COALESCE(u.username, '') AS Username,
                    COALESCE(u.full_name, u.display_name, '') AS FullName,
-                   COALESCE(u.email, '') AS Email, COALESCE(u.phone, '') AS Phone,
+                   COALESCE(NULLIF(s.contact_email, ''), u.email, '') AS Email, COALESCE(NULLIF(s.phone, ''), u.phone, '') AS Phone,
                    u.is_active AS IsActive, u.created_at AS CreatedAt,
                    s.employee_code AS EmployeeCode, s.position AS Position, s.department AS Department,
                    s.joined_on AS JoinedOn, s.note AS Note,
@@ -150,11 +150,12 @@ public sealed class StudioRepository
         await conn.ExecuteAsync(
             """
             INSERT INTO studio.staff_members
-                (user_id, employee_code, position, department, joined_on, note, created_at, created_by, updated_at, updated_by)
-            VALUES (@id, @code, @position, @department, @joined::date, @note, now(), @by, now(), @by)
+                (user_id, employee_code, position, department, joined_on, note, phone, contact_email, created_at, created_by, updated_at, updated_by)
+            VALUES (@id, @code, @position, @department, @joined::date, @note, @phone, @email, now(), @by, now(), @by)
             ON CONFLICT (user_id) DO UPDATE
                SET employee_code = EXCLUDED.employee_code, position = EXCLUDED.position,
                    department = EXCLUDED.department, joined_on = EXCLUDED.joined_on, note = EXCLUDED.note,
+                   phone = EXCLUDED.phone, contact_email = EXCLUDED.contact_email,
                    updated_at = now(), updated_by = EXCLUDED.updated_by;
             """,
             new
@@ -165,6 +166,8 @@ public sealed class StudioRepository
                 department = Blank(staff.Department),
                 joined = staff.JoinedOn?.Date,
                 note = Blank(staff.Note),
+                phone = Blank(staff.Phone),
+                email = Blank(staff.Email),
                 by = user.UserId
             });
         staff.EmployeeCode = code;

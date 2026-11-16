@@ -115,7 +115,7 @@ public sealed class StudioCustomerStaffVideoPlanTests
 
         // A duplicate phone is reported in words instead of a database error.
         var service = Read("TodoX.Web", "Services", "AccountService.cs");
-        Assert.Contains("Mỗi số chỉ dùng cho một tài khoản đăng nhập", service);
+        Assert.Contains("Mỗi số chỉ dùng cho một tài khoản đăng nhập", service); // admin accounts still check it
         Assert.Contains("STAFF_SAVE_FAILED", Read("TodoX.Web", "Components", "Pages", "StaffMembers.razor"));
     }
 
@@ -126,12 +126,41 @@ public sealed class StudioCustomerStaffVideoPlanTests
         foreach (var page in new[] { "Customers.razor", "StaffMembers.razor", "VideoPlans.razor" })
         {
             var razor = Read("TodoX.Web", "Components", "Pages", page);
-            Assert.Contains("Class=\"todox-table todox-table-nowrap\" HorizontalScrollbar=\"true\"", razor);
+            Assert.Contains("todox-table-nowrap", razor);
+            Assert.Contains("HorizontalScrollbar=\"true\"", razor);
             Assert.Contains("class=\"todox-table-actions\"", razor);
         }
         var css = Read("TodoX.Web", "wwwroot", "css", "todox-theme.css");
         Assert.Contains(".todox-table-nowrap td { white-space: nowrap; }", css);
         Assert.Contains("flex-wrap: nowrap;", css);
+
+        // Customer list: customer column pinned left, actions pinned right, header fixed, and the table box is as
+        // tall as the screen so its horizontal scrollbar is visible without scrolling to the last row.
+        var customers = Read("TodoX.Web", "Components", "Pages", "Customers.razor");
+        Assert.Contains("todox-table-sticky\" HorizontalScrollbar=\"true\" FixedHeader=\"true\"", customers);
+        Assert.Contains("<MudTh>Khách hàng</MudTh>", customers);
+        Assert.Contains("max-height: calc(100vh - 170px);", css);
+        Assert.Contains(".todox-table-sticky td:first-child", css);
+        Assert.Contains(".todox-table-sticky td:last-child", css);
+    }
+
+    /// <summary>User (2026-11-16): for staff only the username must be unique; phone/email may be shared.</summary>
+    [Fact]
+    public void Staff_accounts_only_require_a_unique_username()
+    {
+        var service = Read("TodoX.Web", "Services", "AccountService.cs");
+        var method = service[service.IndexOf("public async Task<StaffAccountSaveResult> SaveStaffAccountAsync", StringComparison.Ordinal)..];
+        method = method[..method.IndexOf("internal static string PhoneTakenMessage", StringComparison.Ordinal)];
+        Assert.Contains("UsernameExistsAsync", method);
+        // Phone / email collisions never block the save: the value goes to the profile instead of the login.
+        Assert.DoesNotContain("PhoneTakenMessage", method);
+        Assert.DoesNotContain("Email đã tồn tại", method);
+        Assert.Contains("Email = emailOnLogin ? email : string.Empty", method);
+        Assert.Contains("Phone = phoneOnLogin ? phone : string.Empty", method);
+
+        Assert.Contains("Accounts.SaveStaffAccountAsync(account)", Read("TodoX.Web", "Components", "Pages", "StaffMembers.razor"));
+        Assert.Contains("COALESCE(NULLIF(s.phone, ''), u.phone, '') AS Phone", Read("TodoX.Web", "Services", "Studio", "StudioRepository.cs"));
+        Assert.True(File.Exists(Path.Combine(Root, "database", "manual", "studio", "20261116_staff_contact_fields.test.sql")));
     }
 
     /// <summary>A phone already used by another login names that account, so the admin knows where to change it.</summary>

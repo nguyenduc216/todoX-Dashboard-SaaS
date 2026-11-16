@@ -7,6 +7,9 @@ namespace TodoX.Web.Services;
 /// Application-facing account operations, backed by the todo_saas Foundation V2 database
 /// through Dapper repositories. Method names/shapes preserved from the in-memory version.
 /// </summary>
+/// <summary>Result of saving a staff login: whether the email / phone could go on the login (else profile only).</summary>
+public sealed record StaffAccountSaveResult(bool Ok, string? Error, bool EmailOnLogin, bool PhoneOnLogin);
+
 public sealed class AccountService
 {
     private readonly AccountRepository _accounts;
@@ -286,6 +289,52 @@ public sealed class AccountService
         var newHash = string.IsNullOrWhiteSpace(model.Password) ? null : _passwords.Hash(model.Password);
         await _accounts.UpdateSystemUserAsync(model, newHash);
         return (true, "Đã cập nhật quản trị viên.");
+    }
+
+    /// <summary>
+    /// Staff login account. Only the username must be unique (user, 2026-11-16): a staff phone or email may also
+    /// belong to another account. auth.app_users keeps phone/email unique (Foundation V2, unchanged), so a value
+    /// already used elsewhere is left empty on the login and kept in the staff profile (studio.staff_members).
+    /// Returns which values went to the login.
+    /// </summary>
+    public async Task<StaffAccountSaveResult> SaveStaffAccountAsync(SystemUser model)
+    {
+        if (string.IsNullOrWhiteSpace(model.FullName) || string.IsNullOrWhiteSpace(model.Username))
+            return new(false, "Vui lòng nhập họ tên và tên đăng nhập.", false, false);
+
+        var excludeId = model.Id == Guid.Empty ? (Guid?)null : model.Id;
+        model.Username = model.Username.Trim();
+        if (await _accounts.UsernameExistsAsync(model.Username, excludeId))
+            return new(false, $"Tên đăng nhập \"{model.Username}\" đã có người dùng. Chọn tên khác.", false, false);
+        if (excludeId is null && string.IsNullOrWhiteSpace(model.Password))
+            return new(false, "Vui lòng nhập mật khẩu.", false, false);
+
+        var email = model.Email?.Trim() ?? string.Empty;
+        var phone = model.Phone?.Trim() ?? string.Empty;
+        var emailOnLogin = email.Length > 0 && !await _accounts.EmailExistsAsync(email, excludeId);
+        var phoneOnLogin = phone.Length > 0 && await _accounts.FindPhoneOwnerAsync(phone, excludeId) is null;
+        var login = new SystemUser
+        {
+            Id = model.Id,
+            FullName = model.FullName.Trim(),
+            Username = model.Username,
+            Email = emailOnLogin ? email : string.Empty,
+            Phone = phoneOnLogin ? phone : string.Empty,
+            Password = model.Password,
+            Role = model.Role,
+            Status = model.Status
+        };
+
+        if (excludeId is null)
+        {
+            model.Id = await _accounts.InsertSystemUserAsync(login, _passwords.Hash(model.Password));
+        }
+        else
+        {
+            var newHash = string.IsNullOrWhiteSpace(model.Password) ? null : _passwords.Hash(model.Password);
+            await _accounts.UpdateSystemUserAsync(login, newHash);
+        }
+        return new(true, null, email.Length == 0 || emailOnLogin, phone.Length == 0 || phoneOnLogin);
     }
 
     /// <summary>Each phone logs in one account (unique index on auth.app_users.phone): say which account holds it.</summary>

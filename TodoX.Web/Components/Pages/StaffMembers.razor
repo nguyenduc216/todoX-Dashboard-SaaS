@@ -191,10 +191,11 @@
                 Role = TodoXUserRole.Staff,
                 Status = model.IsActive ? TodoXAccountStatus.Active : TodoXAccountStatus.Locked
             };
-            var (ok, message) = await Accounts.SaveSystemUserAsync(account);
-            if (!ok)
+            // Only the username has to be unique; phone and email may be shared with another account.
+            var saved = await Accounts.SaveStaffAccountAsync(account);
+            if (!saved.Ok)
             {
-                Snackbar.Add(message, Severity.Error);
+                Snackbar.Add(saved.Error ?? "Chưa lưu được tài khoản.", Severity.Error);
                 return;
             }
 
@@ -205,7 +206,9 @@
                 Position = model.Position,
                 Department = model.Department,
                 JoinedOn = model.JoinedOn,
-                Note = model.Note
+                Note = model.Note,
+                Phone = account.Phone,
+                Email = account.Email
             }, isNew);
             if (profileError is not null)
             {
@@ -214,6 +217,11 @@
             else
             {
                 Snackbar.Add(isNew ? $"Đã tạo tài khoản cho {account.FullName}. Đăng nhập bằng {account.Username}." : "Đã cập nhật nhân viên.", Severity.Success);
+            }
+            if (!saved.EmailOnLogin || !saved.PhoneOnLogin)
+            {
+                var shared = string.Join(" và ", new[] { saved.EmailOnLogin ? null : "email", saved.PhoneOnLogin ? null : "số điện thoại" }.Where(x => x is not null));
+                Snackbar.Add($"{char.ToUpper(shared[0])}{shared[1..]} trùng với tài khoản khác nên chỉ lưu trong hồ sơ nhân viên, không dùng để đăng nhập hay lấy lại mật khẩu.", Severity.Info);
             }
 
             await Audit.LogAsync(AuthState.CurrentUser, "staff_members", isNew ? "create" : "update", entityDisplay: account.FullName);

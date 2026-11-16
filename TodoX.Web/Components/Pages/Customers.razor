@@ -78,10 +78,9 @@
             </MudChipSet>
         }
 
-        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap" HorizontalScrollbar="true">
+        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap todox-table-sticky" HorizontalScrollbar="true" FixedHeader="true">
             <HeaderContent>
-                <MudTh>Mã KH</MudTh>
-                <MudTh>Tên công ty</MudTh>
+                <MudTh>Khách hàng</MudTh>
                 @if (_studioReady)
                 {
                     <MudTh>Loại khách</MudTh>
@@ -101,8 +100,10 @@
                 <MudTh Style="text-align:right">Thao tác</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="Mã KH">@context.CustomerCode</MudTd>
-                <MudTd DataLabel="Tên công ty">@context.CompanyName</MudTd>
+                <MudTd DataLabel="Khách hàng">
+                    <div class="todox-customer-name">@context.CompanyName</div>
+                    <div class="todox-customer-code">@context.CustomerCode</div>
+                </MudTd>
                 @if (_studioReady)
                 {
                     <MudTd DataLabel="Loại khách">

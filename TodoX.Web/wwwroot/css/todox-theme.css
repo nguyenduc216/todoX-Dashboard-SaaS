@@ -1786,3 +1786,43 @@ html body ::-webkit-scrollbar-button {
     justify-content: flex-end;
     gap: 2px;
 }
+
+/* Customer list: the customer column is pinned left and the actions column pinned right; the columns in between
+   scroll sideways. The table sits in a box as tall as the screen with a fixed header, so its horizontal
+   scrollbar is always at the bottom of what you see instead of below the last row. */
+.todox-customer-name { font-weight: 700; color: #ffffff; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.todox-customer-code { font-size: 12px; color: var(--todox-muted); }
+
+@media (min-width: 600px) {
+    .todox-table-sticky .mud-table-container {
+        max-height: calc(100vh - 170px);
+        overflow: auto;
+        scrollbar-width: auto;
+        scrollbar-color: rgba(255, 183, 0, .6) rgba(255, 255, 255, .06);
+    }
+    .todox-table-sticky .mud-table-container::-webkit-scrollbar { height: 12px; width: 10px; }
+    .todox-table-sticky .mud-table-container::-webkit-scrollbar-thumb { background: rgba(255, 183, 0, .6); border-radius: 8px; }
+    .todox-table-sticky .mud-table-container::-webkit-scrollbar-track { background: rgba(255, 255, 255, .06); }
+
+    .todox-table-sticky thead th { background: #121a24 !important; }
+    .todox-table-sticky th:first-child,
+    .todox-table-sticky td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: #0f151d;
+        box-shadow: 6px 0 8px -6px rgba(0, 0, 0, .8);
+    }
+    .todox-table-sticky th:last-child,
+    .todox-table-sticky td:last-child {
+        position: sticky;
+        right: 0;
+        z-index: 2;
+        background: #0f151d;
+        box-shadow: -6px 0 8px -6px rgba(0, 0, 0, .8);
+    }
+    .todox-table-sticky thead th:first-child,
+    .todox-table-sticky thead th:last-child { z-index: 4 !important; background: #121a24 !important; }
+    .todox-table-sticky tbody tr:hover td:first-child,
+    .todox-table-sticky tbody tr:hover td:last-child { background: #18212c; }
+}
