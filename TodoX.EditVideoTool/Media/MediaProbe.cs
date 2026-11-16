@@ -20,7 +20,10 @@ public sealed class MediaProbe
         _components = components;
     }
 
-    /// <summary>Expands folders into their video files (sorted by name) and keeps explicit files as given.</summary>
+    /// <summary>
+    /// Expands folders into their video files (sorted by path, sub-folders included so a whole project folder works)
+    /// and keeps explicit files as given. Rendered videos in "output" folders are never picked up again as footage.
+    /// </summary>
     public static IReadOnlyList<string> ExpandInputs(IEnumerable<string> inputs)
     {
         var result = new List<string>();
@@ -29,8 +32,11 @@ public sealed class MediaProbe
             var p = raw.Trim().Trim('"');
             if (Directory.Exists(p))
             {
-                result.AddRange(Directory.EnumerateFiles(p)
+                var root = System.IO.Path.GetFullPath(p);
+                result.AddRange(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
                     .Where(f => VideoExtensions.Contains(System.IO.Path.GetExtension(f).ToLowerInvariant()))
+                    .Where(f => !System.IO.Path.GetRelativePath(root, f).Split(System.IO.Path.DirectorySeparatorChar)
+                        .SkipLast(1).Any(d => d.Equals("output", StringComparison.OrdinalIgnoreCase) || d.StartsWith('.')))
                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
             }
             else if (File.Exists(p))

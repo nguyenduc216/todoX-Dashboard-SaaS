@@ -169,4 +169,36 @@ public sealed class SkillAndProjectTests : IDisposable
         Assert.Null(projects.Find("Vinhomes", create: false).Folder);
         Assert.Equal("Dự án a b", ProjectFolders.SafeName("Dự án a/b"));
     }
+
+    [Fact]
+    public void Every_project_gets_the_standard_folders_and_a_claude_brief_that_names_todox_tools()
+    {
+        var paths = new AgentPaths(_root);
+        new UserSettings { ResourceRoot = Path.Combine(_root, "resources") }.Save(paths);
+        var projects = new ProjectFolders(paths);
+
+        var (project, _) = projects.Find("Nhà phố Quận 7", create: true);
+
+        foreach (var (name, _) in ProjectFolders.Layout)
+        {
+            Assert.True(Directory.Exists(Path.Combine(project!.Path, name)), name);
+        }
+
+        var brief = File.ReadAllText(Path.Combine(project!.Path, ProjectFolders.ClaudeFile));
+        Assert.Contains("# Dự án video: Nhà phố Quận 7", brief);
+        Assert.Contains("todox_project_folder", brief);
+        Assert.Contains("todox_probe", brief);
+        Assert.Contains("project: \"Nhà phố Quận 7\"", brief);
+
+        // A brief the customer edited is kept; footage in sub-folders is found, renders in output are not.
+        File.WriteAllText(Path.Combine(project.Path, ProjectFolders.ClaudeFile), "của khách");
+        File.WriteAllText(Path.Combine(project.Path, ProjectFolders.VideosDir, "mat-tien.mp4"), "x");
+        File.WriteAllText(Path.Combine(project.Path, ProjectFolders.OutputDir, "todox-1.mp4"), "x");
+        projects.Find("nha pho quan 7", create: false);
+
+        Assert.Equal("của khách", File.ReadAllText(Path.Combine(project.Path, ProjectFolders.ClaudeFile)));
+        Assert.Equal([Path.Combine(project.Path, ProjectFolders.VideosDir, "mat-tien.mp4")], TodoX.EditVideoTool.Media.MediaProbe.ExpandInputs([project.Path]));
+        Assert.Equal(project.Path, projects.ProjectOf(Path.Combine(project.Path, ProjectFolders.VideosDir, "mat-tien.mp4")));
+        Assert.Null(projects.ProjectOf(Path.Combine(_root, "elsewhere.mp4")));
+    }
 }

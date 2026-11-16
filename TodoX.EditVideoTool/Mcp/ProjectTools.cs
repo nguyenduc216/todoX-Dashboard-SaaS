@@ -24,7 +24,7 @@ public sealed class ProjectTools
     }, StatusTools.Json);
 
     [McpServerTool(Name = "todox_project_folder", Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Find (or create) the resource folder of a project, e.g. \"dự án An Đông\", and open it in Windows Explorer so the user can copy photos, clips, logos and music into it. Matching ignores case and Vietnamese accents. Afterwards ask the user to tell you when the files are in, then use todox_probe on the folder.")]
+    [Description("Find (or create) the resource folder of a project, e.g. \"dự án An Đông\", and open it in Windows Explorer. Every project has the same sub-folders (01-anh photos, 02-video clips, 03-am-thanh music/voice, 04-kich-ban brief and scripts, 05-thuong-hieu logo and brand, 06-ai AI results, output renders) and a CLAUDE.md with the project brief and rules: read it, and keep its log up to date. Matching ignores case and Vietnamese accents. If the folder has no footage, ask the user to copy files into the right sub-folders and tell you when done, then use todox_probe on the folder.")]
     public string ProjectFolder(
         [Description("Project name as the user says it, e.g. \"An Đông\" or \"dự án An Đông\".")] string project,
         [Description("Open the folder in Windows Explorer (default true).")] bool open = true,
@@ -63,6 +63,8 @@ public sealed class ProjectTools
         videos = p.Videos,
         audio = p.Audio,
         other = p.Other,
-        lastChanged = p.LastChanged?.ToString("yyyy-MM-dd HH:mm")
+        lastChanged = p.LastChanged?.ToString("yyyy-MM-dd HH:mm"),
+        brief = Path.Combine(p.Path, ProjectFolders.ClaudeFile),
+        folders = ProjectFolders.Layout.ToDictionary(f => f.Name, f => f.Holds)
     };
 }

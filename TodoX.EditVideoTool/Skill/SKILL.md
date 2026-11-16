@@ -33,8 +33,13 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 1. `todox_status` once if a tool reports a license or component problem; relay its message.
 2. Footage lives in the TodoX resource folder, one sub-folder per project. When the user names a project
    ("dự án An Đông"), call `todox_project_folder` with that name: it finds or creates the folder and opens it
-   in Explorer. If it is empty, ask the user to copy the photos/videos in and tell you when done.
-   `todox_projects` lists existing projects. Then `todox_probe` the folder to see what footage exists.
+   in Explorer. Every project has the same layout: `01-anh` photos, `02-video` clips, `03-am-thanh` music and
+   recorded voice, `04-kich-ban` brief / script / captions, `05-thuong-hieu` logo and brand, `06-ai` AI results,
+   `output` finished videos, and a `CLAUDE.md` with the project brief and rules. Read `CLAUDE.md` and the files
+   in `04-kich-ban` before asking the user anything; save scripts you write into `04-kich-ban`, and add a short
+   line to the log at the end of `CLAUDE.md` after each delivered video. If there is no footage, ask the user to
+   copy files into the right sub-folders and tell you when done. `todox_projects` lists existing projects. Then
+   `todox_probe` the project folder (sub-folders are included; `output` is skipped).
 3. Ask only for what is missing and matters: aspect (default 9:16), target length, title, the
    narration/caption text, closing text. Write caption text in the user's language, short sentences.
 4. Quick result: `todox_auto_edit` with the clips in story order. When the user wants control, or asks
