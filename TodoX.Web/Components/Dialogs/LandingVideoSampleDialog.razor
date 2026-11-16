@@ -76,7 +76,7 @@
                                          SearchFunc="SearchCustomersAsync" ToStringFunc="CustomerDisplay" Clearable="true" ResetValueOnEmptyText="true"
                                          MaxItems="30" Disabled="_busy" autocomplete="off" data-testid="sample-customer"
                                          HelperText="Video làm cho khách nào thì chọn khách đó; để trống nếu là video mẫu chung." />
-                        @if (_customer is not null && _balance is not null && !Linked && _addToCustomerVideos)
+                        @if (_customer is not null && _balance is not null && !Linked && _existing is null && _addToCustomerVideos)
                         {
                             <MudText Typo="Typo.caption" Class="mt-1 d-block" Color="@(_balance < _points ? Color.Error : Color.Secondary)">Số dư hiện tại: @_balance.Value.ToString("#,0.##") điểm</MudText>
                         }
@@ -87,6 +87,14 @@
                             @if (Linked)
                             {
                                 <MudAlert Severity="Severity.Success" Dense="true">Đã có trong <a href="/customer-videos" target="_blank">Video khách hàng</a>: tiêu đề, video và ảnh bìa được cập nhật theo video mẫu khi lưu.</MudAlert>
+                            }
+                            else if (_existing is not null)
+                            {
+                                <MudAlert Severity="Severity.Success" Dense="true" data-testid="sample-existing-customer-video">
+                                    Khách đã có video này trong <a href="/customer-videos" target="_blank">Video khách hàng</a>
+                                    ("@_existing.Title", @CustomerVideoRules.StatusLabel(_existing.ChargeStatus).ToLowerInvariant()@(_existing.ChargedPoints > 0 ? $" {_existing.ChargedPoints:#,0.##} điểm" : "") ngày @_existing.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy")).
+                                    Lưu chỉ cập nhật thông tin, không trừ điểm thêm.
+                                </MudAlert>
                             }
                             else if (_customerVideosEnabled)
                             {
@@ -294,6 +302,8 @@
     private bool _addToCustomerVideos = true;
     private decimal _points;
     private decimal? _balance;
+    // The customer's video already in "Video khách hàng" (same file or title): saving links it, never charges again.
+    private CustomerVideo? _existing;
 
     private bool CustomerAllowed => _serviceChoice is LandingVideoSampleRepository.OtherServiceChoice or LandingVideoSampleRepository.TvcServiceChoice;
     // Still the customer the saved sample's "Video khách hàng" row belongs to.
@@ -339,7 +349,13 @@
     private async Task LoadBalanceAsync()
     {
         _balance = null;
+        _existing = null;
         if (_customer is null || !_customerVideosEnabled) return;
+        if (!Linked)
+        {
+            try { _existing = await CustomerVideos.FindExistingAsync(_customer.Id, _model.VideoUrl, _model.Title); }
+            catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample existing customer video lookup failed {CustomerId}", _customer.Id); }
+        }
         try { _balance = await Wallets.GetBalanceAsync(_customer.Id); }
         catch (Exception ex) { Logger.LogWarning(ex, "Landing video sample balance lookup failed {CustomerId}", _customer.Id); }
     }
@@ -553,6 +569,19 @@
             var updated = await CustomerVideos.UpdateAsync(linked);
             if (!updated.Ok) Logger.LogWarning("Linked customer video {Id} was not updated: {Error}", linkedId, updated.Error);
             return updated.Ok ? "Đã cập nhật Video khách hàng." : string.Empty;
+        }
+        // Already made for this customer (already charged or free): link it and update its information, no new charge.
+        var existing = await CustomerVideos.FindExistingAsync(customerId, _model.VideoUrl, _model.Title)
+                       ?? await CustomerVideos.FindExistingAsync(customerId, Source?.VideoUrl, Source?.Title);
+        if (existing is not null)
+        {
+            _model.CustomerVideoId = existing.Id;
+            existing.Title = _model.Title;
+            existing.VideoUrl = _model.VideoUrl;
+            existing.PosterUrl = _model.PosterUrl;
+            var updated = await CustomerVideos.UpdateAsync(existing);
+            if (!updated.Ok) Logger.LogWarning("Existing customer video {Id} was not updated: {Error}", existing.Id, updated.Error);
+            return "Khách đã có video này: đã cập nhật Video khách hàng, không trừ điểm.";
         }
         if (!_addToCustomerVideos) return string.Empty;
         var result = await CustomerVideos.CreateAsync(new CustomerVideo
