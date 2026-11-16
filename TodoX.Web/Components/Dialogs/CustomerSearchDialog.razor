@@ -1,0 +1,99 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.Studio
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.ManageSearch" Class="mr-2" Style="vertical-align:middle" />Tìm kiếm khách hàng chi tiết</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Tên khách hàng / công ty" @bind-Value="_filter.Name" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" autocomplete="off" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Mã khách hàng" @bind-Value="_filter.Code" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" autocomplete="off" Placeholder="CUST-0012" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Người liên hệ" @bind-Value="_filter.Contact" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" autocomplete="off" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Email" @bind-Value="_filter.Email" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" autocomplete="off" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_filter.Phone" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" autocomplete="off"
+                              HelperText="Gõ một phần số cũng được" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="TodoXAccountStatus?" Label="Trạng thái" @bind-Value="_filter.Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="Tất cả">
+                    <MudSelectItem T="TodoXAccountStatus?" Value="TodoXAccountStatus.Active">Hoạt động</MudSelectItem>
+                    <MudSelectItem T="TodoXAccountStatus?" Value="TodoXAccountStatus.Pending">Chờ duyệt</MudSelectItem>
+                    <MudSelectItem T="TodoXAccountStatus?" Value="TodoXAccountStatus.Locked">Đã khóa</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            @if (SegmentEnabled)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Loại khách</MudText>
+                    <div>
+                        @foreach (var segment in CustomerSegments.All)
+                        {
+                            <MudCheckBox T="bool" Value="@_filter.Segments.Contains(segment)" ValueChanged="@(v => ToggleSegment(segment, v))"
+                                         Label="@CustomerSegments.Label(segment)" Color="Color.Warning" Dense="true" />
+                        }
+                    </div>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="CustomerVideoFilter" Label="Video" @bind-Value="_filter.Video" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="CustomerVideoFilter.Any">Tất cả</MudSelectItem>
+                        <MudSelectItem Value="CustomerVideoFilter.None">Chưa có video nào</MudSelectItem>
+                        <MudSelectItem Value="CustomerVideoFilter.HasVideo">Đã có video</MudSelectItem>
+                        <MudSelectItem Value="CustomerVideoFilter.InProgress">Có video đang làm</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+            }
+            @if (AffiliateEnabled)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="CustomerAgentFilter" Label="Đại lý" @bind-Value="_filter.Agent" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="CustomerAgentFilter.Any">Tất cả</MudSelectItem>
+                        <MudSelectItem Value="CustomerAgentFilter.IsAgent">Là đại lý</MudSelectItem>
+                        <MudSelectItem Value="CustomerAgentFilter.Referred">Có đại lý giới thiệu</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+            }
+            <MudItem xs="6" sm="3">
+                <MudDatePicker Label="Ngày tạo từ" @bind-Date="_filter.CreatedFrom" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd/MM/yyyy" Clearable="true" />
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudDatePicker Label="đến" @bind-Date="_filter.CreatedTo" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd/MM/yyyy" Clearable="true" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Reset" StartIcon="@Icons.Material.Filled.FilterAltOff">Xóa điều kiện</MudButton>
+        <MudSpacer />
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Search" OnClick="Submit" data-testid="customer-search-apply">Tìm kiếm</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public CustomerSearchFilter? Current { get; set; }
+    [Parameter] public bool SegmentEnabled { get; set; }
+    [Parameter] public bool AffiliateEnabled { get; set; }
+
+    private CustomerSearchFilter _filter = new();
+
+    protected override void OnInitialized() => _filter = Current?.Clone() ?? new CustomerSearchFilter();
+
+    private void ToggleSegment(string segment, bool on)
+    {
+        if (on) _filter.Segments.Add(segment); else _filter.Segments.Remove(segment);
+    }
+
+    private void Reset() => _filter = new CustomerSearchFilter();
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_filter));
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -47,6 +47,8 @@ public static class NavigationAccessRules
             || path.StartsWith("/customer-accounts", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/affiliates", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/customer-videos", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/staff", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/video-plans", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/permissions", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/settings", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/activity-logs", StringComparison.OrdinalIgnoreCase)

@@ -17,6 +17,7 @@ public static class TodoXLabels
     {
         TodoXUserRole.Admin => "Quản trị viên",
         TodoXUserRole.SystemOperator => "Vận hành hệ thống",
+        TodoXUserRole.Staff => "Nhân viên TodoX",
         TodoXUserRole.CustomerOwner => "Chủ tài khoản",
         TodoXUserRole.CustomerUser => "Người dùng",
         _ => role.ToString()

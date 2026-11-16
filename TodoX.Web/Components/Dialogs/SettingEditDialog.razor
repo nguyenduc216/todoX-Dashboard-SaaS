@@ -24,7 +24,7 @@
             else if (Setting.IsSecret)
             {
                 <MudTextField T="string" @bind-Value="_value" Label="Giá trị bí mật mới"
-                              Variant="Variant.Outlined" InputType="InputType.Password"
+                              Variant="Variant.Outlined" InputType="InputType.Password" autocomplete="new-password"
                               Placeholder="Nhập để thay thế, để trống nếu giữ nguyên" />
                 <MudText Typo="Typo.caption" Class="todox-page-subtitle">
                     Giá trị hiện tại được ẩn. Để trống nếu không muốn thay đổi.

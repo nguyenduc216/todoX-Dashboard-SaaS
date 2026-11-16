@@ -26,6 +26,7 @@ public sealed class AccountRepository
     {
         TodoXUserRole.Admin => "admin",
         TodoXUserRole.SystemOperator => "support",
+        TodoXUserRole.Staff => "staff",
         TodoXUserRole.CustomerOwner => "customer",
         TodoXUserRole.CustomerUser => "customer",
         _ => "support"
@@ -35,6 +36,7 @@ public sealed class AccountRepository
     {
         "administrator_root" => TodoXUserRole.Admin,
         "admin" => TodoXUserRole.Admin,
+        "staff" => TodoXUserRole.Staff,
         _ => TodoXUserRole.SystemOperator
     };
 
@@ -71,7 +73,8 @@ public sealed class AccountRepository
              ORDER BY u.full_name;
             """, new { tenant = _tenant.TenantId });
 
-        return rows.Select(r => new SystemUser
+        // Staff accounts are managed on "Nhân viên TodoX"; the admin dialog has no staff role and would turn them into operators.
+        return rows.Where(r => !string.Equals(r.role_code, "staff", StringComparison.OrdinalIgnoreCase)).Select(r => new SystemUser
         {
             Id = r.id,
             Username = r.username ?? string.Empty,
@@ -113,11 +116,26 @@ public sealed class AccountRepository
             new { e = email, id = excludeId });
     }
 
-    public async Task<bool> PhoneExistsAsync(string phone)
+    /// <summary>Who already logs in with this phone (name, email, account type), so the admin knows where to change it.</summary>
+    public async Task<(string Name, string? Email, string UserType)?> FindPhoneOwnerAsync(string phone, Guid? excludeId = null)
+    {
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<(string Name, string? Email, string UserType)>(
+            """
+            SELECT COALESCE(full_name, display_name, username, email, '') AS name, email, COALESCE(user_type, '') AS user_type
+              FROM auth.app_users
+             WHERE phone = @p AND (@id IS NULL OR id <> @id)
+             LIMIT 1;
+            """, new { p = phone, id = excludeId });
+        var list = rows.ToList();
+        return list.Count == 0 ? null : list[0];
+    }
+
+    public async Task<bool> PhoneExistsAsync(string phone, Guid? excludeId = null)
     {
         using var conn = await _factory.OpenAsync();
         return await conn.ExecuteScalarAsync<bool>(
-            "SELECT EXISTS(SELECT 1 FROM auth.app_users WHERE phone=@p);", new { p = phone });
+            "SELECT EXISTS(SELECT 1 FROM auth.app_users WHERE phone=@p AND (@id IS NULL OR id<>@id));", new { p = phone, id = excludeId });
     }
 
     /// <summary>Insert an admin/operator user and assign the matching role. Returns new id.</summary>

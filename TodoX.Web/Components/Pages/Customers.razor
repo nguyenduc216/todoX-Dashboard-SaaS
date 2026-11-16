@@ -8,6 +8,9 @@
 @inject ISnackbar Snackbar
 @inject TodoX.Web.Services.EditVideoTool.EditVideoLicenseService EditVideoLicenses
 @inject TodoX.Web.Services.EditVideoTool.EditVideoUsageService EditVideoUsage
+@inject TodoX.Web.Services.Studio.StudioRepository Studio
+@inject NavigationManager Nav
+@using TodoX.Web.Services.Studio
 
 <PageTitle>Khách hàng</PageTitle>
 
@@ -30,42 +33,74 @@
         </MudAlert>
     }
 
-    <MudGrid>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Tổng khách hàng</MudText>
-                <div class="todox-stat-value">@_customers.Count</div>
+    @* Every card filters the list; clicking the selected card again shows everyone. *@
+    <div class="todox-stat-grid" data-testid="customer-stat-cards">
+        @foreach (var card in Cards)
+        {
+            <MudPaper Class="@($"todox-card todox-stat-card pa-4{(_card == card.Filter ? " is-selected" : "")}")"
+                      @onclick="@(() => SelectCard(card.Filter))" role="button" tabindex="0" title="Bấm để lọc danh sách">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">@card.Title</MudText>
+                    <MudIcon Icon="@card.Icon" Size="Size.Small" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value" style="@(card.Filter == CustomerCardFilter.NeedVideo && card.Count > 0 ? "color:var(--mud-palette-error)" : null)">@card.Count</div>
+                @if (!string.IsNullOrEmpty(card.Caption))
+                {
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@card.Caption</MudText>
+                }
             </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Đang hoạt động</MudText>
-                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Active)</div>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Chờ duyệt</MudText>
-                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Pending)</div>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Đã khóa</MudText>
-                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Locked)</div>
-            </MudPaper>
-        </MudItem>
-    </MudGrid>
+        }
+    </div>
 
     <MudPaper Class="todox-table-card pa-4" rounded="true">
-        <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, mã, email..."
-                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                      Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <div class="d-flex align-center gap-2 mb-3 flex-wrap">
+            <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, mã, email, số điện thoại..."
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                          autocomplete="off" name="customer-search" Style="flex:1;min-width:240px" />
+            <MudBadge Content="@_advanced.Describe().Count" Visible="@(!_advanced.IsEmpty)" Color="Color.Warning" Overlap="true">
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ManageSearch"
+                           OnClick="OpenAdvancedSearch" data-testid="customer-advanced-search">Tìm kiếm chi tiết</MudButton>
+            </MudBadge>
+        </div>
 
-        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+        @if (!_advanced.IsEmpty || _card != CustomerCardFilter.All)
+        {
+            <div class="d-flex align-center gap-1 mb-3 flex-wrap" data-testid="customer-active-filters">
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle mr-1">Đang lọc (@Filtered.Count() khách):</MudText>
+                @if (_card != CustomerCardFilter.All)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" OnClose="@(_ => SelectCard(CustomerCardFilter.All))">@Cards.First(x => x.Filter == _card).Title</MudChip>
+                }
+                @foreach (var label in _advanced.Describe())
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">@label</MudChip>
+                }
+                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ClearFilters">Xóa lọc</MudButton>
+            </div>
+        }
+
+        @if (_studioReady)
+        {
+            <MudChipSet T="string" @bind-SelectedValue="_segmentFilter" SelectionMode="SelectionMode.SingleSelection" Class="mb-3" data-testid="customer-segment-filter">
+                <MudChip T="string" Value="@string.Empty" Variant="Variant.Outlined">Tất cả (@_customers.Count)</MudChip>
+                @foreach (var segment in CustomerSegments.All)
+                {
+                    <MudChip T="string" Value="@segment" Variant="Variant.Outlined" Color="@SegmentColor(segment)">
+                        @CustomerSegments.Label(segment) (@_customers.Count(x => x.Segment == segment))
+                    </MudChip>
+                }
+            </MudChipSet>
+        }
+
+        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap todox-table-sticky" HorizontalScrollbar="true" FixedHeader="true">
             <HeaderContent>
-                <MudTh>Mã KH</MudTh>
-                <MudTh>Tên công ty</MudTh>
+                <MudTh>Khách hàng</MudTh>
+                @if (_studioReady)
+                {
+                    <MudTh>Loại khách</MudTh>
+                    <MudTh>Video đã làm</MudTh>
+                }
                 <MudTh>Người liên hệ</MudTh>
                 <MudTh>Email</MudTh>
                 <MudTh>Số điện thoại</MudTh>
@@ -80,8 +115,41 @@
                 <MudTh Style="text-align:right">Thao tác</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="Mã KH">@context.CustomerCode</MudTd>
-                <MudTd DataLabel="Tên công ty">@context.CompanyName</MudTd>
+                <MudTd DataLabel="Khách hàng">
+                    <div class="todox-customer-name">@context.CompanyName</div>
+                    <div class="todox-customer-code">@context.CustomerCode</div>
+                </MudTd>
+                @if (_studioReady)
+                {
+                    <MudTd DataLabel="Loại khách">
+                        @if (CanUpdate)
+                        {
+                            <MudMenu Dense="true" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                                <ActivatorContent Context="menuContext">
+                                    <MudChip T="string" Size="Size.Small" Color="@SegmentColor(context.Segment)" Icon="@Icons.Material.Filled.ArrowDropDown">@CustomerSegments.Label(context.Segment)</MudChip>
+                                </ActivatorContent>
+                                <ChildContent>
+                                    @foreach (var segment in CustomerSegments.All)
+                                    {
+                                        <MudMenuItem OnClick="@(() => ChangeSegment(context, segment))">@CustomerSegments.Label(segment)</MudMenuItem>
+                                    }
+                                </ChildContent>
+                            </MudMenu>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="@SegmentColor(context.Segment)">@CustomerSegments.Label(context.Segment)</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Video đã làm">
+                        @{ var counts = Counts(context.Id); }
+                        <MudTooltip Text="@($"{counts.Delivered} video đã bàn giao · {counts.Released} kế hoạch đã release · {counts.InProgress} đang làm")">
+                            <MudLink Href="@($"/video-plans?customer={context.Id}")" Underline="Underline.Hover">
+                                <b>@counts.Done</b>@(counts.InProgress > 0 ? $" · {counts.InProgress} đang làm" : "")
+                            </MudLink>
+                        </MudTooltip>
+                    </MudTd>
+                }
                 <MudTd DataLabel="Người liên hệ">@context.ContactName</MudTd>
                 <MudTd DataLabel="Email">@context.Email</MudTd>
                 <MudTd DataLabel="Số điện thoại">@context.Phone</MudTd>
@@ -110,17 +178,29 @@
                     }
                 </MudTd>
                 <MudTd DataLabel="Thao tác" Style="text-align:right">
-                    <MudIconButton Icon="@Icons.Material.Filled.VpnKey" Size="Size.Small" Title="License EditVideoTool" OnClick="@(() => OpenLicenses(context))" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
-                    @if (context.Status == TodoXAccountStatus.Locked)
+                    <div class="todox-table-actions">
+                    @if (_studioReady && CanViewPlans)
                     {
-                        <MudIconButton Icon="@Icons.Material.Filled.LockOpen" Color="Color.Success" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Active))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.EventNote" Size="Size.Small" title="Kế hoạch video" Href="@($"/video-plans?customer={context.Id}")" />
                     }
-                    else
+                    @if (CanUpdate)
                     {
-                        <MudIconButton Icon="@Icons.Material.Filled.Lock" Color="Color.Warning" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Locked))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.VpnKey" Size="Size.Small" Title="License EditVideoTool" OnClick="@(() => OpenLicenses(context))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
+                        @if (context.Status == TodoXAccountStatus.Locked)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.LockOpen" Color="Color.Success" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Active))" />
+                        }
+                        else
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Lock" Color="Color.Warning" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Locked))" />
+                        }
                     }
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(context))" />
+                    @if (CanDelete)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(context))" />
+                    }
+                    </div>
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>
@@ -136,16 +216,103 @@
     private IReadOnlyDictionary<Guid, (int Licenses, int Alerts)> _licenseSummary = new Dictionary<Guid, (int, int)>();
     private IReadOnlyList<TodoX.Web.Services.EditVideoTool.EditVideoAlertRow> _editVideoAlerts = [];
     private bool _affiliateReady;
+    private bool _studioReady;
+    private string? _segmentFilter = string.Empty;
+    private IReadOnlyDictionary<Guid, CustomerVideoCounts> _videoCounts = new Dictionary<Guid, CustomerVideoCounts>();
+    private static readonly CustomerVideoCounts NoVideos = new(0, 0, 0);
+
+    // Admins keep every action; a staff account sees only what its role was granted.
+    private bool CanUpdate => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.Can("customers.update") == true;
+    private bool CanDelete => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.Can("customers.delete") == true;
+    private bool CanViewPlans => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.CanViewModule("video_plans") == true;
+
+    private CustomerVideoCounts Counts(Guid customerId) => _videoCounts.TryGetValue(customerId, out var c) ? c : NoVideos;
+
+    private CustomerCardFilter _card = CustomerCardFilter.All;
+    private CustomerSearchFilter _advanced = new();
+
+    private sealed record StatCard(CustomerCardFilter Filter, string Title, string Icon, int Count, string? Caption);
+
+    private IReadOnlyList<StatCard> Cards
+    {
+        get
+        {
+            var cards = new List<StatCard>
+            {
+                new(CustomerCardFilter.All, "Tổng khách hàng", Icons.Material.Filled.Groups, _customers.Count, null),
+                new(CustomerCardFilter.Active, "Đang hoạt động", Icons.Material.Filled.CheckCircle, _customers.Count(x => x.Status == TodoXAccountStatus.Active), null),
+                new(CustomerCardFilter.Pending, "Chờ duyệt", Icons.Material.Filled.HourglassTop, _customers.Count(x => x.Status == TodoXAccountStatus.Pending), null),
+                new(CustomerCardFilter.Locked, "Đã khóa", Icons.Material.Filled.Lock, _customers.Count(x => x.Status == TodoXAccountStatus.Locked), null)
+            };
+            if (_studioReady)
+            {
+                var chasing = _customers.Count(x => x.Segment == CustomerSegments.Chasing);
+                cards.Add(new(CustomerCardFilter.NeedVideo, "Khách cần làm video", Icons.Material.Filled.VideoCall,
+                    _customers.Count(x => CustomerSearchFilter.NeedsVideo(x, Counts(x.Id))),
+                    $"Bám đuổi, chưa có video nào · {chasing} khách bám đuổi"));
+            }
+            return cards;
+        }
+    }
+
+    private void SelectCard(CustomerCardFilter card) => _card = _card == card ? CustomerCardFilter.All : card;
+
+    private void ClearFilters()
+    {
+        _card = CustomerCardFilter.All;
+        _advanced = new CustomerSearchFilter();
+        _segmentFilter = string.Empty;
+        _search = string.Empty;
+    }
+
+    private async Task OpenAdvancedSearch()
+    {
+        var parameters = new DialogParameters<CustomerSearchDialog>
+        {
+            { x => x.Current, _advanced },
+            { x => x.SegmentEnabled, _studioReady },
+            { x => x.AffiliateEnabled, _affiliateReady }
+        };
+        var dialog = await DialogService.ShowAsync<CustomerSearchDialog>("Tìm kiếm chi tiết", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: CustomerSearchFilter filter }) _advanced = filter;
+    }
+
+    private static Color SegmentColor(string? segment) => CustomerSegments.Normalize(segment) switch
+    {
+        CustomerSegments.Vip => Color.Warning,
+        CustomerSegments.Chasing => Color.Error,
+        _ => Color.Default
+    };
 
     protected override async Task OnInitializedAsync()
     {
         _affiliateReady = await Affiliates.IsReadyAsync();
+        _studioReady = await Studio.IsReadyAsync();
         await Reload();
     }
 
     private async Task Reload()
     {
         var customers = await Accounts.GetCustomersAsync();
+        if (_studioReady)
+        {
+            try
+            {
+                var segments = await Studio.GetSegmentsAsync();
+                foreach (var c in customers)
+                {
+                    c.Segment = segments.TryGetValue(c.Id, out var s) ? CustomerSegments.Normalize(s) : CustomerSegments.Regular;
+                }
+                _videoCounts = await Studio.GetVideoCountsAsync();
+            }
+            catch (Exception)
+            {
+                // The customer list must still show if the studio tables are unreachable.
+                _studioReady = false;
+            }
+        }
         if (_affiliateReady)
         {
             var map = await Affiliates.GetCustomerAffiliateMapAsync();
@@ -227,21 +394,55 @@
         }
     }
 
+    private async Task ChangeSegment(CustomerProfile customer, string segment)
+    {
+        if (customer.Segment == segment) return;
+        try
+        {
+            await Studio.SetSegmentAsync(customer.Id, segment);
+            customer.Segment = segment;
+            await Audit.LogAsync(AuthState.CurrentUser, "customers", "segment", entityDisplay: $"{customer.CompanyName}: {CustomerSegments.Label(segment)}");
+            Snackbar.Add($"{customer.CompanyName}: {CustomerSegments.Label(segment)}", Severity.Success);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task SaveSegmentAsync(CustomerProfile model, CustomerProfile? before)
+    {
+        if (!_studioReady || model.Id == Guid.Empty) return;
+        var segment = CustomerSegments.Normalize(model.Segment);
+        // A new customer keeps the default without writing a row; an edit writes only a real change.
+        if (segment == CustomerSegments.Normalize(before?.Segment)) return;
+        await Studio.SetSegmentAsync(model.Id, segment);
+    }
+
     private IEnumerable<CustomerProfile> Filtered
     {
         get
         {
+            IEnumerable<CustomerProfile> list = _customers
+                .Where(x => CustomerSearchFilter.MatchesCard(_card, x, Counts(x.Id)))
+                .Where(x => _advanced.Matches(x, Counts(x.Id)));
+            if (_studioReady && !string.IsNullOrEmpty(_segmentFilter))
+            {
+                list = list.Where(x => x.Segment == _segmentFilter);
+            }
+
             if (string.IsNullOrWhiteSpace(_search))
             {
-                return _customers;
+                return list;
             }
 
             var q = _search.Trim();
-            return _customers.Where(x =>
+            return list.Where(x =>
                 x.CompanyName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 x.CustomerCode.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 x.ContactName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 x.Email.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (x.Phone ?? string.Empty).Replace(" ", "").Contains(q.Replace(" ", ""), StringComparison.OrdinalIgnoreCase) ||
                 (x.AgentCode ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 (x.ReferralCode ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
         }
@@ -249,7 +450,7 @@
 
     private async Task OpenCreate()
     {
-        var parameters = new DialogParameters<CustomerDialog> { { x => x.AffiliateEnabled, _affiliateReady } };
+        var parameters = new DialogParameters<CustomerDialog> { { x => x.AffiliateEnabled, _affiliateReady }, { x => x.SegmentEnabled, _studioReady } };
         var dialog = await DialogService.ShowAsync<CustomerDialog>("Thêm khách hàng", parameters);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is CustomerProfile model)
@@ -259,6 +460,7 @@
             if (ok)
             {
                 await SaveAffiliateAsync(model, null);
+                await SaveSegmentAsync(model, null);
                 await Audit.LogAsync(AuthState.CurrentUser, "customers", "create", entityDisplay: model.CompanyName);
                 await Reload();
             }
@@ -267,7 +469,7 @@
 
     private async Task OpenEdit(CustomerProfile customer)
     {
-        var parameters = new DialogParameters<CustomerDialog> { { x => x.Source, customer }, { x => x.AffiliateEnabled, _affiliateReady } };
+        var parameters = new DialogParameters<CustomerDialog> { { x => x.Source, customer }, { x => x.AffiliateEnabled, _affiliateReady }, { x => x.SegmentEnabled, _studioReady } };
         var dialog = await DialogService.ShowAsync<CustomerDialog>("Chỉnh sửa khách hàng", parameters);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is CustomerProfile model)
@@ -277,6 +479,7 @@
             if (ok)
             {
                 await SaveAffiliateAsync(model, customer);
+                await SaveSegmentAsync(model, customer);
                 await Reload();
             }
         }

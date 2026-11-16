@@ -1,80 +1,236 @@
+@using TodoX.Web.Services.Studio
 @inject AccountService Accounts
+@inject AuthStateService AuthState
+@inject StudioRepository Studio
+@inject BillingRepository Billing
+@inject HomeStatsRepository HomeStats
+@inject ILogger<AdminDashboard> Logger
 
+@* Every block is behind its own permission (HomeWidgets): an account sees only the stats it may see. *@
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Tổng quan hệ thống</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Trung tâm quản trị khách hàng, tài khoản, điểm và render jobs của TodoX.</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">@(IsAdmin ? "Tổng quan hệ thống" : $"Xin chào, {AuthState.CurrentUser?.DisplayName}")</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+            @(IsAdmin ? "Trung tâm quản trị khách hàng, tài khoản, điểm và render jobs của TodoX." : "Các thông số bạn được xem trên dashboard TodoX.")
+        </MudText>
     </div>
 
-    <MudGrid>
-        <MudItem xs="12" sm="6" lg="3">
-            <MudPaper Class="todox-card pa-5" rounded="true">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                    <MudText Typo="Typo.subtitle2">Khách hàng</MudText>
-                    <MudIcon Icon="@Icons.Material.Filled.Groups" Class="todox-gold" />
-                </MudStack>
-                <div class="todox-stat-value">@CustomerCount</div>
-                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Thông tin khách hàng TodoX</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" lg="3">
-            <MudPaper Class="todox-card pa-5" rounded="true">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                    <MudText Typo="Typo.subtitle2">Tài khoản</MudText>
-                    <MudIcon Icon="@Icons.Material.Filled.ManageAccounts" Class="todox-gold" />
-                </MudStack>
-                <div class="todox-stat-value">@AccountCount</div>
-                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Admin và tài khoản khách hàng</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" lg="3">
-            <MudPaper Class="todox-card pa-5" rounded="true">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                    <MudText Typo="Typo.subtitle2">Điểm đã bán</MudText>
-                    <MudIcon Icon="@Icons.Material.Filled.Token" Class="todox-gold" />
-                </MudStack>
-                <div class="todox-stat-value">0</div>
-                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Kết nối wallet ở sprint tiếp theo</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" lg="3">
-            <MudPaper Class="todox-card pa-5" rounded="true">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                    <MudText Typo="Typo.subtitle2">Render Jobs</MudText>
-                    <MudIcon Icon="@Icons.Material.Filled.Movie" Class="todox-gold" />
-                </MudStack>
-                <div class="todox-stat-value">0</div>
-                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt, image, voice, caption, video</MudText>
-            </MudPaper>
-        </MudItem>
-    </MudGrid>
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!HomeWidgets.All.Any(w => See(w.Module)))
+    {
+        <MudAlert Severity="Severity.Info" data-testid="home-no-widgets">
+            Tài khoản của bạn chưa được cấp thông số nào trên trang chủ. Liên hệ quản trị viên để được cấp quyền trong mục Phân quyền.
+        </MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            @if (See(HomeWidgets.Customers))
+            {
+                <MudItem xs="12" sm="6" lg="3">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.subtitle2">Khách hàng</MudText>
+                            <MudIcon Icon="@Icons.Material.Filled.Groups" Class="todox-gold" />
+                        </MudStack>
+                        <div class="todox-stat-value">@_customerCount</div>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            @(_segmentCounts is null ? "Thông tin khách hàng TodoX" : $"{_segmentCounts.Value.Vip} VIP · {_segmentCounts.Value.Chasing} bám đuổi")
+                        </MudText>
+                    </MudPaper>
+                </MudItem>
+            }
+            @if (See(HomeWidgets.Accounts))
+            {
+                <MudItem xs="12" sm="6" lg="3">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.subtitle2">Tài khoản</MudText>
+                            <MudIcon Icon="@Icons.Material.Filled.ManageAccounts" Class="todox-gold" />
+                        </MudStack>
+                        <div class="todox-stat-value">@_accountCount</div>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Admin và tài khoản khách hàng</MudText>
+                    </MudPaper>
+                </MudItem>
+            }
+            @if (See(HomeWidgets.PointsSold))
+            {
+                <MudItem xs="12" sm="6" lg="3">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.subtitle2">Điểm đã bán</MudText>
+                            <MudIcon Icon="@Icons.Material.Filled.Token" Class="todox-gold" />
+                        </MudStack>
+                        <div class="todox-stat-value" data-testid="home-points-sold">@(_points is null ? "—" : Points(_points.SoldTotal))</div>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            @(_points is null ? "Chưa tải được số liệu điểm" : $"Tổng điểm nạp cho khách · khách còn {Points(_points.TotalBalance)} điểm")
+                        </MudText>
+                    </MudPaper>
+                </MudItem>
+            }
+            @if (See(HomeWidgets.RenderJobs))
+            {
+                <MudItem xs="12" sm="6" lg="3">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.subtitle2">Render Jobs</MudText>
+                            <MudIcon Icon="@Icons.Material.Filled.Movie" Class="todox-gold" />
+                        </MudStack>
+                        <div class="todox-stat-value" data-testid="home-render-jobs">@(_jobs?.Total.ToString("#,##0") ?? "—")</div>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            @if (_jobs is null)
+                            {
+                                <span>Chưa tải được số liệu job</span>
+                            }
+                            else
+                            {
+                                <span>@_jobs.ThisMonth trong tháng · @_jobs.Running đang chạy · </span>
+                                <span style="@(_jobs.FailedThisMonth > 0 ? "color:var(--mud-palette-error);font-weight:600" : null)">@_jobs.FailedThisMonth lỗi trong tháng</span>
+                            }
+                        </MudText>
+                    </MudPaper>
+                </MudItem>
+            }
+            @if (See(HomeWidgets.VideoPlans) && _openPlans is not null)
+            {
+                <MudItem xs="12" sm="6" lg="3">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.subtitle2">Kế hoạch video đang làm</MudText>
+                            <MudIcon Icon="@Icons.Material.Filled.EventNote" Class="todox-gold" />
+                        </MudStack>
+                        <div class="todox-stat-value">@_openPlans.Count</div>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            @_openPlans.Count(DueSoon) sắp release trong 7 ngày ·
+                            <span style="@(_openPlans.Any(Overdue) ? "color:var(--mud-palette-error);font-weight:600" : null)">@_openPlans.Count(Overdue) trễ hạn</span>
+                        </MudText>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
 
-    <MudGrid>
-        <MudItem xs="12" lg="7">
+        @if (See(HomeWidgets.MyVideoPlans) && _openPlans is not null)
+        {
+            var mine = _openPlans.Where(x => x.AssigneeUserId == AuthState.CurrentUser?.UserId).ToList();
             <MudPaper Class="todox-card pa-5" rounded="true">
-                <MudText Typo="Typo.h6">Lộ trình Sprint hiện tại</MudText>
-                <MudDivider Class="my-3" />
-                <MudList T="string">
-                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Đồng bộ màu sắc nhận diện TodoX theo logo</MudListItem>
-                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Bổ sung responsive layout cho desktop và mobile</MudListItem>
-                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Bổ sung đăng nhập, đăng ký và quản lý tài khoản cơ bản</MudListItem>
-                    <MudListItem Icon="@Icons.Material.Filled.Info">Dữ liệu hiện dùng in-memory; PostgreSQL schema/seed đã có script riêng</MudListItem>
-                </MudList>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.h6">Kế hoạch video của tôi (@mine.Count)</MudText>
+                    <MudButton Variant="Variant.Text" Color="Color.Warning" Href="@($"/video-plans?assignee={AuthState.CurrentUser?.UserId}")">Xem tất cả</MudButton>
+                </MudStack>
+                <MudDivider Class="my-2" />
+                @if (mine.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Bạn chưa được giao kế hoạch video nào đang làm.</MudText>
+                }
+                else
+                {
+                    <MudTable Items="mine.Take(8)" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                        <HeaderContent>
+                            <MudTh>Ngày release</MudTh>
+                            <MudTh>Khách hàng</MudTh>
+                            <MudTh>Nội dung video</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Ngày release">
+                                <span style="@(Overdue(context) ? "color:var(--mud-palette-error);font-weight:600" : null)">@(context.ReleaseDate?.ToString("dd/MM/yyyy") ?? "Chưa đặt")</span>
+                            </MudTd>
+                            <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                            <MudTd DataLabel="Nội dung video"><MudLink Href="@($"/video-plans/{context.Id}")">@context.Title</MudLink></MudTd>
+                            <MudTd DataLabel="Trạng thái">@VideoPlanStatuses.Label(context.Status)</MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
             </MudPaper>
-        </MudItem>
-    </MudGrid>
+        }
+
+        @if (See(HomeWidgets.Roadmap))
+        {
+            <MudGrid>
+                <MudItem xs="12" lg="7">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
+                        <MudText Typo="Typo.h6">Lộ trình Sprint hiện tại</MudText>
+                        <MudDivider Class="my-3" />
+                        <MudList T="string">
+                            <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Đồng bộ màu sắc nhận diện TodoX theo logo</MudListItem>
+                            <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Bổ sung responsive layout cho desktop và mobile</MudListItem>
+                            <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Bổ sung đăng nhập, đăng ký và quản lý tài khoản cơ bản</MudListItem>
+                            <MudListItem Icon="@Icons.Material.Filled.Info">Dữ liệu hiện dùng in-memory; PostgreSQL schema/seed đã có script riêng</MudListItem>
+                        </MudList>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        }
+    }
 </MudStack>
 
 @code {
-    private int CustomerCount;
-    private int AccountCount;
+    private int _customerCount;
+    private int _accountCount;
+    private (int Vip, int Chasing)? _segmentCounts;
+    private IReadOnlyList<VideoPlan>? _openPlans;
+    private TokenSummary? _points;
+    private RenderJobHomeStats? _jobs;
+    private bool _loaded;
+
+    private static string Points(decimal value) => value.ToString("#,##0.##");
+
+    private bool IsAdmin => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
+    private bool See(string module) => HomeWidgets.CanSee(AuthState.CurrentUser, module);
+
+    private static bool Overdue(VideoPlan plan) => VideoPlanRules.IsOverdue(plan, DateTime.Today);
+    private static bool DueSoon(VideoPlan plan)
+        => plan.ReleaseDate is { } date && date.Date >= DateTime.Today && date.Date <= DateTime.Today.AddDays(7);
 
     protected override async Task OnInitializedAsync()
     {
-        var customers = await Accounts.GetCustomersAsync();
-        var systemUsers = await Accounts.GetSystemUsersAsync();
-        var customerAccounts = await Accounts.GetCustomerAccountsAsync();
-        CustomerCount = customers.Count;
-        AccountCount = systemUsers.Count + customerAccounts.Count;
+        // Load only what this account may see.
+        if (See(HomeWidgets.Customers))
+        {
+            var customers = await Accounts.GetCustomersAsync();
+            _customerCount = customers.Count;
+            if (await Studio.IsReadyAsync())
+            {
+                var segments = await Studio.GetSegmentsAsync();
+                _segmentCounts = (segments.Values.Count(x => x == CustomerSegments.Vip), segments.Values.Count(x => x == CustomerSegments.Chasing));
+            }
+        }
+
+        if (See(HomeWidgets.Accounts))
+        {
+            var systemUsers = await Accounts.GetSystemUsersAsync();
+            var customerAccounts = await Accounts.GetCustomerAccountsAsync();
+            _accountCount = systemUsers.Count + customerAccounts.Count;
+        }
+
+        // One failing figure must not take the whole home page down: the block shows "—" instead.
+        if (See(HomeWidgets.PointsSold))
+        {
+            try { _points = await Billing.GetSummaryAsync(); }
+            catch (Exception ex) { Logger.LogWarning(ex, "HOME_POINTS_SOLD_UNAVAILABLE"); }
+        }
+
+        if (See(HomeWidgets.RenderJobs))
+        {
+            try { _jobs = await HomeStats.GetRenderJobStatsAsync(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)); }
+            catch (Exception ex) { Logger.LogWarning(ex, "HOME_RENDER_JOBS_UNAVAILABLE"); }
+        }
+
+        if ((See(HomeWidgets.VideoPlans) || See(HomeWidgets.MyVideoPlans)) && await Studio.IsReadyAsync())
+        {
+            try
+            {
+                _openPlans = await Studio.ListOpenPlansForHomeAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "HOME_VIDEO_PLANS_UNAVAILABLE");
+            }
+        }
+
+        _loaded = true;
     }
 }

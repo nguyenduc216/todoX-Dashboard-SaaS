@@ -1,0 +1,296 @@
+@page "/video-plans"
+@using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Services.Studio
+@inject AccountService Accounts
+@inject StudioRepository Studio
+@inject AuthStateService AuthState
+@inject AuditRepository Audit
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Kế hoạch video</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Kế hoạch video</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Làm video gì cho khách, kịch bản ra sao, ai làm, ngày release, các phiên bản và ghi chú làm việc với khách.</MudText>
+        </div>
+        @if (_ready && Can("video_plans.create"))
+        {
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate" Disabled="_busy" data-testid="video-plan-create">Tạo kế hoạch</MudButton>
+        }
+    </MudStack>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!Can("video_plans.view"))
+    {
+        <MudAlert Severity="Severity.Error">Bạn không có quyền xem kế hoạch video.</MudAlert>
+    }
+    else if (!_ready)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Database chưa có bảng kế hoạch video. Cần chạy script <code>database/manual/studio/20261116_customer_segments_staff_video_plans.sql</code>.
+        </MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Đang làm</MudText>
+                    <div class="todox-stat-value">@_plans.Count(x => VideoPlanStatuses.IsOpen(x.Status))</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Release trong 7 ngày tới</MudText>
+                    <div class="todox-stat-value">@_plans.Count(DueThisWeek)</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Trễ ngày release</MudText>
+                    <div class="todox-stat-value" style="@(_plans.Any(Overdue) ? "color:var(--mud-palette-error)" : null)">@_plans.Count(Overdue)</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Đã release</MudText>
+                    <div class="todox-stat-value">@_plans.Count(x => x.Status == VideoPlanStatuses.Released)</div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudGrid Spacing="2" Class="mb-2">
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo nội dung, khách hàng, kịch bản..."
+                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="3">
+                    <MudSelect T="Guid?" Label="Khách hàng" @bind-Value="_customerFilter" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        @foreach (var customer in _customers.OrderBy(x => x.CompanyName))
+                        {
+                            <MudSelectItem T="Guid?" Value="@customer.Id">@customer.CompanyName</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="3">
+                    <MudSelect T="Guid?" Label="Người làm" @bind-Value="_assigneeFilter" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        @if (AuthState.CurrentUser is { } me)
+                        {
+                            <MudSelectItem T="Guid?" Value="@me.UserId">Của tôi</MudSelectItem>
+                        }
+                        @foreach (var person in _assignees.Where(x => x.UserId != AuthState.CurrentUser?.UserId))
+                        {
+                            <MudSelectItem T="Guid?" Value="@person.UserId">@person.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="2" Class="d-flex align-center">
+                    <MudSwitch T="bool" @bind-Value="_hideDone" Color="Color.Warning" Label="Ẩn đã xong" />
+                </MudItem>
+            </MudGrid>
+            <MudChipSet T="string" @bind-SelectedValue="_statusFilter" SelectionMode="SelectionMode.SingleSelection" Class="mb-3">
+                <MudChip T="string" Value="@string.Empty" Variant="Variant.Outlined">Tất cả</MudChip>
+                @foreach (var status in VideoPlanStatuses.All)
+                {
+                    <MudChip T="string" Value="@status" Variant="Variant.Outlined" Color="@StatusColor(status)">@VideoPlanStatuses.Label(status) (@_plans.Count(x => x.Status == status))</MudChip>
+                }
+            </MudChipSet>
+
+            <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap" HorizontalScrollbar="true"
+                      OnRowClick="@((TableRowClickEventArgs<VideoPlan> e) => Nav.NavigateTo($"/video-plans/{e.Item!.Id}"))" RowStyle="cursor:pointer">
+                <HeaderContent>
+                    <MudTh>Ngày release</MudTh>
+                    <MudTh>Khách hàng</MudTh>
+                    <MudTh>Nội dung video</MudTh>
+                    <MudTh>Người làm</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Phiên bản</MudTh>
+                    <MudTh>Ghi chú</MudTh>
+                    <MudTh Style="text-align:right">Thao tác</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Ngày release">
+                        @if (context.ReleaseDate is { } date)
+                        {
+                            <span style="@(Overdue(context) ? "color:var(--mud-palette-error);font-weight:600" : null)">@date.ToString("dd/MM/yyyy")</span>
+                            @if (Overdue(context)) { <MudText Typo="Typo.caption" Color="Color.Error">Trễ @((DateTime.Today - date.Date).Days) ngày</MudText> }
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa đặt</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                    <MudTd DataLabel="Nội dung video"><b>@context.Title</b></MudTd>
+                    <MudTd DataLabel="Người làm">@(context.AssigneeName ?? "Chưa giao")</MudTd>
+                    <MudTd DataLabel="Trạng thái">
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@VideoPlanStatuses.Label(context.Status)</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Phiên bản">@(context.VersionCount == 0 ? "—" : $"v{context.VersionCount}")</MudTd>
+                    <MudTd DataLabel="Ghi chú">@context.NoteCount</MudTd>
+                    <MudTd DataLabel="Thao tác" Style="text-align:right">
+                        <span class="todox-table-actions" @onclick:stopPropagation="true">
+                        <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" title="Mở chi tiết" Href="@($"/video-plans/{context.Id}")" />
+                        @if (Can("video_plans.update"))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(context))" Disabled="_busy" />
+                        }
+                        @if (Can("video_plans.delete"))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" title="Xóa" OnClick="@(() => Delete(context))" Disabled="_busy" />
+                        }
+                        </span>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Class="pa-4 todox-page-subtitle">Chưa có kế hoạch video nào khớp bộ lọc.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    [SupplyParameterFromQuery(Name = "customer")] public Guid? CustomerQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "assignee")] public Guid? AssigneeQuery { get; set; }
+
+    private IReadOnlyList<VideoPlan> _plans = [];
+    private IReadOnlyList<CustomerProfile> _customers = [];
+    private IReadOnlyList<PlanAssignee> _assignees = [];
+    private string _search = string.Empty;
+    private string? _statusFilter = string.Empty;
+    private Guid? _customerFilter;
+    private Guid? _assigneeFilter;
+    private bool _hideDone;
+    private bool _loaded;
+    private bool _ready;
+    private bool _busy;
+
+    private bool Can(string permission)
+        => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.Can(permission) == true;
+
+    private static bool Overdue(VideoPlan plan) => VideoPlanRules.IsOverdue(plan, DateTime.Today);
+
+    private static bool DueThisWeek(VideoPlan plan)
+        => VideoPlanStatuses.IsOpen(plan.Status) && plan.ReleaseDate is { } date
+           && date.Date >= DateTime.Today && date.Date <= DateTime.Today.AddDays(7);
+
+    internal static Color StatusColor(string? status) => status switch
+    {
+        VideoPlanStatuses.Scripting => Color.Info,
+        VideoPlanStatuses.Producing => Color.Warning,
+        VideoPlanStatuses.Reviewing => Color.Secondary,
+        VideoPlanStatuses.Released => Color.Success,
+        VideoPlanStatuses.Cancelled => Color.Dark,
+        _ => Color.Default
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _customerFilter = CustomerQuery;
+        _assigneeFilter = AssigneeQuery;
+        _ready = await Studio.IsReadyAsync();
+        if (_ready && Can("video_plans.view"))
+        {
+            _customers = await Accounts.GetCustomersAsync();
+            _assignees = await Studio.ListAssigneesAsync();
+            await Reload();
+        }
+        _loaded = true;
+    }
+
+    private async Task Reload() => _plans = await Studio.ListPlansAsync();
+
+    private IEnumerable<VideoPlan> Filtered
+    {
+        get
+        {
+            IEnumerable<VideoPlan> list = _plans;
+            if (!string.IsNullOrEmpty(_statusFilter)) list = list.Where(x => x.Status == _statusFilter);
+            if (_hideDone) list = list.Where(x => VideoPlanStatuses.IsOpen(x.Status));
+            if (_customerFilter is { } customer) list = list.Where(x => x.CustomerId == customer);
+            if (_assigneeFilter is { } assignee) list = list.Where(x => x.AssigneeUserId == assignee);
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                var q = _search.Trim();
+                list = list.Where(x =>
+                    x.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.CustomerName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.Content ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.Script ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.AssigneeName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+            return list;
+        }
+    }
+
+    private async Task OpenCreate() => await OpenDialog(null);
+
+    private async Task OpenEdit(VideoPlan plan) => await OpenDialog(plan);
+
+    private async Task OpenDialog(VideoPlan? source)
+    {
+        var parameters = new DialogParameters<VideoPlanDialog>
+        {
+            { x => x.Source, source },
+            { x => x.DefaultCustomerId, _customerFilter },
+            { x => x.Customers, _customers },
+            { x => x.Assignees, _assignees }
+        };
+        var dialog = await DialogService.ShowAsync<VideoPlanDialog>(source is null ? "Tạo kế hoạch video" : "Sửa kế hoạch video", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not VideoPlan model) return;
+
+        _busy = true;
+        try
+        {
+            var (ok, error) = await Studio.SavePlanAsync(model);
+            if (!ok)
+            {
+                Snackbar.Add(error ?? "Chưa lưu được kế hoạch.", Severity.Error);
+                return;
+            }
+            await Audit.LogAsync(AuthState.CurrentUser, "video_plans", source is null ? "create" : "update", entityDisplay: model.Title);
+            Snackbar.Add(source is null ? "Đã tạo kế hoạch video." : "Đã cập nhật kế hoạch video.", Severity.Success);
+            await Reload();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Delete(VideoPlan plan)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa kế hoạch video",
+            $"Xóa kế hoạch \"{plan.Title}\" của {plan.CustomerName}? Các phiên bản và ghi chú của kế hoạch cũng bị xóa, không hoàn tác được.",
+            yesText: "Xóa", cancelText: "Hủy");
+        if (confirm != true) return;
+        try
+        {
+            await Studio.DeletePlanAsync(plan.Id);
+            await Audit.LogAsync(AuthState.CurrentUser, "video_plans", "delete", entityDisplay: plan.Title);
+            Snackbar.Add("Đã xóa kế hoạch.", Severity.Success);
+            await Reload();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

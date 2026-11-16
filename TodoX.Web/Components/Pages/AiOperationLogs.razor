@@ -11,8 +11,8 @@
 <MudStack Spacing="3">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
-            <MudText Typo="Typo.h4" Class="todox-page-title">Nháº­t kÃ½ váº­n hÃ nh AI</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dÃµi provider operation, usage, cost, billing vÃ  assets cá»§a Dance Sell.</MudText>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Nhật ký vận hành AI</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi provider operation, usage, cost, billing và assets của Dance Sell.</MudText>
         </div>
         <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Refresh</MudButton>
     </MudStack>
@@ -98,7 +98,7 @@
                     <MudText Typo="Typo.h6">Detail</MudText>
                     @if (_detail is null)
                     {
-                        <MudText Typo="Typo.body2" Class="mt-3">Chá»n má»™t operation Ä‘á»ƒ xem chi tiáº¿t.</MudText>
+                        <MudText Typo="Typo.body2" Class="mt-3">Chọn một operation để xem chi tiết.</MudText>
                     }
                     else
                     {
@@ -134,8 +134,8 @@
                                 <MudTextField T="string" Label="Reason" Variant="Variant.Outlined" @bind-Value="_reason" />
                                 <MudTextField T="decimal" Label="Refund points" Variant="Variant.Outlined" @bind-Value="_refundPoints" />
                                 <MudStack Row="true" Class="flex-wrap gap-2">
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="RefundAsync">HoÃ n Ä‘iá»ƒm</MudButton>
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Info" OnClick="RetryChargeAsync">Trá»« Ä‘iá»ƒm láº¡i</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="RefundAsync">Hoàn điểm</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Info" OnClick="RetryChargeAsync">Trừ điểm lại</MudButton>
                                     <MudButton Variant="Variant.Outlined" Color="Color.Info" OnClick="RetryRefundAsync">Retry refund</MudButton>
                                 </MudStack>
                             </MudTabPanel>

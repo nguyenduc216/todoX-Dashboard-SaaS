@@ -28,6 +28,17 @@
                     <MudSelectItem Value="TodoXAccountStatus.Locked">Đã khóa</MudSelectItem>
                 </MudSelect>
             </MudItem>
+            @if (SegmentEnabled)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="Loại khách" @bind-Value="_model.Segment" Variant="Variant.Outlined">
+                        @foreach (var segment in TodoX.Web.Services.Studio.CustomerSegments.All)
+                        {
+                            <MudSelectItem Value="@segment">@TodoX.Web.Services.Studio.CustomerSegments.Label(segment)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            }
             <MudItem xs="12">
                 <MudTextField T="string" Label="Địa chỉ" @bind-Value="_model.Address" Variant="Variant.Outlined" Lines="2" />
             </MudItem>
@@ -65,6 +76,9 @@
     /// <summary>Hiện phần đại lý khi DB đã có schema affiliate.</summary>
     [Parameter] public bool AffiliateEnabled { get; set; }
 
+    /// <summary>Hiện ô "Loại khách" khi DB đã có studio.customer_profiles.</summary>
+    [Parameter] public bool SegmentEnabled { get; set; }
+
     private CustomerProfile _model = new();
     private bool _isNew;
 
@@ -88,7 +102,8 @@
                 IsAgent = Source.IsAgent,
                 AgentCode = Source.AgentCode,
                 ReferralCode = Source.ReferralCode,
-                ReferredByAgentName = Source.ReferredByAgentName
+                ReferredByAgentName = Source.ReferredByAgentName,
+                Segment = Source.Segment
             };
     }
 

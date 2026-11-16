@@ -227,10 +227,10 @@
                                 </MudSelect>
                             </MudItem>
                             <MudItem xs="12" sm="6">
-                                <MudTextField T="string" @bind-Value="_smtpUsername" Label="Tài khoản đăng nhập" Variant="Variant.Outlined" />
+                                <MudTextField T="string" @bind-Value="_smtpUsername" Label="Tài khoản đăng nhập" Variant="Variant.Outlined" autocomplete="off" />
                             </MudItem>
                             <MudItem xs="12" sm="6">
-                                <MudTextField T="string" @bind-Value="_smtpPassword" Label="Mật khẩu" InputType="InputType.Password" Variant="Variant.Outlined"
+                                <MudTextField T="string" @bind-Value="_smtpPassword" Label="Mật khẩu" InputType="InputType.Password" autocomplete="new-password" Variant="Variant.Outlined"
                                               Placeholder="@(_smtpHasPassword ? "Đã lưu – để trống để giữ nguyên" : "")" />
                             </MudItem>
                             <MudItem xs="12" sm="6">

@@ -290,6 +290,46 @@ public sealed class LandingVideoSampleTests
         Assert.Contains("Repository.SetVisibleAsync(sample.Id, visible)", page);
     }
 
+    [Fact]
+    public void Communication_samples_can_pick_a_customer_and_keep_old_versions()
+    {
+        // Only the built-in groups (Video truyền thông / TVC) take a customer; each maps to its "Video khách hàng" kind.
+        var communication = new LandingVideoSample();
+        LandingVideoSampleRepository.ApplyServiceChoice(communication, LandingVideoSampleRepository.OtherServiceChoice);
+        Assert.True(LandingVideoSampleRepository.AllowsCustomer(communication));
+        Assert.Equal("truyen_thong", LandingVideoSampleRepository.CustomerVideoProduct(communication));
+        var tvc = new LandingVideoSample();
+        LandingVideoSampleRepository.ApplyServiceChoice(tvc, LandingVideoSampleRepository.TvcServiceChoice);
+        Assert.Equal("tvc", LandingVideoSampleRepository.CustomerVideoProduct(tvc));
+        var service = new LandingVideoSample { ServiceId = Guid.NewGuid() };
+        Assert.False(LandingVideoSampleRepository.AllowsCustomer(service));
+
+        // No customer means no linked customer video.
+        var unlinked = new LandingVideoSample { CustomerId = Guid.Empty, CustomerVideoId = Guid.NewGuid() };
+        LandingVideoSampleRepository.Normalize(unlinked);
+        Assert.Null(unlinked.CustomerId);
+        Assert.Null(unlinked.CustomerVideoId);
+
+        var root = FindRoot();
+        var sql = File.ReadAllText(Path.Combine(root, LandingVideoSampleRepository.CustomerVersionsScript));
+        Assert.Contains("add column if not exists customer_id uuid;", sql);
+        Assert.Contains("create table if not exists landing.video_sample_versions", sql);
+        Assert.DoesNotContain("drop ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(root, LandingVideoSampleRepository.CustomerVersionsScript.Replace(".sql", ".test.sql"))));
+
+        var dialog = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Dialogs", "LandingVideoSampleDialog.razor"));
+        Assert.Contains("private bool _overwrite = true;", dialog);
+        Assert.Contains("private bool _addToCustomerVideos = true;", dialog);
+        Assert.Contains("Label=\"Khách hàng (không bắt buộc)\"", dialog);
+        Assert.Contains("CustomerVideos.CreateAsync(", dialog);
+        // The version in use is never listed; deleting one removes its file only when nothing else uses it.
+        Assert.Contains("!string.Equals(v.VideoUrl, _model.VideoUrl, StringComparison.OrdinalIgnoreCase)", dialog);
+        Assert.Contains("if (!used.Contains(version.VideoUrl)) Media.DeleteSampleUpload(version.VideoUrl);", dialog);
+        var repository = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Services", "Landing", "LandingVideoSampleRepository.cs"));
+        Assert.Contains("where sample_id = @sampleId and video_url <> coalesce(@current, '')", repository);
+        Assert.Contains("from studio.customer_videos", repository);
+    }
+
     private static string FindRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)

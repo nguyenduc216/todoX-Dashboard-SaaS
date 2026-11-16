@@ -26,6 +26,20 @@ public sealed class LandingVideoSample
     public string GroupName => ServiceName ?? LandingVideoSampleRepository.BuiltInGroupName(SampleGroup);
     // False hides the sample from the landing page (/mau-video, homepage) without deleting it.
     public bool IsVisible { get; set; } = true;
+    // Optional customer of a built-in group sample ("Video truyền thông" / TVC) and its row in "Video khách hàng".
+    public Guid? CustomerId { get; set; }
+    public string? CustomerName { get; set; }
+    public Guid? CustomerVideoId { get; set; }
+}
+
+/// <summary>A video file a sample used (landing.video_sample_versions); the current one is the sample's VideoUrl.</summary>
+public sealed class LandingVideoSampleVersion
+{
+    public Guid Id { get; set; }
+    public Guid SampleId { get; set; }
+    public string VideoUrl { get; set; } = "";
+    public string? PosterUrl { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, AuthStateService auth)
@@ -54,6 +68,56 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
     private static volatile bool _groupColumnReady;
     public const string VisibilityScript = "database/manual/landing/20261111_landing_video_samples_visible.sql";
     private static volatile bool _visibleColumnReady;
+    public const string CustomerVersionsScript = "database/manual/landing/20261116_landing_video_sample_customer_versions.sql";
+    private static volatile bool _customerVersionsReady;
+
+    private static async Task<bool> SupportsCustomerVersionsAsync(System.Data.IDbConnection connection, CancellationToken ct)
+    {
+        if (_customerVersionsReady) return true;
+        var ready = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+            select to_regclass('landing.video_sample_versions') is not null
+               and (select count(*) from information_schema.columns
+                     where table_schema = 'landing' and table_name = 'video_samples'
+                       and column_name in ('customer_id', 'customer_video_id')) = 2
+            """, cancellationToken: ct));
+        return _customerVersionsReady = ready;
+    }
+
+    /// <summary>True once <see cref="CustomerVersionsScript"/> ran: customer link and the version list are available.</summary>
+    public async Task<bool> SupportsCustomerVersionsAsync(CancellationToken ct = default)
+    {
+        if (_customerVersionsReady) return true;
+        using var connection = await db.OpenAsync(ct);
+        return await SupportsCustomerVersionsAsync(connection, ct);
+    }
+
+    /// <summary>Older video versions of a sample, newest first; the version in use (<paramref name="currentVideoUrl"/>) is left out.</summary>
+    public async Task<IReadOnlyList<LandingVideoSampleVersion>> ListVersionsAsync(Guid sampleId, string? currentVideoUrl, CancellationToken ct = default)
+    {
+        LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
+        using var connection = await db.OpenAsync(ct);
+        if (!await SupportsCustomerVersionsAsync(connection, ct)) return [];
+        var rows = await connection.QueryAsync<LandingVideoSampleVersion>(new CommandDefinition("""
+            select id as Id, sample_id as SampleId, video_url as VideoUrl, poster_url as PosterUrl, created_at as CreatedAt
+              from landing.video_sample_versions
+             where sample_id = @sampleId and video_url <> coalesce(@current, '')
+             order by created_at desc
+            """, new { sampleId, current = currentVideoUrl }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    /// <summary>Removes version rows of a sample (deleted versions, or files replaced in overwrite mode).</summary>
+    public async Task RemoveVersionsAsync(Guid sampleId, IEnumerable<string> videoUrls, CancellationToken ct = default)
+    {
+        LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
+        var urls = videoUrls.Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (urls.Length == 0) return;
+        using var connection = await db.OpenAsync(ct);
+        if (!await SupportsCustomerVersionsAsync(connection, ct)) return;
+        await connection.ExecuteAsync(new CommandDefinition(
+            "delete from landing.video_sample_versions where sample_id = @sampleId and video_url = any(@urls)",
+            new { sampleId, urls }, cancellationToken: ct));
+    }
 
     private static async Task<bool> SupportsVisibilityAsync(System.Data.IDbConnection connection, CancellationToken ct)
     {
@@ -91,6 +155,18 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
         foreach (var sample in await ListAsync(ct))
             foreach (var url in new[] { sample.VideoUrl, sample.PosterUrl, sample.ThumbnailPortraitUrl, sample.ThumbnailLandscapeUrl, sample.ShareImageUrl })
                 if (!string.IsNullOrWhiteSpace(url)) used.Add(url);
+        using var connection = await db.OpenAsync(ct);
+        // Old versions kept in a sample's list and videos handed to customers still need their files.
+        if (await SupportsCustomerVersionsAsync(connection, ct))
+            foreach (var url in await connection.QueryAsync<string>(new CommandDefinition(
+                         "select video_url from landing.video_sample_versions union select poster_url from landing.video_sample_versions where poster_url is not null",
+                         cancellationToken: ct)))
+                used.Add(url);
+        if (await connection.ExecuteScalarAsync<bool>(new CommandDefinition("select to_regclass('studio.customer_videos') is not null", cancellationToken: ct)))
+            foreach (var url in await connection.QueryAsync<string>(new CommandDefinition(
+                         "select video_url from studio.customer_videos where video_url is not null union select poster_url from studio.customer_videos where poster_url is not null",
+                         cancellationToken: ct)))
+                used.Add(url);
         return used;
     }
 
@@ -134,10 +210,13 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
             : "null as ThumbnailPortraitUrl, null as ThumbnailLandscapeUrl, null as ShareImageUrl";
         var group = await SupportsGroupAsync(connection, ct) ? "s.sample_group" : "null";
         var visible = await SupportsVisibilityAsync(connection, ct) ? "s.is_visible" : "true";
+        var customer = await SupportsCustomerVersionsAsync(connection, ct)
+            ? "s.customer_id as CustomerId, s.customer_video_id as CustomerVideoId, (select coalesce(nullif(c.company_name, ''), c.full_name) from crm.customers c where c.id = s.customer_id) as CustomerName"
+            : "null::uuid as CustomerId, null::uuid as CustomerVideoId, null as CustomerName";
         var rows = await connection.QueryAsync<LandingVideoSample>(new CommandDefinition($"""
             select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
                    s.video_url as VideoUrl, s.poster_url as PosterUrl, s.service_id as ServiceId, sv.service_name as ServiceName,
-                   {group} as SampleGroup, {visible} as IsVisible, {thumbnails}
+                   {group} as SampleGroup, {visible} as IsVisible, {thumbnails}, {customer}
             from landing.video_samples s
             left join catalog.services sv on sv.id = s.service_id
             order by s.created_at desc
@@ -198,6 +277,20 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
                 new { sample.Id, sample.IsVisible }, cancellationToken: ct));
         else if (!sample.IsVisible)
             throw new InvalidOperationException($"Cần chạy script {VisibilityScript} trên database để ẩn video mẫu.");
+        if (await SupportsCustomerVersionsAsync(connection, ct))
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "update landing.video_samples set customer_id = @CustomerId, customer_video_id = @CustomerVideoId where id = @Id",
+                new { sample.Id, sample.CustomerId, sample.CustomerVideoId }, cancellationToken: ct));
+            // The video in use is always one of the sample's versions (its poster follows the latest thumbnail).
+            await connection.ExecuteAsync(new CommandDefinition("""
+                insert into landing.video_sample_versions (id, sample_id, video_url, poster_url, created_by)
+                values (@VersionId, @Id, @VideoUrl, @PosterUrl, @UpdatedBy)
+                on conflict (sample_id, video_url) do update set poster_url = excluded.poster_url
+                """, new { VersionId = Guid.NewGuid(), sample.Id, sample.VideoUrl, sample.PosterUrl, UpdatedBy = updatedBy }, cancellationToken: ct));
+        }
+        else if (sample.CustomerId is not null)
+            throw new InvalidOperationException($"Cần chạy script {CustomerVersionsScript} trên database để gắn khách hàng cho video mẫu.");
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
@@ -217,8 +310,17 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
         else throw new ArgumentException("Cần chọn nhóm dịch vụ video.", nameof(choice));
     }
 
+    /// <summary>Customers can be picked only for the built-in groups (the kinds TodoX hands to customers).</summary>
+    public static bool AllowsCustomer(LandingVideoSample sample) => sample.ServiceId is null;
+
+    /// <summary>"Video khách hàng" kind (studio.video_product_prices) of a built-in group sample.</summary>
+    public static string CustomerVideoProduct(LandingVideoSample sample)
+        => sample.SampleGroup == TvcGroup ? CustomerVideos.CustomerVideoRules.Tvc : CustomerVideos.CustomerVideoRules.Communication;
+
     public static void Normalize(LandingVideoSample sample)
     {
+        if (sample.CustomerId == Guid.Empty) sample.CustomerId = null;
+        if (sample.CustomerId is null) sample.CustomerVideoId = null;
         sample.Title = sample.Title?.Trim() ?? "";
         sample.Description = sample.Description?.Trim() ?? "";
         sample.ThumbnailPortraitUrl = Blank(sample.ThumbnailPortraitUrl);
@@ -244,6 +346,8 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
             throw new ArgumentException("Nhóm video không hợp lệ.", nameof(sample));
         if (sample.ServiceId == Guid.Empty)
             throw new ArgumentException("Cần chọn nhóm dịch vụ video.", nameof(sample));
+        if (sample.CustomerId is not null && !AllowsCustomer(sample))
+            throw new ArgumentException("Chỉ video mẫu nhóm Video truyền thông / Video TVC doanh nghiệp được gắn khách hàng.", nameof(sample));
         if (string.IsNullOrWhiteSpace(sample.VideoUrl) || !IsMediaUrl(sample.VideoUrl, "videos"))
             throw new ArgumentException("Cần tải video lên.", nameof(sample));
         if (string.IsNullOrWhiteSpace(sample.PosterUrl) || !IsMediaUrl(sample.PosterUrl, "posters"))

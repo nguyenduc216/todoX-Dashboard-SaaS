@@ -1,0 +1,274 @@
+@page "/staff"
+@using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Services.Studio
+@inject AccountService Accounts
+@inject StudioRepository Studio
+@inject AuthStateService AuthState
+@inject AuditRepository Audit
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<StaffMembers> Logger
+
+<PageTitle>Nhân viên TodoX</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Nhân viên TodoX</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Hồ sơ nhân viên và tài khoản đăng nhập dashboard để làm video cho khách.</MudText>
+        </div>
+        @if (_ready && Can("staff_members.create"))
+        {
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="OpenCreate" Disabled="_busy">Thêm nhân viên</MudButton>
+        }
+    </MudStack>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!Can("staff_members.view"))
+    {
+        <MudAlert Severity="Severity.Error">Bạn không có quyền xem danh sách nhân viên.</MudAlert>
+    }
+    else if (!_ready)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Database chưa có bảng nhân viên. Cần chạy script <code>database/manual/studio/20261116_customer_segments_staff_video_plans.sql</code>.
+        </MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" sm="4">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Tổng nhân viên</MudText>
+                    <div class="todox-stat-value">@_staff.Count</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Đang hoạt động</MudText>
+                    <div class="todox-stat-value">@_staff.Count(x => x.IsActive)</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Kế hoạch video đang làm</MudText>
+                    <div class="todox-stat-value">@_staff.Sum(x => x.OpenPlans)</div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, mã nhân viên, email, bộ phận..."
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                          autocomplete="off" name="staff-search" />
+            <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap" HorizontalScrollbar="true">
+                <HeaderContent>
+                    <MudTh>Mã NV</MudTh>
+                    <MudTh>Họ tên</MudTh>
+                    <MudTh>Chức vụ</MudTh>
+                    <MudTh>Bộ phận</MudTh>
+                    <MudTh>Tên đăng nhập</MudTh>
+                    <MudTh>Email</MudTh>
+                    <MudTh>Số điện thoại</MudTh>
+                    <MudTh>Đang làm</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Ngày vào làm</MudTh>
+                    <MudTh Style="text-align:right">Thao tác</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Mã NV">@context.EmployeeCode</MudTd>
+                    <MudTd DataLabel="Họ tên">@context.FullName</MudTd>
+                    <MudTd DataLabel="Chức vụ">@context.Position</MudTd>
+                    <MudTd DataLabel="Bộ phận">@context.Department</MudTd>
+                    <MudTd DataLabel="Tên đăng nhập">@context.Username</MudTd>
+                    <MudTd DataLabel="Email">@context.Email</MudTd>
+                    <MudTd DataLabel="Số điện thoại">@context.Phone</MudTd>
+                    <MudTd DataLabel="Đang làm">
+                        <MudLink Href="@($"/video-plans?assignee={context.UserId}")" Underline="Underline.Hover">@context.OpenPlans kế hoạch</MudLink>
+                    </MudTd>
+                    <MudTd DataLabel="Trạng thái">
+                        <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Error)">@(context.IsActive ? "Hoạt động" : "Đã khóa")</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Ngày vào làm">@context.JoinedOn?.ToString("dd/MM/yyyy")</MudTd>
+                    <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <div class="todox-table-actions">
+                        @if (Can("staff_members.update"))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(context))" Disabled="_busy" />
+                            @if (context.IsActive)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Lock" Color="Color.Warning" Size="Size.Small" title="Khóa tài khoản" OnClick="@(() => SetActive(context, false))" Disabled="_busy" />
+                            }
+                            else
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.LockOpen" Color="Color.Success" Size="Size.Small" title="Mở khóa" OnClick="@(() => SetActive(context, true))" Disabled="_busy" />
+                            }
+                        }
+                        @if (Can("staff_members.delete"))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" title="Xóa" OnClick="@(() => Delete(context))" Disabled="_busy" />
+                        }
+                    </div>
+                </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Class="pa-4 todox-page-subtitle">Chưa có nhân viên nào. Bấm "Thêm nhân viên" để tạo tài khoản.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private IReadOnlyList<StaffMember> _staff = [];
+    private string _search = string.Empty;
+    private bool _loaded;
+    private bool _ready;
+    private bool _busy;
+
+    private bool Can(string permission)
+        => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.Can(permission) == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _ready = await Studio.IsReadyAsync();
+        if (_ready && Can("staff_members.view")) await Reload();
+        _loaded = true;
+    }
+
+    private async Task Reload() => _staff = await Studio.ListStaffAsync();
+
+    private IEnumerable<StaffMember> Filtered
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_search)) return _staff;
+            var q = _search.Trim();
+            return _staff.Where(x =>
+                x.FullName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || x.Username.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || x.Email.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (x.EmployeeCode ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (x.Position ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (x.Department ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task OpenCreate() => await OpenDialog(null);
+
+    private async Task OpenEdit(StaffMember staff) => await OpenDialog(staff);
+
+    private async Task OpenDialog(StaffMember? source)
+    {
+        var parameters = new DialogParameters<StaffMemberDialog> { { x => x.Source, source } };
+        var dialog = await DialogService.ShowAsync<StaffMemberDialog>(source is null ? "Thêm nhân viên" : "Sửa nhân viên", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not StaffMemberDialog.StaffEditModel model) return;
+
+        _busy = true;
+        try
+        {
+            var isNew = source is null;
+            if (await Studio.EmployeeCodeTakenAsync(model.EmployeeCode, model.UserId))
+            {
+                Snackbar.Add($"Mã nhân viên {model.EmployeeCode} đã được dùng.", Severity.Error);
+                return;
+            }
+
+            var account = new SystemUser
+            {
+                Id = isNew ? Guid.Empty : model.UserId,
+                FullName = model.FullName?.Trim() ?? string.Empty,
+                Username = model.Username?.Trim() ?? string.Empty,
+                Email = model.Email?.Trim() ?? string.Empty,
+                Phone = model.Phone?.Trim() ?? string.Empty,
+                Password = model.Password ?? string.Empty,
+                Role = TodoXUserRole.Staff,
+                Status = model.IsActive ? TodoXAccountStatus.Active : TodoXAccountStatus.Locked
+            };
+            // Only the username has to be unique; phone and email may be shared with another account.
+            var saved = await Accounts.SaveStaffAccountAsync(account);
+            if (!saved.Ok)
+            {
+                Snackbar.Add(saved.Error ?? "Chưa lưu được tài khoản.", Severity.Error);
+                return;
+            }
+
+            var profileError = await Studio.SaveStaffProfileAsync(new StaffMember
+            {
+                UserId = account.Id,
+                EmployeeCode = model.EmployeeCode,
+                Position = model.Position,
+                Department = model.Department,
+                JoinedOn = model.JoinedOn,
+                Note = model.Note,
+                Phone = account.Phone,
+                Email = account.Email
+            }, isNew);
+            if (profileError is not null)
+            {
+                Snackbar.Add(profileError, Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add(isNew ? $"Đã tạo tài khoản cho {account.FullName}. Đăng nhập bằng {account.Username}." : "Đã cập nhật nhân viên.", Severity.Success);
+            }
+            if (!saved.EmailOnLogin || !saved.PhoneOnLogin)
+            {
+                var shared = string.Join(" và ", new[] { saved.EmailOnLogin ? null : "email", saved.PhoneOnLogin ? null : "số điện thoại" }.Where(x => x is not null));
+                Snackbar.Add($"{char.ToUpper(shared[0])}{shared[1..]} trùng với tài khoản khác nên chỉ lưu trong hồ sơ nhân viên, không dùng để đăng nhập hay lấy lại mật khẩu.", Severity.Info);
+            }
+
+            await Audit.LogAsync(AuthState.CurrentUser, "staff_members", isNew ? "create" : "update", entityDisplay: account.FullName);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation)
+        {
+            Logger.LogWarning(ex, "STAFF_SAVE_DUPLICATE constraint={Constraint}", ex.ConstraintName);
+            Snackbar.Add($"Không lưu được: trùng dữ liệu với tài khoản khác ({ex.ConstraintName}). Kiểm tra tên đăng nhập, email, số điện thoại, mã nhân viên.", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "STAFF_SAVE_FAILED");
+            Snackbar.Add($"Không lưu được nhân viên: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            await Reload();
+        }
+    }
+
+    private async Task SetActive(StaffMember staff, bool active)
+    {
+        await Accounts.SetSystemUserStatusAsync(staff.UserId, active ? TodoXAccountStatus.Active : TodoXAccountStatus.Locked);
+        await Audit.LogAsync(AuthState.CurrentUser, "staff_members", active ? "unlock" : "lock", entityDisplay: staff.FullName);
+        Snackbar.Add(active ? $"Đã mở khóa {staff.FullName}." : $"Đã khóa {staff.FullName}: không đăng nhập được nữa.", Severity.Success);
+        await Reload();
+    }
+
+    private async Task Delete(StaffMember staff)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa nhân viên",
+            $"Xóa tài khoản \"{staff.FullName}\"? Nhân viên sẽ không đăng nhập được nữa; các kế hoạch video đang giao cho người này sẽ trở thành chưa có người làm. Không hoàn tác được.",
+            yesText: "Xóa", cancelText: "Hủy");
+        if (confirm != true) return;
+
+        var (ok, message) = await Accounts.DeleteSystemUserAsync(staff.UserId);
+        Snackbar.Add(ok ? $"Đã xóa {staff.FullName}." : message, ok ? Severity.Success : Severity.Error);
+        if (ok)
+        {
+            await Audit.LogAsync(AuthState.CurrentUser, "staff_members", "delete", entityDisplay: staff.FullName);
+            await Reload();
+        }
+    }
+}

@@ -282,7 +282,7 @@ public sealed class WalletService
             await LogUsageAsync(conn, customerId, userId, providerCode, modelCode, operation, quantity,
                 unit, amount, charged: false, referenceType, referenceId, endpointCode, "insufficient", tx);
             tx.Commit();
-            return new ChargeResult(false, 0, balance, $"KhÃ´ng Ä‘á»§ Ä‘iá»ƒm (cáº§n {amount:0}, cÃ²n {balance:0}).");
+            return new ChargeResult(false, 0, balance, $"Không đủ điểm (cần {amount:0}, còn {balance:0}).");
         }
 
         var after = balance - amount;
@@ -309,7 +309,7 @@ public sealed class WalletService
                 after,
                 reftype = referenceType ?? operation,
                 refid = referenceId,
-                desc = $"Trá»« {amount:0} Ä‘iá»ƒm cho {operation} ({quantity} {unit})",
+                desc = $"Trừ {amount:0} điểm cho {operation} ({quantity} {unit})",
                 user = userId
             },
             tx);

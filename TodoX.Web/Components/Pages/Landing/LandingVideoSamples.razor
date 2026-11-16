@@ -51,7 +51,13 @@
                         <RowTemplate>
                             <MudTd><img src="@context.PosterUrl" alt="" style="max-width:64px;max-height:64px;object-fit:cover" /></MudTd>
                             <MudTd>@context.Title</MudTd>
-                            <MudTd>@context.GroupName</MudTd>
+                            <MudTd>
+                                @context.GroupName
+                                @if (!string.IsNullOrWhiteSpace(context.CustomerName))
+                                {
+                                    <MudText Typo="Typo.caption" Class="d-block" Color="Color.Warning">Khách: @context.CustomerName</MudText>
+                                }
+                            </MudTd>
                             <MudTd>@context.AspectRatio</MudTd>
                             <MudTd>
                                 <MudSwitch T="bool" Value="@context.IsVisible" ValueChanged="@(value => SetVisibleAsync(context, value))"

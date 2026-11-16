@@ -44,7 +44,7 @@ public sealed class AiProviderService : IAiProviderService
     {
         if (string.IsNullOrWhiteSpace(request.ProviderName))
         {
-            throw new InvalidOperationException("TÃªn provider khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng.");
+            throw new InvalidOperationException("Tên provider không được để trống.");
         }
         ValidateJson(request.ConfigJson, "config_json");
 
@@ -58,7 +58,7 @@ public sealed class AiProviderService : IAiProviderService
             throw;
         }
         return await _repo.GetProviderAsync(id, ct)
-               ?? throw new InvalidOperationException("KhÃ´ng Ä‘á»c láº¡i Ä‘Æ°á»£c provider vá»«a cáº­p nháº­t.");
+               ?? throw new InvalidOperationException("Không đọc lại được provider vừa cập nhật.");
     }
 
     public Task<IReadOnlyList<AiProviderCapabilityDto>> GetCapabilitiesAsync(long? providerId, string? capabilityCode, CancellationToken ct = default)
@@ -68,15 +68,15 @@ public sealed class AiProviderService : IAiProviderService
     {
         if (string.IsNullOrWhiteSpace(request.DisplayName))
         {
-            throw new InvalidOperationException("TÃªn hiá»ƒn thá»‹ capability khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng.");
+            throw new InvalidOperationException("Tên hiển thị capability không được để trống.");
         }
         if (!AiProviderCatalog.IsValidUnitType(request.UnitType))
         {
-            throw new InvalidOperationException("ÄÆ¡n vá»‹ tÃ­nh (unit_type) khÃ´ng há»£p lá»‡.");
+            throw new InvalidOperationException("Đơn vị tính (unit_type) không hợp lệ.");
         }
         if (request.UnitCostPoints < 0)
         {
-            throw new InvalidOperationException("Äiá»ƒm má»—i Ä‘Æ¡n vá»‹ khÃ´ng Ä‘Æ°á»£c Ã¢m.");
+            throw new InvalidOperationException("Điểm mỗi đơn vị không được âm.");
         }
         ValidateJson(request.ConfigJson, "config_json");
 
@@ -106,7 +106,7 @@ public sealed class AiProviderService : IAiProviderService
         }
 
         return await _repo.GetCapabilityAsync(id, ct)
-               ?? throw new InvalidOperationException("KhÃ´ng Ä‘á»c láº¡i Ä‘Æ°á»£c capability vá»«a cáº­p nháº­t.");
+               ?? throw new InvalidOperationException("Không đọc lại được capability vừa cập nhật.");
     }
 
     public Task SetDefaultCapabilityAsync(long capabilityId, CurrentUserSession user, CancellationToken ct = default)
@@ -209,7 +209,7 @@ public sealed class AiProviderService : IAiProviderService
         }
         catch
         {
-            throw new InvalidOperationException($"{field} khÃ´ng pháº£i JSON há»£p lá»‡.");
+            throw new InvalidOperationException($"{field} không phải JSON hợp lệ.");
         }
     }
 }
