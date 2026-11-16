@@ -65,7 +65,7 @@
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                           Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
                           autocomplete="off" name="staff-search" />
-            <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap" HorizontalScrollbar="true">
                 <HeaderContent>
                     <MudTh>Mã NV</MudTh>
                     <MudTh>Họ tên</MudTh>
@@ -95,6 +95,7 @@
                     </MudTd>
                     <MudTd DataLabel="Ngày vào làm">@context.JoinedOn?.ToString("dd/MM/yyyy")</MudTd>
                     <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <div class="todox-table-actions">
                         @if (Can("staff_members.update"))
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(context))" Disabled="_busy" />
@@ -111,7 +112,8 @@
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" title="Xóa" OnClick="@(() => Delete(context))" Disabled="_busy" />
                         }
-                    </MudTd>
+                    </div>
+                </MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
                     <MudText Class="pa-4 todox-page-subtitle">Chưa có nhân viên nào. Bấm "Thêm nhân viên" để tạo tài khoản.</MudText>

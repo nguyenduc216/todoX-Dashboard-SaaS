@@ -105,7 +105,7 @@
                 }
             </MudChipSet>
 
-            <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table"
+            <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap" HorizontalScrollbar="true"
                       OnRowClick="@((TableRowClickEventArgs<VideoPlan> e) => Nav.NavigateTo($"/video-plans/{e.Item!.Id}"))" RowStyle="cursor:pointer">
                 <HeaderContent>
                     <MudTh>Ngày release</MudTh>
@@ -138,7 +138,7 @@
                     <MudTd DataLabel="Phiên bản">@(context.VersionCount == 0 ? "—" : $"v{context.VersionCount}")</MudTd>
                     <MudTd DataLabel="Ghi chú">@context.NoteCount</MudTd>
                     <MudTd DataLabel="Thao tác" Style="text-align:right">
-                        <span @onclick:stopPropagation="true">
+                        <span class="todox-table-actions" @onclick:stopPropagation="true">
                         <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" title="Mở chi tiết" Href="@($"/video-plans/{context.Id}")" />
                         @if (Can("video_plans.update"))
                         {

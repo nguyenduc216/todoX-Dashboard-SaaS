@@ -119,6 +119,21 @@ public sealed class StudioCustomerStaffVideoPlanTests
         Assert.Contains("STAFF_SAVE_FAILED", Read("TodoX.Web", "Components", "Pages", "StaffMembers.razor"));
     }
 
+    /// <summary>The wide customer list scrolls sideways instead of wrapping names and stacking the action buttons.</summary>
+    [Fact]
+    public void Wide_tables_keep_one_line_per_row_and_scroll_sideways()
+    {
+        foreach (var page in new[] { "Customers.razor", "StaffMembers.razor", "VideoPlans.razor" })
+        {
+            var razor = Read("TodoX.Web", "Components", "Pages", page);
+            Assert.Contains("Class=\"todox-table todox-table-nowrap\" HorizontalScrollbar=\"true\"", razor);
+            Assert.Contains("class=\"todox-table-actions\"", razor);
+        }
+        var css = Read("TodoX.Web", "wwwroot", "css", "todox-theme.css");
+        Assert.Contains(".todox-table-nowrap td { white-space: nowrap; }", css);
+        Assert.Contains("flex-wrap: nowrap;", css);
+    }
+
     /// <summary>A phone already used by another login names that account, so the admin knows where to change it.</summary>
     [Fact]
     public void A_taken_phone_says_which_account_holds_it()

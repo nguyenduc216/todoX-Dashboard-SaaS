@@ -78,7 +78,7 @@
             </MudChipSet>
         }
 
-        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table todox-table-nowrap" HorizontalScrollbar="true">
             <HeaderContent>
                 <MudTh>Mã KH</MudTh>
                 <MudTh>Tên công ty</MudTh>
@@ -162,6 +162,7 @@
                     }
                 </MudTd>
                 <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <div class="todox-table-actions">
                     @if (_studioReady && CanViewPlans)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.EventNote" Size="Size.Small" title="Kế hoạch video" Href="@($"/video-plans?customer={context.Id}")" />
@@ -183,6 +184,7 @@
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(context))" />
                     }
+                    </div>
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>

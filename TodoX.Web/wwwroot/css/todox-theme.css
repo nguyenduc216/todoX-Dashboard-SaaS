@@ -1770,3 +1770,19 @@ html body ::-webkit-scrollbar-button {
     width: 0;
     height: 0;
 }
+
+/* Wide admin tables: every cell stays on one line and the table scrolls sideways instead of squeezing
+   names into several lines and stacking the action buttons. Phones keep MudTable's card layout. */
+@media (min-width: 600px) {
+    .todox-table-nowrap .mud-table-container { overflow-x: auto; }
+    .todox-table-nowrap th,
+    .todox-table-nowrap td { white-space: nowrap; }
+}
+
+.todox-table-actions {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+}
