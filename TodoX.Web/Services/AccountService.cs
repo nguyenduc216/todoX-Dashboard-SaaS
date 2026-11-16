@@ -271,7 +271,7 @@ public sealed class AccountService
                 return (false, "Vui lòng nhập mật khẩu.");
             }
 
-            await _accounts.InsertSystemUserAsync(model, _passwords.Hash(model.Password));
+            model.Id = await _accounts.InsertSystemUserAsync(model, _passwords.Hash(model.Password));
             return (true, "Đã thêm quản trị viên.");
         }
 

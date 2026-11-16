@@ -1,0 +1,272 @@
+@page "/video-plans/{PlanId:guid}"
+@using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Services.Studio
+@inject AccountService Accounts
+@inject StudioRepository Studio
+@inject AuthStateService AuthState
+@inject AuditRepository Audit
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>@(_plan?.Title ?? "Kế hoạch video")</PageTitle>
+
+<MudStack Spacing="3">
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="/video-plans" Style="align-self:flex-start">Kế hoạch video</MudButton>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!Can("video_plans.view"))
+    {
+        <MudAlert Severity="Severity.Error">Bạn không có quyền xem kế hoạch video.</MudAlert>
+    }
+    else if (_plan is null)
+    {
+        <MudAlert Severity="Severity.Warning">Không tìm thấy kế hoạch này (có thể đã bị xóa).</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="todox-card pa-4">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Start" Class="flex-wrap gap-3">
+                <div>
+                    <MudText Typo="Typo.h5" Class="todox-page-title">@_plan.Title</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">
+                        Khách hàng: <b>@_plan.CustomerName</b> (@_plan.CustomerCode)
+                        · Người làm: <b>@(_plan.AssigneeName ?? "Chưa giao")</b>
+                        · Release: <b style="@(VideoPlanRules.IsOverdue(_plan, DateTime.Today) ? "color:var(--mud-palette-error)" : null)">@(_plan.ReleaseDate?.ToString("dd/MM/yyyy") ?? "chưa đặt")</b>
+                    </MudText>
+                </div>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    @if (Can("video_plans.update"))
+                    {
+                        <MudSelect T="string" Value="_plan.Status" ValueChanged="ChangeStatus" Label="Trạng thái" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="min-width:190px" Disabled="_busy">
+                            @foreach (var status in VideoPlanStatuses.All)
+                            {
+                                <MudSelectItem Value="@status">@VideoPlanStatuses.Label(status)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditPlan" Disabled="_busy">Sửa kế hoạch</MudButton>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="@VideoPlans.StatusColor(_plan.Status)">@VideoPlanStatuses.Label(_plan.Status)</MudChip>
+                    }
+                </MudStack>
+            </MudStack>
+        </MudPaper>
+
+        <MudGrid>
+            <MudItem xs="12" md="7">
+                <MudPaper Class="todox-card pa-4" Style="height:100%">
+                    <MudText Typo="Typo.h6" Class="mb-2">Mô tả / ý tưởng</MudText>
+                    <div style="white-space:pre-wrap">@(string.IsNullOrWhiteSpace(_plan.Content) ? "Chưa có mô tả." : _plan.Content)</div>
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.h6" Class="mb-2">Kịch bản</MudText>
+                    <div style="white-space:pre-wrap" data-testid="video-plan-script">@(string.IsNullOrWhiteSpace(_plan.Script) ? "Chưa có kịch bản. Bấm \"Sửa kế hoạch\" để viết." : _plan.Script)</div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="5">
+                <MudPaper Class="todox-card pa-4" Style="height:100%">
+                    <MudText Typo="Typo.h6" Class="mb-2">Ghi chú làm việc với khách (@_notes.Count)</MudText>
+                    @if (Can("video_plans.create"))
+                    {
+                        <MudTextField T="string" @bind-Value="_newNote" Label="Ghi chú mới" Variant="Variant.Outlined" Lines="3"
+                                      Placeholder="Khách muốn đổi nhạc nền, gọi lại thứ 5..." Disabled="_busy" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Class="mt-2 mb-3" StartIcon="@Icons.Material.Filled.Send"
+                                   OnClick="AddNote" Disabled="@(_busy || string.IsNullOrWhiteSpace(_newNote))">Thêm ghi chú</MudButton>
+                    }
+                    @if (_notes.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">Chưa có ghi chú nào.</MudText>
+                    }
+                    else
+                    {
+                        <MudTimeline TimelinePosition="TimelinePosition.Start" Class="pa-0">
+                            @foreach (var note in _notes)
+                            {
+                                <MudTimelineItem Size="Size.Small" Color="Color.Warning">
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@note.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm") · @(note.CreatedByName ?? "—")</MudText>
+                                    <div style="white-space:pre-wrap">@note.Note</div>
+                                </MudTimelineItem>
+                            }
+                        </MudTimeline>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">Các phiên bản video (@_versions.Count)</MudText>
+            @if (Can("video_plans.create"))
+            {
+                <MudGrid Spacing="2" Class="mb-2">
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" @bind-Value="_newVersion.VideoUrl" Label="Link video" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Placeholder="https://drive.google.com/..." Disabled="_busy" />
+                    </MudItem>
+                    <MudItem xs="12" md="5">
+                        <MudTextField T="string" @bind-Value="_newVersion.ChangeNote" Label="Thay đổi so với bản trước" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Placeholder="Đổi nhạc, rút ngắn cảnh 3..." Disabled="_busy" />
+                    </MudItem>
+                    <MudItem xs="8" md="2">
+                        <MudSelect T="string" @bind-Value="_newVersion.Status" Label="Trạng thái" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                            @foreach (var status in VideoPlanVersionStatuses.All)
+                            {
+                                <MudSelectItem Value="@status">@VideoPlanVersionStatuses.Label(status)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="4" md="1" Class="d-flex align-center">
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="AddVersion" Disabled="_busy" FullWidth="true">Thêm v@(_versions.Count + 1)</MudButton>
+                    </MudItem>
+                </MudGrid>
+            }
+            @if (_versions.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="todox-page-subtitle">Chưa có phiên bản nào.</MudText>
+            }
+            else
+            {
+                <MudTable Items="_versions" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                    <HeaderContent>
+                        <MudTh>Phiên bản</MudTh>
+                        <MudTh>Link video</MudTh>
+                        <MudTh>Thay đổi</MudTh>
+                        <MudTh>Trạng thái</MudTh>
+                        <MudTh>Người tạo</MudTh>
+                        <MudTh>Ngày</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Phiên bản"><b>v@(context.VersionNo)</b></MudTd>
+                        <MudTd DataLabel="Link video">
+                            @if (!string.IsNullOrWhiteSpace(context.VideoUrl))
+                            {
+                                <MudLink Href="@context.VideoUrl" Target="_blank" rel="noopener noreferrer">Mở video</MudLink>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Thay đổi"><span style="white-space:pre-wrap">@context.ChangeNote</span></MudTd>
+                        <MudTd DataLabel="Trạng thái">
+                            @if (Can("video_plans.update"))
+                            {
+                                <MudSelect T="string" Value="context.Status" ValueChanged="@(v => ChangeVersionStatus(context, v))" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_busy">
+                                    @foreach (var status in VideoPlanVersionStatuses.All)
+                                    {
+                                        <MudSelectItem Value="@status">@VideoPlanVersionStatuses.Label(status)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            }
+                            else
+                            {
+                                @VideoPlanVersionStatuses.Label(context.Status)
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Người tạo">@context.CreatedByName</MudTd>
+                        <MudTd DataLabel="Ngày">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public Guid PlanId { get; set; }
+
+    private VideoPlan? _plan;
+    private IReadOnlyList<VideoPlanVersion> _versions = [];
+    private IReadOnlyList<VideoPlanNote> _notes = [];
+    private VideoPlanVersion _newVersion = new();
+    private string? _newNote;
+    private bool _loaded;
+    private bool _busy;
+
+    private bool Can(string permission)
+        => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.Can(permission) == true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loaded = false;
+        if (Can("video_plans.view") && await Studio.IsReadyAsync())
+        {
+            await Reload();
+        }
+        _loaded = true;
+    }
+
+    private async Task Reload()
+    {
+        _plan = await Studio.GetPlanAsync(PlanId);
+        if (_plan is null) return;
+        _versions = await Studio.ListVersionsAsync(PlanId);
+        _notes = await Studio.ListNotesAsync(PlanId);
+        _newVersion = new VideoPlanVersion { PlanId = PlanId, Status = VideoPlanVersionStatuses.Draft };
+    }
+
+    private async Task Run(Func<Task> action)
+    {
+        _busy = true;
+        try { await action(); }
+        catch (UnauthorizedAccessException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private Task ChangeStatus(string status) => Run(async () =>
+    {
+        if (_plan is null || _plan.Status == status) return;
+        await Studio.SetPlanStatusAsync(_plan.Id, status);
+        await Audit.LogAsync(AuthState.CurrentUser, "video_plans", "status", entityDisplay: $"{_plan.Title}: {VideoPlanStatuses.Label(status)}");
+        Snackbar.Add($"Trạng thái: {VideoPlanStatuses.Label(status)}", Severity.Success);
+        await Reload();
+    });
+
+    private async Task EditPlan()
+    {
+        if (_plan is null) return;
+        var parameters = new DialogParameters<VideoPlanDialog>
+        {
+            { x => x.Source, _plan },
+            { x => x.Customers, await Accounts.GetCustomersAsync() },
+            { x => x.Assignees, await Studio.ListAssigneesAsync() }
+        };
+        var dialog = await DialogService.ShowAsync<VideoPlanDialog>("Sửa kế hoạch video", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not VideoPlan model) return;
+        await Run(async () =>
+        {
+            var (ok, error) = await Studio.SavePlanAsync(model);
+            if (!ok) { Snackbar.Add(error ?? "Chưa lưu được kế hoạch.", Severity.Error); return; }
+            await Audit.LogAsync(AuthState.CurrentUser, "video_plans", "update", entityDisplay: model.Title);
+            Snackbar.Add("Đã cập nhật kế hoạch.", Severity.Success);
+            await Reload();
+        });
+    }
+
+    private Task AddNote() => Run(async () =>
+    {
+        var (ok, error) = await Studio.AddNoteAsync(PlanId, _newNote);
+        if (!ok) { Snackbar.Add(error ?? "Chưa lưu được ghi chú.", Severity.Error); return; }
+        _newNote = null;
+        await Reload();
+    });
+
+    private Task AddVersion() => Run(async () =>
+    {
+        _newVersion.PlanId = PlanId;
+        var (ok, error) = await Studio.AddVersionAsync(_newVersion);
+        if (!ok) { Snackbar.Add(error ?? "Chưa lưu được phiên bản.", Severity.Error); return; }
+        await Audit.LogAsync(AuthState.CurrentUser, "video_plans", "version", entityDisplay: $"{_plan?.Title} v{_newVersion.VersionNo}");
+        Snackbar.Add($"Đã thêm phiên bản v{_newVersion.VersionNo}.", Severity.Success);
+        await Reload();
+    });
+
+    private Task ChangeVersionStatus(VideoPlanVersion version, string status) => Run(async () =>
+    {
+        if (version.Status == status) return;
+        await Studio.SetVersionStatusAsync(version.Id, status);
+        await Reload();
+    });
+}

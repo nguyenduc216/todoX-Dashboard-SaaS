@@ -26,6 +26,7 @@ public sealed class AccountRepository
     {
         TodoXUserRole.Admin => "admin",
         TodoXUserRole.SystemOperator => "support",
+        TodoXUserRole.Staff => "staff",
         TodoXUserRole.CustomerOwner => "customer",
         TodoXUserRole.CustomerUser => "customer",
         _ => "support"
@@ -35,6 +36,7 @@ public sealed class AccountRepository
     {
         "administrator_root" => TodoXUserRole.Admin,
         "admin" => TodoXUserRole.Admin,
+        "staff" => TodoXUserRole.Staff,
         _ => TodoXUserRole.SystemOperator
     };
 
@@ -71,7 +73,8 @@ public sealed class AccountRepository
              ORDER BY u.full_name;
             """, new { tenant = _tenant.TenantId });
 
-        return rows.Select(r => new SystemUser
+        // Staff accounts are managed on "Nhân viên TodoX"; the admin dialog has no staff role and would turn them into operators.
+        return rows.Where(r => !string.Equals(r.role_code, "staff", StringComparison.OrdinalIgnoreCase)).Select(r => new SystemUser
         {
             Id = r.id,
             Username = r.username ?? string.Empty,

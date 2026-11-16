@@ -1,0 +1,101 @@
+@using TodoX.Web.Models
+@using TodoX.Web.Services.Studio
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_isNew ? "Tạo kế hoạch video" : "Sửa kế hoạch video")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="Guid" Label="Khách hàng" @bind-Value="_model.CustomerId" Variant="Variant.Outlined" Required="true"
+                           Placeholder="Chọn khách hàng">
+                    @foreach (var customer in Customers.OrderBy(x => x.CompanyName))
+                    {
+                        <MudSelectItem Value="@customer.Id">@customer.CompanyName (@customer.CustomerCode)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="Guid?" Label="Người làm" @bind-Value="_model.AssigneeUserId" Variant="Variant.Outlined" Clearable="true"
+                           Placeholder="Chưa giao">
+                    @foreach (var person in Assignees)
+                    {
+                        <MudSelectItem T="Guid?" Value="@person.UserId">@person.Name@(person.IsStaff ? "" : " (quản trị)")</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Nội dung video" @bind-Value="_model.Title" Variant="Variant.Outlined" Required="true"
+                              Counter="@VideoPlanRules.MaxTitleLength" MaxLength="@VideoPlanRules.MaxTitleLength"
+                              Placeholder="Ví dụ: Video giới thiệu bộ sưu tập Tết 2027" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Mô tả / ý tưởng" @bind-Value="_model.Content" Variant="Variant.Outlined" Lines="3"
+                              Placeholder="Mục tiêu, thông điệp, kênh đăng, yêu cầu của khách..." />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Kịch bản" @bind-Value="_model.Script" Variant="Variant.Outlined" Lines="10"
+                              Placeholder="Cảnh 1: ... / Lời thoại: ..." />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudDatePicker Label="Ngày release" @bind-Date="_model.ReleaseDate" Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Clearable="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
+                    @foreach (var status in VideoPlanStatuses.All)
+                    {
+                        <MudSelectItem Value="@status">@VideoPlanStatuses.Label(status)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3" Dense="true">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="Submit">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public VideoPlan? Source { get; set; }
+    [Parameter] public Guid? DefaultCustomerId { get; set; }
+    [Parameter] public IReadOnlyList<CustomerProfile> Customers { get; set; } = [];
+    [Parameter] public IReadOnlyList<PlanAssignee> Assignees { get; set; } = [];
+
+    private VideoPlan _model = new();
+    private bool _isNew;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        _isNew = Source is null;
+        _model = Source is null
+            ? new VideoPlan { CustomerId = DefaultCustomerId ?? Guid.Empty, Status = VideoPlanStatuses.Planning }
+            : new VideoPlan
+            {
+                Id = Source.Id,
+                CustomerId = Source.CustomerId,
+                Title = Source.Title,
+                Content = Source.Content,
+                Script = Source.Script,
+                AssigneeUserId = Source.AssigneeUserId,
+                ReleaseDate = Source.ReleaseDate,
+                Status = Source.Status
+            };
+    }
+
+    private void Submit()
+    {
+        _error = VideoPlanRules.Validate(_model);
+        if (_error is null) MudDialog.Close(DialogResult.Ok(_model));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

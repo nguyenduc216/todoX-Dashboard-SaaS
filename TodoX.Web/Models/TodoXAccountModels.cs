@@ -4,6 +4,8 @@ public enum TodoXUserRole
 {
     Admin = 1,
     SystemOperator = 2,
+    /// <summary>Nhân viên TodoX (auth.roles 'staff'): chỉ dùng các phần được cấp quyền, không phải quản trị viên.</summary>
+    Staff = 3,
     CustomerOwner = 10,
     CustomerUser = 11
 }
@@ -50,6 +52,9 @@ public sealed class CustomerProfile
     /// <summary>Mã đại lý đã giới thiệu khách hàng này.</summary>
     public string? ReferralCode { get; set; }
     public string? ReferredByAgentName { get; set; }
+
+    /// <summary>Loại khách (studio.customer_profiles): bam_duoi / thong_thuong / vip.</summary>
+    public string Segment { get; set; } = "thong_thuong";
 }
 
 public sealed class CustomerAccount
