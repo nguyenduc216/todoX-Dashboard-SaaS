@@ -25,10 +25,18 @@ public sealed partial class VideoTools
 {
     private const string EditParam = "Edit id from todox_edit_start / todox_auto_edit; omit for the most recent edit.";
 
+    /// <summary>Every video and AI result belongs to a project the user named; the assistant may not invent one.</summary>
+    internal const string ProjectParam = "Project name the USER chose for this work (todox_projects lists existing ones). " +
+        "Before starting, ask the user which project (an existing one or the name of a new one); never invent or guess a name.";
+
+    internal const string NeedProject = "Cần tên dự án trước khi làm. Hỏi người dùng: làm trong dự án nào (dùng todox_projects để liệt kê dự án có sẵn) " +
+        "hay tạo dự án mới tên gì. Không tự đặt tên dự án, rồi gọi lại với project.";
+
     [McpServerTool(Name = "todox_edit_start", Destructive = false)]
     [Description("Start editing a video step by step: TodoX reads the clips and builds a first timeline (scenes, captions, titles, music, look) WITHOUT rendering yet. Then adjust with todox_cut, todox_join, todox_caption, todox_titles, todox_audio, todox_look and finish with todox_export. Returns the edit id and the timeline.")]
     public async Task<string> EditStart(
         [Description("Video files and/or folders, in the order they should appear.")] string[] clips,
+        [Description(ProjectParam)] string project,
         IProgress<ProgressNotificationValue> progress,
         CancellationToken ct,
         [Description("9:16 (TikTok/Reels), 16:9 (YouTube), 1:1 or 4:5; omit for the skill's or the default (9:16).")] string? aspect = null,
@@ -53,7 +61,7 @@ public sealed partial class VideoTools
 
         try
         {
-            var started = await StartEditAsync(new EditBrief(clips, aspect, targetSeconds, title, subtitle, script, voice, outroText, music, voiceover, style, accentColor, skill, skillVersion), session, progress, ct);
+            var started = await StartEditAsync(new EditBrief(clips, aspect, targetSeconds, title, subtitle, script, voice, outroText, music, voiceover, style, accentColor, skill, skillVersion, project), session, progress, ct);
             if (started.Error is not null)
             {
                 return started.Error;
@@ -283,12 +291,18 @@ public sealed partial class VideoTools
     // ---- shared by todox_auto_edit and the step tools
 
     private sealed record EditBrief(string[] Clips, string? Aspect, double? TargetSeconds, string? Title, string? Subtitle, string? Script,
-        string? Voice, string? OutroText, string? Music, string? Voiceover, string? Style, string? AccentColor, string? Skill, int? SkillVersion);
+        string? Voice, string? OutroText, string? Music, string? Voiceover, string? Style, string? AccentColor, string? Skill, int? SkillVersion,
+        string? Project = null);
 
     private sealed record StartResult(EditProject? Edit, AutoEditPlan? Plan, VoiceCheckResult? VoiceCheck, string? Error);
 
     private async Task<StartResult> StartEditAsync(EditBrief brief, SessionLogger session, IProgress<ProgressNotificationValue> progress, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(brief.Project) || _projects.Find(brief.Project, create: true).Folder is not { } folder)
+        {
+            return new StartResult(null, null, null, NeedProject);
+        }
+
         var files = MediaProbe.ExpandInputs(brief.Clips);
         if (files.Count == 0)
         {
@@ -297,6 +311,8 @@ public sealed partial class VideoTools
 
         Report(progress, 2, $"Đang đọc {files.Count} clip");
         var project = _edits.Create(brief.Aspect ?? "9:16");
+        project.ProjectName = folder.Name;
+        project.ProjectDir = folder.Path;
         project.Skill = string.IsNullOrWhiteSpace(brief.Skill) ? null : brief.Skill.Trim().ToLowerInvariant();
         // No version given: the one the user set as default for this skill.
         project.SkillVersion = brief.SkillVersion ?? (project.Skill is null ? null : _skills.LoadState().Skills.GetValueOrDefault(project.Skill)?.Effective);
@@ -434,9 +450,27 @@ public sealed partial class VideoTools
         var tag = SkillTag(project.Skill, project.SkillVersion);
         WriteVideoInfo(result.OutputPath, tag, plan.Style.Name, project.Aspect, result.Seconds);
         await session.EndAsync("ok", tag is null ? new { edit = project.Id } : new { edit = project.Id, skill = tag.Skill, skillVersion = tag.Version, skillVersionName = tag.VersionName, skillTitle = tag.Title }, ct);
+
+        // The project and this video appear in the dashboard's "Jobs của tôi" right away; the file only after "Đồng bộ".
+        var listed = false;
+        if (_sync is not null)
+        {
+            try
+            {
+                listed = (await _sync.SyncInfoAsync(ct)).Error is null;
+            }
+            catch (Exception ex) when (ex is IOException or HttpRequestException or TaskCanceledException)
+            {
+            }
+        }
+
         return JsonSerializer.Serialize(new
         {
             output = result.OutputPath,
+            project = project.ProjectName,
+            dashboard = listed
+                ? "Dự án và video đã hiện trong Jobs của tôi trên Dashboard; video ở trạng thái chưa đồng bộ — nhắc người dùng mở TodoX EditVideo và bấm Đồng bộ để đưa file video lên."
+                : "Chưa báo được lên Dashboard (mất kết nối); TodoX EditVideo sẽ báo lại lần sau.",
             edit = project.Id,
             skill = tag is null ? null : new { tag.Skill, tag.Title, version = tag.Version, versionName = tag.VersionName },
             seconds = Math.Round(result.Seconds, 1),
@@ -560,7 +594,8 @@ public sealed partial class VideoTools
 
     // Clips inside a TodoX project (02-video, 06-ai...) render into that project's output folder.
     private string OutputFolder(EditProject project) =>
-        project.Clips.FirstOrDefault() is not { } first ? DefaultVoiceFolder()
+        !string.IsNullOrEmpty(project.ProjectDir) ? Path.Combine(project.ProjectDir, Projects.ProjectFolders.OutputDir)
+        : project.Clips.FirstOrDefault() is not { } first ? DefaultVoiceFolder()
         : _projects.ProjectOf(first.Path) is { } projectDir ? Path.Combine(projectDir, Projects.ProjectFolders.OutputDir)
         : Path.Combine(Path.GetDirectoryName(first.Path)!, Projects.ProjectFolders.OutputDir);
 

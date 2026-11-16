@@ -58,7 +58,7 @@ public sealed class ProjectFolders
 
     public IReadOnlyList<ProjectFolder> List() =>
         Directory.EnumerateDirectories(Root)
-            .Where(d => !System.IO.Path.GetFileName(d).StartsWith('.'))
+            .Where(d => !System.IO.Path.GetFileName(d).StartsWith('.') && !System.IO.Path.GetFileName(d).StartsWith('_')) // _Thu vien TodoX is not a project
             .Select(Describe)
             .OrderByDescending(p => p.LastChanged)
             .ToList();

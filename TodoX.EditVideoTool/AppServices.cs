@@ -42,6 +42,8 @@ public static class AppServices
         services.AddSingleton<SkillSync>();
         services.AddSingleton<ProjectFolders>();
         services.AddSingleton(sp => new AiGenerator(sp.GetRequiredService<TodoXServerClient>()));
+        services.AddSingleton(sp => new ProjectSync(sp.GetRequiredService<TodoXServerClient>(), sp.GetRequiredService<ProjectFolders>()));
+        services.AddSingleton(sp => new LibrarySync(sp.GetRequiredService<TodoXServerClient>(), sp.GetRequiredService<ProjectFolders>(), http));
         services.AddSingleton<EditStore>();
         services.AddSingleton<SkillRunStore>();
     }

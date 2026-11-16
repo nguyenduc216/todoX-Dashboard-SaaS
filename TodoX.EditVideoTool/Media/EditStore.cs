@@ -22,6 +22,10 @@ public sealed class EditProject
     public int? SkillVersion { get; set; }
     public string? LastOutput { get; set; }
 
+    /// <summary>The customer's project this video belongs to (its folder under the TodoX resource folder).</summary>
+    public string? ProjectName { get; set; }
+    public string? ProjectDir { get; set; }
+
     /// <summary>What the server is allowed to know about the clips.</summary>
     public IEnumerable<object> ClipMetadata() =>
         Clips.Select(c => new { id = c.Id, durationSeconds = c.Seconds, width = c.Width, height = c.Height, hasVideo = c.HasVideo, hasAudio = c.HasAudio });

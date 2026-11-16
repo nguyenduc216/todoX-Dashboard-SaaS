@@ -11,6 +11,7 @@
 @inject IDanceSellOperationRepository DanceOperations
 @inject IRVideoJobService RVideoJobs
 @inject TodoX.Web.Services.CustomerVideos.CustomerVideoRepository CustomerVideos
+@inject TodoX.Web.Services.EditVideoTool.EditVideoProjectService EditVideoProjects
 @inject TodoX.Web.Services.Platform.ICoreJobApplicationService CoreJobs
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService ServiceCatalog
 @inject NavigationManager Navigation
@@ -278,8 +279,9 @@
                 var danceTask = DanceJobs.ListAsync(currentUser, _take + 1);
                 var coreTask = ListCoreJobsAsync(currentUser, _take + 1);
                 var videoTask = ListCustomerVideosAsync(currentUser, _take + 1);
+                var editTask = ListEditVideoProjectsAsync(currentUser, _take + 1);
                 var catalogTask = _catalog is null ? ServiceCatalog.ListAsync() : null;
-                await Task.WhenAll(new Task[] { timelapseTask, danceTask, coreTask, videoTask, catalogTask ?? Task.CompletedTask });
+                await Task.WhenAll(new Task[] { timelapseTask, danceTask, coreTask, videoTask, editTask, catalogTask ?? Task.CompletedTask });
                 if (version != _loadVersion || _disposed) return;
                 _catalog ??= catalogTask!.Result.ToDictionary(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase);
                 var catalog = _catalog;
@@ -287,12 +289,14 @@
                 var dance = danceTask.Result;
                 var core = coreTask.Result;
                 var videos = videoTask.Result;
+                var edits = editTask.Result;
                 // A source that returned a full window may hide older rows; only rows newer than every such
                 // source's oldest kept row are certain to be in the right order, so the list is cut there.
                 DateTime? frontier = null;
                 if (dance.Count > _take) frontier = Max(frontier, dance[_take - 1].CreatedAt);
                 if (core.Count > _take) frontier = Max(frontier, core[_take - 1].CreatedAt);
                 if (videos.Count > _take) frontier = Max(frontier, videos[_take - 1].CreatedAt);
+                if (edits.Count > _take) frontier = Max(frontier, edits[_take - 1].UpdatedAt);
 
                 var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
                         x.Id,
@@ -317,6 +321,7 @@
                             $"/jobs/rvideo/{x.JobId}",
                             RVideoCore: x))))
                     .Concat(videos.Take(_take).Select(BuildCustomerVideoRow))
+                    .Concat(edits.Take(_take).Select(BuildEditVideoRow))
                     .Where(x => frontier is null || x.CreatedAt >= frontier)
                     .OrderByDescending(x => x.CreatedAt)
                     .ToList();
@@ -376,6 +381,30 @@
             return Array.Empty<TodoX.Web.Services.CustomerVideos.CustomerVideo>();
         }
     }
+
+    // Projects made with TodoX EditVideo on the customer's computer; videos appear once the app synced them.
+    private async Task<IReadOnlyList<TodoX.Web.Services.EditVideoTool.EditVideoProjectRow>> ListEditVideoProjectsAsync(CurrentUserSession user, int count)
+    {
+        try { return await EditVideoProjects.ListOwnedAsync(user, count); }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "My jobs EditVideo projects load failed");
+            return Array.Empty<TodoX.Web.Services.EditVideoTool.EditVideoProjectRow>();
+        }
+    }
+
+    internal static CustomerJobRow BuildEditVideoRow(TodoX.Web.Services.EditVideoTool.EditVideoProjectRow project)
+        => new(
+            project.Id,
+            project.ProjectName,
+            "TodoX EditVideo",
+            project.Videos == 0 ? "processing" : "completed",
+            project.Videos == 0 ? "Đang làm"
+                : project.SyncedVideos == project.Videos ? $"Hoàn tất · {project.Videos} video"
+                : $"Hoàn tất · {project.SyncedVideos}/{project.Videos} video đã đồng bộ",
+            project.UpdatedAt,
+            $"{project.Points:0.##}",
+            $"/jobs/editvideo/{project.Id}");
 
     internal static CustomerJobRow BuildCustomerVideoRow(TodoX.Web.Services.CustomerVideos.CustomerVideo video)
         => new(

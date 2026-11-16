@@ -30,11 +30,13 @@ public sealed partial class VideoTools
     private readonly AiGenerator _ai;
     private readonly Projects.ProjectFolders _projects;
     private readonly Updater _updater;
+    private readonly ProjectSync? _sync;
 
     public VideoTools(LicenseGuard license, LicenseVerifier verifier, MediaProbe probe, ClipNormalizer normalizer,
         RemotionRenderer renderer, TodoXServerClient server, ServerConnectivity connectivity, AgentPaths paths, Transcriber transcriber,
-        SkillSync skills, EditStore edits, AiGenerator ai, Projects.ProjectFolders projects, Updater updater)
+        SkillSync skills, EditStore edits, AiGenerator ai, Projects.ProjectFolders projects, Updater updater, ProjectSync? sync = null)
     {
+        _sync = sync;
         _updater = updater;
         _ai = ai;
         _projects = projects;
@@ -208,6 +210,7 @@ public sealed partial class VideoTools
     [Description("Edit clips into one finished video on this computer: TodoX picks the best part of each clip and adds intro/outro, transitions, animated captions from the script, optional music and a TodoX voiceover, then renders an MP4. Returns the output file path and an edit id: adjust the result with todox_cut, todox_join, todox_caption, todox_titles, todox_audio, todox_look and render again with todox_export.")]
     public async Task<string> AutoEdit(
         [Description("Video files and/or folders, in the order they should appear.")] string[] clips,
+        [Description(ProjectParam)] string project,
         IProgress<ProgressNotificationValue> progress,
         CancellationToken ct,
         [Description("9:16 (TikTok/Reels), 16:9 (YouTube), 1:1 or 4:5; omit for the skill's or the default (9:16).")] string? aspect = null,
@@ -234,7 +237,7 @@ public sealed partial class VideoTools
         try
         {
             // Same path as the step tools: a signed edit is kept, so the result can be adjusted and exported again.
-            var started = await StartEditAsync(new EditBrief(clips, aspect, targetSeconds, title, subtitle, script, voice, outroText, music, voiceover, style, accentColor, skill, skillVersion), session, progress, ct);
+            var started = await StartEditAsync(new EditBrief(clips, aspect, targetSeconds, title, subtitle, script, voice, outroText, music, voiceover, style, accentColor, skill, skillVersion, project), session, progress, ct);
             return started.Error ?? await ExportAsync(started.Edit!, output, session, progress, 15, ct, started.VoiceCheck);
         }
         catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or ArgumentException or IOException)

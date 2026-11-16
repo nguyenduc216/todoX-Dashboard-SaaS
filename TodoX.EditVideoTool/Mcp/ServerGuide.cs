@@ -13,6 +13,12 @@ public static class ServerGuide
         command-line encoders or scripts, and do not write code to process media; if a todox_* tool cannot do
         something, say so.
 
+        FIRST ask the user which project this work belongs to (todox_projects lists them; a new name creates one)
+        and pass it as `project` - never invent a project name. Finished videos go to the project's output folder
+        and appear in the dashboard's "Jobs của tôi" as not synced; the user uploads the files with the
+        "Đồng bộ lên Dashboard" button in the TodoX EditVideo window (todox_sync shows the state).
+        The account's AI characters, voices, music and VFX: todox_library. Help / "trợ giúp": skill todox-tro-giup.
+
         Quick result: todox_auto_edit. Step by step: todox_edit_start -> todox_cut (trim a scene),
         todox_join (order/drop/add clips, transition), todox_caption (captions), todox_titles (intro, closing
         card), todox_audio (music, voiceover, clip sound), todox_look (style, brand color) -> todox_export.

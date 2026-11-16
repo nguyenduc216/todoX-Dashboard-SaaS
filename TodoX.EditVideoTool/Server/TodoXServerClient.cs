@@ -158,6 +158,19 @@ public sealed class TodoXServerClient
         File.Move(tmp, destination, overwrite: true);
     }
 
+    /// <summary>Project and exported-video information for "Jobs của tôi" (no files).</summary>
+    public Task<ServerResult<JsonElement>> SyncProjectsAsync(object body, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "projects/sync", body, true, ct, TimeSpan.FromSeconds(60));
+
+    /// <summary>One chunk of a video being synced to the dashboard (at most 8 MB).</summary>
+    public Task<ServerResult<JsonElement>> ProjectVideoChunkAsync(Guid videoId, long size, long offset, byte[] data, int count, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, $"projects/videos/{videoId}/chunk?size={size}&offset={offset}", null, true, ct, TimeSpan.FromMinutes(3),
+            new ByteArrayContent(data, 0, count));
+
+    /// <summary>The account's characters, voices, music and VFX models (kind: characters | voices | music | vfx | all).</summary>
+    public Task<ServerResult<JsonElement>> LibraryAsync(string? kind, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, $"library?kind={Uri.EscapeDataString(kind ?? "all")}", null, true, ct, TimeSpan.FromSeconds(60));
+
     /// <summary>Package, its end date, points and storage of this machine's customer.</summary>
     public Task<ServerResult<JsonElement>> AccountAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "account", null, true, ct, TimeSpan.FromSeconds(20));

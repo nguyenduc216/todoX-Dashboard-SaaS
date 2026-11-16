@@ -10,7 +10,7 @@ namespace TodoX.EditVideoTool.Mcp;
 public sealed partial class VideoTools
 {
     private const string AiOptionParam = "Only a value listed for the model by todox_ai_models and confirmed by the user; never guess.";
-    private const string AiFolderParams = "Where the result is saved: a project name (its TodoX resource folder) or omit for Documents\\TodoX\\ai.";
+    private const string AiFolderParams = ProjectParam + " The result is saved into that project's 06-ai folder.";
 
     [McpServerTool(Name = "todox_ai_models", ReadOnly = true, Idempotent = true)]
     [Description("List TodoX AI models for making images, videos or music: options (ratios, resolutions, modes, durations), abilities and the TodoX point price, plus the customer's point balance. Pass model to see that model's price for each length. Call before todox_image_create / todox_video_create / todox_music_create. VFX (effects on an existing clip) uses the video models with the edit ability (withEdit) and the clip as a source video.")]
@@ -91,8 +91,13 @@ public sealed partial class VideoTools
         [Description("Lyrics with [Intro], [Verse], [Chorus], [Bridge], [Outro] tags; omit for instrumental background music.")] string? lyrics = null,
         [Description("Singer's voice: m or f.")] string? gender = null,
         [Description("Music model from todox_ai_models type music; omit for TodoX's default.")] string? model = null,
-        [Description("Project name: the songs go into its 03-am-thanh folder.")] string? project = null)
+        [Description(ProjectParam + " The songs go into its 03-am-thanh folder.")] string? project = null)
     {
+        if (string.IsNullOrWhiteSpace(project))
+        {
+            return NeedProject;
+        }
+
         await using var session = await SessionLogger.StartAsync(_server, _paths, "ai_music", ct);
         if (await ReadyProblemAsync(session, ct) is { } problem)
         {
@@ -139,6 +144,11 @@ public sealed partial class VideoTools
 
     private async Task<string> AiCreateAsync(AiCreateInput input, string? project, TimeSpan wait, IProgress<ProgressNotificationValue> progress, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(project))
+        {
+            return NeedProject;
+        }
+
         await using var session = await SessionLogger.StartAsync(_server, _paths, $"ai_{input.Kind}", ct);
         if (await ReadyProblemAsync(session, ct) is { } problem)
         {

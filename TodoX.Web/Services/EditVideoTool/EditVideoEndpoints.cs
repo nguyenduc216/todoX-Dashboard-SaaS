@@ -94,6 +94,36 @@ public static class EditVideoEndpoints
             });
         });
 
+        // Projects and exported videos the app reports by itself (no file); shown in the customer's "Jobs của tôi".
+        group.MapPost("/projects/sync", async (HttpContext http, EditVideoSyncRequest body, EditVideoLicenseService licenses, EditVideoProjectService projects, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await projects.SyncAsync(auth.Value.License, auth.Value.Device, body, ct)) : ToResult(auth);
+        }).DisableAntiforgery();
+
+        // A video file sent only when the person presses "Đồng bộ" (raw chunks, at most 8 MB each); stored with the job videos.
+        group.MapPost("/projects/videos/{videoId:guid}/chunk", async (Guid videoId, HttpContext http, long size, long offset,
+            EditVideoLicenseService licenses, EditVideoProjectService projects, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return Error(auth.ErrorCode!, auth.Message!);
+            }
+
+            var result = await projects.AppendVideoAsync(auth.Value.License, videoId, size, offset, http.Request.Body, ct);
+            return !result.Ok
+                ? ToResult(result)
+                : Results.Json(new { success = true, data = result.Value is { } video ? (object)new { done = true, video } : new { done = false } });
+        }).DisableAntiforgery();
+
+        // The account's characters, voices, music and VFX models, for the app to show and download.
+        group.MapGet("/library", async (HttpContext http, string? kind, EditVideoLicenseService licenses, EditVideoLibraryService library, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? Results.Json(new { success = true, data = await library.GetAsync(auth.Value.License, kind, ct) }) : ToResult(auth);
+        });
+
         // A file for the AI provider, sent in chunks (body = raw bytes, at most 8 MB each); the last chunk returns the link.
         group.MapPost("/files/chunk", async (HttpContext http, Guid upload, string project, string name, long size, long offset,
             EditVideoLicenseService licenses, EditVideoStorageService storage, CancellationToken ct) =>
