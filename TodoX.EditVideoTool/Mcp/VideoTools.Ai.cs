@@ -96,5 +96,5 @@ public sealed partial class VideoTools
     private string AiFolder(string? project) =>
         string.IsNullOrWhiteSpace(project)
             ? AiGenerator.DefaultFolder()
-            : _projects.Find(project, create: true).Folder?.Path ?? AiGenerator.DefaultFolder();
+            : _projects.Find(project, create: true).Folder?.Path is { } dir ? Path.Combine(dir, Projects.ProjectFolders.AiDir) : AiGenerator.DefaultFolder();
 }

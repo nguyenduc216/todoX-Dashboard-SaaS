@@ -36,6 +36,7 @@
                 @Service.Description
             </MudText>
 
+            @* Point prices are shown inside each service, not on the list cards. *@
             @if (ShowPrice && !string.IsNullOrWhiteSpace(Service.StartingPriceSummary))
             {
                 <div class="todox-service-price">@Service.StartingPriceSummary</div>
@@ -43,10 +44,6 @@
         </MudStack>
 
         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-4 flex-wrap gap-2">
-            @if (ShowPrice && string.IsNullOrWhiteSpace(Service.StartingPriceSummary))
-            {
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Chưa có giá khởi điểm</MudText>
-            }
 
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                 @if (ShowFavorite)
@@ -78,7 +75,7 @@
     /// <summary>Optional label over the image (e.g. "Hay dùng · 12 lần" on the customer home).</summary>
     [Parameter] public string? Badge { get; set; }
     [Parameter] public bool IsFavorite { get; set; }
-    [Parameter] public bool ShowPrice { get; set; } = true;
+    [Parameter] public bool ShowPrice { get; set; }
     [Parameter] public string PrimaryActionLabel { get; set; } = "Tạo video";
     [Parameter] public string AddFavoriteTooltip { get; set; } = "Thêm vào Dashboard";
     [Parameter] public string RemoveFavoriteTooltip { get; set; } = "Bỏ khỏi Dashboard";

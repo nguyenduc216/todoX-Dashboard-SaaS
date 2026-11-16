@@ -76,7 +76,6 @@ public sealed class SetupWizard : Form
     // page 5
     private readonly Label _doneTitle = Caption("", 17, Ink, bold: true);
     private readonly Label _doneText = Caption("", 10.5f, Ink);
-    private readonly LinkLabel _doneLog = new() { AutoSize = true, MaximumSize = new Size(ContentWidth, 0), LinkColor = Yellow, ActiveLinkColor = Yellow, ForeColor = Muted, Margin = new Padding(0, 4, 0, 14) };
     private readonly CheckBox _openSite = Check("Mở trang todox.vn", true);
     private readonly CheckBox _launch = Check("Mở TodoX EditVideo ngay", true);
 
@@ -305,9 +304,7 @@ public sealed class SetupWizard : Form
         _doneTitle.Margin = new Padding(0, 12, 0, 0);
         page.Controls.Add(title);
         page.Controls.Add(_doneText);
-        _doneText.Margin = new Padding(0, 10, 0, 6);
-        page.Controls.Add(_doneLog);
-        _doneLog.LinkClicked += (_, _) => OpenLog();
+        _doneText.Margin = new Padding(0, 10, 0, 16);
         page.Controls.Add(_openSite);
         page.Controls.Add(_launch);
         return page;
@@ -643,12 +640,12 @@ public sealed class SetupWizard : Form
         }
 
         SaveLog();
-        var sent = 0;
+        // The log stays in {folder}\logs and goes to TodoX quietly; the finish page does not mention it.
         if (_licensed)
         {
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(_cancel.Token);
             wait.CancelAfter(TimeSpan.FromSeconds(20));
-            sent = await _services!.GetRequiredService<InstallLogUploader>().UploadPendingAsync(wait.Token);
+            await _services!.GetRequiredService<InstallLogUploader>().UploadPendingAsync(wait.Token);
         }
 
         var connected = _log?.Steps.Where(s => s.Id is "claude" or "codex" && s.State == StepState.Done).Select(s => s.Id == "claude" ? "Claude" : "Codex").ToList() ?? [];
@@ -659,8 +656,6 @@ public sealed class SetupWizard : Form
             connected.Count > 0 ? $"Tắt hẳn rồi mở lại {string.Join(" và ", connected)} để bắt đầu dựng video với TodoX." : null,
             _licensed ? null : "Bạn chưa nhập license: mở TodoX EditVideo để nhập khi có key."
         }.OfType<string>());
-        _doneLog.Text = $"Nhật ký cài đặt: {_logPath}" + (sent > 0 ? " · đã gửi về TodoX" : _licensed ? " · sẽ gửi về TodoX ở lần mở sau" : " · sẽ gửi về TodoX khi có license");
-        _doneLog.LinkArea = new LinkArea("Nhật ký cài đặt: ".Length, _logPath?.Length ?? 0);
         Show(4);
     }
 

@@ -558,8 +558,11 @@ public sealed partial class VideoTools
         _ => "9:16"
     };
 
-    private static string OutputFolder(EditProject project) =>
-        project.Clips.FirstOrDefault() is { } first ? Path.Combine(Path.GetDirectoryName(first.Path)!, "output") : DefaultVoiceFolder();
+    // Clips inside a TodoX project (02-video, 06-ai...) render into that project's output folder.
+    private string OutputFolder(EditProject project) =>
+        project.Clips.FirstOrDefault() is not { } first ? DefaultVoiceFolder()
+        : _projects.ProjectOf(first.Path) is { } projectDir ? Path.Combine(projectDir, Projects.ProjectFolders.OutputDir)
+        : Path.Combine(Path.GetDirectoryName(first.Path)!, Projects.ProjectFolders.OutputDir);
 
     private static bool IsNone(string? value) =>
         value is not null && (value.Trim().Length == 0 || value.Trim().Equals("none", StringComparison.OrdinalIgnoreCase));
