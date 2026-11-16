@@ -69,7 +69,8 @@ public sealed class LandingAffiliateVideoTests
 
         var home = Page("index.html");
         Assert.Contains("<a href=\"/video-ngan\">Video thương hiệu</a>", home);
-        Assert.Contains("<h1>Biến Một Bức Ảnh Thành Phim Ngắn Doanh Nghiệp Ấn Tượng</h1>", home);
+        // Short hero title: the old 8-word one filled five lines at full size.
+        Assert.Contains("<h1>Biến Ảnh Thành Phim Ngắn Thương Hiệu</h1>", home);
     }
 
     [Fact]
