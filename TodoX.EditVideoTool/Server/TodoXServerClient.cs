@@ -76,6 +76,9 @@ public sealed class TodoXServerClient
     public Task<ServerResult<JsonElement>> AiCreateAsync(string kind, object request, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Post, kind == "video" ? "ai/videos" : "ai/images", request, true, ct, TimeSpan.FromSeconds(120));
 
+    public Task<ServerResult<JsonElement>> AiMusicAsync(object request, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "ai/music", request, true, ct, TimeSpan.FromSeconds(120));
+
     public Task<ServerResult<JsonElement>> AiTaskAsync(Guid taskId, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"ai/tasks/{taskId}", null, true, ct, TimeSpan.FromSeconds(60));
 

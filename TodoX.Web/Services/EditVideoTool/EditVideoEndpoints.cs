@@ -300,6 +300,12 @@ public static class EditVideoEndpoints
             return auth.Ok ? ToResult(await service.CreateAsync(auth.Value.License, auth.Value.Device, "video", body, ct)) : ToResult(auth);
         }).DisableAntiforgery();
 
+        ai.MapPost("/music", async (HttpContext http, EditVideoAiMusicRequest body, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await service.CreateMusicAsync(auth.Value.License, auth.Value.Device, body, ct)) : ToResult(auth);
+        }).DisableAntiforgery();
+
         ai.MapGet("/tasks/{taskId:guid}", async (Guid taskId, HttpContext http, EditVideoLicenseService licenses, EditVideoAiService service, CancellationToken ct) =>
         {
             var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
@@ -343,6 +349,7 @@ public static class EditVideoEndpoints
         EditVideoErrorCodes.InvalidLicense or "not_found" or "voice_not_found" or "model_not_found" => StatusCodes.Status404NotFound,
         EditVideoErrorCodes.DeviceLimitReached => StatusCodes.Status409Conflict,
         "insufficient_points" => StatusCodes.Status402PaymentRequired,
+        "price_not_configured" => StatusCodes.Status503ServiceUnavailable,
         EditVideoErrorCodes.SigningUnavailable or "voice_service_unavailable" or "ai_service_unavailable" => StatusCodes.Status503ServiceUnavailable,
         "voice_failed" or "ai_failed" => StatusCodes.Status502BadGateway,
         _ => StatusCodes.Status403Forbidden

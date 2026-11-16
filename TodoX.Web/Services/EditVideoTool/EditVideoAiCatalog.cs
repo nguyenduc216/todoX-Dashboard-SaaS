@@ -150,6 +150,118 @@ public static class EditVideoGommoJson
         };
     }
 
+    /// <summary>Seconds in a duration value such as "8", "8s" or "8 giây"; null when there is none.</summary>
+    public static int? Seconds(string? duration)
+    {
+        var digits = new string((duration ?? "").TakeWhile(char.IsDigit).ToArray());
+        if (digits.Length == 0)
+        {
+            digits = new string((duration ?? "").SkipWhile(c => !char.IsDigit(c)).TakeWhile(char.IsDigit).ToArray());
+        }
+
+        return int.TryParse(digits, out var s) && s > 0 ? s : null;
+    }
+
+    /// <summary>
+    /// Model card for the tool with TodoX point prices (the web's point table): images per picture, videos per second
+    /// times the length, music per song. Credits from the provider are never shown.
+    /// </summary>
+    public static object Shape(JsonObject model, string kind, EditVideoAiPrices prices, bool withPrices)
+    {
+        var code = Str(model, "model") ?? Str(model, "id_base") ?? "";
+        var durations = Choices(model, "durations");
+        var points = durations.Count > 0
+            ? durations.Select(d => prices.For(kind, code, d)).Where(p => p is not null).Select(p => p!.Value).ToList()
+            : prices.For(kind, code, null) is { } one ? [one] : [];
+        var abilities = new[]
+            {
+                "startText", "startImage", "startImageAndEnd", "withReference", "withSubject", "withMotion", "withEdit",
+                "extendVideo", "withMultiShots", "withLipsync", "withUpscale"
+            }
+            .Where(f => model[f] is JsonValue v && (v.TryGetValue<bool>(out var b) ? b : v.TryGetValue<int>(out var i) && i != 0))
+            .ToList();
+
+        return new
+        {
+            model = code,
+            name = Str(model, "name"),
+            kind,
+            description = Str(model, "description") is { Length: > 240 } d ? d[..240] + "…" : Str(model, "description"),
+            ratios = Choices(model, "ratios"),
+            resolutions = Choices(model, "resolutions"),
+            modes = Choices(model, "modes"),
+            durations,
+            abilities,
+            maxReferenceImages = Num(model, "maxSubject"),
+            pointsFrom = points.Count > 0 ? points.Min() : (decimal?)null,
+            pointsTo = points.Count > 0 ? points.Max() : (decimal?)null,
+            priceNote = points.Count > 0 ? null : "TodoX chưa đặt giá điểm cho loại này; chưa tạo được.",
+            prices = withPrices && durations.Count > 0
+                ? durations.Select(d => new { duration = d, points = prices.For(kind, code, d) }).ToList()
+                : null
+        };
+    }
+
+    /// <summary>Every id_base a create returned (music returns one per generated clip).</summary>
+    public static IReadOnlyList<string> IdBases(JsonNode? root)
+    {
+        if (IdBase(root) is { } one)
+        {
+            return [one];
+        }
+
+        var list = (root?["data"] as JsonArray ?? root as JsonArray ?? [])
+            .Select(n => Str(n, "id_base") ?? Str(n, "id"))
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .Distinct()
+            .ToList();
+        return list.Count > 0 ? list : (Str(root?["data"], "id") ?? Str(root, "job_id")) is { } job ? [job] : [];
+    }
+
+    /// <summary>Https file URLs anywhere in a music job response (audio_url, result_url ...), best first.</summary>
+    public static IReadOnlyList<string> MusicOutputs(JsonNode? node)
+    {
+        var found = new List<string>();
+        void Walk(JsonNode? n)
+        {
+            switch (n)
+            {
+                case JsonObject obj:
+                    foreach (var key in new[] { "audio_url", "result_url", "download_url", "url" })
+                    {
+                        if (Str(obj, key) is { } u && Uri.TryCreate(u, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
+                            && !u.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) && !u.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+                            && !u.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) && !u.EndsWith(".webp", StringComparison.OrdinalIgnoreCase))
+                        {
+                            found.Add(u);
+                            break;
+                        }
+                    }
+
+                    foreach (var (_, child) in obj)
+                    {
+                        if (child is JsonObject or JsonArray)
+                        {
+                            Walk(child);
+                        }
+                    }
+
+                    break;
+                case JsonArray arr:
+                    foreach (var child in arr)
+                    {
+                        Walk(child);
+                    }
+
+                    break;
+            }
+        }
+
+        Walk(node);
+        return found.Distinct().ToList();
+    }
+
     public static string? IdBase(JsonNode? root) =>
         Str(root?["imageInfo"], "id_base") ?? Str(root?["videoInfo"], "id_base") ?? Str(root?["data"], "id_base") ?? Str(root, "id_base");
 
@@ -202,12 +314,16 @@ public static class EditVideoGommoJson
         var urls = new List<string?>();
         if (kind == "video")
         {
+            // Same order as the web (Ai79TaskClient): result_url, download_url, video_url, then the resolutions.
+            urls.Add(Str(task, "result_url"));
             urls.Add(Str(task, "download_url"));
+            urls.Add(Str(task, "video_url"));
             urls.AddRange((task["resolutions"] as JsonArray ?? []).OfType<JsonObject>().Select(r => Str(r, "url")));
             urls.Add(Str(task, "url"));
         }
         else
         {
+            urls.Add(Str(task, "result_url"));
             urls.Add(Str(task, "url"));
             urls.Add(Str(task, "url_preview"));
         }
