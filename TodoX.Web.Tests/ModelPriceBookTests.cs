@@ -55,7 +55,7 @@ public sealed class ModelPriceBookTests
         };
         Assert.Equal(6m, book.PointsForCredits("video", "veo_omni", 2400m));    // 2.400đ × 2,5 = 6 điểm
         Assert.Equal(43.2m, book.PointsForCredits("video", "kling_4_0", 14400m)); // markup 5 is capped at 3
-        Assert.Equal(2.5m, book.PointsForCredits("video", "cheap", 1000m));     // markup 1,2 is raised to 2,5
+        Assert.Equal(2m, book.PointsForCredits("video", "cheap", 1000m));       // markup 1,2 is raised to the minimum 2
         Assert.Equal(0.1m, book.Points(10m, 2.5m));                              // never below 0.1
         Assert.Equal(2.5m, book.PointsForCredits("voice", "vbee", 1000m));       // Vbee 1.000đ/voice → 2,5 điểm
 
@@ -112,6 +112,7 @@ public sealed class ModelPriceBookTests
         Assert.Equal(10m, prices.For("music", "suno-v6.0", null, 4000m));
         Assert.Equal(36m, prices.For("video", "kling_4_0", "8", 14400m));
         Assert.Null(prices.Missing("video", "kling_4_0"));
+        Assert.Equal(60m, prices.For("video", "kling_video_motion_3", "20", 30000m)); // RDance motion ×2: 20 s × 1.500đ
     }
 
     [Fact]

@@ -82,7 +82,7 @@ public sealed record ModelPriceBook
     public decimal VndPerPoint { get; init; } = 1000m;
     public decimal VndPerCredit { get; init; } = 1m;
     public decimal DefaultMarkup { get; init; } = 2.5m;
-    public decimal MinMarkup { get; init; } = 2.5m;
+    public decimal MinMarkup { get; init; } = 2m;
     public decimal MaxMarkup { get; init; } = 3m;
     public IReadOnlyList<ModelPriceEntry> Models { get; init; } = [];
 
@@ -234,8 +234,8 @@ public static class ModelCostLookup
 public static class ModelPriceDefaults
 {
     private static ModelPriceEntry E(string kind, int order, string model, string name, string tier, string env = ModelPriceEnvs.Both,
-        decimal? fixedCost = null, string? note = null) =>
-        new() { Kind = kind, Order = order, Model = model, Name = name, Tier = tier, Env = env, FixedCostVnd = fixedCost, Note = note };
+        decimal? fixedCost = null, string? note = null, decimal? markup = null) =>
+        new() { Kind = kind, Order = order, Model = model, Name = name, Tier = tier, Env = env, FixedCostVnd = fixedCost, Note = note, Markup = markup };
 
     public static IReadOnlyList<ModelPriceEntry> Models { get; } =
     [
@@ -251,7 +251,7 @@ public static class ModelPriceDefaults
         E("video", 80, "kling_video_3_0", "Kling 3.0 Omni", "premium"),
         E("video", 90, "kling_4_0", "Kling 4.0", "premium"),
         E("video", 100, "wan_3_0", "WAN 3.0", "premium"),
-        E("video", 110, "seedance_20_pro", "Seedance 2.0", "premium", note: "Timelapse dùng model này"),
+        E("video", 110, "seedance_20_pro", "Seedance 2.0", "premium", note: "Timelapse dùng model này", markup: 2m),
         E("video", 120, "happy_horse_1", "Happy Horse 1.0", "premium"),
         E("video", 130, "seedance_25_flash", "Seedance 2.5 Flash", "premium"),
         E("video", 140, "seedance_25_omni", "Seedance 2.5", "premium"),
@@ -260,8 +260,8 @@ public static class ModelPriceDefaults
         E("video", 210, "seedance_20_pro_edit", "VFX · Seedance 2.0 Omni Edit", "premium", ModelPriceEnvs.EditVideo),
         E("video", 220, "kling_video_3_0_edit", "VFX · Kling 3.0 Edit", "premium", ModelPriceEnvs.EditVideo),
         // Điều khiển chuyển động — RDance
-        E("video", 300, "kling_video_motion_3", "Motion · Kling 3.0 Motion Control", "standard", ModelPriceEnvs.Dashboard, note: "RDance"),
-        E("video", 310, "kling_4_0_motion", "Motion · Kling 4.0 Motion Control", "premium", ModelPriceEnvs.Dashboard, note: "RDance"),
+        E("video", 300, "kling_video_motion_3", "Motion · Kling 3.0 Motion Control", "standard", ModelPriceEnvs.Dashboard, note: "RDance", markup: 2m),
+        E("video", 310, "kling_4_0_motion", "Motion · Kling 4.0 Motion Control", "premium", ModelPriceEnvs.Dashboard, note: "RDance", markup: 2m),
 
         // Ảnh
         E("image", 10, "google_image_gen_banana_2", "Nano Banana 2", "standard"),
