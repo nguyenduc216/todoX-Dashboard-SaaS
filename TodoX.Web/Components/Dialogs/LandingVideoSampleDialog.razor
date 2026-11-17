@@ -30,7 +30,7 @@
             <MudTextField T="string" Label="Tiêu đề video" @bind-Value="_model.Title" MaxLength="@LandingVideoSampleRepository.MaxTitleLength" />
             <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
                 <MudSwitch T="bool" @bind-Value="_model.IsVisible" Color="Color.Success" Disabled="@(!_visibilityReady)"
-                           Label="@(_model.IsVisible ? "Hiển thị trên landing: Có" : "Hiển thị trên landing: Không (đang ẩn)")" />
+                           Label="@(_model.IsVisible ? "Hiển thị trên landing: Có" : "Hiển thị trên landing: Không (đang ẩn, vẫn xem được qua link)")" />
                 @if (_model.Id != Guid.Empty)
                 {
                     <MudSwitch T="bool" @bind-Value="_overwrite" Color="Color.Warning" Disabled="@_busy"

@@ -36,6 +36,8 @@ public static class VideoSharePage
         public required string BackLabel { get; init; }
         public string? RelatedHeading { get; init; }
         public IReadOnlyList<RelatedVideo> Related { get; init; } = [];
+        // A hidden sample opened from its private link: kept out of search engines.
+        public bool NoIndex { get; init; }
     }
 
     public static Model FromIndustry(IndustrySolutionVideo video, IndustrySolution industry) => new()
@@ -74,6 +76,7 @@ public static class VideoSharePage
         Description = sample.Description,
         AspectRatio = sample.AspectRatio,
         CreatedAt = sample.CreatedAt,
+        NoIndex = !sample.IsVisible,
         Eyebrow = string.IsNullOrWhiteSpace(sample.GroupName)
             ? "KHO MẪU VIDEO"
             : $"MẪU VIDEO · {sample.GroupName.ToUpperInvariant()}",
@@ -103,6 +106,8 @@ public static class VideoSharePage
         var pageTitle = $"{m.Title} | Video mẫu TodoX";
         var description = Truncate(FirstNonEmpty(m.Description, m.FallbackDescription));
         var canonical = Absolute(baseUrl, m.SharePath);
+        // A hidden sample opened from its private link stays out of search results.
+        var robots = m.NoIndex ? "<meta name=\"robots\" content=\"noindex, nofollow\">" : "";
         var image = Absolute(baseUrl, FirstNonEmpty(m.ShareImageUrl, m.ThumbnailUrl, FallbackImage));
         var poster = Absolute(baseUrl, FirstNonEmpty(m.ThumbnailUrl, FallbackImage));
         var videoUrl = Absolute(baseUrl, m.VideoUrl);
@@ -136,6 +141,7 @@ public static class VideoSharePage
               <title>{{E(pageTitle)}}</title>
               <meta name="description" content="{{E(description)}}">
               <link rel="canonical" href="{{E(canonical)}}">
+              {{robots}}
               <meta name="theme-color" content="#ffbd22">
               <meta property="og:type" content="video.other">
               <meta property="og:locale" content="vi_VN">

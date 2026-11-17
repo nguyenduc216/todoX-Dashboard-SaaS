@@ -21,6 +21,9 @@ public sealed class VideoSample
     public string? GroupCode { get; set; }
     public string? GroupName { get; set; }
     public DateTimeOffset? CreatedAt { get; set; }
+    // False: not listed on /mau-video or the homepage, but its own link (/mau-video/{slug}) still plays it,
+    // so a sample can be sent to one customer without publishing it.
+    public bool IsVisible { get; set; } = true;
 
     // Computed from the title (not stored): readable share link that carries Open Graph previews.
     public string Slug { get; set; } = "";
@@ -48,6 +51,20 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
 
     public async Task<VideoSampleCatalog> GetPublicAsync(CancellationToken ct = default)
     {
+        var all = await LoadAllAsync(ct);
+        var videos = all.Videos.Where(video => video.IsVisible).ToList();
+        // Group chips keep the service order; the videos themselves show newest first.
+        var order = all.Groups.Select(group => group.Code).ToList();
+        var groups = videos.GroupBy(video => video.GroupCode)
+            .OrderBy(group => order.IndexOf(group.Key!))
+            .Select(group => new VideoSampleGroup(group.Key!, group.First().GroupName!, group.Count())).ToList();
+        return new VideoSampleCatalog { Videos = videos, Groups = groups };
+    }
+
+    /// <summary>Every publishable sample, hidden ones included (IsVisible=false), with slugs assigned over all of them
+    /// so a sample keeps its link when it is hidden or shown again.</summary>
+    private async Task<VideoSampleCatalog> LoadAllAsync(CancellationToken ct)
+    {
         try
         {
             var root = media.Value.StorageRoot;
@@ -73,17 +90,17 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
                 select count(*) from information_schema.columns
                 where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'is_visible'
                 """, cancellationToken: ct)) == 1;
-            var visibleFilter = visibleColumn ? "and s.is_visible" : "";
+            var visibleSelect = visibleColumn ? "s.is_visible" : "true";
             // Rows come in group order (services, then TVC, then "Video truyền thông"); videos are re-sorted newest first below.
             var rows = await connection.QueryAsync<VideoSample>(new CommandDefinition($"""
                 select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
                        s.video_url as VideoUrl, s.poster_url as PosterUrl, {thumbnails}
                        coalesce(sv.service_code, case when {sampleGroup} = 'tvc' then '{TvcGroupCode}' end) as GroupCode,
                        coalesce(sv.service_name, case when {sampleGroup} = 'tvc' then '{TvcGroupName}' end) as GroupName,
-                       s.created_at as CreatedAt
+                       s.created_at as CreatedAt, {visibleSelect} as IsVisible
                 from landing.video_samples s
                 left join catalog.services sv on sv.id = s.service_id
-                where (sv.id is null or sv.status = 'active') {visibleFilter}
+                where (sv.id is null or sv.status = 'active')
                 order by sv.id is null, {sampleGroup} is null, sv.sort_order, sv.service_name, s.created_at desc
                 """, cancellationToken: ct));
             var videos = rows.Where(video => IsPublishable(video, root)).ToList();
@@ -120,11 +137,15 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
         }
     }
 
+    /// <summary>The sample behind a share link, hidden ones included; Catalog holds only the listed samples
+    /// (used for "Mẫu video khác", so a hidden sample never shows up there).</summary>
     public async Task<(VideoSample Sample, VideoSampleCatalog Catalog)?> FindBySlugAsync(string slug, CancellationToken ct = default)
     {
-        var catalog = await GetPublicAsync(ct);
-        var sample = VideoSlug.Find(catalog.Videos, slug, video => video.Id, video => video.Title, video => video.Slug);
-        return sample is null ? null : (sample, catalog);
+        var all = await LoadAllAsync(ct);
+        var sample = VideoSlug.Find(all.Videos, slug, video => video.Id, video => video.Title, video => video.Slug);
+        if (sample is null) return null;
+        var listed = all.Videos.Where(video => video.IsVisible).ToList();
+        return (sample, new VideoSampleCatalog { Videos = listed, Groups = all.Groups });
     }
 
     private static bool IsPublishable(VideoSample video, string root)
