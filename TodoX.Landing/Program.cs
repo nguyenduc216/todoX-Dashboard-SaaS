@@ -244,6 +244,7 @@ app.MapGet("/video/{slug}", async (
     HttpContext http,
     IndustrySolutionRepository repository,
     IConfiguration configuration,
+    Microsoft.AspNetCore.DataProtection.IDataProtectionProvider protection,
     CancellationToken ct) =>
 {
     var match = await repository.FindVideoBySlugAsync(slug, ct);
@@ -255,7 +256,8 @@ app.MapGet("/video/{slug}", async (
 
     http.Response.Headers.CacheControl = "public,max-age=300";
     var baseUrl = VideoSharePage.ResolveBaseUrl(http.Request, configuration);
-    return Results.Content(VideoSharePage.Render(VideoSharePage.FromIndustry(found.Video, found.Industry), baseUrl), "text/html; charset=utf-8");
+    return Results.Content(VideoSharePage.Render(VideoSharePage.FromIndustry(found.Video, found.Industry), baseUrl,
+        LandingVideoDownload.CreateToken(protection, found.Video.Slug)), "text/html; charset=utf-8");
 });
 
 // Same for the sample library: /mau-video/{slug} is the shareable page of one sample.
@@ -264,6 +266,7 @@ app.MapGet("/mau-video/{slug}", async (
     HttpContext http,
     VideoSampleRepository repository,
     IConfiguration configuration,
+    Microsoft.AspNetCore.DataProtection.IDataProtectionProvider protection,
     CancellationToken ct) =>
 {
     var match = await repository.FindBySlugAsync(slug, ct);
@@ -275,7 +278,8 @@ app.MapGet("/mau-video/{slug}", async (
 
     http.Response.Headers.CacheControl = "public,max-age=300";
     var baseUrl = VideoSharePage.ResolveBaseUrl(http.Request, configuration);
-    return Results.Content(VideoSharePage.Render(VideoSharePage.FromSample(found.Sample, found.Catalog), baseUrl), "text/html; charset=utf-8");
+    return Results.Content(VideoSharePage.Render(VideoSharePage.FromSample(found.Sample, found.Catalog), baseUrl,
+        LandingVideoDownload.CreateToken(protection, found.Sample.Slug)), "text/html; charset=utf-8");
 });
 
 // "Tải xuống" on the share pages: the raw /media file stays blocked, the page's button gets it with a readable name.
@@ -284,12 +288,13 @@ app.MapGet("/video/{slug}" + LandingVideoDownload.RouteSuffix, async (
     HttpContext http,
     IndustrySolutionRepository repository,
     IOptions<SharedMediaOptions> media,
+    Microsoft.AspNetCore.DataProtection.IDataProtectionProvider protection,
     CancellationToken ct) =>
 {
     var match = await repository.FindVideoBySlugAsync(slug, ct);
     if (match is not { } found || string.IsNullOrWhiteSpace(found.Video.VideoUrl))
         return Results.Redirect("/affiliate-video");
-    return LandingVideoDownload.Serve(http, found.Video.VideoUrl, found.Video.Slug, media.Value, found.Video.SharePath);
+    return LandingVideoDownload.Serve(http, found.Video.VideoUrl, found.Video.Slug, media.Value, found.Video.SharePath, protection);
 });
 
 app.MapGet("/mau-video/{slug}" + LandingVideoDownload.RouteSuffix, async (
@@ -297,12 +302,13 @@ app.MapGet("/mau-video/{slug}" + LandingVideoDownload.RouteSuffix, async (
     HttpContext http,
     VideoSampleRepository repository,
     IOptions<SharedMediaOptions> media,
+    Microsoft.AspNetCore.DataProtection.IDataProtectionProvider protection,
     CancellationToken ct) =>
 {
     var match = await repository.FindBySlugAsync(slug, ct);
     if (match is not { } found)
         return Results.Redirect("/mau-video");
-    return LandingVideoDownload.Serve(http, found.Sample.VideoUrl, found.Sample.Slug, media.Value, found.Sample.SharePath);
+    return LandingVideoDownload.Serve(http, found.Sample.VideoUrl, found.Sample.Slug, media.Value, found.Sample.SharePath, protection);
 });
 
 // Serve the marketing deep link as its own document, including on refresh.
