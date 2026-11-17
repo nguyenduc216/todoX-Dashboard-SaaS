@@ -183,6 +183,11 @@ public sealed class MediaAccessTests
         var page = File.ReadAllText(Path.Combine(repo, "TodoX.Landing", "Services", "VideoSharePage.cs"));
         Assert.Contains("href=\"{{E(LandingVideoDownload.DownloadPath(m.SharePath, downloadToken))}}\"", page);
         Assert.Contains("<span>Tải xuống</span>", page);
+        // iPhone opens videos in the system player instead of saving them: the link uses the share sheet ("Lưu video").
+        Assert.Contains("data-video-download data-file-name=", page);
+        var shareJs = File.ReadAllText(Path.Combine(repo, "TodoX.Landing", "wwwroot", "js", "video-share.js"));
+        Assert.Contains("navigator.share({ files: [file] })", shareJs);
+        Assert.Contains("a[data-video-download]", shareJs);
         var program = File.ReadAllText(Path.Combine(repo, "TodoX.Landing", "Program.cs"));
         Assert.Contains("app.MapGet(\"/mau-video/{slug}\" + LandingVideoDownload.RouteSuffix", program);
         Assert.Contains("app.MapGet(\"/video/{slug}\" + LandingVideoDownload.RouteSuffix", program);

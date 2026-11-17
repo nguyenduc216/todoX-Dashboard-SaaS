@@ -91,6 +91,13 @@ public static class VideoSharePage
             .ToList()
     };
 
+    // Same name the /tai-xuong endpoint gives the file (todox-{slug}.mp4), used by the iPhone "Lưu video" sheet.
+    internal static string DownloadFileName(Model m)
+    {
+        var ext = Path.GetExtension(m.VideoUrl.Split('?', '#')[0]).ToLowerInvariant();
+        return $"todox-{m.Slug}{(ext == ".webm" ? ".webm" : ".mp4")}";
+    }
+
     public static string Render(Model m, string baseUrl, string? downloadToken = null)
     {
         var pageTitle = $"{m.Title} | Video mẫu TodoX";
@@ -186,7 +193,7 @@ public static class VideoSharePage
         html.Append($$"""
                     <div class="vp-actions">
                       <a class="vp-btn vp-btn--primary" href="/?utm_source=video-share&amp;utm_medium=landing&amp;utm_content={{Uri.EscapeDataString(m.Slug)}}#contact">Tư vấn giải pháp này <i class="fa-solid fa-arrow-right"></i></a>
-                      <a class="vp-btn" href="{{E(LandingVideoDownload.DownloadPath(m.SharePath, downloadToken))}}" rel="nofollow" download><i class="fa-solid fa-download"></i> <span>Tải xuống</span></a>
+                      <a class="vp-btn" href="{{E(LandingVideoDownload.DownloadPath(m.SharePath, downloadToken))}}" rel="nofollow" download data-video-download data-file-name="{{E(DownloadFileName(m))}}"><i class="fa-solid fa-download"></i> <span>Tải xuống</span></a>
                       <button type="button" class="vp-btn" data-share-url="{{E(canonical)}}" data-share-title="{{E(m.Title)}}"><i class="fa-solid fa-share-nodes"></i> <span>Chia sẻ</span></button>
                       <a class="vp-btn vp-btn--icon" href="https://www.facebook.com/sharer/sharer.php?u={{Uri.EscapeDataString(canonical)}}" target="_blank" rel="noopener" aria-label="Chia sẻ lên Facebook"><i class="fa-brands fa-facebook-f"></i></a>
                     </div>
@@ -226,7 +233,7 @@ public static class VideoSharePage
         html.Append("""
               </main>
               <footer class="vp-footer">© TodoX · <a href="/">todox.vn</a></footer>
-              <script src="/js/video-share.js?v=20261103-1" defer></script>
+              <script src="/js/video-share.js?v=20261117-1" defer></script>
             </body>
             </html>
             """);
