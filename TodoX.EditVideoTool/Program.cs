@@ -181,5 +181,18 @@ static async Task RunMcpServerAsync(string[] args)
     _ = Task.Run(() => host.Services.GetRequiredService<Updater>().RunPeriodicallyAsync(lifetime.ApplicationStopping));
     // Skill library: install/refresh TodoX skills now and every few hours while Claude/Codex keeps us running.
     _ = Task.Run(() => host.Services.GetRequiredService<SkillSync>().RunPeriodicallyAsync(lifetime.ApplicationStopping));
+    // The account's characters, voices and music come down, and project/video information goes up ("Jobs của tôi").
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            await host.Services.GetRequiredService<LibrarySync>().RefreshAsync(lifetime.ApplicationStopping);
+            await host.Services.GetRequiredService<ProjectSync>().SyncInfoAsync(lifetime.ApplicationStopping);
+        }
+        catch (Exception)
+        {
+            // Offline or not activated: tried again on the next start / tool call.
+        }
+    });
     await host.RunAsync();
 }

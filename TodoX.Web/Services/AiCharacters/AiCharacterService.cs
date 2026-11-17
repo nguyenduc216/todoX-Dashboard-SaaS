@@ -452,7 +452,7 @@ public sealed class AiCharacterService : IAiCharacterService
         return $"{prefix}{suffix}"[..Math.Min(50, prefix.Length + suffix.Length)];
     }
 
-    private static long ToBigIntCustomerId(Guid id)
+    internal static long ToBigIntCustomerId(Guid id)
     {
         var bytes = id.ToByteArray();
         var value = BitConverter.ToInt64(bytes, 0);

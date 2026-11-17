@@ -93,7 +93,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
             var estimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
                 pointServiceId, 0, ServiceSellPriceQualityTiers.Standard, 0, ServiceSellPriceQualityTiers.Standard,
-                1, ServiceSellPriceQualityTiers.Standard, true), ct);
+                1, ServiceSellPriceQualityTiers.Standard, true, VoiceModel: TodoX.Web.Services.Render.RVideoPricingModels.Voice), ct);
             return estimate.TotalPoints;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -197,7 +197,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             ServiceSellPriceQualityTiers.Standard,
             1,
             ServiceSellPriceQualityTiers.Standard,
-            true), ct);
+            true,
+            VoiceModel: TodoX.Web.Services.Render.RVideoPricingModels.Voice), ct);
         var customerPointRate = pointEstimate.Voice.Rate;
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, selectedVideo.RenderJobId ?? Guid.Empty);
         // A user-requested new voice is always billed at the TodoX voice rate, never covered by the video's charge.

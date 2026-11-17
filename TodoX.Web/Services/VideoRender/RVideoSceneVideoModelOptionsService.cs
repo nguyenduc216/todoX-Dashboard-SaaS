@@ -33,10 +33,14 @@ public sealed class RVideoSceneVideoModelOptionsService : IRVideoSceneVideoModel
     private IReadOnlyList<SceneVideoModelOption> _cached = Array.Empty<SceneVideoModelOption>();
     private Guid? _cachedServiceId;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    public RVideoSceneVideoModelOptionsService(IAiProviderModelService models, CatalogRepository? catalog = null)
+    private readonly TodoX.Web.Services.Pricing.ModelPriceService? _prices;
+
+    public RVideoSceneVideoModelOptionsService(IAiProviderModelService models, CatalogRepository? catalog = null,
+        TodoX.Web.Services.Pricing.ModelPriceService? prices = null)
     {
         _models = models;
         _catalog = catalog;
+        _prices = prices;
     }
 
     public Task<IReadOnlyList<SceneVideoModelOption>> GetOptionsAsync(CancellationToken ct = default)
@@ -55,7 +59,20 @@ public sealed class RVideoSceneVideoModelOptionsService : IRVideoSceneVideoModel
             var service = await _catalog.GetServiceByIdAsync(id, ct);
             order = TodoX.Web.Models.Catalog.ServiceJobDefaultsCodec.FromJson(service?.JobDefaultsJson).VideoModelOrder;
         }
-        var opts = BuildOptions(models, order);
+        IReadOnlyList<SceneVideoModelOption> opts;
+        if (_prices is not null)
+        {
+            // Model price book: its order when the service sets none, and models it switches off for the dashboard.
+            var book = await _prices.GetAsync(ct);
+            order ??= RVideoVideoModelPolicy.BookOrder(book);
+            opts = BuildOptions(models, order)
+                .Where(o => book.IsAllowed(TodoX.Web.Services.Pricing.ModelPriceKinds.Video, o.ModelCode, TodoX.Web.Services.Pricing.ModelPriceEnvs.Dashboard))
+                .ToArray();
+        }
+        else
+        {
+            opts = BuildOptions(models, order);
+        }
         await _gate.WaitAsync(ct);
         try { _cached = opts; _cachedServiceId = serviceId; } finally { _gate.Release(); }
         return opts;

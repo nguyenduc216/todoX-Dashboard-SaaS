@@ -501,7 +501,7 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
 
         Assert.Contains("ReadGuid(job.RequestJson, \"serviceId\", \"service_id\")", pricing);
         Assert.Contains("await _catalog.GetByIdAsync(id, ct)", pricing);
-        Assert.Contains("await _pointPricing.ResolveRateAsync", pricing);
+        Assert.Contains("await _pointPricing.ResolveModelRateAsync", pricing); // model price book, flat rate when unknown
         Assert.Contains("PointPricingResourceTypes.Video", pricing);
         Assert.Contains("FixedTodoXServiceCatalog.RDance", pricing);
         Assert.Contains("ServiceId = ServiceId", create);

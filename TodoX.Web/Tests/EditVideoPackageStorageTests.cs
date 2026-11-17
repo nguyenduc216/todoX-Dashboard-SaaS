@@ -72,6 +72,17 @@ public sealed class EditVideoPackageStorageTests
 
         var withMusic = prices with { Settings = prices.Settings with { MusicPoints = 3m } };
         Assert.Equal(3m, withMusic.For("music", "suno-v6.0", null));
+
+        // ×2 the 79AI cost, per model, 1 point = 1,000đ: 3,000 credits → 6,000đ = 6 points; 4,000 → 8 points.
+        var doubled = prices with { Settings = prices.Settings with { MusicMarkup = 2m, MusicPoints = 3m } };
+        Assert.Equal(6m, doubled.For("music", "suno-v5.5", null, 3000m));
+        Assert.Equal(8m, doubled.For("music", "suno-v6.0", null, 4000m));
+
+        // Images/videos never below 79AI cost × 2: a 27,200-credit/s model for 8 s is not sold at 0.8 point/s.
+        Assert.Equal(435.2m, prices.For("video", "seedance_25_draft", "8", 217600m));
+        Assert.Equal(0.5m, prices.For("image", "google_image_gen_3_5", null, 50m)); // cheap model: table 0.5 is above cost × 2 (0.1)
+        Assert.Equal(6.4m, (prices with { Settings = prices.Settings with { CostFloorMarkup = null } }).For("video", "seedance_25_draft", "8", 217600m));
+        Assert.Null(doubled.Missing("music", "suno-v5.5"));
         Assert.Null(new EditVideoAiPrices(new EditVideoAiSettings(), new Dictionary<string, decimal>()).For("video", "x", "8"));
     }
 

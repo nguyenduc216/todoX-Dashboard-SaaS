@@ -1,0 +1,304 @@
+@page "/admin/model-prices"
+@using System.Text.Json.Nodes
+@using TodoX.Web.Services.Pricing
+@using TodoX.Web.Services.EditVideoTool
+@inject ModelPriceService Prices
+@inject AuthStateService AuthState
+@inject ISnackbar Snackbar
+
+<PageTitle>Bảng giá model AI</PageTitle>
+
+@if (!_initialized)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else if (!_admin)
+{
+    <MudAlert Severity="Severity.Error">Chỉ quản trị viên mới sửa được bảng giá model.</MudAlert>
+}
+else
+{
+    <MudStack Spacing="3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Bảng giá model AI</MudText>
+            <MudText Class="todox-page-subtitle">
+                Một bảng giá chung cho Dashboard (RVideo, Timelapse, RDance) và TodoX EditVideo.
+                Giá bán = chi phí 79AI thực tế của đúng lần tạo (model, chế độ, độ nét, thời lượng) × hệ số.
+                Giá được ghi lại lúc tạo nên chỉ áp dụng cho video/ảnh tạo mới. Thứ tự là thứ tự trong danh sách chọn model và thứ tự dự phòng.
+            </MudText>
+        </div>
+
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">Quy đổi và hệ số</MudText>
+            <MudStack Row="true" Spacing="3" Class="flex-wrap">
+                <MudNumericField T="decimal" @bind-Value="_vndPerPoint" Label="1 điểm = ? đồng" Variant="Variant.Outlined" Min="1" Style="max-width:180px" />
+                <MudNumericField T="decimal" @bind-Value="_vndPerCredit" Label="1 credit 79AI = ? đồng" Variant="Variant.Outlined" Min="0.01m" Style="max-width:180px" />
+                <MudNumericField T="decimal" @bind-Value="_defaultMarkup" Label="Hệ số mặc định ×" Variant="Variant.Outlined" Min="1" Step="0.1m" Style="max-width:180px" />
+                <MudNumericField T="decimal" @bind-Value="_minMarkup" Label="Hệ số thấp nhất ×" Variant="Variant.Outlined" Min="1" Step="0.1m" Style="max-width:180px" />
+                <MudNumericField T="decimal" @bind-Value="_maxMarkup" Label="Hệ số cao nhất ×" Variant="Variant.Outlined" Min="1" Step="0.1m" Style="max-width:180px" />
+            </MudStack>
+            <MudText Typo="Typo.caption" Style="display:block" Class="mt-2">
+                Ví dụ hệ số 2,5: chi phí 1.000đ → bán 2.500đ = 2,5 điểm (lời 1.500đ). Hệ số riêng của từng model luôn bị giữ trong khoảng thấp nhất – cao nhất.
+                Giá riêng đã đặt cho một dịch vụ (Ví điểm › giá riêng dịch vụ) vẫn được ưu tiên trên Dashboard.
+            </MudText>
+        </MudPaper>
+
+        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-3" @bind-ActivePanelIndex="_tab">
+            @foreach (var kind in ModelPriceKinds.All)
+            {
+                <MudTabPanel Text="@($"{ModelPriceKinds.Label(kind)} ({Rows(kind).Count})")">
+                    <MudPaper Class="todox-card pa-2" Style="overflow-x:auto">
+                        <MudSimpleTable Dense="true" Hover="true" Class="todox-table" Style="min-width:1100px">
+                            <thead>
+                                <tr>
+                                    <th style="width:90px">Thứ tự</th>
+                                    <th>Model</th>
+                                    <th style="width:130px">Hạng</th>
+                                    <th style="width:140px">Dùng ở</th>
+                                    <th style="width:110px">Hệ số ×</th>
+                                    @if (kind == ModelPriceKinds.Voice)
+                                    {
+                                        <th style="width:130px">Giá vốn cố định (đ)</th>
+                                    }
+                                    <th>Chi phí 79AI → giá bán (điểm)</th>
+                                    <th style="width:70px">Bật</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var rows = Rows(kind); }
+                                @for (var i = 0; i < rows.Count; i++)
+                                {
+                                    var row = rows[i];
+                                    var index = i;
+                                    <tr style="@(row.Enabled ? "" : "opacity:.55")">
+                                        <td>
+                                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="index == 0" OnClick="() => Move(kind, index, -1)" />
+                                            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="index == rows.Count - 1" OnClick="() => Move(kind, index, 1)" />
+                                        </td>
+                                        <td>
+                                            <MudTextField @bind-Value="row.Name" Variant="Variant.Text" Margin="Margin.Dense" />
+                                            <MudText Typo="Typo.caption" Style="opacity:.7">
+                                                @row.Model
+                                                @if (!row.InBook)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="ml-1">mới từ 79AI</MudChip>
+                                                }
+                                                @if (!row.InCatalog && row.FixedCost is not > 0)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Class="ml-1">79AI không còn model này</MudChip>
+                                                }
+                                            </MudText>
+                                        </td>
+                                        <td>
+                                            <MudSelect T="string" @bind-Value="row.Tier" Margin="Margin.Dense" Variant="Variant.Outlined" Dense="true">
+                                                <MudSelectItem Value="@("standard")">Thường</MudSelectItem>
+                                                <MudSelectItem Value="@("premium")">Cao cấp</MudSelectItem>
+                                            </MudSelect>
+                                        </td>
+                                        <td>
+                                            <MudSelect T="string" @bind-Value="row.Env" Margin="Margin.Dense" Variant="Variant.Outlined" Dense="true">
+                                                @foreach (var env in ModelPriceEnvs.All)
+                                                {
+                                                    <MudSelectItem Value="@env">@ModelPriceEnvs.Label(env)</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                        </td>
+                                        <td>
+                                            <MudNumericField T="decimal?" @bind-Value="row.Markup" Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Step="0.1m"
+                                                             Placeholder="@_defaultMarkup.ToString("0.##")" />
+                                        </td>
+                                        @if (kind == ModelPriceKinds.Voice)
+                                        {
+                                            <td>
+                                                <MudNumericField T="decimal?" @bind-Value="row.FixedCost" Margin="Margin.Dense" Variant="Variant.Outlined" Min="0" Step="100" />
+                                            </td>
+                                        }
+                                        <td>
+                                            @{ var samples = Samples(kind, row); }
+                                            @if (samples.Count == 0)
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Warning">Chưa có giá 79AI</MudText>
+                                            }
+                                            else
+                                            {
+                                                <div style="display:flex;flex-wrap:wrap;gap:4px">
+                                                    @foreach (var s in samples)
+                                                    {
+                                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success">
+                                                            @s.Label: @s.CostVnd.ToString("#,0") đ → <b>&nbsp;@s.Points.ToString("0.##")</b>
+                                                        </MudChip>
+                                                    }
+                                                </div>
+                                            }
+                                        </td>
+                                        <td><MudSwitch T="bool" @bind-Value="row.Enabled" Color="Color.Warning" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudPaper>
+                    <MudText Typo="Typo.caption" Style="display:block" Class="mt-2">
+                        @Hint(kind)
+                    </MudText>
+                </MudTabPanel>
+            }
+        </MudTabs>
+
+        <MudStack Row="true" Spacing="2">
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_saving" OnClick="SaveAsync">Lưu bảng giá</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_saving" OnClick="LoadAsync">Tải lại</MudButton>
+        </MudStack>
+    </MudStack>
+}
+
+@code {
+    private sealed class Row
+    {
+        public string Kind { get; set; } = "";
+        public string Model { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Tier { get; set; } = "standard";
+        public string Env { get; set; } = ModelPriceEnvs.Both;
+        public bool Enabled { get; set; } = true;
+        public decimal? Markup { get; set; }
+        public decimal? FixedCost { get; set; }
+        public string? Note { get; set; }
+        public bool InBook { get; set; }
+        public bool InCatalog { get; set; }
+        public JsonObject? Catalog { get; set; }
+    }
+
+    private bool _initialized;
+    private bool _admin;
+    private bool _saving;
+    private int _tab;
+    private decimal _vndPerPoint = 1000m;
+    private decimal _vndPerCredit = 1m;
+    private decimal _defaultMarkup = 2m;
+    private decimal _minMarkup = 2m;
+    private decimal _maxMarkup = 3m;
+    private readonly Dictionary<string, List<Row>> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _admin = AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
+        if (_admin)
+        {
+            await LoadAsync();
+        }
+
+        _initialized = true;
+    }
+
+    private List<Row> Rows(string kind) => _rows.TryGetValue(kind, out var list) ? list : [];
+
+    private async Task LoadAsync()
+    {
+        var book = await Prices.GetAsync();
+        _vndPerPoint = book.VndPerPoint;
+        _vndPerCredit = book.VndPerCredit;
+        _defaultMarkup = book.DefaultMarkup;
+        _minMarkup = book.MinMarkup;
+        _maxMarkup = book.MaxMarkup;
+        _rows.Clear();
+        foreach (var kind in ModelPriceKinds.All)
+        {
+            var catalog = EditVideoGommoJson.Models(await Prices.CatalogAsync(kind))
+                .Where(m => !string.Equals(EditVideoGommoJson.Str(m, "status"), "OFF", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            JsonObject? Find(string model) => catalog.FirstOrDefault(c =>
+                string.Equals(EditVideoGommoJson.Str(c, "model"), model, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(EditVideoGommoJson.Str(c, "id_base"), model, StringComparison.OrdinalIgnoreCase));
+
+            var rows = book.Models.Where(m => m.Kind == kind).OrderBy(m => m.Order).ThenBy(m => m.Name)
+                .Select(m => new Row
+                {
+                    Kind = kind, Model = m.Model, Name = m.Name, Tier = m.Tier, Env = m.Env, Enabled = m.Enabled, Markup = m.Markup,
+                    FixedCost = m.FixedCostVnd, Note = m.Note, InBook = true, Catalog = Find(m.Model)
+                }).ToList();
+            foreach (var c in catalog)
+            {
+                var code = EditVideoGommoJson.Str(c, "model");
+                if (code is null || rows.Any(r => string.Equals(r.Model, code, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                rows.Add(new Row
+                {
+                    Kind = kind, Model = code, Name = EditVideoGommoJson.Str(c, "name") ?? code,
+                    Tier = "standard", Env = ModelPriceEnvs.EditVideo, Enabled = false, InBook = false, Catalog = c
+                });
+            }
+
+            foreach (var r in rows)
+            {
+                r.InCatalog = r.Catalog is not null;
+            }
+
+            _rows[kind] = rows;
+        }
+    }
+
+    private ModelPriceBook CurrentBook() => new()
+    {
+        VndPerPoint = _vndPerPoint,
+        VndPerCredit = _vndPerCredit,
+        DefaultMarkup = _defaultMarkup,
+        MinMarkup = _minMarkup,
+        MaxMarkup = _maxMarkup,
+        Models = ModelPriceKinds.All.SelectMany(kind => Rows(kind).Select((r, i) => new ModelPriceEntry
+        {
+            Kind = kind, Model = r.Model, Name = string.IsNullOrWhiteSpace(r.Name) ? r.Model : r.Name.Trim(), Tier = r.Tier,
+            Order = (i + 1) * 10, Env = r.Env, Enabled = r.Enabled, Markup = r.Markup is > 0 ? r.Markup : null,
+            FixedCostVnd = r.FixedCost is > 0 ? r.FixedCost : null, Note = r.Note
+        })).ToList()
+    };
+
+    private IReadOnlyList<ModelPriceSample> Samples(string kind, Row row)
+    {
+        var book = CurrentBook();
+        return ModelPriceSamples.For(kind, row.Catalog, book, book.Find(kind, row.Model));
+    }
+
+    private void Move(string kind, int index, int delta)
+    {
+        var rows = Rows(kind);
+        var target = index + delta;
+        if (target < 0 || target >= rows.Count)
+        {
+            return;
+        }
+
+        (rows[index], rows[target]) = (rows[target], rows[index]);
+    }
+
+    private static string Hint(string kind) => kind switch
+    {
+        ModelPriceKinds.Video => "Video: giá ví dụ cho 8 giây ở chế độ rẻ nhất của từng độ nét; khi tạo thật, giá tính theo đúng chế độ, độ nét và số giây khách chọn. Veo 3.1 tính theo video. Model VFX/Motion chỉ dự phòng cho nhau.",
+        ModelPriceKinds.Image => "Ảnh: giá mỗi ảnh theo độ nét (chế độ rẻ nhất).",
+        ModelPriceKinds.Voice => "Giọng đọc: 79AI tính theo ký tự (giá ví dụ cho 1.000 ký tự, khoảng 1 phút đọc). Vbee tính theo lượt với giá vốn cố định.",
+        _ => "Nhạc: giá mỗi lần tạo (Suno trả về 2 bài)."
+    };
+
+    private async Task SaveAsync()
+    {
+        if (_minMarkup > _maxMarkup)
+        {
+            Snackbar.Add("Hệ số thấp nhất phải nhỏ hơn hoặc bằng hệ số cao nhất.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            await Prices.SaveAsync(CurrentBook());
+            await LoadAsync();
+            Snackbar.Add("Đã lưu bảng giá model. Giá mới áp dụng cho các lần tạo từ bây giờ.", Severity.Success);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

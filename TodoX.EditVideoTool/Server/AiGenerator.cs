@@ -296,7 +296,7 @@ public sealed class AiGenerator
     {
         LicenseApiClient.NetworkError => ServerConnectivity.OfflineText,
         "insufficient_points" or "invalid_request" or "ai_option_required" or "model_not_found" or "ai_service_unavailable" or "price_not_configured"
-            or "ai_failed" or "not_found" => r.Message ?? r.ErrorCode,
+            or "ai_failed" or "not_found" or TodoXServerClient.ConfirmRequired or TodoXServerClient.PriceDeclined => r.Message ?? r.ErrorCode,
         _ => LicenseMessages.ForServerError(r.ErrorCode, r.Message)
     };
 

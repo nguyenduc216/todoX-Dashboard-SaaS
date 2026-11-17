@@ -26,7 +26,8 @@ public static class AppServices
             sp.GetRequiredService<LicenseVerifier>(),
             sp.GetRequiredService<IDeviceIdentity>(),
             sp.GetRequiredService<LicenseApiClient>()));
-        services.AddSingleton(sp => new TodoXServerClient(http, sp.GetRequiredService<LicenseStore>(), sp.GetRequiredService<IDeviceIdentity>()));
+        services.AddSingleton(sp => new TodoXServerClient(http, sp.GetRequiredService<LicenseStore>(), sp.GetRequiredService<IDeviceIdentity>(),
+            new DesktopPriceConsent()));
         services.AddSingleton<INotifier, WindowsNotifier>();
         services.AddSingleton(sp => new ServerConnectivity(sp.GetRequiredService<TodoXServerClient>(), sp.GetRequiredService<INotifier>()));
         services.AddSingleton<StatusService>();
@@ -41,6 +42,8 @@ public static class AppServices
         services.AddSingleton<SkillSync>();
         services.AddSingleton<ProjectFolders>();
         services.AddSingleton(sp => new AiGenerator(sp.GetRequiredService<TodoXServerClient>()));
+        services.AddSingleton(sp => new ProjectSync(sp.GetRequiredService<TodoXServerClient>(), sp.GetRequiredService<ProjectFolders>()));
+        services.AddSingleton(sp => new LibrarySync(sp.GetRequiredService<TodoXServerClient>(), sp.GetRequiredService<ProjectFolders>(), http));
         services.AddSingleton<EditStore>();
         services.AddSingleton<SkillRunStore>();
     }

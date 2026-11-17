@@ -5,7 +5,7 @@ using TodoX.EditVideoTool.Licensing;
 
 namespace TodoX.EditVideoTool.Server;
 
-public sealed record ServerResult<T>(T? Value, string? ErrorCode, string? Message)
+public sealed record ServerResult<T>(T? Value, string? ErrorCode, string? Message, JsonElement? Detail = null)
 {
     public bool Ok => ErrorCode is null;
     public bool IsNetworkError => ErrorCode == LicenseApiClient.NetworkError;
@@ -25,12 +25,55 @@ public sealed class TodoXServerClient
     private readonly LicenseStore _store;
     private readonly IDeviceIdentity _device;
 
-    public TodoXServerClient(HttpClient http, LicenseStore store, IDeviceIdentity device)
+    public TodoXServerClient(HttpClient http, LicenseStore store, IDeviceIdentity device, IPriceConsent? consent = null)
     {
         _http = http;
         _store = store;
         _device = device;
+        Consent = consent;
     }
+
+    /// <summary>Who is asked to accept TodoX's price before a paid command; null = never agree (the command is not run).</summary>
+    public IPriceConsent? Consent { get; set; }
+
+    /// <summary>
+    /// A paid command (AI image/video/music, voice). TodoX answers the first call with its price ("confirm_required");
+    /// the person accepts or refuses it in the confirmation window, and only an accepted price is sent back — with the
+    /// same request, so TodoX can check it is exactly what was priced. Prices are never taken from this app.
+    /// </summary>
+    private async Task<ServerResult<JsonElement>> SendPaidAsync(string path, object body, TimeSpan timeout, CancellationToken ct)
+    {
+        var payload = JsonSerializer.SerializeToNode(body, Json)!.AsObject();
+        for (var round = 0; round < 3; round++)
+        {
+            var result = await SendAsync<JsonElement>(HttpMethod.Post, path, payload, true, ct, timeout);
+            if (result.ErrorCode != ConfirmRequired || PriceQuote.From(result.Detail) is not { } quote)
+            {
+                return result;
+            }
+
+            var answer = Consent is null ? ConsentAnswer.Unavailable : await Consent.AskAsync(quote, ct);
+            if (answer != ConsentAnswer.Accepted)
+            {
+                var price = $"{quote.Points:0.##} điểm TodoX (≈ {quote.Vnd:#,0}đ) cho: {quote.Summary}";
+                return ServerResult<JsonElement>.Fail(PriceDeclined, answer switch
+                {
+                    ConsentAnswer.Declined => $"Người dùng bấm Hủy ở cửa sổ xác nhận giá {price}. Chưa tạo gì, không trừ điểm. Không gọi lại trừ khi người dùng yêu cầu.",
+                    ConsentAnswer.NoAnswer => $"Cửa sổ xác nhận giá {price} đã hiện nhưng không ai bấm trong {DesktopPriceConsent.Wait.TotalMinutes:0} phút. Chưa tạo gì, không trừ điểm. Hỏi người dùng có thấy cửa sổ \"TodoX EditVideo — Xác nhận trừ điểm\" không rồi mới gọi lại.",
+                    _ => $"Không hiện được cửa sổ xác nhận giá {price} trên máy này. Chưa tạo gì, không trừ điểm. Báo người dùng mở TodoX EditVideo (cửa sổ chính) rồi thử lại."
+                });
+            }
+
+            payload["confirmQuoteId"] = quote.QuoteId;
+            payload["consentMethod"] = Consent.Method;
+            payload["consentUser"] = Environment.UserName;
+        }
+
+        return ServerResult<JsonElement>.Fail(ConfirmRequired, "Giá TodoX vừa thay đổi; hãy thử lại để xem giá mới.");
+    }
+
+    public const string ConfirmRequired = "confirm_required";
+    public const string PriceDeclined = "price_declined";
 
     public string ServerUrl => (_store.Load()?.ServerUrl ?? LicenseApiClient.DefaultServerUrl).TrimEnd('/');
 
@@ -65,7 +108,7 @@ public sealed class TodoXServerClient
         SendAsync<JsonElement>(HttpMethod.Get, "voices", null, true, ct);
 
     public Task<ServerResult<JsonElement>> SubmitTtsAsync(string text, string? voiceCode, Guid? sessionId, CancellationToken ct = default) =>
-        SendAsync<JsonElement>(HttpMethod.Post, "tts", new { text, voiceCode, sessionId }, true, ct, TimeSpan.FromSeconds(60));
+        SendPaidAsync("tts", new { text, voiceCode, sessionId }, TimeSpan.FromSeconds(60), ct);
 
     public Task<ServerResult<JsonElement>> TtsStatusAsync(Guid jobId, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"tts/{jobId}", null, true, ct, TimeSpan.FromSeconds(60));
@@ -74,10 +117,10 @@ public sealed class TodoXServerClient
         SendAsync<JsonElement>(HttpMethod.Get, $"ai/models?type={Uri.EscapeDataString(type ?? string.Empty)}&model={Uri.EscapeDataString(model ?? string.Empty)}", null, true, ct, TimeSpan.FromSeconds(60));
 
     public Task<ServerResult<JsonElement>> AiCreateAsync(string kind, object request, CancellationToken ct = default) =>
-        SendAsync<JsonElement>(HttpMethod.Post, kind == "video" ? "ai/videos" : "ai/images", request, true, ct, TimeSpan.FromSeconds(120));
+        SendPaidAsync(kind == "video" ? "ai/videos" : "ai/images", request, TimeSpan.FromSeconds(120), ct);
 
     public Task<ServerResult<JsonElement>> AiMusicAsync(object request, CancellationToken ct = default) =>
-        SendAsync<JsonElement>(HttpMethod.Post, "ai/music", request, true, ct, TimeSpan.FromSeconds(120));
+        SendPaidAsync("ai/music", request, TimeSpan.FromSeconds(120), ct);
 
     public Task<ServerResult<JsonElement>> AiTaskAsync(Guid taskId, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"ai/tasks/{taskId}", null, true, ct, TimeSpan.FromSeconds(60));
@@ -120,6 +163,19 @@ public sealed class TodoXServerClient
 
         File.Move(tmp, destination, overwrite: true);
     }
+
+    /// <summary>Project and exported-video information for "Jobs của tôi" (no files).</summary>
+    public Task<ServerResult<JsonElement>> SyncProjectsAsync(object body, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "projects/sync", body, true, ct, TimeSpan.FromSeconds(60));
+
+    /// <summary>One chunk of a video being synced to the dashboard (at most 8 MB).</summary>
+    public Task<ServerResult<JsonElement>> ProjectVideoChunkAsync(Guid videoId, long size, long offset, byte[] data, int count, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, $"projects/videos/{videoId}/chunk?size={size}&offset={offset}", null, true, ct, TimeSpan.FromMinutes(3),
+            new ByteArrayContent(data, 0, count));
+
+    /// <summary>The account's characters, voices, music and VFX models (kind: characters | voices | music | vfx | all).</summary>
+    public Task<ServerResult<JsonElement>> LibraryAsync(string? kind, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, $"library?kind={Uri.EscapeDataString(kind ?? "all")}", null, true, ct, TimeSpan.FromSeconds(60));
 
     /// <summary>Package, its end date, points and storage of this machine's customer.</summary>
     public Task<ServerResult<JsonElement>> AccountAsync(CancellationToken ct = default) =>
@@ -180,7 +236,9 @@ public sealed class TodoXServerClient
 
             var code = envelope.ValueKind == JsonValueKind.Object && envelope.TryGetProperty("code", out var c) ? c.GetString() : null;
             var message = envelope.ValueKind == JsonValueKind.Object && envelope.TryGetProperty("message", out var m) ? m.GetString() : null;
-            return ServerResult<T>.Fail(code ?? $"http_{(int)response.StatusCode}", message);
+            JsonElement? detail = envelope.ValueKind == JsonValueKind.Object && envelope.TryGetProperty("detail", out var dt) && dt.ValueKind == JsonValueKind.Object
+                ? dt.Clone() : null;
+            return new ServerResult<T>(default, code ?? $"http_{(int)response.StatusCode}", message, detail);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException && !ct.IsCancellationRequested)
         {

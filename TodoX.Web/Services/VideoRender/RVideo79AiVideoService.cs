@@ -61,6 +61,20 @@ public static class RVideoVideoModelPolicy
 
     public static RVideoVideoModelPolicyEntry GetInitial() => Models[0];
 
+    /// <summary>Policy keys in the model price book's order (used when a service sets no order of its own).</summary>
+    public static List<string> BookOrder(TodoX.Web.Services.Pricing.ModelPriceBook book)
+        => Models.OrderBy(p => book.Rank(TodoX.Web.Services.Pricing.ModelPriceKinds.Video, p.Model)).ThenBy(p => p.AttemptIndex).Select(BuildKey).ToList();
+
+    /// <summary>Policy keys the price book switches off for the dashboard (never picked, never used as fallback).</summary>
+    public static List<string> BookExcluded(TodoX.Web.Services.Pricing.ModelPriceBook book)
+        => Models.Where(p => !book.IsAllowed(TodoX.Web.Services.Pricing.ModelPriceKinds.Video, p.Model, TodoX.Web.Services.Pricing.ModelPriceEnvs.Dashboard))
+            .Select(BuildKey).ToList();
+
+    /// <summary>Price-book query for a scene video: model, mode, resolution and length decide the 79AI cost.</summary>
+    public static TodoX.Web.Services.Pricing.ModelPriceQuery PriceQuery(string? model, string? mode, string? resolution, int? seconds)
+        => new(string.IsNullOrWhiteSpace(model) ? GetInitial().Model : model.Trim(),
+            string.IsNullOrWhiteSpace(mode) ? null : mode.Trim(), string.IsNullOrWhiteSpace(resolution) ? "720p" : resolution.Trim(), seconds is > 0 ? seconds : null);
+
     public static RVideoVideoModelPolicyEntry? GetByAttemptIndex(int attemptIndex)
         => Models.FirstOrDefault(x => x.AttemptIndex == attemptIndex);
 

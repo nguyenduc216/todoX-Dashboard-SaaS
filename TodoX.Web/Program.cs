@@ -82,6 +82,7 @@ builder.Services.AddHttpClient<IServicePromptProviderClient, ServicePrompt79AiCl
 builder.Services.AddScoped<IAiStudioCatalogService, AiStudioCatalogService>();
 builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();
 builder.Services.AddScoped<IPointPricingService, PointPricingService>();
+builder.Services.AddScoped<TodoX.Web.Services.Pricing.ModelPriceService>();
 builder.Services.AddScoped<ITimelapseProfileRepository, TimelapseProfileRepository>();
 builder.Services.AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>();
 builder.Services.AddScoped<ITimelapseJobService, TimelapseJobService>();
@@ -327,6 +328,10 @@ builder.Services.Configure<EditVideoAiOptions>(builder.Configuration.GetSection(
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient<IEditVideoGommoClient, EditVideoGommoClient>(client => client.Timeout = TimeSpan.FromSeconds(90));
 builder.Services.AddScoped<EditVideoAiSettingsService>();
+builder.Services.AddScoped<EditVideoConsentService>();
+builder.Services.AddScoped<TodoX.Web.Services.VoicePreviewGenerator>();
+builder.Services.AddScoped<EditVideoProjectService>();
+builder.Services.AddScoped<EditVideoLibraryService>();
 builder.Services.AddScoped<EditVideoAiService>();
 builder.Services.AddScoped<EditVideoSkillService>();
 builder.Services.AddScoped<EditVideoSkillRunService>();

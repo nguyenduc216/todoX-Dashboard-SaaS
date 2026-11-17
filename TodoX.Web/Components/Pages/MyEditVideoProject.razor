@@ -1,0 +1,147 @@
+@page "/jobs/editvideo/{ProjectId:guid}"
+@using TodoX.Web.Services
+@using TodoX.Web.Services.EditVideoTool
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject EditVideoProjectService Projects
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject ILogger<MyEditVideoProject> Logger
+@inject TodoX.Web.Services.Media.MediaDownloadService MediaDownloads
+
+<PageTitle>@(_detail?.Project.ProjectName ?? "Dự án EditVideo")</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" title="Jobs của tôi" OnClick="@(() => Navigation.NavigateTo("/jobs"))" />
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">@(_detail?.Project.ProjectName ?? "Dự án EditVideo")</MudText>
+            @if (_detail is not null)
+            {
+                <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+                    TodoX EditVideo · tạo @_detail.Project.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ·
+                    @_detail.Project.Videos video (@_detail.Project.SyncedVideos đã đồng bộ) · @_detail.Project.Points.ToString("#,0.##") điểm AI
+                </MudText>
+            }
+        </div>
+    </MudStack>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_detail is null)
+    {
+        <MudAlert Severity="Severity.Warning">Không tìm thấy dự án hoặc bạn không có quyền xem dự án này.</MudAlert>
+    }
+    else
+    {
+        @if (_detail.Videos.Any(v => v.SyncStatus != "synced"))
+        {
+            <MudAlert Severity="Severity.Info">
+                Có video chưa đồng bộ. Mở TodoX EditVideo trên máy đã làm video và bấm <b>Đồng bộ</b> để đưa video lên đây.
+            </MudAlert>
+        }
+
+        <MudGrid>
+            @if (_detail.Videos.Count == 0)
+            {
+                <MudItem xs="12">
+                    <MudPaper Class="todox-card pa-4"><MudText>Dự án chưa có video nào được xuất.</MudText></MudPaper>
+                </MudItem>
+            }
+            @foreach (var video in _detail.Videos)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudPaper Class="todox-card pa-3">
+                        <MudStack Spacing="2">
+                            @if (video.SyncStatus == "synced" && !string.IsNullOrWhiteSpace(video.VideoUrl))
+                            {
+                                <video src="@video.VideoUrl" controls playsinline preload="metadata" controlslist="nodownload"
+                                       style="width:100%;max-height:60vh;background:#000;border-radius:8px"></video>
+                            }
+                            else
+                            {
+                                <div style="aspect-ratio:9/16;max-height:40vh;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.06);border-radius:8px">
+                                    <MudStack AlignItems="AlignItems.Center" Spacing="1">
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Warning" />
+                                        <MudText Typo="Typo.caption">@(video.SyncStatus == "uploading" ? "Đang đồng bộ…" : "Chưa đồng bộ")</MudText>
+                                    </MudStack>
+                                </div>
+                            }
+                            <MudText Typo="Typo.subtitle1"><b>@video.Title</b></MudText>
+                            <MudText Typo="Typo.caption">
+                                @(video.RenderedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")
+                                @if (video.DurationSeconds is { } s) { <span> · @s.ToString("0") giây</span> }
+                                @if (!string.IsNullOrWhiteSpace(video.Aspect)) { <span> · @video.Aspect</span> }
+                                @if (!string.IsNullOrWhiteSpace(video.Skill)) { <span> · @video.Skill@(video.SkillVersion is { } sv ? $" v{sv}" : "")</span> }
+                            </MudText>
+                            @if (video.SyncStatus == "synced")
+                            {
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => DownloadAsync(video))">Tải video</MudButton>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+
+        @if (_detail.Tasks.Count > 0)
+        {
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Ảnh, video, nhạc AI của dự án</MudText>
+                <MudSimpleTable Dense="true" Class="todox-table">
+                    <thead><tr><th>Thời gian</th><th>Loại</th><th>Model</th><th>Trạng thái</th><th>Điểm</th></tr></thead>
+                    <tbody>
+                        @foreach (var t in _detail.Tasks)
+                        {
+                            <tr>
+                                <td>@t.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                                <td>@(t.Kind switch { "image" => "Ảnh", "video" => "Video", "music" => "Nhạc", _ => t.Kind })</td>
+                                <td>@t.Model</td>
+                                <td>@(t.Status switch { "succeeded" => "Xong", "failed" => "Lỗi", _ => "Đang chạy" })</td>
+                                <td>@(t.Charged ? t.Points.ToString("0.##") : "0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        }
+    }
+</MudStack>
+
+@code {
+    [Parameter] public Guid ProjectId { get; set; }
+
+    private EditVideoProjectDetail? _detail;
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loaded = false;
+        try
+        {
+            if (!AuthState.IsInitialized) await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+            _detail = await Projects.GetAsync(ProjectId, AuthState.CurrentUser);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "EditVideo project load failed {ProjectId}", ProjectId);
+            _detail = null;
+        }
+        finally { _loaded = true; }
+    }
+
+    // Videos are downloaded through TodoX (signed, short-lived ticket); their file link is never exposed.
+    private async Task DownloadAsync(EditVideoProjectVideoRow video)
+    {
+        try
+        {
+            await MediaDownloads.DownloadAsync(video.VideoUrl, $"{video.Title}.mp4");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
+}

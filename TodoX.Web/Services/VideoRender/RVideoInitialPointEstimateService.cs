@@ -26,7 +26,9 @@ public sealed record RVideoInitialPointEstimateRequest(
     Func<VideoProjectSceneDto, CancellationToken, Task<SceneImageVersionDto?>>? SelectedImageResolver,
     string ImageQuality,
     string VideoQuality,
-    string VoiceQuality);
+    string VoiceQuality,
+    TodoX.Web.Services.Pricing.ModelPriceQuery? VideoModel = null,
+    TodoX.Web.Services.Pricing.ModelPriceQuery? ImageModel = null);
 
 public sealed record RVideoInitialPointEstimate(
     Guid BillingOperationId,
@@ -149,7 +151,16 @@ public sealed class RVideoInitialPointEstimateService : IRVideoInitialPointEstim
             voiceCount,
             request.VoiceQuality,
             request.Settings is not null && RVideoRules.ResolveVoiceMode(request.Settings) == RVideoVoiceModes.Library)
-            .Validate();
+            .Validate() with
+            {
+                // Model price book: the scene video model (default: RVideo's first model, priced per second at the
+                // longest scene), the first image model and Vbee.
+                VideoModel = request.VideoModel ?? RVideoVideoModelPolicy.PriceQuery(
+                    RVideoVideoModelPolicy.GetInitial().Model, RVideoVideoModelPolicy.GetInitial().Mode, null,
+                    videoScenes.Length > 0 ? videoScenes.Max(s => s.DurationSeconds) : null),
+                ImageModel = request.ImageModel ?? RVideoPricingModels.InitialImage(),
+                VoiceModel = RVideoPricingModels.Voice
+            };
         var pricing = await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
         var available = request.CustomerId is Guid customerId
             ? await _wallets.GetBalanceAsync(customerId)

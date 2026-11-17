@@ -616,7 +616,9 @@
                 TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
                 0,
                 TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
-                false));
+                false,
+                TodoX.Web.Services.Timelapse.TimelapseJobService.PriceModels(_request.VideoMode, TimelapseRequestRules.RuntimeClipDurationSeconds).Video,
+                TodoX.Web.Services.Timelapse.TimelapseJobService.PriceModels(_request.VideoMode, TimelapseRequestRules.RuntimeClipDurationSeconds).Image));
 
             if (version == _priceLoadVersion)
             {

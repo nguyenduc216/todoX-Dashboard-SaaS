@@ -32,6 +32,8 @@ public sealed class EditVideoVoiceService
     private readonly EditVideoUsageService _usage;
     private readonly IConfiguration _configuration;
     private readonly ILogger<EditVideoVoiceService> _logger;
+    private readonly EditVideoConsentService? _consent;
+    private readonly TodoX.Web.Services.Pricing.ModelPriceService? _modelPrices;
 
     public EditVideoVoiceService(
         TodoXConnectionFactory factory,
@@ -43,8 +45,12 @@ public sealed class EditVideoVoiceService
         IVbeeRuntimeConfigProvider vbeeConfig,
         EditVideoUsageService usage,
         IConfiguration configuration,
-        ILogger<EditVideoVoiceService> logger)
+        ILogger<EditVideoVoiceService> logger,
+        EditVideoConsentService? consent = null,
+        TodoX.Web.Services.Pricing.ModelPriceService? modelPrices = null)
     {
+        _consent = consent;
+        _modelPrices = modelPrices;
         _factory = factory;
         _tenant = tenant;
         _catalog = catalog;
@@ -57,6 +63,9 @@ public sealed class EditVideoVoiceService
         _logger = logger;
     }
 
+    /// <summary>Vbee is priced by the model price book (fixed cost per voice × markup).</summary>
+    private static readonly TodoX.Web.Services.Pricing.ModelPriceQuery VbeePrice = new("vbee");
+
     public async Task<(IReadOnlyList<EditVideoVoice> Voices, decimal PointsPerJob, decimal Balance)> ListAsync(Guid customerId, CancellationToken ct = default)
     {
         var voices = (await _catalog.ListVoicesAsync(activeOnly: true, ct: ct))
@@ -64,12 +73,13 @@ public sealed class EditVideoVoiceService
             .OrderByDescending(v => v.IsDefault).ThenBy(v => v.SortOrder)
             .Select(v => new EditVideoVoice(v.Code, v.Name, v.Gender, v.LanguageCode, v.PreviewFileUrl, v.IsDefault))
             .ToList();
-        var rate = await _pricing.ResolveRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, ct);
+        var rate = await _pricing.ResolveModelRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, VbeePrice, ct);
         return (voices, rate.Rate, await _wallets.GetBalanceAsync(customerId));
     }
 
     public async Task<EditVideoResult<EditVideoVoiceJob>> SubmitAsync(
-        EditVideoLicenseRow license, EditVideoDeviceRow device, string? text, string? voiceCode, Guid? sessionId, CancellationToken ct = default)
+        EditVideoLicenseRow license, EditVideoDeviceRow device, string? text, string? voiceCode, Guid? sessionId, CancellationToken ct = default,
+        string? confirmQuoteId = null, string? consentMethod = null, string? consentUser = null)
     {
         text = text?.Trim();
         if (string.IsNullOrEmpty(text) || text.Length > MaxChars)
@@ -88,11 +98,28 @@ public sealed class EditVideoVoiceService
             return Fail("voice_not_found", "Không tìm thấy giọng đọc này. Dùng todox_voice_list để xem danh sách.");
         }
 
-        var rate = (await _pricing.ResolveRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, ct)).Rate;
+        var rate = (await _pricing.ResolveModelRateAsync(null, PointPricingResourceTypes.Voice, QualityTier, VbeePrice, ct)).Rate;
         var balance = await _wallets.GetBalanceAsync(license.CustomerId);
         if (balance < rate)
         {
-            return Fail("insufficient_points", $"Không đủ point để tạo giọng đọc (cần {rate:0}, còn {balance:0}). Nạp thêm point trên dashboard TodoX.");
+            return Fail("insufficient_points", $"Không đủ point để tạo giọng đọc (cần {rate:0.##}, còn {balance:0.##}). Nạp thêm point trên dashboard TodoX.");
+        }
+
+        // The person confirms this exact TodoX price in the app before the voice is made or charged.
+        EditVideoConsentTicket? consent = null;
+        if (_consent is not null)
+        {
+            var vndPerPoint = _modelPrices is null ? 1000m : (await _modelPrices.GetAsync(ct)).VndPerPoint;
+            var (ticket, ask) = await _consent.CheckAsync(license, device, "voice", "vbee", $"Giọng đọc Vbee \"{voice.Name}\" · {text.Length} ký tự",
+                EditVideoConsentService.Fingerprint("voice", voice.Code, text), rate, vndPerPoint, balance,
+                string.IsNullOrWhiteSpace(confirmQuoteId) ? null : confirmQuoteId.Trim(),
+                new EditVideoConsentInfo(string.IsNullOrWhiteSpace(consentMethod) ? null : consentMethod.Trim(), string.IsNullOrWhiteSpace(consentUser) ? null : consentUser.Trim(), null), ct);
+            if (ask is not null)
+            {
+                return EditVideoResult<EditVideoVoiceJob>.Fail(EditVideoConsentService.ConfirmRequired, EditVideoConsentService.Message(ask), ask);
+            }
+
+            consent = ticket;
         }
 
         VbeeOptions options;
@@ -116,6 +143,11 @@ public sealed class EditVideoVoiceService
                 VALUES (@jobId, @tenantId, @licenseId, @deviceId, @customerId, @sessionId, @voiceCode, @tier, @chars, @rate);
                 """,
                 new { jobId, tenantId = _tenant.TenantId, licenseId = license.Id, deviceId = device.Id, customerId = license.CustomerId, sessionId, voiceCode = voice.Code, tier = QualityTier, chars = text.Length, rate });
+        }
+
+        if (consent is not null)
+        {
+            await _consent!.LogConsentAsync(license, device, consent, "voice", jobId, ct);
         }
 
         var publicBase = (_configuration["TodoX:PublicBaseUrl"] ?? "https://dashboard.todox.vn").TrimEnd('/');
@@ -292,7 +324,7 @@ public sealed class EditVideoVoiceService
 
     private static EditVideoResult<EditVideoVoiceJob> Fail(string code, string message) => EditVideoResult<EditVideoVoiceJob>.Fail(code, message);
 
-    private static string? FindString(JsonNode? node, params string[] keys)
+    internal static string? FindString(JsonNode? node, params string[] keys)
     {
         switch (node)
         {

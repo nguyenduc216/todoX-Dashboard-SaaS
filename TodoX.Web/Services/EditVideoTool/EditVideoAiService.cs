@@ -5,6 +5,7 @@ using Dapper;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Data;
+using TodoX.Web.Services.Pricing;
 
 namespace TodoX.Web.Services.EditVideoTool;
 
@@ -26,6 +27,10 @@ public sealed class EditVideoAiCreateRequest
     public string? ClientKey { get; init; }
     /// <summary>The customer's project (folder name); the task goes into that project's own 79AI project.</summary>
     public string? Project { get; init; }
+    /// <summary>The quote the person agreed to in the app's confirmation window (see EditVideoConsentService).</summary>
+    public string? ConfirmQuoteId { get; init; }
+    public string? ConsentMethod { get; init; }
+    public string? ConsentUser { get; init; }
 }
 
 public sealed record EditVideoAiUploadRequest(string? FileName, string? Data, string? Project = null);
@@ -41,6 +46,10 @@ public sealed class EditVideoAiMusicRequest
     public string? Model { get; init; }
     public string? ClientKey { get; init; }
     public string? Project { get; init; }
+    /// <summary>The quote the person agreed to in the app's confirmation window (see EditVideoConsentService).</summary>
+    public string? ConfirmQuoteId { get; init; }
+    public string? ConsentMethod { get; init; }
+    public string? ConsentUser { get; init; }
 }
 
 public sealed record EditVideoAiTask(
@@ -71,8 +80,10 @@ public sealed class EditVideoAiService
 
     public EditVideoAiService(TodoXConnectionFactory factory, TenantContext tenant, IEditVideoGommoClient gommo, WalletService wallets,
         EditVideoUsageService usage, IMemoryCache cache, IOptionsMonitor<EditVideoAiOptions> options, IConfiguration configuration,
-        ILogger<EditVideoAiService> logger, EditVideoAiProjectService? projects = null, EditVideoAiSettingsService? settings = null)
+        ILogger<EditVideoAiService> logger, EditVideoAiProjectService? projects = null, EditVideoAiSettingsService? settings = null,
+        EditVideoConsentService? consent = null)
     {
+        _consent = consent;
         _projects = projects;
         _settings = settings;
         _factory = factory;
@@ -90,12 +101,20 @@ public sealed class EditVideoAiService
 
     private readonly EditVideoAiProjectService? _projects;
     private readonly EditVideoAiSettingsService? _settings;
+    private readonly EditVideoConsentService? _consent;
+
+    private static EditVideoConsentInfo ConsentInfo(string? method, string? user, string? quoteId) =>
+        new(string.IsNullOrWhiteSpace(method) ? (quoteId is null ? null : "app") : method.Trim()[..Math.Min(40, method.Trim().Length)],
+            string.IsNullOrWhiteSpace(user) ? null : user.Trim()[..Math.Min(80, user.Trim().Length)], null);
+
+    private static EditVideoResult<EditVideoAiTask> ConfirmFirst(EditVideoPriceQuote quote) =>
+        Fail(EditVideoConsentService.ConfirmRequired, EditVideoConsentService.Message(quote), quote);
 
     /// <summary>TodoX point prices; without the settings service (tests) the old credit conversion is used.</summary>
     private async Task<EditVideoAiPrices?> PricesAsync(CancellationToken ct) => _settings is null ? null : await _settings.PricesAsync(ct);
 
     private decimal? PriceOf(EditVideoAiPrices? prices, string kind, string model, EditVideoAiQuote quote) =>
-        prices is null ? ToPoints(quote.Credits) : prices.For(kind, model, quote.Selection.Duration);
+        prices is null ? ToPoints(quote.Credits) : prices.For(kind, model, quote.Selection.Duration, quote.Credits);
 
     private async Task<EditVideoResult<EditVideoAiTask>> PriceMissingAsync(EditVideoAiPrices prices, string kind, string model, CancellationToken ct)
     {
@@ -138,6 +157,9 @@ public sealed class EditVideoAiService
                 var catalog = await CatalogAsync(k, ct);
                 list.AddRange(EditVideoGommoJson.Models(catalog)
                     .Where(m => model is null || string.Equals(EditVideoGommoJson.Str(m, "model"), model.Trim(), StringComparison.OrdinalIgnoreCase))
+                    // The price book decides which models EditVideo offers and in which order.
+                    .Where(m => prices?.Book is not { } book || book.IsAllowed(k, EditVideoGommoJson.Str(m, "model"), ModelPriceEnvs.EditVideo))
+                    .OrderBy(m => prices?.Book?.Rank(k, EditVideoGommoJson.Str(m, "model")) ?? 0)
                     .Select(m => prices is null
                         ? EditVideoGommoJson.Shape(m, k, ToPoints, withPrices: model is not null)
                         : EditVideoGommoJson.Shape(m, k, prices, withPrices: model is not null)));
@@ -200,6 +222,11 @@ public sealed class EditVideoAiService
 
         var modelCode = EditVideoGommoJson.Str(model, "model")!;
         var prices = await PricesAsync(ct);
+        if (prices?.Book is { } allowedBook && !allowedBook.IsAllowed(kind, modelCode, ModelPriceEnvs.EditVideo))
+        {
+            return Fail("model_not_found", $"Model {kind} '{modelCode}' đang tắt trên TodoX EditVideo. Dùng todox_ai_models để xem danh sách.");
+        }
+
         if (PriceOf(prices, kind, modelCode, quote) is not { } points)
         {
             return await PriceMissingAsync(prices!, kind, modelCode, ct);
@@ -209,6 +236,27 @@ public sealed class EditVideoAiService
         if (available < points)
         {
             return Fail("insufficient_points", $"Không đủ point để tạo {KindLabel(kind)} AI (cần {points:0.#}, còn khả dụng {Math.Max(0, available):0.#}). Nạp thêm point trên dashboard TodoX.");
+        }
+
+        // The person confirms this exact TodoX price in the app before anything is made or charged.
+        EditVideoConsentTicket? consent = null;
+        if (_consent is not null)
+        {
+            var s = quote.Selection;
+            var summary = kind == "video"
+                ? $"Video AI {modelCode} · {s.Resolution ?? "mặc định"} · {s.Duration ?? "?"} giây · khung {s.Ratio ?? "mặc định"}"
+                : $"Ảnh AI {modelCode} · {s.Resolution ?? "mặc định"} · khung {s.Ratio ?? "mặc định"}";
+            var fingerprint = EditVideoConsentService.Fingerprint(kind, modelCode, s.Ratio, s.Resolution, s.Mode, s.Duration,
+                Clean(request.Prompt), request.Images, request.References, request.VideoUrls, Clean(request.Project));
+            var (ticket, ask) = await _consent.CheckAsync(license, device, kind, modelCode, summary, fingerprint, points,
+                prices?.Book?.VndPerPoint ?? prices?.VndPerPoint ?? 1000m, available, Clean(request.ConfirmQuoteId),
+                ConsentInfo(request.ConsentMethod, request.ConsentUser, Clean(request.ConfirmQuoteId)), ct);
+            if (ask is not null)
+            {
+                return ConfirmFirst(ask);
+            }
+
+            consent = ticket;
         }
 
         var taskId = Guid.NewGuid();
@@ -232,6 +280,11 @@ public sealed class EditVideoAiService
             }
         }
 
+        if (consent is not null)
+        {
+            await _consent!.LogConsentAsync(license, device, consent, kind, taskId, ct);
+        }
+
         // The chosen model first; when the provider rejects it before accepting the job, the next model of the
         // admin's fallback list that offers the same options at no higher price (same rule as the web's renders).
         var attempts = new List<(string Model, EditVideoAiQuote Quote, decimal Points)> { (modelCode, quote, points) };
@@ -246,7 +299,13 @@ public sealed class EditVideoAiService
             {
             }
 
-            foreach (var next in prices.Settings.FallbackFor(kind).Where(m => !string.Equals(m, modelCode, StringComparison.OrdinalIgnoreCase)))
+            var fallback = prices.Book is { } book
+                ? (prices.Settings.FallbackEnabled
+                    ? book.Ordered(kind, ModelPriceEnvs.EditVideo).Select(e => e.Model)
+                        .Where(m => ModelPriceBook.Group(m) == ModelPriceBook.Group(modelCode)).ToList()
+                    : [])
+                : prices.Settings.FallbackFor(kind);
+            foreach (var next in fallback.Where(m => !string.Equals(m, modelCode, StringComparison.OrdinalIgnoreCase)))
             {
                 if (EditVideoGommoJson.FindModel(catalog, next) is not { } alt)
                 {
@@ -254,7 +313,7 @@ public sealed class EditVideoAiService
                 }
 
                 var altQuote = EditVideoGommoJson.Quote(alt, quote.Selection);
-                if (altQuote.Ok && prices.For(kind, next, altQuote.Selection.Duration) is { } altPoints && altPoints <= points)
+                if (altQuote.Ok && prices.For(kind, next, altQuote.Selection.Duration, altQuote.Credits) is { } altPoints && altPoints <= points)
                 {
                     attempts.Add((EditVideoGommoJson.Str(alt, "model")!, altQuote, altPoints));
                 }
@@ -333,7 +392,23 @@ public sealed class EditVideoAiService
 
         var prices = await PricesAsync(ct);
         var modelCode = Clean(request.Model) ?? prices?.Settings.MusicModel ?? "suno-v5.5";
-        if (prices?.For("music", modelCode, null) is not { } points)
+        decimal? credits;
+        try
+        {
+            var found = EditVideoGommoJson.FindModel(await CatalogAsync("music", ct), modelCode);
+            if (found is null)
+            {
+                return Fail("model_not_found", $"Không có model nhạc '{modelCode}'. Dùng todox_ai_models type music để xem danh sách.");
+            }
+
+            credits = EditVideoGommoJson.Quote(found, new EditVideoAiSelection(null, null, null, null)).Credits;
+        }
+        catch (EditVideoGommoException ex)
+        {
+            return await ProviderFailureAsync(ex, ct);
+        }
+
+        if (prices?.For("music", modelCode, null, credits) is not { } points)
         {
             return prices is null ? Fail("price_not_configured", "TodoX chưa đặt giá điểm cho nhạc AI.") : await PriceMissingAsync(prices, "music", modelCode, ct);
         }
@@ -342,6 +417,21 @@ public sealed class EditVideoAiService
         if (available < points)
         {
             return Fail("insufficient_points", $"Không đủ point để tạo nhạc AI (cần {points:0.#}, còn khả dụng {Math.Max(0, available):0.#}). Nạp thêm point trên dashboard TodoX.");
+        }
+
+        EditVideoConsentTicket? consent = null;
+        if (_consent is not null)
+        {
+            var fingerprint = EditVideoConsentService.Fingerprint("music", modelCode, name, styles, Clean(request.Lyrics), Clean(request.Gender), Clean(request.Project));
+            var (ticket, ask) = await _consent.CheckAsync(license, device, "music", modelCode, $"Nhạc AI {modelCode} · bài \"{name}\" (2 bản)", fingerprint, points,
+                prices?.Book?.VndPerPoint ?? prices?.VndPerPoint ?? 1000m, available, Clean(request.ConfirmQuoteId),
+                ConsentInfo(request.ConsentMethod, request.ConsentUser, Clean(request.ConfirmQuoteId)), ct);
+            if (ask is not null)
+            {
+                return ConfirmFirst(ask);
+            }
+
+            consent = ticket;
         }
 
         var taskId = Guid.NewGuid();
@@ -364,6 +454,11 @@ public sealed class EditVideoAiService
             {
                 return await GetAsync(raced, license.Id, ct);
             }
+        }
+
+        if (consent is not null)
+        {
+            await _consent!.LogConsentAsync(license, device, consent, "music", taskId, ct);
         }
 
         try

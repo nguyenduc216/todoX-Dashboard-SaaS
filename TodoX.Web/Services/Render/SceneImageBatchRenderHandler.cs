@@ -81,6 +81,17 @@ public sealed record RVideoImageModelPolicyEntry(
     string Mode,
     string Resolution);
 
+/// <summary>Model price book queries for RVideo images and voices.</summary>
+public static class RVideoPricingModels
+{
+    public static readonly TodoX.Web.Services.Pricing.ModelPriceQuery Voice = new("vbee");
+
+    public static TodoX.Web.Services.Pricing.ModelPriceQuery InitialImage() => Image(RVideoImageModelPolicy.GetInitial());
+
+    public static TodoX.Web.Services.Pricing.ModelPriceQuery Image(RVideoImageModelPolicyEntry entry) =>
+        new(entry.Model, entry.Mode, entry.Resolution);
+}
+
 public static class RVideoImageModelPolicy
 {
     public static readonly IReadOnlyList<RVideoImageModelPolicyEntry> Models =

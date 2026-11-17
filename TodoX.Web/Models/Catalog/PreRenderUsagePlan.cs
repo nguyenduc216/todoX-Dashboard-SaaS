@@ -31,7 +31,12 @@ public sealed record PreRenderUsagePlan(
         return this;
     }
 
+    /// <summary>Models priced through the model price book (null = flat tier rate).</summary>
+    public TodoX.Web.Services.Pricing.ModelPriceQuery? VideoModel { get; init; }
+    public TodoX.Web.Services.Pricing.ModelPriceQuery? ImageModel { get; init; }
+    public TodoX.Web.Services.Pricing.ModelPriceQuery? VoiceModel { get; init; }
+
     public PointPricingEstimateRequest ToPricingRequest()
         => new(ServiceId, ImageCount, ImageQuality, VideoSeconds, VideoQuality,
-            VoiceCount, VoiceQuality, VoiceEnabled);
+            VoiceCount, VoiceQuality, VoiceEnabled, VideoModel, ImageModel, VoiceModel);
 }

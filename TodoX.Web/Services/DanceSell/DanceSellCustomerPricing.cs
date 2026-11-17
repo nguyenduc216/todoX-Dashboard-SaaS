@@ -49,19 +49,23 @@ public sealed class DanceSellCustomerPricing : IDanceSellCustomerPricing
                 qualityTier,
                 0,
                 ServiceSellPriceQualityTiers.Standard,
-                false), ct);
+                false,
+                VideoPrice(job, qualityTier, durationSeconds),
+                ReferenceImagePrice), ct);
         }
 
-        var videoRate = await _pointPricing.ResolveRateAsync(
+        var videoRate = await _pointPricing.ResolveModelRateAsync(
             service.Id,
             PointPricingResourceTypes.Video,
             qualityTier,
+            VideoPrice(job, qualityTier, durationSeconds),
             ct);
         var imageRate = imageCount > 0
-            ? await _pointPricing.ResolveRateAsync(
+            ? await _pointPricing.ResolveModelRateAsync(
                 service.Id,
                 PointPricingResourceTypes.Image,
                 qualityTier,
+                ReferenceImagePrice,
                 ct)
             : new PointPricingRate(
                 PointPricingResourceTypes.Image,
@@ -86,6 +90,15 @@ public sealed class DanceSellCustomerPricing : IDanceSellCustomerPricing
             0,
             voiceRate);
     }
+
+    /// <summary>Model price book: the job's motion model (Kling motion control, per second) in its mode.</summary>
+    internal static TodoX.Web.Services.Pricing.ModelPriceQuery VideoPrice(DanceSellJobDto job, string qualityTier, int durationSeconds)
+        => new(string.IsNullOrWhiteSpace(job.MotionProviderModel) ? DanceSellConstants.Model : job.MotionProviderModel.Trim(),
+            string.Equals(qualityTier, ServiceSellPriceQualityTiers.Premium, StringComparison.OrdinalIgnoreCase) ? "professional" : "standard",
+            null, durationSeconds > 0 ? durationSeconds : null);
+
+    /// <summary>The reference image RDance makes (Nano Banana 2 at 2K).</summary>
+    internal static readonly TodoX.Web.Services.Pricing.ModelPriceQuery ReferenceImagePrice = new(DanceSellConstants.Ai79ReferenceModel, "vip", "2k");
 
     private async Task<CoreServiceView?> ResolveServiceAsync(DanceSellJobDto job, CancellationToken ct)
     {
