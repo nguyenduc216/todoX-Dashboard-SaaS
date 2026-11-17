@@ -15,10 +15,11 @@ public sealed class StudioCustomerStaffVideoPlanTests
     [InlineData("vip", "vip", "VIP")]
     [InlineData("VIP", "vip", "VIP")]
     [InlineData("bam_duoi", "bam_duoi", "Bám đuổi")]
+    [InlineData("tiem_nang", "tiem_nang", "Tiềm năng")]
     [InlineData("thong_thuong", "thong_thuong", "Thông thường")]
     [InlineData(null, "thong_thuong", "Thông thường")]
     [InlineData("bogus", "thong_thuong", "Thông thường")]
-    public void Customer_segment_has_three_types_and_defaults_to_regular(string? raw, string normalized, string label)
+    public void Customer_segment_has_four_types_and_defaults_to_regular(string? raw, string normalized, string label)
     {
         Assert.Equal(normalized, CustomerSegments.Normalize(raw));
         Assert.Equal(label, CustomerSegments.Label(raw));

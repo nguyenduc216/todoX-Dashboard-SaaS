@@ -185,6 +185,12 @@ else
           <div class="rv2-pv-used-model">Video hiện tại tạo bằng: <b>@usedLabel</b>@(HasExplicitModel(a) ? " · lượt mới dùng model đang chọn ở trên" : null)</div>
         }
 
+        @* Image audit: which model is making the image and for how long, or why the last attempt failed. *@
+        @if(SceneImageAuditText.Describe(_imageAudits.GetValueOrDefault(a.Id), DateTime.UtcNow) is { } imageAudit)
+        {
+          <div class="rv2-pv-used-model rv2-pv-image-audit" data-tone="@imageAudit.Tone.ToString().ToLowerInvariant()"
+               style="@AuditStyle(imageAudit.Tone)">@imageAudit.Text</div>
+        }
         @if(!HasSceneImage(a) && !VideoInFlight(a))
         {
           <div class="rv2-pv-used-model">Scene chưa có ảnh: bấm "Tạo ảnh" trước, video được tạo từ ảnh của scene.</div>
@@ -222,6 +228,13 @@ readonly HashSet<long> _showImage = new();
 private readonly SemaphoreSlim _gate = new(1,1);
 readonly HashSet<long> _rerenderingImage = new();
 readonly HashSet<long> _activeImageScenes = new();
+readonly Dictionary<long, SceneImageAudit> _imageAudits = new();
+static string AuditStyle(SceneImageAuditText.Tone tone) => tone switch
+{
+  SceneImageAuditText.Tone.Error => "color:var(--mud-palette-error)",
+  SceneImageAuditText.Tone.Warning => "color:var(--mud-palette-warning)",
+  _ => string.Empty
+};
 // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-SCENE07-UI-001.
 // Poll persisted operation state through the existing shell reload; never enqueue from a timer.
 readonly CancellationTokenSource _pollCancellation = new();
@@ -401,6 +414,14 @@ protected override async Task OnParametersSetAsync()
     foreach(var id in ids) { if(active.Contains(id)) _activeImageScenes.Add(id); else _activeImageScenes.Remove(id); }
   }
   catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_ACTIVE_IMAGE_STATE_UNAVAILABLE projectId={ProjectId}", JobView.Project.Id); }
+  try
+  {
+    var audits = await SceneVersions.ListLatestImageAuditsAsync(ids);
+    if(revision != _videoStateRevision) return;
+    _imageAudits.Clear();
+    foreach(var pair in audits) _imageAudits[pair.Key] = pair.Value;
+  }
+  catch(Exception ex) { Logger.LogWarning(ex, "RVIDEO_V2_IMAGE_AUDIT_UNAVAILABLE projectId={ProjectId}", JobView.Project.Id); }
   var targets = scenes
     .Where(s=>!pollOnly || !_videoStates.ContainsKey(s.Id) || IsSceneBusy(s))
     .OrderBy(s=>s.Id==SelectedSceneId ? 0 : 1).ThenBy(s=>s.SceneIndex).ToArray();

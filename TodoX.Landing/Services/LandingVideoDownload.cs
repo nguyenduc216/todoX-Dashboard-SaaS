@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 
 namespace TodoX.Landing.Services;
@@ -10,6 +12,9 @@ namespace TodoX.Landing.Services;
 public static class LandingVideoDownload
 {
     public const string RouteSuffix = "/tai-xuong";
+    public const string TokenQuery = "t";
+    private const string TokenPurpose = "TodoX.Landing.VideoDownload.v1";
+    public static readonly TimeSpan TokenLifetime = TimeSpan.FromHours(12);
 
     private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase) { ".mp4", ".webm" };
 
@@ -42,9 +47,34 @@ public static class LandingVideoDownload
                && string.Equals(referer.Host, request.Host.Host, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static IResult Serve(HttpContext http, string? videoUrl, string slug, SharedMediaOptions media, string pagePath)
+    /// <summary>
+    /// Signed, time-limited token put on the page's "Tải xuống" link. iPhone hands the download to its media player,
+    /// whose (range) requests carry neither Sec-Fetch-Site nor Referer, so the own-page check alone sent it the HTML page
+    /// and Safari / Zalo / Facebook showed a broken video. The token is bound to the slug and expires.
+    /// </summary>
+    public static string CreateToken(IDataProtectionProvider protection, string slug) =>
+        protection.CreateProtector(TokenPurpose).ToTimeLimitedDataProtector().Protect(slug, TokenLifetime);
+
+    public static bool IsValidToken(IDataProtectionProvider protection, string? token, string slug)
     {
-        if (!IsFromOwnPage(http.Request)) return Results.Redirect(pagePath);
+        if (string.IsNullOrWhiteSpace(token)) return false;
+        try
+        {
+            var value = protection.CreateProtector(TokenPurpose).ToTimeLimitedDataProtector().Unprotect(token, out _);
+            return string.Equals(value, slug, StringComparison.Ordinal);
+        }
+        catch (CryptographicException) { return false; }
+    }
+
+    public static string DownloadPath(string sharePath, string? token) =>
+        string.IsNullOrEmpty(token) ? sharePath + RouteSuffix : $"{sharePath}{RouteSuffix}?{TokenQuery}={Uri.EscapeDataString(token)}";
+
+    public static IResult Serve(HttpContext http, string? videoUrl, string slug, SharedMediaOptions media, string pagePath,
+        IDataProtectionProvider? protection = null)
+    {
+        var allowed = IsFromOwnPage(http.Request)
+                      || (protection is not null && IsValidToken(protection, http.Request.Query[TokenQuery].ToString(), slug));
+        if (!allowed) return Results.Redirect(pagePath);
         var file = ResolveFile(videoUrl, media.StorageRoot, media.RequestPath);
         if (file is null) return Results.Redirect(pagePath);
         var ext = Path.GetExtension(file).ToLowerInvariant();

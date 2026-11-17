@@ -302,6 +302,7 @@ builder.Services.AddHostedService<TodoX.Web.Services.Render.SceneImageJobWorker>
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.SceneVideoReconciliationWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.RVideoEventRetentionWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.SceneImageEnqueueReconciliationWorker>();
+builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.SceneImageStuckSweeper>();
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.RVideoLifecycleWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseImageWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseVideoWorker>();

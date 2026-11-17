@@ -3,17 +3,19 @@ namespace TodoX.Web.Services.Studio;
 /// <summary>Loại khách hàng (studio.customer_profiles.segment).</summary>
 public static class CustomerSegments
 {
+    public const string Potential = "tiem_nang";
     public const string Chasing = "bam_duoi";
     public const string Regular = "thong_thuong";
     public const string Vip = "vip";
 
-    public static readonly IReadOnlyList<string> All = [Chasing, Regular, Vip];
+    public static readonly IReadOnlyList<string> All = [Potential, Chasing, Regular, Vip];
 
     public static string Normalize(string? segment)
         => All.FirstOrDefault(x => string.Equals(x, segment?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? Regular;
 
     public static string Label(string? segment) => Normalize(segment) switch
     {
+        Potential => "Tiềm năng",
         Chasing => "Bám đuổi",
         Vip => "VIP",
         _ => "Thông thường"

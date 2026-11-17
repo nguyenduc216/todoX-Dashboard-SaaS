@@ -169,9 +169,19 @@ public sealed class MediaAccessTests
         oldBrowser.Request.Headers.Referer = "https://todox.vn/mau-video/phong-van-karaoke-quinter";
         Assert.True(LandingVideoDownload.IsFromOwnPage(oldBrowser.Request));
 
+        // iPhone's media player sends neither Sec-Fetch-Site nor Referer: the signed link token lets it through.
+        var protection = new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider();
+        var token = LandingVideoDownload.CreateToken(protection, "ho-boi-vo-cuc-quinter-central");
+        Assert.True(LandingVideoDownload.IsValidToken(protection, token, "ho-boi-vo-cuc-quinter-central"));
+        Assert.False(LandingVideoDownload.IsValidToken(protection, token, "phong-van-karaoke-quinter"));
+        Assert.False(LandingVideoDownload.IsValidToken(protection, "bogus", "ho-boi-vo-cuc-quinter-central"));
+        Assert.False(LandingVideoDownload.IsValidToken(protection, null, "ho-boi-vo-cuc-quinter-central"));
+        Assert.Equal("/mau-video/x/tai-xuong?t=a%2Bb", LandingVideoDownload.DownloadPath("/mau-video/x", "a+b"));
+        Assert.Equal("/mau-video/x/tai-xuong", LandingVideoDownload.DownloadPath("/mau-video/x", null));
+
         var repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         var page = File.ReadAllText(Path.Combine(repo, "TodoX.Landing", "Services", "VideoSharePage.cs"));
-        Assert.Contains("href=\"{{E(m.SharePath + LandingVideoDownload.RouteSuffix)}}\"", page);
+        Assert.Contains("href=\"{{E(LandingVideoDownload.DownloadPath(m.SharePath, downloadToken))}}\"", page);
         Assert.Contains("<span>Tải xuống</span>", page);
         var program = File.ReadAllText(Path.Combine(repo, "TodoX.Landing", "Program.cs"));
         Assert.Contains("app.MapGet(\"/mau-video/{slug}\" + LandingVideoDownload.RouteSuffix", program);

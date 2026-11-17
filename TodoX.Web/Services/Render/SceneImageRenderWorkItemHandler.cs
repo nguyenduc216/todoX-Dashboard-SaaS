@@ -12,6 +12,10 @@ namespace TodoX.Web.Services.Render;
 public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
 {
     public const string JobTypeName = "render_scene_image";
+    public const string ProviderTimeoutCode = "SCENE_IMAGE_PROVIDER_TIMEOUT";
+    /// <summary>79AI cancels a task it could not start after ~20 min of queueing; waiting longer than this is pointless.</summary>
+    public const int DefaultPollTimeoutMinutes = 60;
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly VideoRenderRepository _repo;
     private readonly ISceneImageRenderService _images;
@@ -23,6 +27,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly ILogger<SceneImageRenderWorkItemHandler> _logger;
+    private readonly TimeSpan _pollTimeout;
 
     public SceneImageRenderWorkItemHandler(
         VideoRenderRepository repo,
@@ -34,8 +39,11 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         WalletService wallets,
         TodoXConnectionFactory factory,
         TenantContext tenant,
-        ILogger<SceneImageRenderWorkItemHandler> logger)
+        ILogger<SceneImageRenderWorkItemHandler> logger,
+        IConfiguration? configuration = null)
     {
+        _pollTimeout = TimeSpan.FromMinutes(Math.Clamp(
+            configuration?.GetValue("RenderQueue:SceneImagePollTimeoutMinutes", DefaultPollTimeoutMinutes) ?? DefaultPollTimeoutMinutes, 5, 24 * 60));
         _repo = repo;
         _images = images;
         _versions = versions;
@@ -112,25 +120,14 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 await _versions.MarkSceneImageVersionSubmittedAsync(version.Id, outcome.ProviderCode,
                     outcome.ModelName, outcome.ProviderCapabilityId, outcome.ProviderTaskId!, ct);
                 await _versions.MarkSceneImagePendingReconciliationAsync(version.Id, "provider_pending", outcome.Error, ct);
-                await _jobs.ScheduleRetryAsync(job.Id, TimeSpan.FromSeconds(10), "SCENE_IMAGE_POLL_SCHEDULED",
-                    "79AI image task remains pending; the same provider task will be polled later.", ct);
-                throw new RenderJobDeferredException("79AI image task remains pending; retry scheduled.");
+                await KeepPollingOrGiveUpAsync(job, input, scene, version.Id, outcome.ProviderTaskId!, ct);
+                return;
             }
 
             if (!outcome.Success)
             {
-                await _versions.FailImageVersionAsync(version.Id, "provider_error", outcome.Error, ct);
-                var nextModel = RVideoImageModelPolicy.GetNext(input.ModelAttemptIndex);
-                if (nextModel is not null)
-                {
-                    await EnqueueFallbackAsync(job, input, scene, nextModel, ct);
-                    return;
-                }
-
-                await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: outcome.Error,
-                    title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
-                    videoPrompt: scene.VideoPrompt, ct: ct);
-                throw new RenderJobTerminalFailureException(outcome.Error ?? "Scene image render failed.");
+                await FailAndFallbackAsync(job, input, scene, version.Id, "provider_error", outcome.Error, ct);
+                return;
             }
 
             var chargedPoints = 0m;
@@ -208,10 +205,66 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         {
             await _versions.MarkSceneImagePendingReconciliationAsync(version.Id, "SCENE_IMAGE_POLL_TRANSIENT",
                 ex.Message, CancellationToken.None);
-            await _jobs.ScheduleRetryAsync(job.Id, TimeSpan.FromSeconds(30), "SCENE_IMAGE_POLL_TRANSIENT",
-                "Temporary 79AI poll failure; the same task ID will be retried.", CancellationToken.None);
-            throw new RenderJobDeferredException("Temporary 79AI poll failure; retry scheduled.");
+            await KeepPollingOrGiveUpAsync(job, input, scene, version.Id, taskId ?? "?", CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// A pending 79AI task is polled again without using the job's retry budget (each poll used to cost one
+    /// attempt, so after ~100 polls the job was left "rendering" for good and the scene showed "Đang tạo ảnh"
+    /// forever). Past the poll timeout the version fails and the next image model takes over.
+    /// </summary>
+    private async Task KeepPollingOrGiveUpAsync(RenderJobDto job, SceneImageRenderWorkItemInput input,
+        VideoProjectSceneDto scene, Guid versionId, string providerTaskId, CancellationToken ct)
+    {
+        var waited = PollElapsed(job.InputJson, DateTimeOffset.UtcNow);
+        if (waited < _pollTimeout
+            && await _jobs.ScheduleProviderPollAsync(job.Id, PollInterval, "SCENE_IMAGE_POLL_SCHEDULED",
+                "79AI image task remains pending; the same provider task will be polled later.", ct,
+                enforceReconciliationLimit: false, enforceProviderPollTimeout: false))
+        {
+            throw new RenderJobDeferredException("79AI image task remains pending; poll scheduled.");
+        }
+
+        var minutes = (int)Math.Round(Math.Max(waited.TotalMinutes, _pollTimeout.TotalMinutes));
+        _logger.LogWarning("SCENE_IMAGE_PROVIDER_TIMEOUT jobId={JobId} sceneId={SceneId} imageVersionId={ImageVersionId} providerTaskId={ProviderTaskId} waitedMinutes={Minutes}",
+            job.Id, input.SceneId, versionId, providerTaskId, minutes);
+        await FailAndFallbackAsync(job, input, scene, versionId, ProviderTimeoutCode,
+            $"79AI không trả ảnh sau {minutes} phút (task {providerTaskId}).", ct);
+    }
+
+    /// <summary>How long this job has been polling its provider task (zero before the first scheduled poll).</summary>
+    internal static TimeSpan PollElapsed(string? inputJson, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(inputJson)) return TimeSpan.Zero;
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("providerPollStartedAt", out var started)
+                && started.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(started.GetString(), out var at))
+                return now - at;
+        }
+        catch (JsonException) { }
+        return TimeSpan.Zero;
+    }
+
+    private async Task FailAndFallbackAsync(RenderJobDto job, SceneImageRenderWorkItemInput input,
+        VideoProjectSceneDto scene, Guid versionId, string errorCode, string? error, CancellationToken ct)
+    {
+        await _versions.FailImageVersionAsync(versionId, errorCode, error, ct);
+        var nextModel = RVideoImageModelPolicy.GetNext(input.ModelAttemptIndex);
+        if (nextModel is not null)
+        {
+            await EnqueueFallbackAsync(job, input, scene, nextModel, ct);
+            return;
+        }
+
+        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: error,
+            title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
+            videoPrompt: scene.VideoPrompt, ct: ct);
+        throw new RenderJobTerminalFailureException(error ?? "Scene image render failed.");
     }
 
     private async Task<Guid?> ResolvePointServiceIdAsync(long projectId, CancellationToken ct)

@@ -91,7 +91,7 @@ public static class VideoSharePage
             .ToList()
     };
 
-    public static string Render(Model m, string baseUrl)
+    public static string Render(Model m, string baseUrl, string? downloadToken = null)
     {
         var pageTitle = $"{m.Title} | Video mẫu TodoX";
         var description = Truncate(FirstNonEmpty(m.Description, m.FallbackDescription));
@@ -186,7 +186,7 @@ public static class VideoSharePage
         html.Append($$"""
                     <div class="vp-actions">
                       <a class="vp-btn vp-btn--primary" href="/?utm_source=video-share&amp;utm_medium=landing&amp;utm_content={{Uri.EscapeDataString(m.Slug)}}#contact">Tư vấn giải pháp này <i class="fa-solid fa-arrow-right"></i></a>
-                      <a class="vp-btn" href="{{E(m.SharePath + LandingVideoDownload.RouteSuffix)}}" rel="nofollow" download><i class="fa-solid fa-download"></i> <span>Tải xuống</span></a>
+                      <a class="vp-btn" href="{{E(LandingVideoDownload.DownloadPath(m.SharePath, downloadToken))}}" rel="nofollow" download><i class="fa-solid fa-download"></i> <span>Tải xuống</span></a>
                       <button type="button" class="vp-btn" data-share-url="{{E(canonical)}}" data-share-title="{{E(m.Title)}}"><i class="fa-solid fa-share-nodes"></i> <span>Chia sẻ</span></button>
                       <a class="vp-btn vp-btn--icon" href="https://www.facebook.com/sharer/sharer.php?u={{Uri.EscapeDataString(canonical)}}" target="_blank" rel="noopener" aria-label="Chia sẻ lên Facebook"><i class="fa-brands fa-facebook-f"></i></a>
                     </div>
