@@ -137,6 +137,10 @@ public sealed record FinalVideoVersionCompleteRequest(
     decimal? DurationSeconds,
     string? MimeType);
 
+/// <summary>The latest image attempt of a scene, for the status line under the scene.</summary>
+public sealed record SceneImageAudit(long SceneId, string Status, string? ErrorCode, string? ErrorMessage,
+    string? Model, string? ProviderTaskId, DateTime CreatedAt, DateTime UpdatedAt);
+
 public sealed class SceneImageVersionDto
 {
     public Guid Id { get; set; }
@@ -406,6 +410,9 @@ public interface ISceneMediaVersioningService
     Task<bool> HasActiveImageVersionAsync(long sceneId, CancellationToken ct = default);
     /// <summary>Scenes of one job that currently have an image being generated, in a single query.</summary>
     Task<IReadOnlyCollection<long>> ListActiveImageSceneIdsAsync(IReadOnlyCollection<long> sceneIds, CancellationToken ct = default);
+    /// <summary>Latest image attempt of each scene (status, model, error), shown under the scene as the image audit.</summary>
+    Task<IReadOnlyDictionary<long, SceneImageAudit>> ListLatestImageAuditsAsync(IReadOnlyCollection<long> sceneIds, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyDictionary<long, SceneImageAudit>>(new Dictionary<long, SceneImageAudit>());
     Task<Guid?> FindImageRenderJobAsync(Guid versionId, CancellationToken ct = default);
     Task<bool> TryActivateImageRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default);
     Task MarkImageEnqueueUnknownAsync(Guid versionId, CancellationToken ct = default);
@@ -1083,6 +1090,25 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """,
             new { sceneIds = sceneIds.ToArray(), tenant = _tenant.TenantId });
         return rows.ToArray();
+    }
+
+    public async Task<IReadOnlyDictionary<long, SceneImageAudit>> ListLatestImageAuditsAsync(IReadOnlyCollection<long> sceneIds, CancellationToken ct = default)
+    {
+        if (sceneIds.Count == 0) return new Dictionary<long, SceneImageAudit>();
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<SceneImageAudit>(
+            """
+            SELECT DISTINCT ON (scene_id)
+                   scene_id AS SceneId, status AS Status, error_code AS ErrorCode, error_message AS ErrorMessage,
+                   COALESCE(actual_model, requested_model) AS Model, provider_task_id AS ProviderTaskId,
+                   created_at AS CreatedAt, updated_at AS UpdatedAt
+              FROM video_render.scene_image_versions
+             WHERE tenant_id=@tenant AND scene_id = ANY(@sceneIds)
+             ORDER BY scene_id, created_at DESC;
+            """,
+            new { sceneIds = sceneIds.ToArray(), tenant = _tenant.TenantId });
+        return rows.ToDictionary(x => x.SceneId);
     }
 
     // RVID-UI-V2-SCENE-RERENDER-HISTORY / TODOX-20261014-RVIDEO-RERENDER-HARDENING-001:
