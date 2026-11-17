@@ -55,7 +55,8 @@ public sealed class TodoXServerClient
             var answer = Consent is null ? ConsentAnswer.Unavailable : await Consent.AskAsync(quote, ct);
             if (answer != ConsentAnswer.Accepted)
             {
-                var price = $"{quote.Points:0.##} điểm TodoX (≈ {quote.Vnd:#,0}đ) cho: {quote.Summary}";
+                // The assistant is told what happened, never the price (that is only for the person, in the window).
+                var price = "cho: " + quote.Summary;
                 return ServerResult<JsonElement>.Fail(PriceDeclined, answer switch
                 {
                     ConsentAnswer.Declined => $"Người dùng bấm Hủy ở cửa sổ xác nhận giá {price}. Chưa tạo gì, không trừ điểm. Không gọi lại trừ khi người dùng yêu cầu.",

@@ -24,15 +24,23 @@ public static class ServerGuide
         card), todox_audio (music, voiceover, clip sound), todox_look (style, brand color) -> todox_export.
         todox_timeline shows the numbered scenes; edits are remembered, so later changes apply to the latest one.
         Footage: todox_project_folder / todox_projects / todox_probe. Voice: todox_voice_list, todox_voice_tts.
-        AI images/videos (cost points): todox_ai_models first, then todox_image_create / todox_video_create;
-        never guess ratio, resolution, mode or duration - use the model's listed values the user confirmed, and
-        tell the user the point price before creating. Results are saved on this computer (pass project to save
+        AI images/videos (paid): todox_ai_models first, then todox_image_create / todox_video_create;
+        never guess ratio, resolution, mode or duration - use the model's listed values the user confirmed. Results are saved on this computer (pass project to save
         into that project's folder); a video still running returns a task to check with todox_video_status
         (images: todox_image_status). todox_ai_tasks lists recent tasks. Local photos can be used as inputs.
-        AI music (Suno, costs points): todox_music_create (title, style, optional lyrics), saved into the project's
+        AI music (Suno, paid): todox_music_create (title, style, optional lyrics), saved into the project's
         03-am-thanh; todox_music_status for one still running. VFX on a clip: a video model with the edit ability
-        and the clip as source video. Every price is TodoX's point price; before anything paid
-        (image, video, music, voice) TodoX shows it in a confirmation window the person must accept - refused = nothing made.
+        and the clip as source video.
+
+        PAID STEPS (AI image, AI video, AI music, TodoX voice/voiceover): you do not know any price or the balance and
+        must never state, estimate or ask the user to agree to a number of points in chat. Before each paid step:
+        1) tell the user exactly what will be made (model, options, length, voice) and that it is paid;
+        2) wait for the user to say go;
+        3) call the tool - TodoX EditVideo then shows its confirmation window with the exact price, and only the
+           person's click on "Đồng ý trừ điểm" there lets it run. Say: "TodoX sẽ hiện cửa sổ báo giá, anh/chị xem giá
+           và bấm Đồng ý trừ điểm nếu đồng ý." Never treat the chat answer as the price agreement.
+        If the window is refused, unanswered or cannot open, nothing was made or charged: report it and do not retry
+        unless the user asks. Prices and the balance are shown only in that window and on the TodoX dashboard.
         TodoX skills (todox-...): start them with todox_skill_start and follow the steps it returns.
         """;
 }

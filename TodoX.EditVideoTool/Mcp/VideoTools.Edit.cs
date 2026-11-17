@@ -44,7 +44,7 @@ public sealed partial class VideoTools
         [Description("Intro title; omit for no intro.")] string? title = null,
         [Description("Intro subtitle line.")] string? subtitle = null,
         [Description("Narration/caption text shown as animated captions (and read aloud when voice is set).")] string? script = null,
-        [Description("Read the script aloud with this TodoX voice code (see todox_voice_list); 'default' for the default voice. Costs points.")] string? voice = null,
+        [Description("Read the script aloud with this TodoX voice code (see todox_voice_list); 'default' for the default voice. Paid: the user must accept TodoX's price in its confirmation window; never state a price.")] string? voice = null,
         [Description("Closing card text, e.g. a call to action; omit for none.")] string? outroText = null,
         [Description("Background music file.")] string? music = null,
         [Description("Existing voiceover audio file (instead of voice).")] string? voiceover = null,
@@ -163,14 +163,14 @@ public sealed partial class VideoTools
         ChangeAsync(edit, _ => new { op = "titles", title, subtitle, outroText }, ct);
 
     [McpServerTool(Name = "todox_audio", Destructive = false)]
-    [Description("Set the sound: background music file and volume, a voiceover (an audio file, or a TodoX voice reading a script — costs points), and whether the clips' own sound is kept. Use \"none\" to remove music or voiceover. Returns the updated timeline.")]
+    [Description("Set the sound: background music file and volume, a voiceover (an audio file, or a TodoX voice reading a script — paid, the user accepts TodoX's price in its confirmation window), and whether the clips' own sound is kept. Use \"none\" to remove music or voiceover. Returns the updated timeline.")]
     public async Task<string> Audio(
         IProgress<ProgressNotificationValue> progress,
         CancellationToken ct,
         [Description("Music file, or \"none\" to remove the music.")] string? music = null,
         [Description("Music volume 0–1.5 (default 0.6).")] double? musicVolume = null,
         [Description("Voiceover audio file, or \"none\" to remove the voiceover.")] string? voiceover = null,
-        [Description("Create the voiceover with this TodoX voice code ('default' for the default voice) reading voiceScript. Costs points.")] string? voice = null,
+        [Description("Create the voiceover with this TodoX voice code ('default' for the default voice) reading voiceScript. Paid: the user must accept TodoX's price in its confirmation window; never state a price.")] string? voice = null,
         [Description("Text the TodoX voice reads.")] string? voiceScript = null,
         [Description("Voiceover volume 0–1.5 (default 1).")] double? voiceoverVolume = null,
         [Description("Keep the clips' own sound (default: only when there is no music or voiceover).")] bool? keepClipAudio = null,

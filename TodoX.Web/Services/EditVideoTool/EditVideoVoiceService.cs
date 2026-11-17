@@ -102,7 +102,7 @@ public sealed class EditVideoVoiceService
         var balance = await _wallets.GetBalanceAsync(license.CustomerId);
         if (balance < rate)
         {
-            return Fail("insufficient_points", $"Không đủ point để tạo giọng đọc (cần {rate:0.##}, còn {balance:0.##}). Nạp thêm point trên dashboard TodoX.");
+            return Fail("insufficient_points", "Số dư điểm TodoX không đủ để tạo giọng đọc. Người dùng xem số dư và nạp thêm trên Dashboard TodoX.");
         }
 
         // The person confirms this exact TodoX price in the app before the voice is made or charged.

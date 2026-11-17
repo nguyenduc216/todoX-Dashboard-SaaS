@@ -45,8 +45,10 @@ else
                 Mỗi lệnh tốn điểm (video, ảnh, nhạc, giọng đọc) đều được TodoX báo giá trước; TodoX EditVideo từ bản 1.1.3 hiện cửa sổ
                 "Đồng ý trừ điểm" cho người dùng bấm — trợ lý AI không tự đồng ý được. Mọi lần báo giá và đồng ý được ghi log theo license.
             </MudText>
-            <MudSwitch T="bool" @bind-Value="_requireConsent" Color="Color.Warning"
-                       Label="Bắt buộc cả với bản EditVideo cũ (trước 1.1.3): bản cũ phải cập nhật mới tạo được nội dung tốn điểm" />
+            <MudAlert Severity="Severity.Info" Dense="true">
+                Luôn bắt buộc với mọi bản EditVideo: bản chưa có cửa sổ xác nhận phải cập nhật mới tạo được nội dung tốn điểm.
+                Trợ lý AI (Claude) không được xem giá hay số dư — giá chỉ hiện trong cửa sổ xác nhận.
+            </MudAlert>
         </MudPaper>
 
         <MudPaper Class="todox-card pa-4">

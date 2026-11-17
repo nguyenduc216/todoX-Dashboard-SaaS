@@ -28,8 +28,8 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 | What is said in a clip | `todox_transcribe` |
 | Make a file widely playable | `todox_convert` |
 | Public link for a local file (kept 7 days in the customer's TodoX storage) | `todox_upload` |
-| AI image / AI video / VFX on a clip (costs points) | `todox_ai_models`, `todox_image_create`, `todox_video_create` |
-| AI music, Suno (costs points) | `todox_music_create` |
+| AI image / AI video / VFX on a clip (paid) | `todox_ai_models`, `todox_image_create`, `todox_video_create` |
+| AI music, Suno (paid) | `todox_music_create` |
 | Check / fetch an AI result, recent AI tasks | `todox_image_status`, `todox_video_status`, `todox_music_status`, `todox_ai_tasks` |
 
 1. `todox_status` once if a tool reports a license or component problem; relay its message.
@@ -53,8 +53,8 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 6. Give the user the output path and length. For another format, start again with a different `aspect`.
 7. AI images and videos (e.g. a missing shot, an intro scene, a product photo): call `todox_ai_models` first
    and use only option values listed for the chosen model (ratio, resolution, mode, duration) that the user
-   confirmed — never guess them. Tell the user the point price and get a yes before `todox_image_create` /
-   `todox_video_create`. Always pass `project`: files on this computer (photos, and clips as source videos) are
+   confirmed — never guess them. Tell the user what will be made and get a go before `todox_image_create` /
+   `todox_video_create` (see "Paid steps" below). Always pass `project`: files on this computer (photos, and clips as source videos) are
    then sent through the customer's TodoX storage automatically, the task goes into that project's own 79AI
    project, and the result is saved into the project's `06-ai` folder, ready for
    `todox_probe` and the edit. A video that is not ready yet returns a `task`: check it with
@@ -62,12 +62,17 @@ write code to process media, even if they are installed — if a `todox_*` tool 
    required, ask the user to pick from the values it lists.
 8. Music: use the user's file from `03-am-thanh` when there is one. Otherwise offer AI music:
    `todox_music_create` with a title, a style (genre, mood, instruments, BPM) and lyrics only for a song;
-   tell the user the point price from `todox_ai_models` (type music) first. The songs land in `03-am-thanh`;
+   it is paid (see "Paid steps" below). The songs land in `03-am-thanh`;
    let the user pick one, then pass it as the music of the edit.
 9. VFX (an effect on an existing clip: weather, light, magic, transform): `todox_ai_models` type video, pick a
-   model with the edit ability, pass the clip as `videos` with the effect as the prompt, and confirm the price.
-   Points always follow TodoX's price list; if a tool says TodoX has no price yet, tell the user it is not
-   available yet instead of retrying.
+   model with the edit ability, pass the clip as `videos` with the effect as the prompt, paid (see "Paid steps").
+   If a model shows available=false, tell the user it is not available yet instead of retrying.
+
+Paid steps (AI image, AI video, AI music, TodoX voice): you never see a price or the balance. Never state, estimate
+or ask the user to agree to a number of points in chat. Say what will be made, wait for the user's go, then call
+the tool: TodoX EditVideo shows its own confirmation window with the exact price, and only the person's click on
+"Đồng ý trừ điểm" lets it run. If it is refused, unanswered or cannot open, nothing was made or charged: report it
+and do not retry unless the user asks.
 
 Do not try to reproduce or inspect how the tools edit; just pass the user's intent.
 Other TodoX skills (named todox-...) cover specific kinds of video with these same tools. Run one with
