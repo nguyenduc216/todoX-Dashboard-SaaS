@@ -53,7 +53,7 @@ public sealed class CustomerProfile
     public string? ReferralCode { get; set; }
     public string? ReferredByAgentName { get; set; }
 
-    /// <summary>Loại khách (studio.customer_profiles): bam_duoi / thong_thuong / vip.</summary>
+    /// <summary>Loại khách (studio.customer_profiles): tiem_nang / bam_duoi / thong_thuong / vip.</summary>
     public string Segment { get; set; } = "thong_thuong";
 }
 
