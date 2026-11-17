@@ -270,8 +270,9 @@ public static class EditVideoEndpoints
                 return ToResult(auth);
             }
 
-            var (list, points, balance) = await voices.ListAsync(auth.Value.License.CustomerId, ct);
-            return Results.Json(new { success = true, data = new { voices = list, pointsPerJob = points, balance } });
+            var (list, _, _) = await voices.ListAsync(auth.Value.License.CustomerId, ct);
+            // No price or balance for the assistant; the confirmation window shows the price.
+            return Results.Json(new { success = true, data = new { voices = list, priceNote = EditVideoAiService.PriceNote } });
         });
 
         group.MapPost("/tts", async (HttpContext http, VoiceRequest body, EditVideoLicenseService licenses, EditVideoVoiceService voices, CancellationToken ct) =>

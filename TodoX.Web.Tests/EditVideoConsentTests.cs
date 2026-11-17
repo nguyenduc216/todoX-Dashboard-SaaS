@@ -59,13 +59,25 @@ public sealed class EditVideoConsentTests
     }
 
     [Fact]
-    public async Task OldAppsAreOnlyAskedWhenTheAdminSaysSo()
+    public async Task OldAppsMustConfirmToo()
     {
-        var (ticket, quote) = await Service("1.1.2", new MemoryCache(new MemoryCacheOptions()))
-            .CheckAsync(License, Device, "image", "m", "Ảnh", "fp", 1m, 1000m, 5m, null, null);
-        Assert.NotNull(ticket);
-        Assert.Null(quote);
-        Assert.Equal("", ticket!.Quote.QuoteId);
+        foreach (var version in new string?[] { "1.1.2", "0.9.0", null })
+        {
+            var (ticket, quote) = await Service(version, new MemoryCache(new MemoryCacheOptions()))
+                .CheckAsync(License, Device, "image", "m", "Ảnh", "fp", 1m, 1000m, 5m, null, null);
+            Assert.Null(ticket);
+            Assert.NotNull(quote);
+            Assert.DoesNotContain("điểm (", EditVideoConsentService.Message(quote!));
+        }
+
+        var shaped = EditVideoAiService.WithoutPrices(new { model = "veo", pointsFrom = 1m, pointsTo = 2m, prices = new[] { 1 }, priceNote = "x" });
+        Assert.False(shaped.ContainsKey("pointsFrom"));
+        Assert.False(shaped.ContainsKey("prices"));
+        Assert.True((bool)shaped["available"]!);
+
+        var steps = new[] { "## Bước 1\nHỏi tên sản phẩm.", "## Bước 2\nGọi todox_voice_list, báo trước là giọng đọc tốn điểm." };
+        Assert.DoesNotContain("QUY ĐỊNH GIÁ", EditVideoSkillService.BuildStep("S", 1, null, steps, 0));
+        Assert.Contains("QUY ĐỊNH GIÁ", EditVideoSkillService.BuildStep("S", 1, null, steps, 1));
         Assert.NotEqual(EditVideoConsentService.Fingerprint("a", 1), EditVideoConsentService.Fingerprint("a", 2));
         Assert.Equal(409, EditVideoEndpoints.StatusFor(EditVideoConsentService.ConfirmRequired));
     }

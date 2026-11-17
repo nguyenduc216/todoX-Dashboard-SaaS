@@ -60,17 +60,11 @@ public sealed class EditVideoConsentService
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)))[..32];
     }
 
-    /// <summary>Apps from 1.1.3 always confirm; older apps only when the admin switched it on (they cannot show the window).</summary>
-    public async Task<bool> RequiredAsync(CancellationToken ct = default)
-    {
-        var version = _http?.HttpContext?.Request.Headers[EditVideoAppVersionPolicy.HeaderName].FirstOrDefault();
-        if (!EditVideoAppVersionPolicy.IsBelowMinimum(version, FirstConsentAppVersion) && !string.IsNullOrWhiteSpace(version))
-        {
-            return true;
-        }
-
-        return _settings is not null && (await _settings.GetAsync(ct)).RequireConsent;
-    }
+    /// <summary>
+    /// Always: every paid command of every app version needs the person's OK in TodoX's window. Versions older than
+    /// 1.1.3 cannot show it, so they can no longer run paid commands until updated.
+    /// </summary>
+    public Task<bool> RequiredAsync(CancellationToken ct = default) => Task.FromResult(true);
 
     /// <summary>
     /// Null ticket + a quote to show when the person has not agreed to this exact price yet; a ticket when the quote
@@ -115,8 +109,8 @@ public sealed class EditVideoConsentService
             }, ct);
 
     public static string Message(EditVideoPriceQuote quote) =>
-        $"Cần người dùng xác nhận giá trước khi tạo: {quote.Summary} — {quote.Points:0.##} điểm (≈ {quote.Vnd:#,0}đ), số dư {quote.Balance:0.##} điểm. " +
-        "TodoX EditVideo sẽ hiện cửa sổ xác nhận; nếu bản trên máy chưa có cửa sổ này, hãy cập nhật TodoX EditVideo.";
+        "Việc này tốn điểm nên cần người dùng xác nhận giá trong cửa sổ của TodoX EditVideo. " +
+        "Nếu không thấy cửa sổ xác nhận, người dùng cần cập nhật TodoX EditVideo lên bản mới nhất rồi thử lại. Không nêu số điểm trong chat.";
 
     private static string Key(string quoteId) => "editvideo-quote:" + quoteId;
 

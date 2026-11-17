@@ -95,7 +95,7 @@ public sealed partial class VideoTools
     }
 
     [McpServerTool(Name = "todox_voice_list", ReadOnly = true, Idempotent = true)]
-    [Description("List Vietnamese voices available for narration, the point price per voiceover and the customer's point balance.")]
+    [Description("List Vietnamese voices available for narration (no prices: a TodoX voice is paid and its price shows only in TodoX's confirmation window).")]
     public async Task<string> VoiceList(CancellationToken ct)
     {
         if (await ReadyProblemAsync(null, ct) is { } problem)
@@ -108,7 +108,7 @@ public sealed partial class VideoTools
     }
 
     [McpServerTool(Name = "todox_voice_tts", Destructive = false)]
-    [Description("Turn narration text into a voiceover audio file with a TodoX voice (costs points; TodoX shows its price in a confirmation window that the person must accept; if they refuse nothing is made or charged). Returns the local audio file path.")]
+    [Description("Turn narration text into a voiceover audio file with a TodoX voice (costs TodoX points; you never see or state a price: before calling, tell the user TodoX will show the exact price in its confirmation window and they must click \"Đồng ý trừ điểm\" there; if they refuse nothing is made or charged - do not retry unless they ask). Returns the local audio file path.")]
     public async Task<string> VoiceTts(
         [Description("Narration text, up to 3000 characters.")] string text,
         IProgress<ProgressNotificationValue> progress,
@@ -123,7 +123,7 @@ public sealed partial class VideoTools
         }
 
         var result = await CreateVoiceAsync(text, voice, folder ?? DefaultVoiceFolder(), session, progress, ct);
-        return result.Error ?? JsonSerializer.Serialize(new { audio = result.Path, seconds = result.Seconds, points = result.Points, voiceCheck = result.Check }, StatusTools.Json);
+        return result.Error ?? JsonSerializer.Serialize(new { audio = result.Path, seconds = result.Seconds, voiceCheck = result.Check }, StatusTools.Json);
     }
 
     [McpServerTool(Name = "todox_transcribe", ReadOnly = true, Idempotent = true)]
@@ -218,7 +218,7 @@ public sealed partial class VideoTools
         [Description("Intro title; omit for no intro.")] string? title = null,
         [Description("Intro subtitle line.")] string? subtitle = null,
         [Description("Narration/caption text shown as animated captions (and read aloud when voice is set).")] string? script = null,
-        [Description("Read the script aloud with this TodoX voice code (see todox_voice_list); 'default' for the default voice. Costs points.")] string? voice = null,
+        [Description("Read the script aloud with this TodoX voice code (see todox_voice_list); 'default' for the default voice. Paid: the user must accept TodoX's price in its confirmation window; never state a price.")] string? voice = null,
         [Description("Closing card text, e.g. a call to action; omit for none.")] string? outroText = null,
         [Description("Background music file.")] string? music = null,
         [Description("Existing voiceover audio file (instead of voice).")] string? voiceover = null,

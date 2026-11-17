@@ -175,6 +175,16 @@ public sealed partial class MainWindow : Form
             Shot(consent, "4-price-consent");
             consent.Close();
         }
+        var (newProject, _) = PromptForm("Dự án mới", "Tên dự án (ví dụ: Nhà phố Quận 7, Khách A – TVC tháng 12):", Font);
+        using (newProject)
+        {
+            newProject.StartPosition = FormStartPosition.Manual;
+            newProject.Location = new Point(-6000, 0);
+            newProject.Show();
+            await Task.Delay(300);
+            Shot(newProject, "4-new-project");
+            newProject.Close();
+        }
         _updateOverlay.Hide();
         Location = new Point(-6000, 0);
 
@@ -763,30 +773,86 @@ public sealed partial class MainWindow : Form
 
     private string? Prompt(string title, string question)
     {
-        using var form = new Form
+        var (form, box) = PromptForm(title, question, Font);
+        using (form)
+        {
+            return form.ShowDialog(this) == DialogResult.OK ? box.Text.Trim() : null;
+        }
+    }
+
+    /// <summary>
+    /// Asks for one line of text. Everything is placed from the measured text sizes (DPI and font safe), so the
+    /// question, the box and the buttons never overlap. "Câu hỏi (ví dụ: …)" shows the example as a small hint line.
+    /// </summary>
+    internal static (Form Form, TextBox Box) PromptForm(string title, string question, Font font)
+    {
+        const int pad = 24, width = 520;
+        var form = new Form
         {
             Text = title,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterParent,
             MinimizeBox = false,
             MaximizeBox = false,
+            ShowInTaskbar = false,
             BackColor = Ground,
             ForeColor = Ink,
-            Font = Font,
-            ClientSize = new Size(520, 170)
+            Font = font,
+            AutoScaleMode = AutoScaleMode.None,
+            ClientSize = new Size(width, 200)
         };
-        var label = new Label { Text = question, AutoSize = true, MaximumSize = new Size(470, 0), Location = new Point(24, 20) };
-        var box = new TextBox { Location = new Point(24, 64), Width = 470, Font = new Font("Segoe UI", 11), BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle };
-        var ok = Ui.Button("Tạo dự án", primary: true);
+
+        var text = question.Trim().TrimEnd(':').Trim();
+        string? example = null;
+        var open = text.IndexOf("(ví dụ", StringComparison.OrdinalIgnoreCase);
+        if (open > 0 && text.EndsWith(')'))
+        {
+            example = "Ví dụ" + text[(open + 6)..^1];
+            text = text[..open].Trim();
+        }
+
+        var inner = width - 2 * pad;
+        var label = new Label
+        {
+            Text = text, AutoSize = true, MaximumSize = new Size(inner, 0), Location = new Point(pad, 20),
+            Font = new Font("Segoe UI Semibold", 11), ForeColor = Ink, UseMnemonic = false
+        };
+        var hint = new Label
+        {
+            Text = example ?? "", AutoSize = true, MaximumSize = new Size(inner, 0), ForeColor = Muted,
+            Font = new Font("Segoe UI", 9.5f), UseMnemonic = false, Visible = example is not null
+        };
+        var box = new TextBox { Width = inner, Font = new Font("Segoe UI", 11.5f), BackColor = Panel, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle };
+        var ok = Ui.Button(title.StartsWith("Dự án", StringComparison.OrdinalIgnoreCase) ? "Tạo dự án" : "Đồng ý", primary: true);
         ok.DialogResult = DialogResult.OK;
-        ok.Location = new Point(24, 112);
         var cancel = Ui.Button("Huỷ");
         cancel.DialogResult = DialogResult.Cancel;
-        cancel.Location = new Point(150, 112);
-        form.Controls.AddRange([label, box, ok, cancel]);
+        form.Controls.AddRange([label, hint, box, ok, cancel]);
         form.AcceptButton = ok;
         form.CancelButton = cancel;
-        return form.ShowDialog(this) == DialogResult.OK ? box.Text.Trim() : null;
+
+        void Arrange()
+        {
+            var y = label.Bottom + 6;
+            if (hint.Visible)
+            {
+                hint.Location = new Point(pad, y);
+                y = hint.Bottom + 4;
+            }
+
+            box.Location = new Point(pad, y + 8);
+            ok.Size = new Size(Math.Max(ok.PreferredSize.Width, 130), 38);
+            cancel.Size = new Size(Math.Max(cancel.PreferredSize.Width, 90), 38);
+            var buttonsTop = box.Bottom + 20;
+            cancel.Location = new Point(width - pad - cancel.Width, buttonsTop);
+            ok.Location = new Point(cancel.Left - 10 - ok.Width, buttonsTop);
+            form.ClientSize = new Size(width, ok.Bottom + pad);
+        }
+
+        Arrange();
+        form.Load += (_, _) => Arrange();
+        form.Shown += (_, _) => box.Focus();
+        return (form, box);
     }
 
     // ------------------------------------------------------------------ license, settings, updates, health

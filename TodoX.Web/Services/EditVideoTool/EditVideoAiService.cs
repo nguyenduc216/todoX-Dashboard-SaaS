@@ -130,6 +130,25 @@ public sealed class EditVideoAiService
             ? await _projects.ResolveAsync(license, project, ct)
             : Options.ProjectId;
 
+    /// <summary>What the AI assistant is told instead of any price.</summary>
+    public const string PriceNote =
+        "Giá không có ở đây. Khi tạo, TodoX EditVideo tự hiện cửa sổ báo giá chi tiết; chỉ người dùng xem giá và bấm \"Đồng ý trừ điểm\" ở đó. " +
+        "Không nêu, không ước tính số điểm và không xin đồng ý giá trong chat.";
+
+    /// <summary>A model card with its price fields removed; a model TodoX has not priced is marked not available.</summary>
+    internal static JsonObject WithoutPrices(object shaped)
+    {
+        var node = JsonSerializer.SerializeToNode(shaped)!.AsObject();
+        var priced = node["pointsFrom"] is JsonValue || node["pointsTo"] is JsonValue;
+        foreach (var key in new[] { "pointsFrom", "pointsTo", "prices", "priceNote" })
+        {
+            node.Remove(key);
+        }
+
+        node["available"] = priced;
+        return node;
+    }
+
     public decimal ToPoints(decimal credits) => EditVideoGommoJson.Points(
         credits, Options.VndPerCredit, Options.Markup, Options.VndPerPoint ?? _configuration.GetValue("AiImageBilling:TodoXVndPerPoint", 10000m));
 
@@ -175,7 +194,8 @@ public sealed class EditVideoAiService
             return EditVideoResult<object>.Fail("model_not_found", $"Không có model '{model}'. Gọi lại không kèm model để xem danh sách.");
         }
 
-        return EditVideoResult<object>.Success(new { models = list, balance = await _wallets.GetBalanceAsync(customerId) });
+        // The assistant never sees prices or the balance: TodoX shows the exact price only in its confirmation window.
+        return EditVideoResult<object>.Success(new { models = list.Select(WithoutPrices).ToList(), priceNote = PriceNote });
     }
 
     public async Task<EditVideoResult<EditVideoAiTask>> CreateAsync(
@@ -235,7 +255,7 @@ public sealed class EditVideoAiService
         var available = await _wallets.GetBalanceAsync(license.CustomerId) - await PendingPointsAsync(license.CustomerId, ct);
         if (available < points)
         {
-            return Fail("insufficient_points", $"Không đủ point để tạo {KindLabel(kind)} AI (cần {points:0.#}, còn khả dụng {Math.Max(0, available):0.#}). Nạp thêm point trên dashboard TodoX.");
+            return Fail("insufficient_points", $"Số dư điểm TodoX không đủ để tạo {KindLabel(kind)} AI này. Người dùng xem số dư và nạp thêm trên Dashboard TodoX.");
         }
 
         // The person confirms this exact TodoX price in the app before anything is made or charged.
@@ -416,7 +436,7 @@ public sealed class EditVideoAiService
         var available = await _wallets.GetBalanceAsync(license.CustomerId) - await PendingPointsAsync(license.CustomerId, ct);
         if (available < points)
         {
-            return Fail("insufficient_points", $"Không đủ point để tạo nhạc AI (cần {points:0.#}, còn khả dụng {Math.Max(0, available):0.#}). Nạp thêm point trên dashboard TodoX.");
+            return Fail("insufficient_points", "Số dư điểm TodoX không đủ để tạo nhạc AI này. Người dùng xem số dư và nạp thêm trên Dashboard TodoX.");
         }
 
         EditVideoConsentTicket? consent = null;

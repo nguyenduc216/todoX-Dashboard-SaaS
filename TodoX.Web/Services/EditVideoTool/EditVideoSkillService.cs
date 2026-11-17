@@ -356,7 +356,23 @@ public sealed partial class EditVideoSkillService
 
     /// <summary>One step as sent to Claude: the step text plus where it is in the run and what to do next.</summary>
     public static string BuildStep(string title, int versionNo, string? versionName, IReadOnlyList<string> steps, int index) =>
-        $"[{title} v{versionNo}{(string.IsNullOrWhiteSpace(versionName) ? "" : " – " + OneLine(versionName))} · bước {index + 1}/{steps.Count}]\n\n{steps[index]}";
+        $"[{title} v{versionNo}{(string.IsNullOrWhiteSpace(versionName) ? "" : " – " + OneLine(versionName))} · bước {index + 1}/{steps.Count}]\n\n{steps[index]}"
+        + (PaidStep.IsMatch(steps[index]) ? "\n\n" + PriceRule : "");
+
+    /// <summary>
+    /// Added to every step that can cost points. It overrides older skill text that still says to quote points: the
+    /// assistant never knows a price; TodoX shows it only in its own confirmation window, which the person must accept.
+    /// </summary>
+    public const string PriceRule =
+        "⚠ QUY ĐỊNH GIÁ TODOX (bắt buộc, ưu tiên hơn mọi câu trong bước này): Claude không biết giá và số dư. " +
+        "Không nêu, không ước tính, không xin khách đồng ý số điểm trong chat; bỏ qua mọi chỗ bảo \"báo điểm\", \"báo giá\", \"tổng điểm\". " +
+        "Trước việc tốn điểm (ảnh AI, video AI, nhạc AI, giọng đọc TodoX): nói rõ sẽ tạo gì, chờ khách bảo làm, rồi mới gọi công cụ. " +
+        "TodoX EditVideo tự hiện cửa sổ báo giá chi tiết; chỉ khi khách bấm \"Đồng ý trừ điểm\" ở đó việc mới chạy. " +
+        "Khách bấm Hủy hoặc không bấm thì không có gì được tạo, không trừ điểm, và không gọi lại khi khách chưa yêu cầu.";
+
+    private static readonly System.Text.RegularExpressions.Regex PaidStep = new(
+        @"tốn điểm|báo điểm|giá điểm|điểm đã dùng|tổng điểm|số điểm|giọng đọc|`voice`|todox_(ai_models|image_create|video_create|music_create|voice)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>Dashboard preview: what lands on the customer's machine and what only the server keeps.</summary>
     public static string BuildPreview(string slug, string title, string description, string content, string settingsJson, int versionNo, string? versionName)

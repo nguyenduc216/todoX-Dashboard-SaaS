@@ -159,7 +159,6 @@ public sealed class AiGenerator
                 kind = Text(x, "kind"),
                 model = Text(x, "model"),
                 status = Status(x),
-                points = x.TryGetProperty("points", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetDecimal() : 0,
                 createdAt = Text(x, "createdAt"),
                 message = Text(x, "message")
             }),
@@ -173,7 +172,6 @@ public sealed class AiGenerator
         var id = task.GetProperty("id").GetGuid();
         var kind = Text(task, "kind") ?? "image";
         var status = Status(task);
-        var points = task.TryGetProperty("points", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetDecimal() : 0;
         var files = new List<string>();
         if (status == "succeeded" && task.TryGetProperty("outputs", out var outputs) && outputs.ValueKind == JsonValueKind.Array)
         {
@@ -191,7 +189,7 @@ public sealed class AiGenerator
                     {
                         return JsonSerializer.Serialize(new
                         {
-                            task = id, kind, status, points,
+                            task = id, kind, status,
                             message = "Kết quả đã xong nhưng tải về máy bị lỗi. Gọi lại tool trạng thái với task này để tải lại."
                         }, Json);
                     }
@@ -207,7 +205,6 @@ public sealed class AiGenerator
             kind,
             model = Text(task, "model"),
             status,
-            points,
             files,
             message = Text(task, "message"),
             next = status == "running"
