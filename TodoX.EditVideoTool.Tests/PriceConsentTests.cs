@@ -138,4 +138,66 @@ public sealed class PriceConsentTests : IDisposable
         Assert.Equal(TodoXServerClient.PriceDeclined, result.ErrorCode);
         Assert.Single(_handler.Requests);
     }
+
+    private sealed class FakeNotifier : INotifier
+    {
+        public List<string> Shown { get; } = [];
+        public void Show(string title, string text, bool isError = false) => Shown.Add(title + ": " + text);
+    }
+
+    private const string Ok = """{"success":true,"data":{"id":"0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0","status":"running"}}""";
+
+    [Fact]
+    public async Task Allowing_the_whole_project_stops_asking_and_keeps_its_history()
+    {
+        var dir = Path.Combine(_root, "Du an A");
+        Directory.CreateDirectory(dir);
+        var notifier = new FakeNotifier();
+        _client.Notifier = notifier;
+        _consent.Answer = ConsentAnswer.AcceptedForProject;
+        try
+        {
+            Projects.PaidScope.Set("Dự án A", dir);
+            _handler.Replies.Enqueue((HttpStatusCode.Conflict, Quote));
+            _handler.Replies.Enqueue((HttpStatusCode.OK, Ok));
+            Assert.True((await _client.AiCreateAsync("video", new { model = "veo_omni", prompt = "a" })).Ok);
+            Assert.Equal("Dự án A", Assert.Single(_consent.Asked).Project);
+            Assert.True(Projects.ProjectHistory.IsGranted(dir));
+
+            // Same project: no window, only a notice of the points; the server still gets an accepted quote.
+            _handler.Replies.Enqueue((HttpStatusCode.Conflict, Quote));
+            _handler.Replies.Enqueue((HttpStatusCode.OK, Ok));
+            Assert.True((await _client.SubmitTtsAsync("Xin chào", null, null)).Ok);
+            Assert.Single(_consent.Asked);
+            Assert.Contains("4,8 điểm", Assert.Single(notifier.Shown));
+            var last = JsonDocument.Parse(_handler.Requests[^1].Body!).RootElement;
+            Assert.Equal("project_grant", last.GetProperty("consentMethod").GetString());
+
+            var history = Projects.ProjectHistory.Read(dir);
+            Assert.Equal(2, history.Count);
+            Assert.Equal(Projects.ProjectHistory.Auto, history[0].Answer);
+            Assert.Equal(Projects.ProjectHistory.AcceptedForProject, history[1].Answer);
+            Assert.Equal(4.8m, history[0].Points);
+            Assert.Equal(20m - 4.8m, history[0].Balance); // balance left after the deduction
+
+            // Every assistant command of the project is kept too, with the files it produced (opened from the history).
+            var video = Path.Combine(dir, "ket-qua.mp4");
+            File.WriteAllText(video, "");
+            var box = Projects.PaidScope.Begin();
+            box.Name = "Dự án A";
+            box.Dir = dir;
+            Projects.CommandHistory.Record(null, box, "todox_export", new Dictionary<string, JsonElement> { ["edit"] = JsonDocument.Parse("\"e1\"").RootElement },
+                false, JsonSerializer.Serialize(new { output = video, seconds = 30 }));
+            var command = Projects.ProjectHistory.Read(dir)[0];
+            Assert.Equal("todox_export", command.Kind);
+            Assert.Null(command.Points);
+            Assert.Equal(video, Assert.Single(command.Files!));
+        }
+        finally
+        {
+            Projects.ProjectHistory.Revoke(dir);
+        }
+
+        Assert.False(Projects.ProjectHistory.IsGranted(dir));
+    }
 }

@@ -231,6 +231,7 @@ public sealed partial class VideoTools
                     return problem;
                 }
 
+                Projects.PaidScope.Set(project.ProjectName, project.ProjectDir);
                 var created = await CreateVoiceAsync(voiceScript, voice == "default" ? null : voice, OutputFolder(project), session, progress, ct);
                 if (created.Error is not null)
                 {
@@ -303,6 +304,7 @@ public sealed partial class VideoTools
             return new StartResult(null, null, null, NeedProject);
         }
 
+        Projects.PaidScope.Set(folder.Name, folder.Path);
         var files = MediaProbe.ExpandInputs(brief.Clips);
         if (files.Count == 0)
         {

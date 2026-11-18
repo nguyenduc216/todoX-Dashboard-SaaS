@@ -164,7 +164,11 @@ static async Task RunMcpServerAsync(string[] args)
         {
             // Claude Desktop, Claude Code and Codex each send their own name when they connect.
             CallerApp.Set(context.Server.ClientInfo?.Name ?? "mcp", context.Server.ClientInfo?.Version);
+            var scope = TodoX.EditVideoTool.Projects.PaidScope.Begin();
             var result = await next(context, ct);
+            // Every command the assistant runs is written to its project's history (seen in the TodoX window).
+            TodoX.EditVideoTool.Projects.CommandHistory.Record(context.Services, scope, context.Params?.Name, context.Params?.Arguments,
+                result.IsError == true, result.Content.OfType<TextContentBlock>().FirstOrDefault()?.Text);
             // Once per session: tell the assistant to let the customer know a newer TodoX EditVideo is ready.
             if (context.Services?.GetService<Updater>()?.TakeAssistantNotice() is { } notice)
             {
