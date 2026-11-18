@@ -16,6 +16,12 @@ public sealed class UserSettings
     /// <summary>How often a running tool checks TodoX for new or changed skills.</summary>
     public int SkillSyncHours { get; set; } = DefaultSkillSyncHours;
 
+    /// <summary>
+    /// The assistant may open the TodoX EditVideo window by itself when a paid step needs the price confirmation
+    /// (true); null = not asked yet, false = ask the customer each time.
+    /// </summary>
+    public bool? AutoOpenApp { get; set; }
+
     public static string DefaultResourceRoot =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "TodoX EditVideo");
 

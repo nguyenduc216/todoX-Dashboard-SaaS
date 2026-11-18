@@ -39,10 +39,13 @@ public sealed class EditVideoConsentService
     private readonly EditVideoAiSettingsService? _settings;
     private readonly IHttpContextAccessor? _http;
     private readonly ILogger<EditVideoConsentService>? _logger;
+    private readonly EditVideoConsentSkipService? _skips;
 
     public EditVideoConsentService(TodoXConnectionFactory factory, TenantContext tenant, IMemoryCache cache,
-        EditVideoAiSettingsService? settings = null, IHttpContextAccessor? http = null, ILogger<EditVideoConsentService>? logger = null)
+        EditVideoAiSettingsService? settings = null, IHttpContextAccessor? http = null, ILogger<EditVideoConsentService>? logger = null,
+        EditVideoConsentSkipService? skips = null)
     {
+        _skips = skips;
         _factory = factory;
         _tenant = tenant;
         _cache = cache;
@@ -78,6 +81,14 @@ public sealed class EditVideoConsentService
         {
             return (new EditVideoConsentTicket(new EditVideoPriceQuote("", kind, model, summary, points, points * vndPerPoint, balance, 0),
                 info ?? new EditVideoConsentInfo("not_required", null, null)), null);
+        }
+
+        // TodoX's own license (added by an admin with their password): no window, but every use is logged.
+        if (_skips is not null && await _skips.IsSkippedAsync(license.Id, ct))
+        {
+            var skipped = new EditVideoPriceQuote("skip-" + Guid.NewGuid().ToString("N"), kind, model, summary, points, points * vndPerPoint, balance, 0);
+            await LogAsync(license.Id, device.Id, "ai_price_skip", new { skipped.QuoteId, kind, model, summary, points, vnd = skipped.Vnd, balance }, ct);
+            return (new EditVideoConsentTicket(skipped, new EditVideoConsentInfo("account_skip", info?.WindowsUser, info?.AppVersion)), null);
         }
 
         if (!string.IsNullOrWhiteSpace(confirmQuoteId)

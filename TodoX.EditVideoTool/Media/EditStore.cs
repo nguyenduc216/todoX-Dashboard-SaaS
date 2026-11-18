@@ -79,7 +79,10 @@ public sealed class EditStore
 
         try
         {
-            return JsonSerializer.Deserialize<EditProject>(File.ReadAllText(file), Json);
+            var edit = JsonSerializer.Deserialize<EditProject>(File.ReadAllText(file), Json);
+            // Commands on this edit belong to its project (history, "allow the whole project").
+            Projects.PaidScope.Set(edit?.ProjectName, edit?.ProjectDir);
+            return edit;
         }
         catch (JsonException)
         {

@@ -329,6 +329,7 @@ builder.Services.Configure<EditVideoAiOptions>(builder.Configuration.GetSection(
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient<IEditVideoGommoClient, EditVideoGommoClient>(client => client.Timeout = TimeSpan.FromSeconds(90));
 builder.Services.AddScoped<EditVideoAiSettingsService>();
+builder.Services.AddScoped<EditVideoConsentSkipService>();
 builder.Services.AddScoped<EditVideoConsentService>();
 builder.Services.AddScoped<TodoX.Web.Services.VoicePreviewGenerator>();
 builder.Services.AddScoped<EditVideoProjectService>();

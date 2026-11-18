@@ -53,6 +53,7 @@ public sealed class SetupWizard : Form
     private readonly CheckBox _codex = Check("Kết nối vào Codex", true);
     private readonly CheckBox _startup = Check("Tự khởi động cùng Windows — tự kiểm tra bản mới và skill mỗi khi mở máy", true);
     private readonly CheckBox _desktop = Check("Tạo biểu tượng TodoX EditVideo trên Desktop", true);
+    private readonly CheckBox _autoOpen = Check("Cho phép Claude tự mở TodoX EditVideo khi cần xác nhận trừ điểm", true);
 
     // page 3
     private readonly Label _installTitle = Caption("Đang cài đặt...", 15, Ink, bold: true);
@@ -266,6 +267,7 @@ public sealed class SetupWizard : Form
         page.Controls.Add(Section("Tùy chọn khác"));
         page.Controls.Add(_startup);
         page.Controls.Add(_desktop);
+        page.Controls.Add(_autoOpen);
         return page;
     }
 
@@ -387,7 +389,7 @@ public sealed class SetupWizard : Form
             _browse.Visible = !locked && !IsUpdate;
         }
 
-        foreach (var box in new[] { _claude, _codex, _startup, _desktop })
+        foreach (var box in new[] { _claude, _codex, _startup, _desktop, _autoOpen })
         {
             box.Enabled = !locked;
         }
@@ -478,6 +480,20 @@ public sealed class SetupWizard : Form
         _services ??= AppServices.Build(new AgentPaths(PreviewMode is null ? Root : Path.Combine(Path.GetTempPath(), "todox-setup-preview")));
         var installer = _services.GetRequiredService<Installer>();
         var options = new InstallOptions(_claude.Checked, _codex.Checked, _startup.Checked, _desktop.Checked);
+        if (PreviewMode is null)
+        {
+            try
+            {
+                var paths = _services.GetRequiredService<AgentPaths>();
+                var settings = UserSettings.Load(paths);
+                settings.AutoOpenApp = _autoOpen.Checked;
+                settings.Save(paths);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Only a preference: the assistant then asks in chat instead.
+            }
+        }
         if (_log is null)
         {
             _log = new InstallLog(IsUpdate ? "update" : "install", _existing?.Version, Root, options);

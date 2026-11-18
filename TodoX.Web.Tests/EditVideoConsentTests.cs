@@ -11,7 +11,7 @@ namespace TodoX.Web.Tests;
 /// <summary>Every paid EditVideo command needs the person's OK on the exact TodoX price, once.</summary>
 public sealed class EditVideoConsentTests
 {
-    private static EditVideoConsentService Service(string? appVersion, IMemoryCache cache)
+    private static EditVideoConsentService Service(string? appVersion, IMemoryCache cache, bool withSkips = false)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -24,7 +24,9 @@ public sealed class EditVideoConsentTests
             http.Request.Headers[EditVideoAppVersionPolicy.HeaderName] = appVersion;
         }
 
-        return new EditVideoConsentService(factory, new TenantContext(factory, config), cache, null, new HttpContextAccessor { HttpContext = http });
+        var tenant = new TenantContext(factory, config);
+        return new EditVideoConsentService(factory, tenant, cache, null, new HttpContextAccessor { HttpContext = http }, null,
+            withSkips ? new EditVideoConsentSkipService(factory, tenant, cache) : null);
     }
 
     private static readonly EditVideoLicenseRow License = new() { Id = Guid.NewGuid(), CustomerId = Guid.NewGuid() };
@@ -80,5 +82,25 @@ public sealed class EditVideoConsentTests
         Assert.Contains("QUY ĐỊNH GIÁ", EditVideoSkillService.BuildStep("S", 1, null, steps, 1));
         Assert.NotEqual(EditVideoConsentService.Fingerprint("a", 1), EditVideoConsentService.Fingerprint("a", 2));
         Assert.Equal(409, EditVideoEndpoints.StatusFor(EditVideoConsentService.ConfirmRequired));
+    }
+
+    [Fact]
+    public async Task OnlyTheListedTodoXLicenseSkipsTheWindow()
+    {
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        cache.Set("editvideo-consent-skip", (IReadOnlyList<EditVideoConsentSkip>)[new EditVideoConsentSkip(License.Id, "TodoX", "admin", DateTimeOffset.UtcNow)]);
+        var service = Service("1.1.9", cache, withSkips: true);
+
+        var (ticket, quote) = await service.CheckAsync(License, Device, "video", "veo", "Video", "fp", 4.8m, 1000m, 50m, null, null);
+        Assert.Null(quote);
+        Assert.Equal("account_skip", ticket!.Info.Method);
+        Assert.StartsWith("skip-", ticket.Quote.QuoteId);
+
+        var other = new EditVideoLicenseRow { Id = Guid.NewGuid(), CustomerId = Guid.NewGuid() };
+        var (none, asked) = await service.CheckAsync(other, Device, "video", "veo", "Video", "fp", 4.8m, 1000m, 50m, null, null);
+        Assert.Null(none);
+        Assert.NotNull(asked);
+
+        Assert.Empty(EditVideoConsentSkipService.Parse("not json"));
     }
 }

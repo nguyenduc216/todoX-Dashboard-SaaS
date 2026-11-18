@@ -36,6 +36,23 @@ public sealed class TodoXServerClient
     /// <summary>Who is asked to accept TodoX's price before a paid command; null = never agree (the command is not run).</summary>
     public IPriceConsent? Consent { get; set; }
 
+    /// <summary>The TodoX EditVideo window; null (tests) skips the check.</summary>
+    public IAppWindow? Window { get; set; }
+
+    public const string AppNotRunning = "app_not_running";
+
+    /// <summary>Shows "points used" when a project allowed its paid commands without asking; null in tests.</summary>
+    public INotifier? Notifier { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Vi = new("vi-VN");
+
+    /// <summary>A paid step for the project history: points, and the balance left after it when it was accepted.</summary>
+    private static Projects.HistoryEntry Entry(PriceQuote q, string answer)
+    {
+        var charged = answer is Projects.ProjectHistory.Accepted or Projects.ProjectHistory.AcceptedForProject or Projects.ProjectHistory.Auto;
+        return new(DateTimeOffset.Now, q.Kind, q.Summary, q.Points, q.Vnd, charged ? Math.Max(0, q.Balance - q.Points) : q.Balance, answer, q.QuoteId);
+    }
+
     /// <summary>
     /// A paid command (AI image/video/music, voice). TodoX answers the first call with its price ("confirm_required");
     /// the person accepts or refuses it in the confirmation window, and only an accepted price is sent back — with the
@@ -52,22 +69,70 @@ public sealed class TodoXServerClient
                 return result;
             }
 
-            var answer = Consent is null ? ConsentAnswer.Unavailable : await Consent.AskAsync(quote, ct);
-            if (answer != ConsentAnswer.Accepted)
+            var scope = Projects.PaidScope.Project;
+            quote = quote with { Project = scope?.Name };
+            string method;
+            if (scope is { } granted && Projects.ProjectHistory.IsGranted(granted.Dir))
             {
-                // The assistant is told what happened, never the price (that is only for the person, in the window).
-                var price = "cho: " + quote.Summary;
-                return ServerResult<JsonElement>.Fail(PriceDeclined, answer switch
+                // The person allowed every paid command of this project: no window, only a notice of the points used.
+                method = "project_grant";
+                Projects.ProjectHistory.Add(granted.Dir, Entry(quote, Projects.ProjectHistory.Auto));
+                Notifier?.Show($"TodoX · dự án {granted.Name}",
+                    $"Trừ {quote.Points.ToString("0.##", Vi)} điểm (≈ {quote.Vnd.ToString("#,0", Vi)} đ), còn {Math.Max(0, quote.Balance - quote.Points).ToString("#,0.##", Vi)} điểm: {quote.Summary}");
+            }
+            else
+            {
+                // The price is confirmed with TodoX EditVideo open: opened here when the customer allowed it, otherwise
+                // the assistant must ask the customer first (todox_app).
+                if (Window is { IsRunning: false } window)
                 {
-                    ConsentAnswer.Declined => $"Người dùng bấm Hủy ở cửa sổ xác nhận giá {price}. Chưa tạo gì, không trừ điểm. Không gọi lại trừ khi người dùng yêu cầu.",
-                    ConsentAnswer.NoAnswer => $"Cửa sổ xác nhận giá {price} đã hiện nhưng không ai bấm trong {DesktopPriceConsent.Wait.TotalMinutes:0} phút. Chưa tạo gì, không trừ điểm. Hỏi người dùng có thấy cửa sổ \"TodoX EditVideo — Xác nhận trừ điểm\" không rồi mới gọi lại.",
-                    _ => $"Không hiện được cửa sổ xác nhận giá {price} trên máy này. Chưa tạo gì, không trừ điểm. Báo người dùng mở TodoX EditVideo (cửa sổ chính) rồi thử lại."
-                });
+                    if (!window.AutoOpen)
+                    {
+                        return ServerResult<JsonElement>.Fail(AppNotRunning,
+                            "TodoX EditVideo chưa mở nên chưa hiện được cửa sổ xác nhận giá. Chưa tạo gì, không trừ điểm. " +
+                            "Hỏi người dùng: \"Cho phép tôi mở TodoX EditVideo bây giờ và tự mở mỗi khi cần xác nhận giá về sau?\" " +
+                            "Đồng ý: gọi todox_app với action=open, remember=true rồi gọi lại lệnh này. Chỉ lần này: action=open, remember=false. " +
+                            "Không đồng ý: nhờ người dùng tự mở TodoX EditVideo rồi gọi lại.");
+                    }
+
+                    await window.OpenAsync(ct);
+                }
+
+                var answer = Consent is null ? ConsentAnswer.Unavailable : await Consent.AskAsync(quote, ct);
+                if (scope is { } project)
+                {
+                    Projects.ProjectHistory.Add(project.Dir, Entry(quote, answer switch
+                    {
+                        ConsentAnswer.Accepted => Projects.ProjectHistory.Accepted,
+                        ConsentAnswer.AcceptedForProject => Projects.ProjectHistory.AcceptedForProject,
+                        ConsentAnswer.Declined => Projects.ProjectHistory.Declined,
+                        ConsentAnswer.NoAnswer => Projects.ProjectHistory.NoAnswer,
+                        _ => Projects.ProjectHistory.Unavailable
+                    }));
+                    if (answer == ConsentAnswer.AcceptedForProject)
+                    {
+                        Projects.ProjectHistory.Grant(project.Dir, Environment.UserName);
+                    }
+                }
+
+                if (answer is not (ConsentAnswer.Accepted or ConsentAnswer.AcceptedForProject))
+                {
+                    // The assistant is told what happened, never the price (that is only for the person, in the window).
+                    var price = "cho: " + quote.Summary;
+                    return ServerResult<JsonElement>.Fail(PriceDeclined, answer switch
+                    {
+                        ConsentAnswer.Declined => $"Người dùng bấm Hủy ở cửa sổ xác nhận giá {price}. Chưa tạo gì, không trừ điểm. Không gọi lại trừ khi người dùng yêu cầu.",
+                        ConsentAnswer.NoAnswer => $"Cửa sổ xác nhận giá {price} đã hiện nhưng không ai bấm trong {DesktopPriceConsent.Wait.TotalMinutes:0} phút. Chưa tạo gì, không trừ điểm. Hỏi người dùng có thấy cửa sổ \"TodoX EditVideo — Xác nhận trừ điểm\" không rồi mới gọi lại.",
+                        _ => $"Không hiện được cửa sổ xác nhận giá {price} trên máy này. Chưa tạo gì, không trừ điểm. Báo người dùng mở TodoX EditVideo (cửa sổ chính) rồi thử lại."
+                    });
+                }
+
+                method = answer == ConsentAnswer.AcceptedForProject ? "desktop_dialog_project" : Consent!.Method;
             }
 
             payload["confirmQuoteId"] = quote.QuoteId;
-            payload["consentMethod"] = Consent.Method;
-            payload["consentUser"] = Environment.UserName;
+            payload["consentMethod"] = method;
+            payload["consentUser"] = scope is { } p ? $"{Environment.UserName} | dự án: {p.Name}" : Environment.UserName;
         }
 
         return ServerResult<JsonElement>.Fail(ConfirmRequired, "Giá TodoX vừa thay đổi; hãy thử lại để xem giá mới.");

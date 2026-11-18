@@ -98,6 +98,8 @@ public sealed partial class VideoTools
             return NeedProject;
         }
 
+        SetPaidProject(project);
+
         await using var session = await SessionLogger.StartAsync(_server, _paths, "ai_music", ct);
         if (await ReadyProblemAsync(session, ct) is { } problem)
         {
@@ -149,6 +151,8 @@ public sealed partial class VideoTools
             return NeedProject;
         }
 
+        SetPaidProject(project);
+
         await using var session = await SessionLogger.StartAsync(_server, _paths, $"ai_{input.Kind}", ct);
         if (await ReadyProblemAsync(session, ct) is { } problem)
         {
@@ -167,6 +171,15 @@ public sealed partial class VideoTools
         string.IsNullOrWhiteSpace(project)
             ? AiGenerator.DefaultFolder()
             : _projects.Find(project, create: true).Folder?.Path is { } dir ? Path.Combine(dir, Projects.ProjectFolders.AudioDir) : AiGenerator.DefaultFolder();
+
+    /// <summary>Paid commands from here on belong to this project (its history, its "allow all" choice).</summary>
+    private void SetPaidProject(string project)
+    {
+        if (_projects.Find(project, create: true).Folder is { } folder)
+        {
+            Projects.PaidScope.Set(folder.Name, folder.Path);
+        }
+    }
 
     private string AiFolder(string? project) =>
         string.IsNullOrWhiteSpace(project)

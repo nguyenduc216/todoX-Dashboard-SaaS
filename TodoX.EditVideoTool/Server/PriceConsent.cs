@@ -8,6 +8,9 @@ namespace TodoX.EditVideoTool.Server;
 /// <summary>A price TodoX asks the person to accept before a paid command (from the server, never stored here).</summary>
 public sealed record PriceQuote(string QuoteId, string Kind, string Summary, decimal Points, decimal Vnd, decimal Balance)
 {
+    /// <summary>The project this command works in, when known: the window then offers "allow the whole project".</summary>
+    public string? Project { get; init; }
+
     public static PriceQuote? From(JsonElement? detail)
     {
         if (detail is not { ValueKind: JsonValueKind.Object } d || !d.TryGetProperty("quoteId", out var id) || id.GetString() is not { Length: > 0 } quoteId)
@@ -29,6 +32,8 @@ public sealed record PriceQuote(string QuoteId, string Kind, string Summary, dec
 public enum ConsentAnswer
 {
     Accepted,
+    /// <summary>Accepted, and every later paid command of the same project runs without asking.</summary>
+    AcceptedForProject,
     Declined,
     /// <summary>The window was shown but nobody answered in time.</summary>
     NoAnswer,
@@ -126,7 +131,7 @@ public sealed class DesktopPriceConsent : IPriceConsent
             BackColor = ColorTranslator.FromHtml("#0B0D10");
             ForeColor = Color.White;
             Font = new Font("Segoe UI", 10.5f);
-            ClientSize = new Size(520, 320);
+            ClientSize = new Size(520, quote.Project is null ? 320 : 396);
 
             var title = new Label { Text = "Xác nhận trừ điểm TodoX", Font = new Font("Segoe UI Semibold", 15), AutoSize = true, Location = new Point(24, 18), ForeColor = Color.White };
             var summary = new Label { Text = quote.Summary, AutoSize = false, Location = new Point(24, 58), Size = new Size(472, 48), ForeColor = ColorTranslator.FromHtml("#A9AFBD"), UseMnemonic = false };
@@ -140,20 +145,29 @@ public sealed class DesktopPriceConsent : IPriceConsent
                 Text = $"Số dư hiện có: {quote.Balance.ToString("#,0.##", Vi)} điểm. Bấm Hủy thì không tạo và không trừ điểm.",
                 AutoSize = false, Location = new Point(24, 160), Size = new Size(472, 60), ForeColor = ColorTranslator.FromHtml("#A9AFBD"), UseMnemonic = false
             };
+            var whole = new CheckBox { AutoSize = true, Location = new Point(24, 224), Visible = quote.Project is not null };
+            var wholeText = new Label
+            {
+                Text = $"Cho phép mọi lệnh tốn điểm của dự án \"{quote.Project}\" không hỏi lại (chỉ báo số điểm trừ)",
+                AutoSize = true, MaximumSize = new Size(440, 0), Location = new Point(48, 222), ForeColor = Color.White, UseMnemonic = false,
+                Cursor = Cursors.Hand, Visible = quote.Project is not null
+            };
+            wholeText.Click += (_, _) => whole.Checked = !whole.Checked;
+            var buttonsTop = quote.Project is null ? 246 : 322;
             var yes = new Button
             {
-                Text = "Đồng ý trừ điểm", Size = new Size(200, 44), Location = new Point(24, 246), FlatStyle = FlatStyle.Flat,
+                Text = "Đồng ý trừ điểm", Size = new Size(200, 44), Location = new Point(24, buttonsTop), FlatStyle = FlatStyle.Flat,
                 BackColor = ColorTranslator.FromHtml("#FFBE2E"), ForeColor = Color.Black, Font = new Font("Segoe UI Semibold", 11)
             };
             yes.FlatAppearance.BorderSize = 0;
             yes.Click += (_, _) =>
             {
-                Answer = ConsentAnswer.Accepted;
+                Answer = whole.Checked ? ConsentAnswer.AcceptedForProject : ConsentAnswer.Accepted;
                 Close();
             };
             var no = new Button
             {
-                Text = "Hủy", Size = new Size(140, 44), Location = new Point(236, 246), FlatStyle = FlatStyle.Flat,
+                Text = "Hủy", Size = new Size(140, 44), Location = new Point(236, buttonsTop), FlatStyle = FlatStyle.Flat,
                 BackColor = ColorTranslator.FromHtml("#16181E"), ForeColor = Color.White
             };
             no.FlatAppearance.BorderColor = ColorTranslator.FromHtml("#2C2F38");
@@ -162,7 +176,16 @@ public sealed class DesktopPriceConsent : IPriceConsent
                 Answer = ConsentAnswer.Declined;
                 Close();
             };
-            Controls.AddRange([title, summary, price, balance, yes, no]);
+            Controls.AddRange([title, summary, price, balance, whole, wholeText, yes, no]);
+            if (quote.Project is not null)
+            {
+                // The tick's text wraps by itself (DPI, long project names); the buttons go right under it.
+                Load += (_, _) =>
+                {
+                    yes.Top = no.Top = Math.Max(whole.Bottom, wholeText.Bottom) + 16;
+                    ClientSize = new Size(ClientSize.Width, yes.Bottom + 20);
+                };
+            }
             CancelButton = no;
             Shown += (_, _) =>
             {

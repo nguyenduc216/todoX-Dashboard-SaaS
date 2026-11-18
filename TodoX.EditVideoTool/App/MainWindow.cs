@@ -166,7 +166,31 @@ public sealed partial class MainWindow : Form
         _updateOverlay.Report("Tải TodoX EditVideo: 42%");
         await Task.Delay(400);
         Shot(_updateOverlay, "4-updating-overlay");
-        using (var consent = DesktopPriceConsent.PreviewForm(new PriceQuote("q", "video", "Video AI veo_omni · 720p · 8 giây · khung 9:16", 4.8m, 4800m, 5876m)))
+        var sampleDir = Path.Combine(Path.GetTempPath(), "todox-shot-history");
+        Directory.CreateDirectory(sampleDir);
+        File.Delete(Path.Combine(sampleDir, ProjectHistory.HistoryFile));
+        ProjectHistory.Add(sampleDir, new HistoryEntry(DateTimeOffset.Now.AddMinutes(-12), "todox_project_folder", "", null, null, null, "xong", null));
+        ProjectHistory.Add(sampleDir, new HistoryEntry(DateTimeOffset.Now.AddMinutes(-9), "video", "Video AI veo_omni · 720p · 8 giây", 4.8m, 4800m, 5871.2m, ProjectHistory.AcceptedForProject, "q1"));
+        ProjectHistory.Add(sampleDir, new HistoryEntry(DateTimeOffset.Now.AddMinutes(-8), "todox_video_create", "model: veo_omni · prompt: Nhà phố 4 tầng, buổi sáng · duration: 8", null, null, null, "xong", null,
+            [Path.Combine(sampleDir, "ai-video-1.mp4")]));
+        ProjectHistory.Add(sampleDir, new HistoryEntry(DateTimeOffset.Now.AddMinutes(-4), "voice", "Giọng đọc Vbee · 412 ký tự", 2m, 2000m, 5869.2m, ProjectHistory.Auto, "q2"));
+        ProjectHistory.Add(sampleDir, new HistoryEntry(DateTimeOffset.Now.AddMinutes(-3), "todox_auto_edit", "clips: [\"06-ai\"] · voice: default · targetSeconds: 30", null, null, null, "xong", null,
+            [Path.Combine(sampleDir, "video-30s.mp4"), Path.Combine(sampleDir, "voice.mp3")]));
+        foreach (var sample in new[] { "ai-video-1.mp4", "video-30s.mp4", "voice.mp3" })
+        {
+            File.WriteAllText(Path.Combine(sampleDir, sample), "");
+        }
+        using (var history = HistoryForm("Nhà phố Quận 7", sampleDir, Font))
+        {
+            history.StartPosition = FormStartPosition.Manual;
+            history.Location = new Point(-6000, 0);
+            history.Show();
+            await Task.Delay(300);
+            Shot(history, "4-project-history");
+            history.Close();
+        }
+
+        using (var consent = DesktopPriceConsent.PreviewForm(new PriceQuote("q", "video", "Video AI veo_omni · 720p · 8 giây · khung 9:16", 4.8m, 4800m, 5876m) { Project = "Nhà phố Quận 7" }))
         {
             consent.StartPosition = FormStartPosition.Manual;
             consent.Location = new Point(-6000, 0);
@@ -208,6 +232,7 @@ public sealed partial class MainWindow : Form
     public static int Run(IServiceProvider services)
     {
         FreeConsole(); // hide the console window a double-click opened
+        using var running = Server.AppWindow.Hold(); // lets Claude's TodoX tools see the window is open
         var ui = new Thread(() =>
         {
             Application.EnableVisualStyles();
@@ -456,7 +481,10 @@ public sealed partial class MainWindow : Form
         var sync = Ui.Button("Đồng bộ");
         sync.Click += async (_, _) => await SyncVideosAsync(ask: false);
         _tips.SetToolTip(sync, "Đưa các video chưa đồng bộ lên Jobs của tôi trên Dashboard TodoX.");
-        buttons.Controls.AddRange([create, open, sync]); // the resource folder is changed in Cài đặt › Thư mục
+        var history = Ui.Button("Lịch sử dự án");
+        history.Click += (_, _) => ShowHistory(list);
+        _tips.SetToolTip(history, "Mọi lệnh Claude đã làm trong dự án đang chọn: lệnh nào trừ điểm thì có số điểm trừ và số điểm còn; bấm đúp để mở file kết quả.");
+        buttons.Controls.AddRange([create, open, sync, history]); // the resource folder is changed in Cài đặt › Thư mục
         _ = root;
         left.Controls.Add(list);
         left.Controls.Add(leftTitle);
@@ -755,6 +783,149 @@ public sealed partial class MainWindow : Form
 
         ProjectFolders.Open((string)list.SelectedItems[0].Tag!);
     }
+
+    /// <summary>The paid commands of the selected project and its "allow all" choice (which can be withdrawn here).</summary>
+    private void ShowHistory(ListView list)
+    {
+        if (list.SelectedItems.Count == 0 || list.SelectedItems[0].Tag is not string dir)
+        {
+            Say("Chọn một dự án trong danh sách để xem lịch sử.");
+            return;
+        }
+
+        using var form = HistoryForm(list.SelectedItems[0].Text, dir, Font);
+        form.ShowDialog(this);
+    }
+
+    internal static Form HistoryForm(string project, string dir, Font font)
+    {
+        var vi = new System.Globalization.CultureInfo("vi-VN");
+        var form = new Form
+        {
+            Text = "Lịch sử dự án — " + project,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            BackColor = Ground,
+            ForeColor = Ink,
+            Font = font,
+            ClientSize = new Size(1080, 560)
+        };
+        var entries = ProjectHistory.Read(dir);
+        var used = entries.Where(e => e.IsPaid && e.Charged).ToList();
+        var head = new Label
+        {
+            Dock = DockStyle.Top, Height = 84, Padding = new Padding(16, 12, 16, 0), ForeColor = Ink, UseMnemonic = false,
+            Font = new Font("Segoe UI Semibold", 11),
+            Text = $"{entries.Count(e => !e.IsPaid)} lệnh của Claude · {used.Count} lần trừ điểm, tổng {used.Sum(e => e.Points ?? 0).ToString("0.##", vi)} điểm " +
+                   $"(≈ {used.Sum(e => e.Vnd ?? 0).ToString("#,0", vi)} đ) · bấm đúp dòng có kết quả để mở\n" +
+                   (ProjectHistory.IsGranted(dir) ? "Dự án này đang cho phép mọi lệnh tốn điểm không cần hỏi (chỉ báo số điểm)." : "Mỗi lệnh tốn điểm đều hỏi xác nhận.")
+        };
+        var grid = new ListView
+        {
+            View = View.Details, FullRowSelect = true, Dock = DockStyle.Fill, BackColor = Ui.Card, ForeColor = Ink, BorderStyle = BorderStyle.None,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable, ShowItemToolTips = true, OwnerDraw = true
+        };
+        grid.DrawColumnHeader += (_, e) =>
+        {
+            using var back = new SolidBrush(Ui.Panel);
+            e.Graphics.FillRectangle(back, e.Bounds);
+            TextRenderer.DrawText(e.Graphics, e.Header!.Text, new Font("Segoe UI", 9.5f), Rectangle.Inflate(e.Bounds, -4, 0), Muted,
+                TextFormatFlags.VerticalCenter | (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left) | TextFormatFlags.EndEllipsis);
+        };
+        grid.DrawItem += (_, e) => e.DrawDefault = true;
+        grid.DrawSubItem += (_, e) => e.DrawDefault = true;
+        // Columns share the window width (fractions), so nothing is cut on high-DPI screens.
+        double[] shares = [0.12, 0.13, 0.30, 0.08, 0.09, 0.15, 0.13];
+        grid.Resize += (_, _) =>
+        {
+            var w = grid.ClientSize.Width - 4;
+            for (var i = 0; i < grid.Columns.Count && i < shares.Length; i++)
+            {
+                grid.Columns[i].Width = (int)(w * shares[i]);
+            }
+        };
+        grid.Columns.Add("Lúc", 130);
+        grid.Columns.Add("Lệnh", 130);
+        grid.Columns.Add("Nội dung", 330);
+        grid.Columns.Add("Điểm trừ", 80, HorizontalAlignment.Right);
+        grid.Columns.Add("Điểm còn", 90, HorizontalAlignment.Right);
+        grid.Columns.Add("Trả lời / kết quả", 170);
+        grid.Columns.Add("File kết quả", 130);
+        foreach (var e in entries)
+        {
+            var files = (e.Files ?? []).Where(File.Exists).ToList();
+            var item = new ListViewItem([
+                e.At.ToLocalTime().ToString("dd/MM/yyyy HH:mm"),
+                e.IsPaid ? KindName(e.Kind) : e.Kind,
+                e.Summary,
+                e.IsPaid ? (e.Charged ? "-" : "") + (e.Points ?? 0).ToString("0.##", vi) : "",
+                e.Balance is { } b ? b.ToString("#,0.##", vi) : "",
+                e.Answer,
+                files.Count switch { 0 => "", 1 => "▶ " + Path.GetFileName(files[0]), _ => $"▶ {files.Count} file" }
+            ])
+            {
+                Tag = files,
+                ToolTipText = files.Count > 0 ? string.Join("\n", files) : e.Summary,
+                ForeColor = e.IsPaid ? Yellow : Ink
+            };
+            grid.Items.Add(item);
+        }
+
+        if (entries.Count == 0)
+        {
+            grid.Items.Add(new ListViewItem(["", "", "Chưa có lệnh nào trong dự án này.", "", "", "", ""]));
+        }
+
+        // Double-click a row with a result: one file opens; several show a menu to pick one.
+        grid.DoubleClick += (_, _) =>
+        {
+            if (grid.SelectedItems.Count == 0 || grid.SelectedItems[0].Tag is not List<string> { Count: > 0 } files)
+            {
+                return;
+            }
+
+            if (files.Count == 1)
+            {
+                Ui.Open(files[0]);
+                return;
+            }
+
+            var menu = new ContextMenuStrip();
+            foreach (var f in files)
+            {
+                menu.Items.Add(Path.GetFileName(f), null, (_, _) => Ui.Open(f));
+            }
+
+            menu.Show(grid, grid.PointToClient(Cursor.Position));
+        };
+
+        var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 56, Padding = new Padding(12, 10, 12, 0), BackColor = Ground };
+        var revoke = Ui.Button("Thu hồi cho phép cả dự án");
+        revoke.Enabled = ProjectHistory.IsGranted(dir);
+        revoke.Click += (_, _) =>
+        {
+            ProjectHistory.Revoke(dir);
+            revoke.Enabled = false;
+            head.Text = head.Text.Split('\n')[0] + "\nĐã thu hồi: từ giờ mỗi lệnh tốn điểm lại hỏi xác nhận.";
+        };
+        var close = Ui.Button("Đóng", primary: true);
+        close.Click += (_, _) => form.Close();
+        bottom.Controls.AddRange([close, revoke]);
+        form.Controls.Add(grid);
+        form.Controls.Add(head);
+        form.Controls.Add(bottom);
+        return form;
+    }
+
+    private static string KindName(string kind) => kind switch
+    {
+        "video" => "Trừ điểm · video",
+        "image" => "Trừ điểm · ảnh",
+        "music" => "Trừ điểm · nhạc",
+        "voice" => "Trừ điểm · giọng",
+        _ => "Trừ điểm · " + kind
+    };
 
     private void CopyRequest(string template, ListView list)
     {

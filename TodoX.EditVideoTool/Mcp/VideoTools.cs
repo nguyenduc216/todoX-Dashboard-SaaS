@@ -395,7 +395,7 @@ public sealed partial class VideoTools
     {
         LicenseApiClient.NetworkError => ServerConnectivity.OfflineText,
         "insufficient_points" or "voice_service_unavailable" or "voice_not_found"
-            or TodoXServerClient.ConfirmRequired or TodoXServerClient.PriceDeclined => r.Message ?? r.ErrorCode,
+            or TodoXServerClient.ConfirmRequired or TodoXServerClient.PriceDeclined or TodoXServerClient.AppNotRunning => r.Message ?? r.ErrorCode,
         _ => LicenseMessages.ForServerError(r.ErrorCode, r.Message)
     };
 
