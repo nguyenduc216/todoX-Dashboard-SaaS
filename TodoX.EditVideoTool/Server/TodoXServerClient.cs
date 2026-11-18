@@ -36,6 +36,11 @@ public sealed class TodoXServerClient
     /// <summary>Who is asked to accept TodoX's price before a paid command; null = never agree (the command is not run).</summary>
     public IPriceConsent? Consent { get; set; }
 
+    /// <summary>The TodoX EditVideo window; null (tests) skips the check.</summary>
+    public IAppWindow? Window { get; set; }
+
+    public const string AppNotRunning = "app_not_running";
+
     /// <summary>
     /// A paid command (AI image/video/music, voice). TodoX answers the first call with its price ("confirm_required");
     /// the person accepts or refuses it in the confirmation window, and only an accepted price is sent back — with the
@@ -50,6 +55,22 @@ public sealed class TodoXServerClient
             if (result.ErrorCode != ConfirmRequired || PriceQuote.From(result.Detail) is not { } quote)
             {
                 return result;
+            }
+
+            // The price is confirmed with TodoX EditVideo open: opened here when the customer allowed it, otherwise
+            // the assistant must ask the customer first (todox_app).
+            if (Window is { IsRunning: false } window)
+            {
+                if (!window.AutoOpen)
+                {
+                    return ServerResult<JsonElement>.Fail(AppNotRunning,
+                        "TodoX EditVideo chưa mở nên chưa hiện được cửa sổ xác nhận giá. Chưa tạo gì, không trừ điểm. " +
+                        "Hỏi người dùng: \"Cho phép tôi mở TodoX EditVideo bây giờ và tự mở mỗi khi cần xác nhận giá về sau?\" " +
+                        "Đồng ý: gọi todox_app với action=open, remember=true rồi gọi lại lệnh này. Chỉ lần này: action=open, remember=false. " +
+                        "Không đồng ý: nhờ người dùng tự mở TodoX EditVideo rồi gọi lại.");
+                }
+
+                await window.OpenAsync(ct);
             }
 
             var answer = Consent is null ? ConsentAnswer.Unavailable : await Consent.AskAsync(quote, ct);

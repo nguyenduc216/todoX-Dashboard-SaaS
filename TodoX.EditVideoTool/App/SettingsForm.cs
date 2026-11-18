@@ -262,6 +262,22 @@ public sealed class SettingsForm : Form
         updateRow.Controls.Add(Action("Kiểm tra cập nhật", UpdateAsync, primary: true));
         page.Controls.Add(updateRow);
 
+        page.Controls.Add(Ui.Section("Xác nhận trừ điểm"));
+        var autoOpen = new CheckBox
+        {
+            Text = "Cho phép Claude tự mở TodoX EditVideo khi cần xác nhận trừ điểm",
+            AutoSize = true, ForeColor = Ui.Ink, Margin = new Padding(0, 0, 0, 6),
+            Checked = UserSettings.Load(_paths).AutoOpenApp == true
+        };
+        autoOpen.CheckedChanged += (_, _) =>
+        {
+            var current = UserSettings.Load(_paths);
+            current.AutoOpenApp = autoOpen.Checked;
+            current.Save(_paths);
+        };
+        page.Controls.Add(autoOpen);
+        page.Controls.Add(Ui.Text("Bỏ chọn thì mỗi lần cần, Claude sẽ hỏi bạn trước khi mở app. Giá luôn chỉ hiện trong cửa sổ xác nhận của TodoX.", 9.5f, Ui.Muted));
+
         page.Controls.Add(Ui.Section("Kiểm tra hệ thống"));
         page.Controls.Add(_checks);
         var row = Ui.Row();

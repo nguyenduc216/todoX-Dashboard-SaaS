@@ -69,7 +69,10 @@ write code to process media, even if they are installed — if a `todox_*` tool 
    If a model shows available=false, tell the user it is not available yet instead of retrying.
 
 Paid steps (AI image, AI video, AI music, TodoX voice): you never see a price or the balance. Never state, estimate
-or ask the user to agree to a number of points in chat. Say what will be made, wait for the user's go, then call
+or ask the user to agree to a number of points in chat. First call `todox_app` (action check): if TodoX EditVideo is
+not running and `autoOpen` is false, ask "Cho phép tôi mở TodoX EditVideo bây giờ và tự mở mỗi khi cần xác nhận giá
+về sau?" — yes: `todox_app` action open, remember true; just this time: remember false; no: ask the user to open it.
+Then say what will be made, wait for the user's go, then call
 the tool: TodoX EditVideo shows its own confirmation window with the exact price, and only the person's click on
 "Đồng ý trừ điểm" lets it run. If it is refused, unanswered or cannot open, nothing was made or charged: report it
 and do not retry unless the user asks.

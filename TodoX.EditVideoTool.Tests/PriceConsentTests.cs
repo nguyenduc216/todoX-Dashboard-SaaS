@@ -82,6 +82,51 @@ public sealed class PriceConsentTests : IDisposable
         Assert.Single(_handler.Requests);
     }
 
+    private sealed class FakeWindow : IAppWindow
+    {
+        public bool IsRunning { get; set; }
+        public bool AutoOpen { get; set; }
+        public int Opened { get; private set; }
+
+        public Task<bool> OpenAsync(CancellationToken ct)
+        {
+            Opened++;
+            IsRunning = true;
+            return Task.FromResult(true);
+        }
+    }
+
+    [Fact]
+    public async Task Closed_app_without_permission_asks_the_user_first()
+    {
+        var window = new FakeWindow();
+        _client.Window = window;
+        _handler.Replies.Enqueue((HttpStatusCode.Conflict, Quote));
+
+        var result = await _client.SubmitTtsAsync("Xin chào", null, null);
+
+        Assert.Equal(TodoXServerClient.AppNotRunning, result.ErrorCode);
+        Assert.Contains("todox_app", result.Message);
+        Assert.Empty(_consent.Asked);
+        Assert.Equal(0, window.Opened);
+        Assert.DoesNotContain("4.8", result.Message!.Replace(',', '.'));
+    }
+
+    [Fact]
+    public async Task Closed_app_with_permission_is_opened_then_asked()
+    {
+        var window = new FakeWindow { AutoOpen = true };
+        _client.Window = window;
+        _handler.Replies.Enqueue((HttpStatusCode.Conflict, Quote));
+        _handler.Replies.Enqueue((HttpStatusCode.OK, """{"success":true,"data":{"id":"0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0","status":"running"}}"""));
+
+        var result = await _client.AiCreateAsync("video", new { model = "veo_omni", prompt = "a cat" });
+
+        Assert.True(result.Ok);
+        Assert.Equal(1, window.Opened);
+        Assert.Single(_consent.Asked);
+    }
+
     [Fact]
     public async Task Without_anyone_to_ask_nothing_is_agreed()
     {

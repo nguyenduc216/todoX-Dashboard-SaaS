@@ -208,6 +208,7 @@ public sealed partial class MainWindow : Form
     public static int Run(IServiceProvider services)
     {
         FreeConsole(); // hide the console window a double-click opened
+        using var running = Server.AppWindow.Hold(); // lets Claude's TodoX tools see the window is open
         var ui = new Thread(() =>
         {
             Application.EnableVisualStyles();
