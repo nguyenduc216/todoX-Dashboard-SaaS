@@ -1,6 +1,7 @@
 @page "/admin/editvideo-settings"
 @using TodoX.Web.Services.EditVideoTool
 @inject EditVideoAiSettingsService Settings
+@inject EditVideoConsentSkipService Skips
 @inject AuthStateService AuthState
 @inject ISnackbar Snackbar
 
@@ -52,6 +53,49 @@ else
         </MudPaper>
 
         <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-1">Bỏ qua xác nhận giá (chỉ license của TodoX)</MudText>
+            <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
+                License trong danh sách này tạo ảnh, video, nhạc, giọng đọc mà không hiện cửa sổ "Đồng ý trừ điểm" — chỉ dùng cho license nội bộ
+                của TodoX. Mỗi lần dùng vẫn ghi log (ai_price_skip). Khi thêm, bạn phải gõ lại mật khẩu đăng nhập Dashboard của chính bạn.
+                Mọi license khác luôn phải bấm xác nhận.
+            </MudText>
+            @if (_skips.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mb-3">Chưa có license nào được bỏ qua xác nhận.</MudText>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Class="mb-3">
+                    <thead><tr><th>License</th><th>Bật bởi</th><th>Lúc</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var s in _skips)
+                        {
+                            <tr>
+                                <td>@s.Label</td>
+                                <td>@s.EnabledBy</td>
+                                <td>@s.EnabledAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                <td><MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" OnClick="@(() => RemoveSkipAsync(s.LicenseId))">Tắt</MudButton></td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Spacing="2">
+                <MudSelect T="Guid?" @bind-Value="_skipLicense" Label="License TodoX" Variant="Variant.Outlined" Dense="true" Style="min-width:320px">
+                    @foreach (var l in _licenses.Where(l => _skips.All(s => s.LicenseId != l.Id)))
+                    {
+                        <MudSelectItem T="Guid?" Value="@l.Id">@($"{l.CustomerName ?? "?"} · {l.KeyPrefix} · {l.Status}")</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudTextField T="string" @bind-Value="_skipPassword" Label="Mật khẩu Dashboard của bạn" InputType="InputType.Password"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:240px"
+                              UserAttributes="@(new Dictionary<string, object> { ["autocomplete"] = "new-password" })" />
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_skipLicense is null || string.IsNullOrEmpty(_skipPassword) || _skipBusy)"
+                           OnClick="AddSkipAsync">Bật bỏ qua xác nhận</MudButton>
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4">
             <MudText Typo="Typo.h6" Class="mb-1">Model dự phòng</MudText>
             <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
                 Khi 79AI từ chối model khách chọn (lỗi model, hết tài nguyên, thời lượng không hợp lệ), TodoX thử lần lượt các model khác theo thứ tự
@@ -98,6 +142,50 @@ else
     private string _musicModel = "suno-v5.5";
     private bool _fallback = true;
     private bool _requireConsent;
+    private IReadOnlyList<EditVideoConsentSkip> _skips = [];
+    private IReadOnlyList<EditVideoLicenseChoice> _licenses = [];
+    private Guid? _skipLicense;
+    private string? _skipPassword;
+    private bool _skipBusy;
+
+    private async Task LoadSkipsAsync()
+    {
+        _skips = await Skips.ListAsync();
+        _licenses = await Skips.LicensesAsync();
+    }
+
+    private async Task AddSkipAsync()
+    {
+        if (_licenses.FirstOrDefault(l => l.Id == _skipLicense) is not { } license)
+        {
+            return;
+        }
+
+        _skipBusy = true;
+        try
+        {
+            var (ok, message) = await Skips.AddAsync(license, AuthState.CurrentUser, _skipPassword ?? "");
+            _skipPassword = null;
+            if (ok)
+            {
+                _skipLicense = null;
+                await LoadSkipsAsync();
+            }
+
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+        }
+        finally
+        {
+            _skipBusy = false;
+        }
+    }
+
+    private async Task RemoveSkipAsync(Guid licenseId)
+    {
+        await Skips.RemoveAsync(licenseId, AuthState.CurrentUser);
+        await LoadSkipsAsync();
+        Snackbar.Add("Đã tắt: license này phải bấm xác nhận giá như bình thường.", Severity.Info);
+    }
     private string? _videoFallback;
     private string? _imageFallback;
 
@@ -130,6 +218,7 @@ else
         _requireConsent = _form.RequireConsent;
         _videoFallback = _form.VideoFallback;
         _imageFallback = _form.ImageFallback;
+        await LoadSkipsAsync();
         _missing = new[] { prices.Missing("image", ""), prices.Missing("video", ""), prices.Missing("music", "") }
             .Where(m => m is not null).Select(m => "Chưa có " + m).ToList();
     }
