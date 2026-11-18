@@ -270,6 +270,25 @@ public sealed class LandingVideoSampleTests
     }
 
     [Fact]
+    public void Admin_page_shows_a_view_link_per_sample_matching_todox_vn_slugs()
+    {
+        var a = new LandingVideoSample { Id = Guid.Parse("ec1d64a0-5c48-41a7-a6d4-3f00c7d9478b"), Title = "Quinter YEP", IsVisible = false };
+        var b = new LandingVideoSample { Id = Guid.Parse("46c24ddb-9fd8-411e-8595-4b0a54f92d4c"), Title = "Hồ bơi vô cực Quinter Central" };
+        var c = new LandingVideoSample { Id = Guid.Parse("11111111-2222-3333-4444-555555555555"), Title = "Hồ bơi vô cực Quinter Central!" };
+        var d = new LandingVideoSample { Id = Guid.Parse("99999999-2222-3333-4444-555555555555"), Title = "Đáo hạn ngân hàng" };
+        var links = LandingVideoSampleLinks.ShareUrls([a, b, c, d], "https://todox.vn/");
+        Assert.Equal("https://todox.vn/mau-video/quinter-yep", links[a.Id]);
+        Assert.Equal("https://todox.vn/mau-video/ho-boi-vo-cuc-quinter-central-46c24ddb", links[b.Id]);
+        Assert.Equal("https://todox.vn/mau-video/ho-boi-vo-cuc-quinter-central-11111111", links[c.Id]);
+        Assert.Equal("https://todox.vn/mau-video/dao-han-ngan-hang", links[d.Id]);
+        Assert.Equal("https://todox.vn", LandingVideoSampleLinks.BaseUrl(null));
+
+        var page = File.ReadAllText(Path.Combine(FindRoot(), "TodoX.Web", "Components", "Pages", "Landing", "LandingVideoSamples.razor"));
+        Assert.Contains("<MudTh>Link xem</MudTh>", page);
+        Assert.Contains("CopyLinkAsync(link)", page);
+    }
+
+    [Fact]
     public void Samples_can_be_hidden_and_replaced_files_are_removed()
     {
         Assert.True(new LandingVideoSample().IsVisible);
@@ -280,7 +299,13 @@ public sealed class LandingVideoSampleTests
         Assert.True(File.Exists(Path.Combine(root, LandingVideoSampleRepository.VisibilityScript.Replace(".sql", ".test.sql"))));
 
         var landing = File.ReadAllText(Path.Combine(root, "TodoX.Landing", "Data", "VideoSampleRepository.cs"));
-        Assert.Contains("var visibleFilter = visibleColumn ? \"and s.is_visible\" : \"\";", landing);
+        // Hidden samples are not listed, but their own link still plays them (kept out of search engines).
+        Assert.Contains("var visibleSelect = visibleColumn ? \"s.is_visible\" : \"true\";", landing);
+        Assert.Contains("all.Videos.Where(video => video.IsVisible)", landing);
+        Assert.Contains("var all = await LoadAllAsync(ct);", landing);
+        var share = File.ReadAllText(Path.Combine(root, "TodoX.Landing", "Services", "VideoSharePage.cs"));
+        Assert.Contains("NoIndex = !sample.IsVisible", share);
+        Assert.Contains("content=\\\"noindex, nofollow\\\"", share);
 
         var dialog = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Dialogs", "LandingVideoSampleDialog.razor"));
         Assert.Contains("Ghi đè file cũ khi tải bản mới", dialog);

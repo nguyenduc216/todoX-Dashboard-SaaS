@@ -11,13 +11,15 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject ILogger<LandingVideoSamples> Logger
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
 
 <PageTitle>Kho mẫu video - Landing</PageTitle>
 <MudStack Spacing="3">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap">
         <MudStack Spacing="0">
             <MudText Typo="Typo.h4">Kho mẫu video</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Trang landing: /mau-video</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Trang landing: /mau-video. Mẫu đang ẩn không hiện trong danh sách nhưng vẫn xem được qua "Link xem".</MudText>
         </MudStack>
         @if (_ready && CanView)
         {
@@ -46,6 +48,7 @@
                             <MudTh>Nhóm dịch vụ</MudTh>
                             <MudTh>Kích thước</MudTh>
                             <MudTh>Hiển thị</MudTh>
+                            <MudTh>Link xem</MudTh>
                             <MudTh></MudTh>
                         </HeaderContent>
                         <RowTemplate>
@@ -64,6 +67,22 @@
                                            Color="Color.Success" Disabled="@(!CanUpdate || _busy)"
                                            Label="@(context.IsVisible ? "Có" : "Ẩn")" />
                             </MudTd>
+                            <MudTd>
+                                @* Works for hidden samples too: todox.vn plays them from this link without listing them. *@
+                                @if (_links.TryGetValue(context.Id, out var link))
+                                {
+                                    <div class="d-flex align-center gap-1" style="max-width:280px">
+                                        <a href="@link" target="_blank" rel="noopener" title="@link"
+                                           style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@link.Replace("https://", "")</a>
+                                        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                                                       aria-label="Sao chép link xem" OnClick="@(() => CopyLinkAsync(link))" />
+                                    </div>
+                                    @if (!context.IsVisible)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">Đang ẩn: chỉ ai có link mới xem được</MudText>
+                                    }
+                                }
+                            </MudTd>
                             <MudTd Style="text-align:right;white-space:nowrap">
                                 <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => EditAsync(context))">Sửa</MudButton>
                                 <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" Disabled="@(!CanUpdate || _busy)" OnClick="@(() => DeleteAsync(context))">Xóa</MudButton>
@@ -78,6 +97,7 @@
 
 @code {
     private List<LandingVideoSample> _samples = [];
+    private Dictionary<Guid, string> _links = new();
     private IReadOnlyList<ServiceDto> _services = [];
     private bool _ready;
     private bool _busy;
@@ -102,7 +122,25 @@
         }
     }
 
-    private async Task ReloadAsync() => _samples = (await Repository.ListAsync()).ToList();
+    private async Task ReloadAsync()
+    {
+        _samples = (await Repository.ListAsync()).ToList();
+        _links = LandingVideoSampleLinks.ShareUrls(_samples, LandingVideoSampleLinks.BaseUrl(Configuration));
+    }
+
+    private async Task CopyLinkAsync(string link)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", link);
+            Snackbar.Add("Đã sao chép link xem video.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Copy landing sample link failed.");
+            Snackbar.Add("Không sao chép được, hãy mở link rồi copy trên thanh địa chỉ.", Severity.Warning);
+        }
+    }
 
     private Task AddAsync() => OpenEditorAsync(null);
     private Task EditAsync(LandingVideoSample sample) => OpenEditorAsync(sample);
