@@ -49,6 +49,7 @@ builder.Services.AddScoped<NavigationMenuRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.Affiliate.AffiliateRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.CustomerVideos.CustomerVideoRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.Studio.StudioRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.Studio.StaffTaskRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.HomeStatsRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.CustomerVideos.CustomerVideoMediaService>();
 builder.Services.AddScoped<LandingContactLeadRepository>();

@@ -1,0 +1,353 @@
+@page "/staff-tasks"
+@using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Services.Studio
+@inject AccountService Accounts
+@inject StudioRepository Studio
+@inject StaffTaskRepository Tasks
+@inject AuthStateService AuthState
+@inject AuditRepository Audit
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<StaffTasks> Logger
+
+<PageTitle>Công việc nhân viên</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Công việc nhân viên</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Giao việc, theo dõi trạng thái, ngày giờ thực hiện và hoàn thành của từng nhân viên.</MudText>
+        </div>
+        @if (_ready && Can("staff_tasks.create"))
+        {
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate" Disabled="_busy" data-testid="staff-task-create">Tạo công việc</MudButton>
+        }
+    </MudStack>
+
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!Can("staff_tasks.view"))
+    {
+        <MudAlert Severity="Severity.Error">Bạn không có quyền xem công việc nhân viên.</MudAlert>
+    }
+    else if (!_ready)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Database chưa có bảng công việc nhân viên. Cần chạy script <code>@StaffTaskRepository.Script</code>.
+        </MudAlert>
+    }
+    else
+    {
+        var summary = StaffTaskSummary.From(Scoped);
+        <MudGrid>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = OpenFilter)">
+                    <MudText Typo="Typo.subtitle2">Chưa hoàn thành</MudText>
+                    <div class="todox-stat-value" style="color:var(--mud-palette-warning)">@summary.Open</div>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Mới, chờ và đang thực hiện</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = StaffTaskStatuses.Done)">
+                    <MudText Typo="Typo.subtitle2">Đã hoàn thành</MudText>
+                    <div class="todox-stat-value" style="color:var(--mud-palette-success)">@summary.Done</div>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Trên tổng @summary.Total công việc</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = LateFilter)">
+                    <MudText Typo="Typo.subtitle2">Trễ hạn hoàn thành</MudText>
+                    <div class="todox-stat-value" style="@(LateCount > 0 ? "color:var(--mud-palette-error)" : null)">@LateCount</div>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa xong mà đã qua giờ hoàn thành</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = StaffTaskStatuses.Cancelled)">
+                    <MudText Typo="Typo.subtitle2">Hủy</MudText>
+                    <div class="todox-stat-value">@summary.Count(StaffTaskStatuses.Cancelled)</div>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Không tính vào chưa/đã hoàn thành</MudText>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudGrid Spacing="2" Class="mb-2">
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tiêu đề, ghi chú, khách hàng, người thực hiện..."
+                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" autocomplete="off"
+                                  Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <MudSelect T="Guid?" Label="Người thực hiện" @bind-Value="_assigneeFilter" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        @if (AuthState.CurrentUser is { } me)
+                        {
+                            <MudSelectItem T="Guid?" Value="@me.UserId">Của tôi</MudSelectItem>
+                        }
+                        <MudSelectItem T="Guid?" Value="@Unassigned">Chưa giao</MudSelectItem>
+                        @foreach (var person in _assignees.Where(x => x.UserId != AuthState.CurrentUser?.UserId))
+                        {
+                            <MudSelectItem T="Guid?" Value="@person.UserId">@person.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <MudSelect T="Guid?" Label="Khách hàng" @bind-Value="_customerFilter" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        @foreach (var customer in _customers.OrderBy(x => x.CompanyName))
+                        {
+                            <MudSelectItem T="Guid?" Value="@customer.Id">@customer.CompanyName</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+            <MudChipSet T="string" @bind-SelectedValue="_statusFilter" SelectionMode="SelectionMode.SingleSelection" Class="mb-3">
+                <MudChip T="string" Value="@string.Empty" Variant="Variant.Outlined">Tất cả (@summary.Total)</MudChip>
+                @foreach (var status in StaffTaskStatuses.All)
+                {
+                    <MudChip T="string" Value="@status" Variant="Variant.Outlined" Color="@StatusColor(status)">@StaffTaskStatuses.Label(status) (@summary.Count(status))</MudChip>
+                }
+            </MudChipSet>
+
+            <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" HorizontalScrollbar="true">
+                <HeaderContent>
+                    <MudTh>Tiêu đề</MudTh>
+                    <MudTh>Người thực hiện</MudTh>
+                    <MudTh>Khách hàng</MudTh>
+                    <MudTh>Thực hiện</MudTh>
+                    <MudTh>Hoàn thành</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh Style="text-align:right">Thao tác</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Tiêu đề" Style="min-width:220px;max-width:420px">
+                        <b>@context.Title</b>
+                        @if (!string.IsNullOrWhiteSpace(context.Note))
+                        {
+                            <MudText Typo="Typo.caption" Class="d-block todox-page-subtitle" Style="white-space:pre-line">@Short(context.Note)</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Người thực hiện" Style="white-space:nowrap">@(context.AssigneeName ?? "Chưa giao")</MudTd>
+                    <MudTd DataLabel="Khách hàng">@(context.CustomerName ?? "—")</MudTd>
+                    <MudTd DataLabel="Thực hiện" Style="white-space:nowrap">@When(context.StartAt)</MudTd>
+                    <MudTd DataLabel="Hoàn thành" Style="white-space:nowrap">
+                        @if (StaffTaskRules.IsLate(context, _now))
+                        {
+                            <span style="color:var(--mud-palette-error);font-weight:600">@When(context.CompletedAt)</span>
+                            <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block">Trễ hạn</MudText>
+                        }
+                        else
+                        {
+                            @When(context.CompletedAt)
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Trạng thái">
+                        @if (Can("staff_tasks.update"))
+                        {
+                            <MudMenu Dense="true" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Disabled="_busy">
+                                <ActivatorContent Context="menuContext">
+                                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)" Icon="@Icons.Material.Filled.ArrowDropDown">@StaffTaskStatuses.Label(context.Status)</MudChip>
+                                </ActivatorContent>
+                                <ChildContent>
+                                    @foreach (var status in StaffTaskStatuses.All.Where(x => x != context.Status))
+                                    {
+                                        <MudMenuItem OnClick="@(() => SetStatus(context, status))">@StaffTaskStatuses.Label(status)</MudMenuItem>
+                                    }
+                                </ChildContent>
+                            </MudMenu>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StaffTaskStatuses.Label(context.Status)</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Thao tác" Style="text-align:right;white-space:nowrap">
+                        @if (Can("staff_tasks.update"))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="Sửa" OnClick="@(() => OpenEdit(context))" Disabled="_busy" />
+                        }
+                        @if (Can("staff_tasks.delete"))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" aria-label="Xóa" OnClick="@(() => Delete(context))" Disabled="_busy" />
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Class="pa-4 todox-page-subtitle">Chưa có công việc nào khớp bộ lọc.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private const string OpenFilter = "__open";
+    private const string LateFilter = "__late";
+    private static readonly Guid Unassigned = Guid.Empty;
+
+    private IReadOnlyList<StaffTask> _tasks = [];
+    private IReadOnlyList<CustomerProfile> _customers = [];
+    private IReadOnlyList<PlanAssignee> _assignees = [];
+    private string _search = string.Empty;
+    private string? _statusFilter = string.Empty;
+    private Guid? _assigneeFilter;
+    private Guid? _customerFilter;
+    private DateTime _now = VietnamTime.Now;
+    private bool _loaded;
+    private bool _ready;
+    private bool _busy;
+
+    private bool Can(string permission)
+        => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.Can(permission) == true;
+
+    internal static Color StatusColor(string? status) => StaffTaskStatuses.Normalize(status) switch
+    {
+        StaffTaskStatuses.Pending => Color.Info,
+        StaffTaskStatuses.InProgress => Color.Warning,
+        StaffTaskStatuses.Done => Color.Success,
+        StaffTaskStatuses.Cancelled => Color.Dark,
+        _ => Color.Default
+    };
+
+    private static string When(DateTime? value) => value?.ToString("dd/MM/yyyy HH:mm") ?? "—";
+
+    private static string Short(string text) => text.Length <= 140 ? text : text[..140].TrimEnd() + "…";
+
+    private int LateCount => Scoped.Count(x => StaffTaskRules.IsLate(x, _now));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _ready = await Tasks.IsReadyAsync();
+            if (_ready && Can("staff_tasks.view"))
+            {
+                _assignees = await Studio.ListAssigneesAsync();
+                try { _customers = await Accounts.GetCustomersAsync(); }
+                catch (Exception ex) { Logger.LogWarning(ex, "Staff tasks: customer list unavailable."); }
+                await Reload();
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        _loaded = true;
+    }
+
+    private async Task Reload()
+    {
+        _tasks = await Tasks.ListAsync();
+        _now = VietnamTime.Now;
+    }
+
+    /// <summary>Tasks after the search / person / customer filters: the cards and chips count these.</summary>
+    private IEnumerable<StaffTask> Scoped
+    {
+        get
+        {
+            IEnumerable<StaffTask> list = _tasks;
+            if (_assigneeFilter is { } assignee)
+                list = assignee == Unassigned ? list.Where(x => x.AssigneeUserId is null) : list.Where(x => x.AssigneeUserId == assignee);
+            if (_customerFilter is { } customer) list = list.Where(x => x.CustomerId == customer);
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                var q = _search.Trim();
+                list = list.Where(x =>
+                    x.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.Note ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.CustomerName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.AssigneeName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+            return list;
+        }
+    }
+
+    private IEnumerable<StaffTask> Filtered => _statusFilter switch
+    {
+        null or "" => Scoped,
+        OpenFilter => Scoped.Where(x => StaffTaskStatuses.IsOpen(x.Status)),
+        LateFilter => Scoped.Where(x => StaffTaskRules.IsLate(x, _now)),
+        var status => Scoped.Where(x => x.Status == status)
+    };
+
+    private Task OpenCreate() => OpenDialog(null);
+
+    private Task OpenEdit(StaffTask task) => OpenDialog(task);
+
+    private async Task OpenDialog(StaffTask? source)
+    {
+        var parameters = new DialogParameters<StaffTaskDialog>
+        {
+            { x => x.Source, source },
+            { x => x.DefaultAssigneeId, _assigneeFilter is { } a && a != Unassigned ? a : null },
+            { x => x.Customers, _customers },
+            { x => x.Assignees, _assignees }
+        };
+        var dialog = await DialogService.ShowAsync<StaffTaskDialog>(source is null ? "Tạo công việc" : "Sửa công việc", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not StaffTask model) return;
+
+        _busy = true;
+        try
+        {
+            var (ok, error) = await Tasks.SaveAsync(model);
+            if (!ok)
+            {
+                Snackbar.Add(error ?? "Chưa lưu được công việc.", Severity.Error);
+                return;
+            }
+            await Audit.LogAsync(AuthState.CurrentUser, "staff_tasks", source is null ? "create" : "update", entityDisplay: model.Title);
+            Snackbar.Add(source is null ? "Đã tạo công việc." : "Đã cập nhật công việc.", Severity.Success);
+            await Reload();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetStatus(StaffTask task, string status)
+    {
+        _busy = true;
+        try
+        {
+            await Tasks.SetStatusAsync(task.Id, status);
+            await Audit.LogAsync(AuthState.CurrentUser, "staff_tasks", "update", entityDisplay: $"{task.Title} → {StaffTaskStatuses.Label(status)}");
+            await Reload();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Delete(StaffTask task)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa công việc",
+            $"Xóa công việc \"{task.Title}\"? Không hoàn tác được.",
+            yesText: "Xóa", cancelText: "Hủy");
+        if (confirm != true) return;
+        try
+        {
+            await Tasks.DeleteAsync(task.Id);
+            await Audit.LogAsync(AuthState.CurrentUser, "staff_tasks", "delete", entityDisplay: task.Title);
+            Snackbar.Add("Đã xóa công việc.", Severity.Success);
+            await Reload();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}
