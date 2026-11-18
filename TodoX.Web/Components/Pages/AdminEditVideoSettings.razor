@@ -89,7 +89,7 @@ else
                 </MudSelect>
                 <MudTextField T="string" @bind-Value="_skipPassword" Label="Mật khẩu Dashboard của bạn" InputType="InputType.Password"
                               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:240px"
-                              UserAttributes="@(new Dictionary<string, object> { ["autocomplete"] = "new-password" })" />
+                              autocomplete="new-password" />
                 <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_skipLicense is null || string.IsNullOrEmpty(_skipPassword) || _skipBusy)"
                            OnClick="AddSkipAsync">Bật bỏ qua xác nhận</MudButton>
             </MudStack>
