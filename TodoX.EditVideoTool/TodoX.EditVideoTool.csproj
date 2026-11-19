@@ -8,12 +8,12 @@
     <Nullable>enable</Nullable>
     <AssemblyName>todox-editvideo</AssemblyName>
     <RootNamespace>TodoX.EditVideoTool</RootNamespace>
-    <Version>1.2.2</Version>
+    <Version>1.2.3</Version>
     <Product>TodoX EditVideo</Product>
     <Company>TodoX</Company>
     <!-- Required by the LibraryImport source generator (volume serial P/Invoke). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <ApplicationIcon>Assets/favicon.ico</ApplicationIcon>
+    <ApplicationIcon>Assets/editvideo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Release distribution: one self-contained exe for Windows x64. -->
