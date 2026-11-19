@@ -8,10 +8,10 @@
     <Nullable>enable</Nullable>
     <AssemblyName>todox-reupvideo</AssemblyName>
     <RootNamespace>TodoX.ReupVideo</RootNamespace>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Product>todoX ReupVideo</Product>
     <Company>TodoX</Company>
-    <ApplicationIcon>Assets/favicon.ico</ApplicationIcon>
+    <ApplicationIcon>Assets/reupvideo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Release distribution: one self-contained exe for Windows x64. -->
