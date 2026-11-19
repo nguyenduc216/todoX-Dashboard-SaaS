@@ -29,6 +29,9 @@ public sealed partial class MainForm
     private readonly LinkLabel _noPageHint = new() { Text = "⚠ Chưa chọn fanpage nào để đăng — bấm để thêm fanpage", AutoSize = true, LinkColor = Yellow, ActiveLinkColor = Ink, Font = F(9.5f), Margin = P(8, 13, 0, 0), Visible = false };
     private bool _fillingLinks;
     private Action _fitLinkColumns = () => { };
+    // Bottom panel: the highlighted link on every fanpage (posted / waiting / failed).
+    private readonly ListView _linkPages = Theme.List();
+    private readonly Label _linkPagesTitle = new() { AutoSize = true, ForeColor = Yellow, Font = F(9, FontStyle.Bold), Margin = P(0, 8, 0, 4), UseMnemonic = false };
 
     private Control BuildHomePage()
     {
@@ -52,9 +55,9 @@ public sealed partial class MainForm
 
         // --- figure cards
         var cards = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, BackColor = Ground, Padding = P(0, 10, 0, 0) };
-        cards.Controls.Add(Card(HomeView.Pending, "Link chưa reup", Yellow));
+        cards.Controls.Add(Card(HomeView.Pending, "Link chờ reup", Yellow));
         cards.Controls.Add(Card(HomeView.Failed, "Reup lỗi · chờ reup lại", Red));
-        cards.Controls.Add(Card(HomeView.Posted, "Đã reup", Green));
+        cards.Controls.Add(Card(HomeView.Posted, "Đã reup đủ mọi fanpage", Green));
         cards.Controls.Add(Card(HomeView.Inactive, "Link không còn active", Muted));
         cards.Controls.Add(Card(HomeView.All, "Tất cả link đã quét", Ink));
 
@@ -81,7 +84,7 @@ public sealed partial class MainForm
 
         // --- list
         // Column 0 holds only the tick box; "Kênh" is sized to the longest channel name in RefreshHome.
-        _fitLinkColumns = Columns(_links, ("", 30), ("Ngày TikTok", 92), ("Kênh", 140), ("Nội dung", -1), ("Trạng thái", 140), ("Thử", 44), ("Fanpage", 190));
+        _fitLinkColumns = Columns(_links, ("", 30), ("Ngày TikTok", 92), ("Kênh", 140), ("Nội dung", -1), ("Trạng thái", 150), ("Đã lên", 64), ("Còn chờ đăng lên fanpage", 240));
         _links.Dock = DockStyle.Fill;
         _links.ItemChecked += (_, e) =>
         {
@@ -109,6 +112,7 @@ public sealed partial class MainForm
             }
         };
         _links.DoubleClick += (_, _) => ShowLinkHistory();
+        _links.SelectedIndexChanged += (_, _) => FillLinkPages();
         var menu = new ContextMenuStrip();
         menu.Items.Add("Reup link này ngay", null, async (_, _) => await ReupSelectedAsync());
         menu.Items.Add("Xem lịch sử reup của link", null, (_, _) => ShowLinkHistory());
@@ -134,8 +138,24 @@ public sealed partial class MainForm
         menu.Items.Add("Xoá khỏi danh sách", null, (_, _) => RemoveSelected());
         _links.ContextMenuStrip = menu;
 
+        // --- the highlighted link on each fanpage
+        Columns(_linkPages, ("Fanpage", 230), ("Tình trạng", 250), ("Thời gian", 130), ("Chi tiết / bài Facebook (nhấp đúp để mở)", -1));
+        _linkPages.Dock = DockStyle.Fill;
+        _linkPages.DoubleClick += (_, _) =>
+        {
+            if (_linkPages.SelectedItems.Count > 0 && _linkPages.SelectedItems[0].Tag is PageReupStatus { Post.FacebookId: { } id })
+            {
+                OpenUrl(FacebookUrl(id));
+            }
+        };
+        var detail = new Panel { Dock = DockStyle.Bottom, Height = S(150), BackColor = Ground, Padding = P(0, 6, 0, 0) };
+        _linkPagesTitle.Dock = DockStyle.Top;
+        detail.Controls.Add(_linkPages);
+        detail.Controls.Add(_linkPagesTitle);
+
         // Docking: the last added Top control sits highest.
         page.Controls.Add(_links);
+        page.Controls.Add(detail);
         page.Controls.Add(tools);
         page.Controls.Add(cards);
         page.Controls.Add(runBar);
@@ -179,9 +199,9 @@ public sealed partial class MainForm
 
         _listTitle.Text = view switch
         {
-            HomeView.Pending => "LINK CHƯA REUP",
+            HomeView.Pending => "LINK CHỜ REUP (GỒM CẢ LINK ĐÃ LÊN MỘT SỐ PAGE)",
             HomeView.Failed => "REUP LỖI — DANH SÁCH REUP LẠI",
-            HomeView.Posted => "LINK ĐÃ REUP",
+            HomeView.Posted => "LINK ĐÃ LÊN ĐỦ MỌI FANPAGE",
             HomeView.Inactive => "LINK KHÔNG CÒN ACTIVE (KHÔNG ĐĂNG)",
             _ => "TẤT CẢ LINK"
         };
@@ -205,11 +225,13 @@ public sealed partial class MainForm
         var all = _library.Snapshot();
         // Fanpages each link goes to (ticked fanpages mapped to its TikTok channel).
         var targetsOf = all.ToDictionary(v => v.VideoId, v => ReupTargets.For(v, _settings, pages));
+        var statusOf = all.ToDictionary(v => v.VideoId, v => PageReupStatuses.For(v, _settings, pages));
+        bool Complete(VideoItem v) => v.State != VideoState.Removed && PageReupStatuses.IsComplete(statusOf[v.VideoId]);
         var counts = new Dictionary<HomeView, int>
         {
             [HomeView.Pending] = all.Count(v => v.IsPending(targetsOf[v.VideoId])),
             [HomeView.Failed] = all.Count(v => v.HasFailed(targetsOf[v.VideoId])),
-            [HomeView.Posted] = all.Count(v => v.IsPostedAnywhere && v.State != VideoState.Removed),
+            [HomeView.Posted] = all.Count(Complete),
             [HomeView.Inactive] = all.Count(v => v.State == VideoState.Inactive),
             [HomeView.All] = all.Count(v => v.State != VideoState.Removed)
         };
@@ -222,7 +244,7 @@ public sealed partial class MainForm
             {
                 HomeView.Pending => v.IsPending(targetsOf[v.VideoId]),
                 HomeView.Failed => v.HasFailed(targetsOf[v.VideoId]),
-                HomeView.Posted => v.IsPostedAnywhere && v.State != VideoState.Removed,
+                HomeView.Posted => Complete(v),
                 HomeView.Inactive => v.State == VideoState.Inactive,
                 _ => v.State != VideoState.Removed
             })
@@ -238,8 +260,9 @@ public sealed partial class MainForm
         foreach (var v in items)
         {
             var targets = targetsOf[v.VideoId];
+            var status = statusOf[v.VideoId];
             var (state, color) = Describe(v, targets);
-            var failedPosts = v.Posts.Where(p => p.State == PostState.Failed).ToList();
+            var onTargets = status.Count(s => s.State == PageReupState.Posted);
             var text = (v.Description ?? "").Replace('\n', ' ');
             var row = new ListViewItem([
                 "",
@@ -247,10 +270,12 @@ public sealed partial class MainForm
                 "@" + v.Author,
                 text.Length > 300 ? text[..300] + "…" : text,
                 state,
-                failedPosts.Count == 0 ? "" : failedPosts.Max(p => p.Attempts).ToString(),
-                FanpageColumn(v, targets)
+                targets.Count == 0 ? "—" : $"{onTargets}/{targets.Count}",
+                WaitingColumn(status)
             ]) { Tag = v, UseItemStyleForSubItems = false, Selected = selected.Contains(v.VideoId), Checked = _ticked.Contains(v.VideoId) };
             row.SubItems[4].ForeColor = color;
+            row.SubItems[5].ForeColor = targets.Count > 0 && onTargets == targets.Count ? Green : onTargets > 0 ? Yellow : Muted;
+            row.SubItems[6].ForeColor = status.Any(s => s.State is PageReupState.Failed or PageReupState.GaveUp) ? Red : Ink;
             _links.Items.Add(row);
         }
 
@@ -266,6 +291,73 @@ public sealed partial class MainForm
         _fillingLinks = false;
         _fitLinkColumns();
         UpdateTickState();
+        FillLinkPages();
+    }
+
+    /// <summary>Bottom panel: the highlighted link (or the first one) on every fanpage.</summary>
+    private void FillLinkPages()
+    {
+        var link = _links.SelectedItems.Count > 0 ? _links.SelectedItems[0].Tag as VideoItem
+            : _links.Items.Count > 0 ? _links.Items[0].Tag as VideoItem : null;
+        if (link is not null)
+        {
+            link = _library.Find(link.VideoId) ?? link;
+        }
+
+        _linkPagesTitle.Text = link is null
+            ? "TỪNG FANPAGE CỦA LINK — CHỌN MỘT LINK Ở DANH SÁCH TRÊN"
+            : $"TÌNH TRẠNG TRÊN TỪNG FANPAGE · @{link.Author} · {Short(link.Description, 70)}";
+        FillPageStatus(_linkPages, link);
+    }
+
+    private static string Short(string? text, int max)
+    {
+        var t = (text ?? "").Replace('\n', ' ').Trim();
+        return t.Length > max ? t[..max] + "…" : t;
+    }
+
+    /// <summary>Fills a list with one row per fanpage: posted (when, post link), waiting, failed (tries, error).</summary>
+    private void FillPageStatus(ListView list, VideoItem? link)
+    {
+        list.BeginUpdate();
+        list.Items.Clear();
+        if (link is not null)
+        {
+            var live = link.State is VideoState.New or VideoState.Active;
+            var rows = PageReupStatuses.For(link, _settings, EnabledPages());
+            foreach (var s in rows)
+            {
+                var (text, color) = s.State switch
+                {
+                    PageReupState.Posted => ("✓ Đã đăng", Green),
+                    PageReupState.Waiting when live => ("⏳ Chờ đăng (lượt reup tới)", Yellow),
+                    PageReupState.Waiting => (link.State == VideoState.Inactive ? "Không đăng — link không còn active" : "Không đăng — link đã bỏ qua", Muted),
+                    PageReupState.Failed => ($"✗ Lỗi lần {s.Post!.Attempts} — tự reup lại lượt sau", Red),
+                    PageReupState.GaveUp => ($"✗ Lỗi {s.Post!.Attempts} lần — bấm Reup để thử lại", Red),
+                    _ => ("✓ Đã đăng (page nay không còn gán kênh này)", Muted)
+                };
+                var item = new ListViewItem([
+                    s.PageName,
+                    text,
+                    s.Post is { } p ? p.At.ToString("HH:mm dd/MM/yyyy") : "",
+                    s.Post switch
+                    {
+                        { State: PostState.Posted, FacebookId: { } id } => FacebookUrl(id),
+                        { State: PostState.Failed, Error: { } e } => e,
+                        _ => ""
+                    }
+                ]) { Tag = s, UseItemStyleForSubItems = false };
+                item.SubItems[1].ForeColor = color;
+                list.Items.Add(item);
+            }
+
+            if (rows.Count == 0)
+            {
+                list.Items.Add(new ListViewItem(["—", "Kênh này chưa được gán fanpage nào (Cài đặt → Kênh → Fanpage)", "", ""]));
+            }
+        }
+
+        list.EndUpdate();
     }
 
     private void UpdateTickState()
@@ -325,18 +417,17 @@ public sealed partial class MainForm
         _log.Report($"Đã xoá {selected.Count} link khỏi danh sách.");
     }
 
-    /// <summary>"✓" before fanpages that already got the link, "✗" for failed ones, plain = still to post.</summary>
-    private string FanpageColumn(VideoItem v, List<FacebookPage> targets)
+    /// <summary>Fanpages the link has not reached yet: waiting by name, failed ones with "✗".</summary>
+    private static string WaitingColumn(List<PageReupStatus> status)
     {
-        var names = targets.Select(p => (v.PostFor(p.PageId)?.State switch
+        var names = status.Where(s => s.State is PageReupState.Waiting or PageReupState.Failed or PageReupState.GaveUp)
+            .Select(s => (s.State == PageReupState.Waiting ? "" : "✗ ") + s.PageName).ToList();
+        if (names.Count > 0)
         {
-            PostState.Posted => "✓ ",
-            PostState.Failed => "✗ ",
-            _ => ""
-        }) + p.Name).ToList();
-        // Pages it was posted to that are no longer mapped/ticked are still shown.
-        names.AddRange(v.Posts.Where(p => p.State == PostState.Posted && targets.All(t => t.PageId != p.PageId)).Select(p => "✓ " + PageName(p.PageId)));
-        return names.Count == 0 ? "—" : string.Join(", ", names);
+            return string.Join(", ", names);
+        }
+
+        return status.Any(s => s.State == PageReupState.Posted) ? "Đã lên đủ fanpage" : status.Count == 0 ? "Chưa gán fanpage" : "—";
     }
 
     private (string Text, Color Color) Describe(VideoItem v, List<FacebookPage> pages)
@@ -365,7 +456,8 @@ public sealed partial class MainForm
 
         if (v.IsPending(pages))
         {
-            return (v.IsPostedAnywhere ? "Đã reup một phần · chờ fanpage còn lại" : "Chờ reup", Yellow);
+            var done = pages.Count(p => v.IsPostedTo(p.PageId));
+            return (done > 0 ? "Chờ page còn lại" : "Chờ reup", Yellow);
         }
 
         return (v.IsPostedAnywhere ? "Đã reup" : "—", Green);

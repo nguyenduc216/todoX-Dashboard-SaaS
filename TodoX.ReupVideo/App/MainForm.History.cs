@@ -22,7 +22,7 @@ public sealed partial class MainForm
         top.Controls.Add(new Label { Text = "CÁC LẦN REUP", AutoSize = true, ForeColor = Yellow, Font = F(9, FontStyle.Bold), Margin = P(0, 12, 12, 6) });
         top.Controls.Add(Theme.Text("Bấm vào một lần chạy để xem từng link: đăng thành công, lỗi (kèm lý do) hoặc link không còn active. Nhấp đúp vào link để mở bài Facebook / link TikTok.", Muted, 9, 700));
 
-        Columns(_runs, ("Thời gian", 130), ("Kiểu chạy", 130), ("Link mới", 70), ("Thành công", 85), ("Lỗi", 60), ("Không active", 90), ("Thời lượng", 80), ("Ghi chú", -1));
+        Columns(_runs, ("Thời gian", 130), ("Kiểu chạy", 130), ("Link mới", 70), ("Thành công", 85), ("Lỗi", 60), ("Không active", 90), ("Thời lượng", 80), ("Đã đăng lên fanpage", -1), ("Ghi chú", 220));
         _runs.Dock = DockStyle.Fill;
         _runs.MultiSelect = false;
         _runs.SelectedIndexChanged += (_, _) => FillRunEntries();
@@ -37,7 +37,7 @@ public sealed partial class MainForm
         _runButtons.Add(_retryRunButton);
         entryTools.Controls.AddRange([_runTitle, _retryRunButton, openTikTok, openFacebook]);
 
-        Columns(_runEntries, ("Giờ", 70), ("Kết quả", 110), ("Kênh", 110), ("Nội dung", -1), ("Fanpage", 150), ("Chi tiết", 260));
+        Columns(_runEntries, ("Giờ", 70), ("Link TikTok", 130), ("Kênh", 110), ("Nội dung", -1), ("Fanpage", 200), ("Kết quả", 110), ("Chi tiết", 260));
         _runEntries.Dock = DockStyle.Fill;
         _runEntries.DoubleClick += (_, _) =>
         {
@@ -86,6 +86,7 @@ public sealed partial class MainForm
                 run.Failed.ToString(),
                 run.Inactive.ToString(),
                 duration.TotalMinutes >= 1 ? $"{(int)duration.TotalMinutes} ph {duration.Seconds} s" : $"{duration.Seconds} s",
+                PagesPosted(run),
                 note
             ]) { Tag = run, UseItemStyleForSubItems = false, Selected = run.Id == selectedId };
             item.SubItems[3].ForeColor = run.Posted > 0 ? Green : Muted;
@@ -102,6 +103,15 @@ public sealed partial class MainForm
         FillRunEntries();
     }
 
+    /// <summary>"Page A: 2 video, Page B: 1 video" for a run.</summary>
+    private static string PagesPosted(RunRecord run)
+    {
+        var groups = run.Entries.Where(e => e.Kind == RunEntryKind.Posted)
+            .GroupBy(e => e.PageName ?? e.PageId ?? "")
+            .Select(g => $"{g.Key}: {g.Count()} video").ToList();
+        return groups.Count == 0 ? "—" : string.Join(", ", groups);
+    }
+
     private RunRecord? SelectedRun() => _runs.SelectedItems.Count > 0 ? _runs.SelectedItems[0].Tag as RunRecord : null;
 
     private List<RunEntry> SelectedEntries() =>
@@ -114,8 +124,13 @@ public sealed partial class MainForm
         _retryRunButton.Visible = run is not null && run.Entries.Any(e => e.Kind == RunEntryKind.Failed);
         _runEntries.BeginUpdate();
         _runEntries.Items.Clear();
-        foreach (var e in run?.Entries ?? [])
+        // Grouped by link (in the order the links were handled), then one row per fanpage.
+        var order = (run?.Entries ?? []).Select(e => e.VideoId).Distinct().Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
+        string? lastVideo = null;
+        foreach (var e in (run?.Entries ?? []).OrderBy(e => order[e.VideoId]).ThenBy(e => e.At))
         {
+            var firstOfLink = e.VideoId != lastVideo;
+            lastVideo = e.VideoId;
             var (text, color) = e.Kind switch
             {
                 RunEntryKind.Posted => ("✓ Đã đăng", Green),
@@ -124,13 +139,14 @@ public sealed partial class MainForm
             };
             var item = new ListViewItem([
                 e.At.ToString("HH:mm:ss"),
+                firstOfLink ? "…" + (e.VideoId.Length > 8 ? e.VideoId[^8..] : e.VideoId) : "  ↳",
+                firstOfLink ? "@" + e.Author : "",
+                firstOfLink ? e.Text ?? "" : "",
+                e.PageName ?? (e.Kind == RunEntryKind.Inactive ? "(không đăng page nào)" : ""),
                 text,
-                "@" + e.Author,
-                e.Text ?? "",
-                e.PageName ?? "",
-                e.Kind == RunEntryKind.Posted ? $"{e.Message} · id {e.FacebookId}" : e.Message ?? ""
+                e.Kind == RunEntryKind.Posted ? $"{e.Message} · {FacebookUrl(e.FacebookId ?? "")}" : e.Message ?? ""
             ]) { Tag = e, UseItemStyleForSubItems = false };
-            item.SubItems[1].ForeColor = color;
+            item.SubItems[5].ForeColor = color;
             _runEntries.Items.Add(item);
         }
 
@@ -169,13 +185,27 @@ public sealed partial class MainForm
             ForeColor = Ink,
             Font = F(9.5f),
             StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(S(860), S(420)),
+            ClientSize = new Size(S(960), S(600)),
             MinimizeBox = false,
             ShowIcon = false,
             Padding = P(16, 12, 16, 12)
         };
-        var head = Theme.Text($"{link.Url}\n{(link.Description ?? "").Replace('\n', ' ')}", Muted, 9, 820);
+        var head = Theme.Text($"{link.Url}\n{(link.Description ?? "").Replace('\n', ' ')}", Muted, 9, 920);
         head.Dock = DockStyle.Top;
+        var statusTitle = new Label { Text = "TÌNH TRẠNG TRÊN TỪNG FANPAGE", AutoSize = true, ForeColor = Yellow, Font = F(9, FontStyle.Bold), Dock = DockStyle.Top, Padding = P(0, 8, 0, 4) };
+        var status = Theme.List();
+        status.Dock = DockStyle.Top;
+        status.Height = S(200);
+        Columns(status, ("Fanpage", 220), ("Tình trạng", 250), ("Thời gian", 130), ("Chi tiết / bài Facebook", -1));
+        FillPageStatus(status, _library.Find(link.VideoId) ?? link);
+        status.DoubleClick += (_, _) =>
+        {
+            if (status.SelectedItems.Count > 0 && status.SelectedItems[0].Tag is PageReupStatus { Post.FacebookId: { } id })
+            {
+                OpenUrl(FacebookUrl(id));
+            }
+        };
+        var logTitle = new Label { Text = "CÁC LẦN REUP CỦA LINK", AutoSize = true, ForeColor = Yellow, Font = F(9, FontStyle.Bold), Dock = DockStyle.Top, Padding = P(0, 10, 0, 4) };
         var list = Theme.List();
         list.Dock = DockStyle.Fill;
         Columns(list, ("Thời gian", 130), ("Lần chạy", 120), ("Kết quả", 100), ("Fanpage", 160), ("Chi tiết", -1));
@@ -205,6 +235,9 @@ public sealed partial class MainForm
             }
         };
         dialog.Controls.Add(list);
+        dialog.Controls.Add(logTitle);
+        dialog.Controls.Add(status);
+        dialog.Controls.Add(statusTitle);
         dialog.Controls.Add(head);
         dialog.ShowDialog(this);
     }
