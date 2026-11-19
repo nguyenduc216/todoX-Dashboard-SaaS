@@ -215,7 +215,7 @@ public class ReupRunnerTests : IDisposable
         var facebook = new FakeFacebook();
         var settings = new AppSettings
         {
-            TikTokSources = [new TikTokSource { Username = "shop" }, new TikTokSource { Username = "other", Enabled = false }],
+            TikTokSources = [new TikTokSource { Username = "shop", PageIds = ["P1", "P2"] }, new TikTokSource { Username = "other", Enabled = false, PageIds = ["P1", "P2"] }],
             FacebookPages = [new FacebookPage { PageId = "P1", Name = "Page 1", ProtectedToken = "P1" }, new FacebookPage { PageId = "P2", Name = "Page 2", ProtectedToken = "P2" }],
             Post = { MaxVideosPerRun = 2, DelaySecondsBetweenPosts = 0 }
         };
@@ -295,7 +295,7 @@ public class ReupRunnerTests : IDisposable
         facebook.FailingPages.Add("P1");
         var settings = new AppSettings
         {
-            TikTokSources = [new TikTokSource { Username = "shop" }],
+            TikTokSources = [new TikTokSource { Username = "shop", PageIds = ["P1"] }],
             FacebookPages = [new FacebookPage { PageId = "P1", Name = "Page 1", ProtectedToken = "P1" }],
             Post = { MaxAttempts = 1, DelaySecondsBetweenPosts = 0 }
         };
@@ -322,6 +322,37 @@ public class ReupRunnerTests : IDisposable
         Assert.Equal(RunEntryKind.Posted, runs[0].Entries.Single().Kind);
         Assert.Equal("Theo lịch", runs[2].Trigger);
         Assert.Equal("denied", runs[2].Entries.Single().Message);
+    }
+
+    [Fact]
+    public async Task EachChannelGoesOnlyToItsMappedFanpages()
+    {
+        var (runner, _, settings, tiktok, facebook) = Setup();
+        settings.TikTokSources[0].PageIds = ["P1"];           // shop → Page 1 only
+        settings.TikTokSources[1].Enabled = true;
+        settings.TikTokSources[1].PageIds = ["P2"];           // other → Page 2 only
+        settings.Post.MaxVideosPerRun = 10;
+        tiktok.Channels["other"] = [new TikTokLink("2001", TikTokLinks.VideoUrlOf("other", "2001"), "other", "d", DateTime.Now)];
+
+        await runner.RunAsync(settings, new Progress<string>(), CancellationToken.None);
+
+        Assert.Equal(3, facebook.Posts.Count(p => p.Page == "P1"));
+        Assert.All(facebook.Posts.Where(p => p.Page == "P1"), p => Assert.Contains("100", p.Caption));
+        Assert.Single(facebook.Posts, p => p.Page == "P2");
+        Assert.Contains("2001", facebook.Posts.Single(p => p.Page == "P2").Caption);
+    }
+
+    [Fact]
+    public async Task ChannelWithoutFanpageIsNotPosted()
+    {
+        var (runner, library, settings, _, facebook) = Setup();
+        settings.TikTokSources[0].PageIds = [];
+        var summary = await runner.RunAsync(settings, new Progress<string>(), CancellationToken.None);
+
+        Assert.Equal(3, summary!.NewLinks);
+        Assert.Empty(facebook.Posts);
+        Assert.Single(ReupTargets.Unmapped(settings));
+        Assert.Empty(ReupTargets.For(library.Find("1001")!, settings, settings.FacebookPages));
     }
 
     [Fact]

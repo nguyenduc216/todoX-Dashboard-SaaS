@@ -76,12 +76,12 @@ public sealed partial class MainForm
         tools.Controls.AddRange([_listTitle, reupSelected, _retryAllButton, linkHistory, open, skip, remove]);
         tools.SetFlowBreak(remove, true);
         _tickAll.CheckedChanged += TickAllChanged;
-        _noPageHint.LinkClicked += (_, _) => OpenSettingsTab(SettingsTabPages);
+        _noPageHint.LinkClicked += (_, _) => OpenSettingsTab(EnabledPages().Count == 0 ? SettingsTabPages : SettingsTabMapping);
         tools.Controls.AddRange([_tickAll, _tickedLabel, _noPageHint]);
 
         // --- list
         // Column 0 holds only the tick box; "Kênh" is sized to the longest channel name in RefreshHome.
-        _fitLinkColumns = Columns(_links, ("", 30), ("Ngày TikTok", 92), ("Kênh", 140), ("Nội dung", -1), ("Trạng thái", 150), ("Thử", 44), ("Fanpage", 120));
+        _fitLinkColumns = Columns(_links, ("", 30), ("Ngày TikTok", 92), ("Kênh", 140), ("Nội dung", -1), ("Trạng thái", 140), ("Thử", 44), ("Fanpage", 190));
         _links.Dock = DockStyle.Fill;
         _links.ItemChecked += (_, e) =>
         {
@@ -197,12 +197,18 @@ public sealed partial class MainForm
         }
 
         var pages = EnabledPages();
-        _noPageHint.Visible = pages.Count == 0;
+        var unmapped = ReupTargets.Unmapped(_settings);
+        _noPageHint.Visible = pages.Count == 0 || unmapped.Count > 0;
+        _noPageHint.Text = pages.Count == 0
+            ? "⚠ Chưa chọn fanpage nào để đăng — bấm để thêm fanpage"
+            : $"⚠ Kênh {string.Join(", ", unmapped.Take(3).Select(s => "@" + s.Username))}{(unmapped.Count > 3 ? $" và {unmapped.Count - 3} kênh khác" : "")} chưa chọn fanpage để đăng — bấm để chọn";
         var all = _library.Snapshot();
+        // Fanpages each link goes to (ticked fanpages mapped to its TikTok channel).
+        var targetsOf = all.ToDictionary(v => v.VideoId, v => ReupTargets.For(v, _settings, pages));
         var counts = new Dictionary<HomeView, int>
         {
-            [HomeView.Pending] = all.Count(v => v.IsPending(pages)),
-            [HomeView.Failed] = all.Count(v => v.HasFailed(pages)),
+            [HomeView.Pending] = all.Count(v => v.IsPending(targetsOf[v.VideoId])),
+            [HomeView.Failed] = all.Count(v => v.HasFailed(targetsOf[v.VideoId])),
             [HomeView.Posted] = all.Count(v => v.IsPostedAnywhere && v.State != VideoState.Removed),
             [HomeView.Inactive] = all.Count(v => v.State == VideoState.Inactive),
             [HomeView.All] = all.Count(v => v.State != VideoState.Removed)
@@ -214,8 +220,8 @@ public sealed partial class MainForm
 
         var items = all.Where(v => _view switch
             {
-                HomeView.Pending => v.IsPending(pages),
-                HomeView.Failed => v.HasFailed(pages),
+                HomeView.Pending => v.IsPending(targetsOf[v.VideoId]),
+                HomeView.Failed => v.HasFailed(targetsOf[v.VideoId]),
                 HomeView.Posted => v.IsPostedAnywhere && v.State != VideoState.Removed,
                 HomeView.Inactive => v.State == VideoState.Inactive,
                 _ => v.State != VideoState.Removed
@@ -231,9 +237,9 @@ public sealed partial class MainForm
         _links.Items.Clear();
         foreach (var v in items)
         {
-            var (state, color) = Describe(v, pages);
+            var targets = targetsOf[v.VideoId];
+            var (state, color) = Describe(v, targets);
             var failedPosts = v.Posts.Where(p => p.State == PostState.Failed).ToList();
-            var postedNames = v.Posts.Where(p => p.State == PostState.Posted).Select(p => PageName(p.PageId)).ToList();
             var text = (v.Description ?? "").Replace('\n', ' ');
             var row = new ListViewItem([
                 "",
@@ -242,7 +248,7 @@ public sealed partial class MainForm
                 text.Length > 300 ? text[..300] + "…" : text,
                 state,
                 failedPosts.Count == 0 ? "" : failedPosts.Max(p => p.Attempts).ToString(),
-                _view == HomeView.Failed ? string.Join(", ", failedPosts.Select(p => PageName(p.PageId))) : postedNames.Count == 0 ? "—" : string.Join(", ", postedNames)
+                FanpageColumn(v, targets)
             ]) { Tag = v, UseItemStyleForSubItems = false, Selected = selected.Contains(v.VideoId), Checked = _ticked.Contains(v.VideoId) };
             row.SubItems[4].ForeColor = color;
             _links.Items.Add(row);
@@ -319,6 +325,20 @@ public sealed partial class MainForm
         _log.Report($"Đã xoá {selected.Count} link khỏi danh sách.");
     }
 
+    /// <summary>"✓" before fanpages that already got the link, "✗" for failed ones, plain = still to post.</summary>
+    private string FanpageColumn(VideoItem v, List<FacebookPage> targets)
+    {
+        var names = targets.Select(p => (v.PostFor(p.PageId)?.State switch
+        {
+            PostState.Posted => "✓ ",
+            PostState.Failed => "✗ ",
+            _ => ""
+        }) + p.Name).ToList();
+        // Pages it was posted to that are no longer mapped/ticked are still shown.
+        names.AddRange(v.Posts.Where(p => p.State == PostState.Posted && targets.All(t => t.PageId != p.PageId)).Select(p => "✓ " + PageName(p.PageId)));
+        return names.Count == 0 ? "—" : string.Join(", ", names);
+    }
+
     private (string Text, Color Color) Describe(VideoItem v, List<FacebookPage> pages)
     {
         if (v.State == VideoState.Inactive)
@@ -340,7 +360,7 @@ public sealed partial class MainForm
 
         if (pages.Count == 0 && !v.IsPostedAnywhere)
         {
-            return ("Chờ reup", Yellow);
+            return ("Chưa có fanpage", Muted);
         }
 
         if (v.IsPending(pages))
@@ -375,7 +395,7 @@ public sealed partial class MainForm
     private async Task RetryAllFailedAsync()
     {
         var pages = EnabledPages();
-        var failed = _library.Snapshot().Where(v => v.HasFailed(pages)).Select(v => v.VideoId).ToList();
+        var failed = _library.Snapshot().Where(v => v.HasFailed(ReupTargets.For(v, _settings, pages))).Select(v => v.VideoId).ToList();
         if (failed.Count == 0)
         {
             MessageBox.Show("Không có link reup lỗi.", "todoX ReupVideo");

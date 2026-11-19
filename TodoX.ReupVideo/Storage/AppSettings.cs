@@ -29,6 +29,8 @@ public sealed class TikTokSource
     public string? DisplayName { get; set; }
     /// <summary>Ticked = videos of this channel are cloned. New channels are ticked by default.</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>Fanpages (PageId) that receive this channel's videos. Empty = not posted anywhere yet.</summary>
+    public List<string> PageIds { get; set; } = [];
     public DateTime AddedAt { get; set; } = DateTime.Now;
     public DateTime? LastScanAt { get; set; }
     public string? LastScanResult { get; set; }

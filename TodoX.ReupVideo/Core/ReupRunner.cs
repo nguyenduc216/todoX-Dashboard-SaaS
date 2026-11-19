@@ -130,9 +130,14 @@ public sealed class ReupRunner
             }
 
             pages = pages.Where(p => tokens[p.PageId].Length > 0).ToList();
+            foreach (var source in ReupTargets.Unmapped(settings))
+            {
+                log.Report($"Kênh {source} chưa chọn fanpage để đăng (Cài đặt → Kênh → Fanpage) — bỏ qua.");
+            }
+
             var queue = manualPick
                 ? _library.Snapshot().Where(v => options.OnlyVideoIds!.Contains(v.VideoId) && v.State is not (VideoState.Inactive or VideoState.Removed)
-                        && pages.Any(p => v.NeedsPostTo(p.PageId, maxAttempts))).ToList()
+                        && ReupTargets.For(v, settings, pages).Any(p => v.NeedsPostTo(p.PageId, maxAttempts))).ToList()
                 : Candidates(settings, pages, DateTime.Now);
             var limit = manualPick ? int.MaxValue : Math.Max(1, settings.Post.MaxVideosPerRun);
             log.Report(manualPick
@@ -149,7 +154,12 @@ public sealed class ReupRunner
                 }
 
                 ct.ThrowIfCancellationRequested();
-                var targets = pages.Where(p => item.NeedsPostTo(p.PageId, maxAttempts)).ToList();
+                var targets = ReupTargets.For(item, settings, pages).Where(p => item.NeedsPostTo(p.PageId, maxAttempts)).ToList();
+                if (targets.Count == 0)
+                {
+                    continue;
+                }
+
                 log.Report($"Kiểm tra link {item.Url}");
                 var check = await _tiktok.CheckAsync(item.Url, ct);
                 if (check.State == LinkCheck.Unavailable)
@@ -305,7 +315,7 @@ public sealed class ReupRunner
             .Where(v => v.State is VideoState.New or VideoState.Active)
             .Where(v => v.SourceId is null || enabledSources.Contains(v.SourceId))
             .Where(v => minDate is null || v.PublishedAt is null || v.PublishedAt >= minDate)
-            .Where(v => pages.Any(p => v.NeedsPostTo(p.PageId, settings.Post.MaxAttempts)));
+            .Where(v => ReupTargets.For(v, settings, pages).Any(p => v.NeedsPostTo(p.PageId, settings.Post.MaxAttempts)));
 
         Func<VideoItem, DateTime> order = v => v.PublishedAt ?? v.DiscoveredAt;
         return (settings.Post.NewestFirst ? list.OrderByDescending(order) : list.OrderBy(order)).ToList();

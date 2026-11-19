@@ -11,7 +11,7 @@ namespace TodoX.ReupVideo.App;
 /// <summary>Cài đặt: fanpages, TikTok channels, schedule, posting rules, system.</summary>
 public sealed partial class MainForm
 {
-    private const int SettingsTabPages = 0, SettingsTabChannels = 1, SettingsTabSchedule = 2;
+    private const int SettingsTabPages = 0, SettingsTabChannels = 1, SettingsTabMapping = 2, SettingsTabSchedule = 3;
 
     private Control _settingsTabs = null!;
 
@@ -35,6 +35,7 @@ public sealed partial class MainForm
         _settingsTabs = Tabs(
             ("Fanpage Facebook", BuildPagesTab()),
             ("Kênh TikTok", BuildChannelsTab()),
+            ("Kênh → Fanpage", BuildMappingTab()),
             ("Lịch chạy", BuildScheduleTab()),
             ("Đăng bài", BuildPostTab()),
             ("Hệ thống", BuildSystemTab()));
@@ -53,7 +54,7 @@ public sealed partial class MainForm
     {
         var page = Page(out var host);
         page.Controls.Add(Section("Fanpage — tick các trang sẽ đăng video"));
-        Columns(_pages, ("Fanpage", -1), ("Page ID", 150), ("Kiểu đăng", 80), ("Token", 130), ("Kiểm tra", 170));
+        Columns(_pages, ("Fanpage", -1), ("Page ID", 140), ("Reup từ kênh TikTok", 190), ("Kiểu đăng", 76), ("Token", 120), ("Kiểm tra", 150));
         _pages.Height = S(220);
         _pages.ItemChecked += (_, e) =>
         {
@@ -251,12 +252,14 @@ public sealed partial class MainForm
             var item = new ListViewItem([
                 fb.Name,
                 fb.PageId,
+                ChannelsOf(fb),
                 fb.PostKind == FacebookPostKind.Reels ? "Reels" : "Video",
                 token.Length == 0 ? "cần nhập lại" : SecretProtector.Mask(token),
                 fb.LastCheckAt is null ? "" : $"{fb.LastCheckAt:HH:mm dd/MM} {fb.LastCheckResult}"
             ]) { Tag = fb, Checked = fb.Enabled, UseItemStyleForSubItems = false };
-            item.SubItems[3].ForeColor = token.Length == 0 ? Red : Ink;
-            item.SubItems[4].ForeColor = fb.LastCheckResult == "OK" ? Green : Red;
+            item.SubItems[2].ForeColor = item.SubItems[2].Text == "—" ? Muted : Ink;
+            item.SubItems[4].ForeColor = token.Length == 0 ? Red : Ink;
+            item.SubItems[5].ForeColor = fb.LastCheckResult == "OK" ? Green : Red;
             _pages.Items.Add(item);
         }
 
@@ -270,7 +273,7 @@ public sealed partial class MainForm
     {
         var page = Page(out var host);
         page.Controls.Add(Section("Kênh TikTok — tick các kênh sẽ clone video"));
-        Columns(_channels, ("Kênh", -1), ("Thêm lúc", 110), ("Lần quét cuối", 120), ("Kết quả", 220));
+        Columns(_channels, ("Kênh", -1), ("Đăng lên fanpage", 240), ("Lần quét cuối", 110), ("Kết quả", 170));
         _channels.Height = S(240);
         _channels.ItemChecked += (_, e) =>
         {
@@ -305,7 +308,7 @@ public sealed partial class MainForm
         _channelInput.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; AddChannel(); } };
         addRow.Controls.AddRange([_channelInput, add]);
         page.Controls.Add(addRow);
-        page.Controls.Add(Theme.Text("Có thể dán nhiều kênh một lần, cách nhau dấu phẩy hoặc khoảng trắng. Kênh mới được tick sẵn (mặc định clone tất cả kênh).", Muted));
+        page.Controls.Add(Theme.Text("Có thể dán nhiều kênh một lần, cách nhau dấu phẩy hoặc khoảng trắng. Kênh mới được tick sẵn; sau khi thêm, chọn fanpage nhận video của kênh ở tab \"Kênh → Fanpage\".", Muted));
 
         page.Controls.Add(Section("Thêm link video lẻ vào danh sách chờ reup"));
         var linkRow = Row();
@@ -351,6 +354,13 @@ public sealed partial class MainForm
             _channelInput.Clear();
             RefreshChannels();
             RefreshHome();
+            // Next step for a new channel: choose the fanpages it reups to.
+            var newest = _settings.TikTokSources[^1];
+            if (_settings.FacebookPages.Count > 0)
+            {
+                OpenSettingsTab(SettingsTabMapping);
+                RefreshMapping(newest);
+            }
         }
     }
 
@@ -401,8 +411,9 @@ public sealed partial class MainForm
         _channels.Items.Clear();
         foreach (var s in _settings.TikTokSources)
         {
-            var item = new ListViewItem([s.ToString(), s.AddedAt.ToString("dd/MM/yyyy"), s.LastScanAt?.ToString("HH:mm dd/MM") ?? "chưa quét", s.LastScanResult ?? ""])
+            var item = new ListViewItem([s.ToString(), PagesOf(s), s.LastScanAt?.ToString("HH:mm dd/MM") ?? "chưa quét", s.LastScanResult ?? ""])
                 { Tag = s, Checked = s.Enabled, UseItemStyleForSubItems = false };
+            item.SubItems[1].ForeColor = s.PageIds.Count == 0 ? Red : Ink;
             item.SubItems[3].ForeColor = (s.LastScanResult ?? "").StartsWith("Lỗi", StringComparison.Ordinal) ? Red : Muted;
             _channels.Items.Add(item);
         }

@@ -16,7 +16,8 @@ Same TodoX look as TodoX EditVideo (palette, logo, thin yellow scroll bar `App/S
 
 ## Flow (`Core/ReupRunner.cs`)
 
-Scan ticked TikTok channels (yt-dlp `--flat-playlist`) → new links into `library.json` → for up to N pending links:
+Scan ticked TikTok channels (yt-dlp `--flat-playlist`); each channel posts only to the fanpages mapped to it
+(`TikTokSource.PageIds`, Cài đặt → Kênh → Fanpage, `Core/ReupTargets.cs`; unmapped channel = not posted) → new links into `library.json` → for up to N pending links:
 check the link is still live (deleted/private = "không còn active", never posted) → download once → post to every
 ticked fanpage that has not got it (Reels ≤ 90 s, else normal video) with the TikTok text + hashtags
 (`Core/CaptionBuilder.cs`). Failures (check, download or post) go to the "reup lại" list: retried automatically up to
