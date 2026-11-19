@@ -411,6 +411,9 @@ TodoX.Web.Services.Media.MediaAccessEndpoints.UseProtectedMedia(app, app.Configu
 // Serve runtime-uploaded files (avatars, chibi, references) from wwwroot/uploads.
 app.UseStaticFiles();
 
+// Self-hosted Vietnam map data for EditVideo's geo layer (folder "maps" beside the site; deploys never touch it).
+TodoX.Web.Services.Maps.MapHosting.UseTodoXMaps(app);
+
 var sharedMediaOptions = app.Services.GetRequiredService<IOptions<SharedMediaOptions>>().Value;
 if (!string.IsNullOrWhiteSpace(sharedMediaOptions.StorageRoot))
 {
