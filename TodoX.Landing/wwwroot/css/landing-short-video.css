@@ -23,3 +23,7 @@
   .sv-teaser-plan { flex-direction:row; flex-wrap:wrap; justify-content:space-between; align-items:center; text-align:left; padding:14px 16px; }
   .sv-teaser-plan span { width:100%; }
 }
+
+/* "Tải app" section: two app tiles instead of three plans. */
+.sv-teaser-plans.is-two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+@media (max-width:520px) { .sv-teaser-plans.is-two { grid-template-columns:1fr; } }

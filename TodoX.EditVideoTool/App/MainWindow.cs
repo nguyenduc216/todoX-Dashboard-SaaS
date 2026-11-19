@@ -54,8 +54,28 @@ public sealed partial class MainWindow : Form
     private readonly Label _licenseSub = new() { AutoSize = false, Location = new Point(42, 25), Height = 19, Width = 368, AutoEllipsis = true, TextAlign = ContentAlignment.TopLeft, Font = new Font("Segoe UI", 8.5f), BackColor = Color.Transparent, Cursor = Cursors.Hand, UseMnemonic = false, Visible = false };
 
     /// <summary>One line (status) or two lines (account name + package details), always inside the chip's border.</summary>
+    private (string Main, string? Sub, string? Points) _chipLines = ("", null, null);
+
+    /// <summary>Width the name/package need (their own, 140 at most: longer ones end in "…") and the points need.</summary>
+    private (int Text, int Points) ChipNeeds(string main, string? sub, string? points) => (
+        Math.Min(140, Math.Max(TextRenderer.MeasureText(main, _licenseText.Font).Width, TextRenderer.MeasureText(sub ?? "", _licenseSub.Font).Width) + 6),
+        string.IsNullOrWhiteSpace(points) ? 0 : TextRenderer.MeasureText(points, _licensePoints.Font).Width + 16);
+
     private void SetChipLines(string main, string? sub, string? points = null)
     {
+        _chipLines = (main, sub, points);
+        var (needForText, needForPoints) = ChipNeeds(main, sub, points);
+        if (!string.IsNullOrWhiteSpace(points) && _licenseChip.Width - 52 - needForPoints < needForText)
+        {
+            // Narrow window: only the points, big and yellow, so they are never cut off.
+            _licenseText.Visible = _licenseSub.Visible = false;
+            _licensePoints.Text = points;
+            _licensePoints.Visible = true;
+            _licensePoints.SetBounds(38, 4, _licenseChip.Width - 46, _licenseChip.Height - 8);
+            return;
+        }
+
+        _licenseText.Visible = true;
         var two = !string.IsNullOrWhiteSpace(sub);
         _licenseText.Text = main;
         _licenseSub.Text = sub ?? "";
@@ -78,6 +98,8 @@ public sealed partial class MainWindow : Form
     private readonly UpdateOverlay _updateOverlay = new();
     private readonly Dictionary<Screen, ListView> _projectLists = [];
     private readonly Dictionary<Screen, ListView> _videoLists = [];
+    private bool _guideCollapsed;
+    private readonly List<Action> _guideToggles = [];
     private bool _syncing;
     private bool _licensed;
     private bool _updateStaged;
@@ -165,6 +187,18 @@ public sealed partial class MainWindow : Form
         Go(Screen.Edit);
         await Task.Delay(300);
         Shot(this, "2-edit");
+        var normalSize = Size;
+        Size = new Size(940, 780);
+        await Task.Delay(400);
+        Shot(this, "2-edit-narrow");
+        _guideCollapsed = true;
+        _guideToggles.ForEach(a => a());
+        await Task.Delay(400);
+        Shot(this, "2-edit-narrow-collapsed");
+        _guideCollapsed = false;
+        _guideToggles.ForEach(a => a());
+        Size = normalSize;
+        await Task.Delay(300);
         Go(Screen.Ai);
         await Task.Delay(300);
         Shot(this, "3-ai");
@@ -276,8 +310,9 @@ public sealed partial class MainWindow : Form
             bar.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Bounds = new Rectangle(28, 18, 120, 60) });
         }
 
-        var titles = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Location = new Point(158, 16), BackColor = Ui.Bar };
-        titles.Controls.Add(new Label { Text = "TodoX EditVideo", Font = new Font("Segoe UI Semibold", 17), ForeColor = Ink, AutoSize = true, Margin = new Padding(0) });
+        var titles = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = false, Size = new Size(560, 70), Location = new Point(158, 16), BackColor = Ui.Bar };
+        var appName = new Label { Text = "TodoX EditVideo", Font = new Font("Segoe UI Semibold", 17), ForeColor = Ink, AutoSize = true, Margin = new Padding(0) };
+        titles.Controls.Add(appName);
         var maker = new LinkLabel
         {
             Text = $"Sản phẩm của TodoX AI Automation · todox.vn · phiên bản {StatusService.Version}",
@@ -321,7 +356,35 @@ public sealed partial class MainWindow : Form
         bar.Layout += (_, _) =>
         {
             settings.Location = new Point(bar.ClientSize.Width - settings.Width - 28, 28);
+            // The chip takes the room between the titles and Settings (420 at most), so it never slides under them.
+            // When even the points do not fit, the small line under the app name (maker · version) steps aside.
+            var pointsNeed = 60 + TextRenderer.MeasureText(_chipLines.Points ?? "00.000 điểm", _licensePoints.Font).Width;
+            int TitlesRight(bool withMaker) => titles.Left + Math.Max(appName.PreferredSize.Width, withMaker ? maker.PreferredSize.Width + 2 : 0) + 16;
+            // The account name, package and points come first; the small line under the app name gives way to them.
+            var (textNeed, pointsOnly) = ChipNeeds(_chipLines.Main, _chipLines.Sub, _chipLines.Points);
+            var fullNeed = 52 + textNeed + pointsOnly;
+            var showMaker = settings.Left - 12 - TitlesRight(true) >= fullNeed;
+            if (maker.Visible != showMaker)
+            {
+                maker.Visible = showMaker;
+            }
+
+            var room = settings.Left - 12 - TitlesRight(showMaker);
+            // Never wider than its text, so it cannot cover the chip.
+            titles.Size = new Size(Math.Max(120, TitlesRight(showMaker) - 16 - titles.Left + 4),
+                appName.PreferredSize.Height + (showMaker ? maker.PreferredSize.Height : 0) + 6);
+
+            var width = Math.Clamp(room, Math.Min(pointsNeed, 420), 420);
+            if (_licenseChip.Width != width)
+            {
+                _licenseChip.Width = width;
+                SetChipLines(_chipLines.Main, _chipLines.Sub, _chipLines.Points);
+                _licenseChip.Invalidate();
+            }
+
             _licenseChip.Location = new Point(settings.Left - _licenseChip.Width - 12, settings.Top + settings.Height / 2 - _licenseChip.Height / 2);
+            _licenseChip.BringToFront();
+            settings.BringToFront();
         };
         return bar;
     }
@@ -443,15 +506,13 @@ public sealed partial class MainWindow : Form
             TextRenderer.DrawText(e.Graphics, e.Header!.Text, new Font("Segoe UI", 9.5f), Rectangle.Inflate(e.Bounds, -4, 0), Muted,
                 TextFormatFlags.VerticalCenter | (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left) | TextFormatFlags.EndEllipsis);
         };
-        list.DrawItem += (_, e) => e.DrawDefault = true;
-        list.DrawSubItem += (_, e) => e.DrawDefault = true;
         list.Columns.Add("Dự án", 260);
         list.Columns.Add("Ảnh", 66, HorizontalAlignment.Right);
         list.Columns.Add("Video", 74, HorizontalAlignment.Right);
         list.Columns.Add(ai ? "AI" : "Âm thanh", 100, HorizontalAlignment.Right);
         list.Columns.Add("Cập nhật", 150);
         // The name column takes the rest, so the header has no blank (white) end.
-        list.Resize += (_, _) => list.Columns[0].Width = Math.Max(120, list.ClientSize.Width - list.Columns.Cast<ColumnHeader>().Skip(1).Sum(c => c.Width));
+        Ui.FitList(list);
         list.DoubleClick += (_, _) => OpenSelected(list);
         list.SelectedIndexChanged += (_, _) => RefreshVideos(kind);
         _projectLists[kind] = list;
@@ -477,12 +538,10 @@ public sealed partial class MainWindow : Form
             e.Graphics.FillRectangle(back, e.Bounds);
             TextRenderer.DrawText(e.Graphics, e.Header!.Text, new Font("Segoe UI", 9.5f), Rectangle.Inflate(e.Bounds, -4, 0), Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         };
-        videos.DrawItem += (_, e) => e.DrawDefault = true;
-        videos.DrawSubItem += (_, e) => e.DrawDefault = true;
         videos.Columns.Add("Video đã làm", 260);
         videos.Columns.Add("Ngày", 130);
         videos.Columns.Add("Dashboard", 150);
-        videos.Resize += (_, _) => videos.Columns[0].Width = Math.Max(120, videos.ClientSize.Width - videos.Columns.Cast<ColumnHeader>().Skip(1).Sum(c => c.Width));
+        Ui.FitList(videos);
         videos.DoubleClick += (_, _) =>
         {
             if (videos.SelectedItems.Count > 0 && videos.SelectedItems[0].Tag is LocalVideo v)
@@ -494,7 +553,8 @@ public sealed partial class MainWindow : Form
         var videosTitle = new Label { Text = "VIDEO ĐÃ LÀM (bấm đúp để xem)", Dock = DockStyle.Bottom, Height = 40, ForeColor = Yellow, Font = new Font("Segoe UI", 9, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(0, 0, 0, 6) };
 
         var leftTitle = new Label { Text = "DỰ ÁN CỦA BẠN", Dock = DockStyle.Top, Height = 28, ForeColor = Yellow, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 50, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0, 10, 0, 0), BackColor = Ui.Card };
+        // Wraps to a second row in a narrow window instead of hiding buttons.
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0, 10, 0, 0), BackColor = Ui.Card };
         var create = Ui.Button("Dự án mới", primary: true);
         create.Click += (_, _) => NewProject(list);
         var open = Ui.Button("Mở thư mục");
@@ -583,6 +643,30 @@ public sealed partial class MainWindow : Form
 
         var rightHost = new ScrollHost(right, Ground) { Dock = DockStyle.Fill, Margin = new Padding(0) };
         screen.Controls.Add(rightHost, 1, 1);
+
+        // "Cách làm / Yêu cầu mẫu" can be folded away so the projects get the whole width (remembered for both screens).
+        var toggle = Ui.Button("");
+        toggle.Margin = new Padding(24, 10, 0, 0);
+        void Apply()
+        {
+            rightHost.Visible = !_guideCollapsed;
+            screen.ColumnStyles[0] = _guideCollapsed ? new ColumnStyle(SizeType.Percent, 100) : new ColumnStyle(SizeType.Percent, 58);
+            screen.ColumnStyles[1] = _guideCollapsed ? new ColumnStyle(SizeType.Absolute, 0) : new ColumnStyle(SizeType.Percent, 42);
+            left.Margin = _guideCollapsed ? new Padding(0) : new Padding(0, 0, 16, 0);
+            toggle.Text = _guideCollapsed ? "Hiện hướng dẫn  »" : "«  Thu gọn hướng dẫn";
+        }
+
+        toggle.Click += (_, _) =>
+        {
+            _guideCollapsed = !_guideCollapsed;
+            foreach (var apply in _guideToggles)
+            {
+                apply();
+            }
+        };
+        _guideToggles.Add(Apply);
+        head.Controls.Add(toggle);
+        Apply();
         return screen;
     }
 
@@ -860,6 +944,7 @@ public sealed partial class MainWindow : Form
         grid.DrawSubItem += (_, e) => e.DrawDefault = true;
         // Columns share the window width (fractions), so nothing is cut on high-DPI screens.
         double[] shares = [0.12, 0.13, 0.30, 0.08, 0.09, 0.15, 0.13];
+        Ui.DarkScrollBars(grid);
         grid.Resize += (_, _) =>
         {
             var w = grid.ClientSize.Width - 4;
@@ -1085,6 +1170,7 @@ public sealed partial class MainWindow : Form
                 }
 
                 _licenseSub.ForeColor = Muted;
+                _licenseChip.Parent?.PerformLayout(); // the new name/points may need the room of the line under the app name
                 var tip = (account.CustomerName is { } who ? $"Tài khoản: {who}{Environment.NewLine}" : "") + $"Gói: {account.Package ?? "—"}{(account.Ends is { } end ? $", đến {end.ToLocalTime():dd/MM/yyyy}" : "")}{Environment.NewLine}"
                           + $"Điểm: {account.PointsText}{Environment.NewLine}Lưu trữ: {account.StorageText}{Environment.NewLine}Bấm để mở Cài đặt › Kích hoạt";
                 _tips.SetToolTip(_licenseChip, tip);
