@@ -324,7 +324,17 @@ var appDownloadsRoot = app.Configuration["Downloads:Root"] is { Length: > 0 } co
 const string downloadNotReady = "Bản cài đặt đang được cập nhật, vui lòng thử lại sau ít phút hoặc gọi 0366 699 961.";
 app.MapGet("/api/landing/apps/{app}", (string app) =>
     AppDownloads.Latest(appDownloadsRoot, app) is { } release
-        ? Results.Json(new { release.Version, release.PublishedAt, release.Size, Url = $"/downloads/{release.App}/latest" })
+        // fileName/fileUrl/sha256 let the desktop app update itself (it checks the hash before replacing itself).
+        ? Results.Json(new
+        {
+            release.Version,
+            release.PublishedAt,
+            release.Size,
+            Url = $"/downloads/{release.App}/latest",
+            release.FileName,
+            FileUrl = $"/downloads/{release.App}/{Uri.EscapeDataString(release.FileName)}",
+            release.Sha256
+        })
         : Results.NotFound());
 app.MapGet("/downloads/{app}/latest", (string app, HttpContext http) =>
 {

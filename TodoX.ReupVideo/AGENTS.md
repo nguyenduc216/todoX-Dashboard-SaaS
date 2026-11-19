@@ -39,4 +39,4 @@ dotnet publish TodoX.ReupVideo/TodoX.ReupVideo.csproj -c Release   # single self
 `todoX-ReupVideo-<Version>.exe` + `manifest.json` and copies them to `C:/TodoXDeploy/downloads/reupvideo` on the prod
 server (manifest last, old exe removed). The landing site serves it at `https://todox.vn/downloads/reupvideo/latest`
 (`TodoX.Landing/Services/AppDownloads.cs`); pages: `/reupvideo`, home section `#tai-app`, `/editvideo#tai-app-khac`.
-Bump `<Version>` in the csproj for every release. The window's bottom bar shows TodoX hotline, website and email.
+Bump `<Version>` in the csproj for every release; apps from 1.0.1 update themselves (Core/AppUpdater.cs reads `/api/landing/apps/reupvideo`: fileName, fileUrl, sha256). The window's bottom bar shows TodoX hotline, website and email.

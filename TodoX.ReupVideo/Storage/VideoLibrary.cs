@@ -11,7 +11,9 @@ public enum VideoState
     /// <summary>TikTok says the video is deleted/private/unavailable: never posted.</summary>
     Inactive,
     /// <summary>The user chose not to post it.</summary>
-    Skipped
+    Skipped,
+    /// <summary>Removed from the list by the user: hidden, never posted, and not added again by later scans.</summary>
+    Removed
 }
 
 public enum PostState
@@ -53,8 +55,9 @@ public sealed class VideoItem
     public bool IsPostedTo(string pageId) => PostFor(pageId)?.State == PostState.Posted;
 
     /// <summary>"Chưa reup": live link with at least one ticked fanpage that has never received it.</summary>
-    public bool IsPending(IEnumerable<FacebookPage> pages) =>
-        State is VideoState.New or VideoState.Active && pages.Any(p => PostFor(p.PageId) is null);
+    public bool IsPending(IReadOnlyCollection<FacebookPage> pages) =>
+        State is VideoState.New or VideoState.Active
+        && (pages.Count == 0 ? !IsPostedAnywhere : pages.Any(p => PostFor(p.PageId) is null));
 
     /// <summary>"Reup lỗi": live link whose last reup to a ticked fanpage failed — the "reup lại" list.</summary>
     public bool HasFailed(IEnumerable<FacebookPage> pages) =>
@@ -196,6 +199,20 @@ public sealed class VideoLibrary
             item.State = VideoState.New;
         }
     });
+
+    /// <summary>Hides links for good: kept as "removed" so a later scan does not bring them back.</summary>
+    public void MarkRemoved(IReadOnlyCollection<string> videoIds)
+    {
+        lock (_gate)
+        {
+            foreach (var item in _items.Where(i => videoIds.Contains(i.VideoId)))
+            {
+                item.State = VideoState.Removed;
+            }
+        }
+
+        Save();
+    }
 
     public void Remove(string videoId)
     {

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace TodoX.Landing.Services;
 
 /// <summary>Latest build of a desktop app, as listed in its manifest.json.</summary>
-public sealed record AppRelease(string App, string Version, DateTimeOffset? PublishedAt, string FileName, long Size, string FilePath);
+public sealed record AppRelease(string App, string Version, DateTimeOffset? PublishedAt, string FileName, long Size, string FilePath, string? Sha256 = null);
 
 /// <summary>
 /// Desktop app downloads served by the landing site ("Tải app"). Each app has a folder on the server,
@@ -58,7 +58,7 @@ public static class AppDownloads
                     continue;
                 }
 
-                return new AppRelease(app, version, published, name!, new FileInfo(path).Length, path);
+                return new AppRelease(app, version, published, name!, new FileInfo(path).Length, path, Str(file, "sha256"));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)

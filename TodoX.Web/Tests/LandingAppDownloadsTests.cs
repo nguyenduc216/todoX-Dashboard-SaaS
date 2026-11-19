@@ -28,7 +28,7 @@ public sealed class LandingAppDownloadsTests : IDisposable
     [Fact]
     public void LatestReadsAppFileFromManifest()
     {
-        Release("""{"version":"1.0.0","publishedAt":"2026-11-19T09:00:00Z","files":[{"name":"todoX-ReupVideo-1.0.0.exe","kind":"app"}]}""", "todoX-ReupVideo-1.0.0.exe", "other.exe");
+        Release("""{"version":"1.0.0","publishedAt":"2026-11-19T09:00:00Z","files":[{"name":"todoX-ReupVideo-1.0.0.exe","kind":"app","sha256":"ABC123"}]}""", "todoX-ReupVideo-1.0.0.exe", "other.exe");
 
         var release = AppDownloads.Latest(_root, "reupvideo");
 
@@ -36,6 +36,7 @@ public sealed class LandingAppDownloadsTests : IDisposable
         Assert.Equal("1.0.0", release!.Version);
         Assert.Equal("todoX-ReupVideo-1.0.0.exe", release.FileName);
         Assert.Equal(3, release.Size);
+        Assert.Equal("ABC123", release.Sha256); // the desktop app checks it before updating itself
     }
 
     [Fact]

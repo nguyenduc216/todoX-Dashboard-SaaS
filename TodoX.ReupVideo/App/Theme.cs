@@ -252,7 +252,7 @@ internal static class Theme
     }
 
     /// <summary>Adds columns given in 96-DPI widths; the column marked fill (-1) takes the remaining width.</summary>
-    public static void Columns(ListView list, params (string Title, int Width)[] columns)
+    public static Action Columns(ListView list, params (string Title, int Width)[] columns)
     {
         foreach (var (title, width) in columns)
         {
@@ -262,7 +262,7 @@ internal static class Theme
         var fill = Array.FindIndex(columns, c => c.Width < 0);
         if (fill < 0)
         {
-            return;
+            return () => { };
         }
 
         void Fit()
@@ -277,6 +277,7 @@ internal static class Theme
 
         list.Resize += (_, _) => Fit();
         list.HandleCreated += (_, _) => Fit();
+        return Fit;
     }
 
     /// <summary>Row of toggle buttons switching between pages (used for the settings tabs).</summary>

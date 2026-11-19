@@ -573,11 +573,13 @@ public sealed partial class MainForm
         page.Controls.Add(row);
         page.Controls.Add(Theme.Text("Khi TikTok đổi cách hiển thị, quét link có thể lỗi: bấm \"Cài / cập nhật yt-dlp\" để lấy bản sửa mới nhất.", Muted));
 
+        AddUpdateSection(page);
+
         page.Controls.Add(Section("Dữ liệu trên máy (chạy offline)"));
         page.Controls.Add(Theme.Text(
-            "todoX ReupVideo chạy hoàn toàn trên máy này và không gửi thông tin nào lên server TodoX. Cài đặt, danh sách link, " +
+            "todoX ReupVideo chạy trên máy này và không gửi thông tin của bạn lên server TodoX. Cài đặt, danh sách link, " +
             "lịch sử reup (history.json) và nhật ký từng ngày (thư mục logs) đều lưu tại:\n" + _paths.Root +
-            "\nỨng dụng chỉ kết nối TikTok (lấy video), Facebook (đăng bài) và GitHub của yt-dlp (tải công cụ).", Muted));
+            "\nỨng dụng chỉ kết nối TikTok (lấy video), Facebook (đăng bài), GitHub của yt-dlp (tải công cụ) và todox.vn (kiểm tra phiên bản mới).", Muted));
         var dataRow = Row();
         var logs = Theme.Button("Mở thư mục nhật ký");
         logs.Click += (_, _) => { Directory.CreateDirectory(_paths.LogsDir); OpenUrl(_paths.LogsDir); };

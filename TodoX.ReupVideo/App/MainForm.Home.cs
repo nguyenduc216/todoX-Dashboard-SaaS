@@ -13,7 +13,7 @@ public sealed partial class MainForm
 
     private readonly Dictionary<HomeView, (Panel Card, Label Number)> _cards = [];
     private readonly Label _listTitle = new() { AutoSize = true, ForeColor = Yellow, Font = F(9, FontStyle.Bold), Margin = P(0, 12, 12, 0) };
-    private readonly ListView _links = Theme.List();
+    private readonly ListView _links = Theme.List(checkboxes: true);
     private readonly Label _scheduleLabel = new() { AutoSize = true, ForeColor = Ink, Font = F(10), Margin = P(4, 12, 8, 0) };
     /// <summary>What the run is doing right now (one line; the full log goes only to the log files).</summary>
     private readonly Label _activityLabel = new() { AutoSize = true, ForeColor = Muted, Font = F(9.5f), Margin = P(0, 2, 0, 6), UseMnemonic = false };
@@ -21,6 +21,14 @@ public sealed partial class MainForm
     private Button _stopButton = null!;
     private Button _retryAllButton = null!;
     private HomeView _view = HomeView.Pending;
+
+    // Ticked links survive refreshes (the list is rebuilt whenever the library changes).
+    private readonly HashSet<string> _ticked = [];
+    private readonly CheckBox _tickAll = new() { Text = "Chọn tất cả", AutoSize = true, ForeColor = Ink, Font = F(10), Margin = P(2, 12, 14, 0), Cursor = Cursors.Hand };
+    private readonly Label _tickedLabel = new() { AutoSize = true, ForeColor = Muted, Font = F(9.5f), Margin = P(0, 13, 12, 0) };
+    private readonly LinkLabel _noPageHint = new() { Text = "⚠ Chưa chọn fanpage nào để đăng — bấm để thêm fanpage", AutoSize = true, LinkColor = Yellow, ActiveLinkColor = Ink, Font = F(9.5f), Margin = P(8, 13, 0, 0), Visible = false };
+    private bool _fillingLinks;
+    private Action _fitLinkColumns = () => { };
 
     private Control BuildHomePage()
     {
@@ -62,12 +70,44 @@ public sealed partial class MainForm
         open.Click += (_, _) => { foreach (var v in SelectedLinks()) OpenUrl(v.Url); };
         var skip = Theme.Button("Bỏ qua link");
         skip.Click += (_, _) => SkipSelected();
+        var remove = Theme.Button("Xoá khỏi danh sách");
+        remove.Click += (_, _) => RemoveSelected();
         _runButtons.AddRange([reupSelected, _retryAllButton]);
-        tools.Controls.AddRange([_listTitle, reupSelected, _retryAllButton, linkHistory, open, skip]);
+        tools.Controls.AddRange([_listTitle, reupSelected, _retryAllButton, linkHistory, open, skip, remove]);
+        tools.SetFlowBreak(remove, true);
+        _tickAll.CheckedChanged += TickAllChanged;
+        _noPageHint.LinkClicked += (_, _) => OpenSettingsTab(SettingsTabPages);
+        tools.Controls.AddRange([_tickAll, _tickedLabel, _noPageHint]);
 
         // --- list
-        Columns(_links, ("Ngày TikTok", 92), ("Kênh", 120), ("Nội dung", -1), ("Trạng thái", 220), ("Lần thử", 60), ("Fanpage", 170));
+        // Column 0 holds only the tick box; "Kênh" is sized to the longest channel name in RefreshHome.
+        _fitLinkColumns = Columns(_links, ("", 30), ("Ngày TikTok", 92), ("Kênh", 140), ("Nội dung", -1), ("Trạng thái", 150), ("Thử", 44), ("Fanpage", 120));
         _links.Dock = DockStyle.Fill;
+        _links.ItemChecked += (_, e) =>
+        {
+            if (_fillingLinks || e.Item.Tag is not VideoItem v)
+            {
+                return;
+            }
+
+            if (e.Item.Checked)
+            {
+                _ticked.Add(v.VideoId);
+            }
+            else
+            {
+                _ticked.Remove(v.VideoId);
+            }
+
+            UpdateTickState();
+        };
+        _links.ColumnClick += (_, e) =>
+        {
+            if (e.Column == 0)
+            {
+                _tickAll.Checked = !_tickAll.Checked;
+            }
+        };
         _links.DoubleClick += (_, _) => ShowLinkHistory();
         var menu = new ContextMenuStrip();
         menu.Items.Add("Reup link này ngay", null, async (_, _) => await ReupSelectedAsync());
@@ -91,7 +131,7 @@ public sealed partial class MainForm
             }
         });
         menu.Items.Add("Kiểm tra lại link (đặt về chờ reup)", null, (_, _) => SelectedLinks().ForEach(v => _library.Update(v.VideoId, x => { x.State = VideoState.New; x.StateNote = null; })));
-        menu.Items.Add("Xoá khỏi danh sách", null, (_, _) => SelectedLinks().ForEach(v => _library.Remove(v.VideoId)));
+        menu.Items.Add("Xoá khỏi danh sách", null, (_, _) => RemoveSelected());
         _links.ContextMenuStrip = menu;
 
         // Docking: the last added Top control sits highest.
@@ -157,14 +197,15 @@ public sealed partial class MainForm
         }
 
         var pages = EnabledPages();
+        _noPageHint.Visible = pages.Count == 0;
         var all = _library.Snapshot();
         var counts = new Dictionary<HomeView, int>
         {
             [HomeView.Pending] = all.Count(v => v.IsPending(pages)),
             [HomeView.Failed] = all.Count(v => v.HasFailed(pages)),
-            [HomeView.Posted] = all.Count(v => v.IsPostedAnywhere),
+            [HomeView.Posted] = all.Count(v => v.IsPostedAnywhere && v.State != VideoState.Removed),
             [HomeView.Inactive] = all.Count(v => v.State == VideoState.Inactive),
-            [HomeView.All] = all.Count
+            [HomeView.All] = all.Count(v => v.State != VideoState.Removed)
         };
         foreach (var (view, (_, number)) in _cards)
         {
@@ -175,15 +216,17 @@ public sealed partial class MainForm
             {
                 HomeView.Pending => v.IsPending(pages),
                 HomeView.Failed => v.HasFailed(pages),
-                HomeView.Posted => v.IsPostedAnywhere,
+                HomeView.Posted => v.IsPostedAnywhere && v.State != VideoState.Removed,
                 HomeView.Inactive => v.State == VideoState.Inactive,
-                _ => true
+                _ => v.State != VideoState.Removed
             })
             .OrderByDescending(v => _view == HomeView.Failed ? v.Posts.Where(p => p.State == PostState.Failed).Max(p => (DateTime?)p.At) ?? v.DiscoveredAt : v.PublishedAt ?? v.DiscoveredAt)
             .Take(3000)
             .ToList();
 
-        var selected = SelectedLinks().Select(v => v.VideoId).ToHashSet();
+        var selected = _links.SelectedItems.Cast<ListViewItem>().Select(i => i.Tag).OfType<VideoItem>().Select(v => v.VideoId).ToHashSet();
+        _ticked.IntersectWith(items.Select(v => v.VideoId));
+        _fillingLinks = true;
         _links.BeginUpdate();
         _links.Items.Clear();
         foreach (var v in items)
@@ -193,18 +236,87 @@ public sealed partial class MainForm
             var postedNames = v.Posts.Where(p => p.State == PostState.Posted).Select(p => PageName(p.PageId)).ToList();
             var text = (v.Description ?? "").Replace('\n', ' ');
             var row = new ListViewItem([
+                "",
                 (v.PublishedAt ?? v.DiscoveredAt).ToString("dd/MM/yyyy"),
                 "@" + v.Author,
-                text.Length > 160 ? text[..160] + "…" : text,
+                text.Length > 300 ? text[..300] + "…" : text,
                 state,
                 failedPosts.Count == 0 ? "" : failedPosts.Max(p => p.Attempts).ToString(),
                 _view == HomeView.Failed ? string.Join(", ", failedPosts.Select(p => PageName(p.PageId))) : postedNames.Count == 0 ? "—" : string.Join(", ", postedNames)
-            ]) { Tag = v, UseItemStyleForSubItems = false, Selected = selected.Contains(v.VideoId) };
-            row.SubItems[3].ForeColor = color;
+            ]) { Tag = v, UseItemStyleForSubItems = false, Selected = selected.Contains(v.VideoId), Checked = _ticked.Contains(v.VideoId) };
+            row.SubItems[4].ForeColor = color;
             _links.Items.Add(row);
         }
 
+        // "Kênh" as wide as the longest channel name, so it is never cut off.
+        using (var font = F(9.5f))
+        {
+            var longest = items.Select(v => "@" + v.Author).DefaultIfEmpty("Kênh")
+                .Max(t => TextRenderer.MeasureText(t, font).Width);
+            _links.Columns[2].Width = Math.Clamp(longest + S(20), S(90), S(320));
+        }
+
         _links.EndUpdate();
+        _fillingLinks = false;
+        _fitLinkColumns();
+        UpdateTickState();
+    }
+
+    private void UpdateTickState()
+    {
+        var total = _links.Items.Count;
+        _tickedLabel.Text = _ticked.Count == 0 ? $"{total:N0} link" : $"Đã chọn {_ticked.Count:N0}/{total:N0} link";
+        _tickedLabel.ForeColor = _ticked.Count == 0 ? Muted : Yellow;
+        _tickAll.CheckedChanged -= TickAllChanged;
+        _tickAll.CheckState = _ticked.Count == 0 ? CheckState.Unchecked : _ticked.Count >= total ? CheckState.Checked : CheckState.Indeterminate;
+        _tickAll.CheckedChanged += TickAllChanged;
+    }
+
+    private void TickAllChanged(object? sender, EventArgs e) => TickAll(_tickAll.Checked);
+
+    private void TickAll(bool tick)
+    {
+        _fillingLinks = true;
+        _links.BeginUpdate();
+        foreach (ListViewItem item in _links.Items)
+        {
+            item.Checked = tick;
+            if (item.Tag is VideoItem v)
+            {
+                if (tick)
+                {
+                    _ticked.Add(v.VideoId);
+                }
+                else
+                {
+                    _ticked.Remove(v.VideoId);
+                }
+            }
+        }
+
+        _links.EndUpdate();
+        _fillingLinks = false;
+        UpdateTickState();
+    }
+
+    private void RemoveSelected()
+    {
+        var selected = SelectedLinks();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show("Tick chọn link cần xoá trước (hoặc \"Chọn tất cả\").", "todoX ReupVideo");
+            return;
+        }
+
+        if (MessageBox.Show($"Xoá {selected.Count:N0} link khỏi danh sách?\nCác link này sẽ không được reup và không bị thêm lại ở lần quét sau.",
+                "todoX ReupVideo", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        _library.MarkRemoved(selected.Select(v => v.VideoId).ToList());
+        _ticked.Clear();
+        _log.Report($"Đã xoá {selected.Count} link khỏi danh sách.");
     }
 
     private (string Text, Color Color) Describe(VideoItem v, List<FacebookPage> pages)
@@ -226,6 +338,11 @@ public sealed partial class MainForm
             return ($"Lỗi ({auto}): {failed.Error}", Red);
         }
 
+        if (pages.Count == 0 && !v.IsPostedAnywhere)
+        {
+            return ("Chờ reup", Yellow);
+        }
+
         if (v.IsPending(pages))
         {
             return (v.IsPostedAnywhere ? "Đã reup một phần · chờ fanpage còn lại" : "Chờ reup", Yellow);
@@ -234,15 +351,21 @@ public sealed partial class MainForm
         return (v.IsPostedAnywhere ? "Đã reup" : "—", Green);
     }
 
-    private List<VideoItem> SelectedLinks() =>
-        _links.SelectedItems.Cast<ListViewItem>().Select(i => i.Tag).OfType<VideoItem>().ToList();
+    /// <summary>Ticked links; when none is ticked, the highlighted rows.</summary>
+    private List<VideoItem> SelectedLinks()
+    {
+        var rows = _ticked.Count > 0
+            ? _links.Items.Cast<ListViewItem>().Where(i => i.Checked)
+            : _links.SelectedItems.Cast<ListViewItem>();
+        return rows.Select(i => i.Tag).OfType<VideoItem>().ToList();
+    }
 
     private async Task ReupSelectedAsync()
     {
         var selected = SelectedLinks();
         if (selected.Count == 0)
         {
-            MessageBox.Show("Chọn link trong danh sách trước (giữ Ctrl để chọn nhiều).", "todoX ReupVideo");
+            MessageBox.Show("Tick chọn link trong danh sách trước (hoặc \"Chọn tất cả\").", "todoX ReupVideo");
             return;
         }
 

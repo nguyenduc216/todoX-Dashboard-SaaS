@@ -89,6 +89,7 @@ public sealed partial class MainForm : Form
         _history.Changed += () => OnUi(RefreshHistory);
 
         SetupTray();
+        SetupUpdater();
         _scheduler.Tick += async (_, _) => await SchedulerTickAsync();
         _scheduler.Start();
 

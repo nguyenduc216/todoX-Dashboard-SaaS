@@ -131,7 +131,7 @@ public sealed class ReupRunner
 
             pages = pages.Where(p => tokens[p.PageId].Length > 0).ToList();
             var queue = manualPick
-                ? _library.Snapshot().Where(v => options.OnlyVideoIds!.Contains(v.VideoId) && v.State != VideoState.Inactive
+                ? _library.Snapshot().Where(v => options.OnlyVideoIds!.Contains(v.VideoId) && v.State is not (VideoState.Inactive or VideoState.Removed)
                         && pages.Any(p => v.NeedsPostTo(p.PageId, maxAttempts))).ToList()
                 : Candidates(settings, pages, DateTime.Now);
             var limit = manualPick ? int.MaxValue : Math.Max(1, settings.Post.MaxVideosPerRun);

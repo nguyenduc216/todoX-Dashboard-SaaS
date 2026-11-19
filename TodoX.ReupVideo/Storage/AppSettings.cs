@@ -87,6 +87,8 @@ public sealed class AppSettings
     public ScheduleSettings Schedule { get; set; } = new();
     public PostSettings Post { get; set; } = new();
     public bool StartWithWindows { get; set; }
+    /// <summary>Download and install newer versions from todox.vn by itself.</summary>
+    public bool AutoUpdate { get; set; } = true;
 
     internal static readonly JsonSerializerOptions Json = new()
     {
