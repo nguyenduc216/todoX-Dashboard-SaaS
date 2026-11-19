@@ -119,7 +119,9 @@ public sealed class EditVideoProjectService
                         tenantId = _tenant.TenantId, customerId = license.CustomerId, projectId, licenseId = license.Id, deviceId = device.Id,
                         clientId = Cut(v.ClientId, 120), title = Cut(string.IsNullOrWhiteSpace(v.Title) ? v.FileName : v.Title, 200),
                         fileName = Cut(v.FileName, 200), duration = v.DurationSeconds, aspect = Cut(v.Aspect, 10), style = Cut(v.Style, 80),
-                        skill = Cut(v.Skill, 80), skillVersion = v.SkillVersion, size = v.SizeBytes, renderedAt = v.RenderedAt
+                        skill = Cut(v.Skill, 80), skillVersion = v.SkillVersion, size = v.SizeBytes,
+                        // The app sends local time (+07:00); Npgsql only writes UTC offsets to timestamptz.
+                        renderedAt = v.RenderedAt?.ToUniversalTime()
                     });
                 result.Add(new EditVideoSyncedVideo(v.ClientId!.Trim(), row.Id, row.SyncStatus, row.VideoUrl));
             }

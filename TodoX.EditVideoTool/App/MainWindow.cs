@@ -742,12 +742,14 @@ public sealed partial class MainWindow : Form
         list.Items.Clear();
         if (projects.SelectedItems.Count > 0)
         {
+            var latest = true; // newest first: only the last export is synced, earlier ones are drafts
             foreach (var v in _services.GetRequiredService<ProjectSync>().Videos(projects.SelectedItems[0].Text))
             {
                 var item = new ListViewItem(v.FileName) { Tag = v };
                 item.SubItems.Add(v.Rendered.ToString("dd/MM/yyyy HH:mm"));
-                item.SubItems.Add(v.Synced ? "Đã đồng bộ" : "Chưa đồng bộ");
-                item.ForeColor = v.Synced ? Ink : Yellow;
+                item.SubItems.Add(v.Synced ? "Đã đồng bộ" : latest ? "Chưa đồng bộ" : "Bản cũ");
+                item.ForeColor = v.Synced || !latest ? Ink : Yellow;
+                latest = false;
                 list.Items.Add(item);
             }
         }
@@ -772,7 +774,7 @@ public sealed partial class MainWindow : Form
         }
     }
 
-    /// <summary>The "Đồng bộ" button: uploads every video that is not on the dashboard yet.</summary>
+    /// <summary>The "Đồng bộ" button: uploads the last video of each project when it is not on the dashboard yet.</summary>
     private async Task SyncVideosAsync(bool ask)
     {
         if (_syncing || !_licensed)
@@ -811,7 +813,7 @@ public sealed partial class MainWindow : Form
             }
 
             if (ask && MessageBox.Show(this,
-                    $"Có {pending.Count} video chưa đồng bộ lên Dashboard TodoX (Jobs của tôi).\n\nĐồng bộ ngay bây giờ?",
+                    $"Có {pending.Count} video mới nhất chưa đồng bộ lên Dashboard TodoX (Jobs của tôi). Các bản xuất cũ hơn không đưa lên.\n\nĐồng bộ ngay bây giờ?",
                     "TodoX EditVideo — Đồng bộ video", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             {
                 Say($"{pending.Count} video chưa đồng bộ. Bấm \"Đồng bộ lên Dashboard\" khi muốn đưa lên.");

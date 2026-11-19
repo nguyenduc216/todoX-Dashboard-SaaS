@@ -63,6 +63,17 @@ public sealed class ProjectSync
         return list.OrderByDescending(v => v.Rendered).ToList();
     }
 
+    /// <summary>
+    /// Only the last export of each project goes to the dashboard: earlier exports are drafts of the same video.
+    /// Returns each project's newest video when it is not synced yet.
+    /// </summary>
+    public static IReadOnlyList<LocalVideo> LatestToSync(IEnumerable<LocalVideo> videos) =>
+        videos.GroupBy(v => v.Project, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(v => v.Rendered).First())
+            .Where(v => !v.Synced)
+            .OrderByDescending(v => v.Rendered)
+            .ToList();
+
     private static string InfoPath(string video) => video + ".todox.json";
 
     private static JsonObject LoadInfo(string video)
@@ -145,18 +156,18 @@ public sealed class ProjectSync
                     skill = v.Skill,
                     skillVersion = v.SkillVersion,
                     sizeBytes = v.Size,
-                    renderedAt = new DateTimeOffset(v.Rendered)
+                    renderedAt = new DateTimeOffset(v.Rendered).ToUniversalTime()
                 })
             })
         };
         var result = await _server.SyncProjectsAsync(body, ct);
         if (!result.Ok)
         {
-            return (videos.Where(v => !v.Synced).ToList(), result.Message ?? result.ErrorCode);
+            return (LatestToSync(videos), result.Message ?? result.ErrorCode);
         }
 
         var answer = result.Value.ValueKind == JsonValueKind.Array ? result.Value.EnumerateArray().ToList() : [];
-        var pending = new List<LocalVideo>();
+        var updatedVideos = new List<LocalVideo>();
         foreach (var v in videos)
         {
             var row = answer.FirstOrDefault(a => a.TryGetProperty("clientId", out var c) && c.GetString() == v.ClientId);
@@ -171,14 +182,10 @@ public sealed class ProjectSync
             info["serverId"] = id.ToString();
             info["synced"] = synced;
             SaveInfo(v.Path, info);
-            var updated = v with { ServerId = id, Synced = synced };
-            if (!synced)
-            {
-                pending.Add(updated);
-            }
+            updatedVideos.Add(v with { ServerId = id, Synced = synced });
         }
 
-        return (pending, null);
+        return (LatestToSync(updatedVideos), null);
     }
 
     /// <summary>Uploads one video (the "Đồng bộ" button). Progress is 0..100.</summary>
