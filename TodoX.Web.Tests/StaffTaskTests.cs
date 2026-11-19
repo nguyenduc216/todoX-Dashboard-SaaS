@@ -161,4 +161,19 @@ public sealed class StaffTaskTests
         Assert.Equal("#EF4444", StaffTasks.StatusHex("__late"));
         Assert.NotEqual(StaffTasks.StatusHex("__open"), StaffTasks.StatusHex(StaffTaskStatuses.InProgress));
     }
+
+    [Fact]
+    public void Late_is_automatic_and_counted_only_once()
+    {
+        var now = new DateTime(2026, 11, 19, 15, 0, 0);
+        var summary = StaffTaskSummary.From(
+            [Task("in_progress", now.AddHours(-1)), Task("in_progress", now.AddHours(1)), Task("new", now.AddDays(-1)), Task("done", now.AddDays(-1)), Task("cancelled", now.AddDays(-1))],
+            now);
+        Assert.Equal(2, summary.Late);
+        Assert.Equal(1, summary.Count("in_progress"));
+        Assert.Equal(0, summary.Count("new"));
+        Assert.Equal(3, summary.Open);
+        Assert.Equal(1, summary.Done);
+        Assert.Equal(5, summary.Total);
+    }
 }

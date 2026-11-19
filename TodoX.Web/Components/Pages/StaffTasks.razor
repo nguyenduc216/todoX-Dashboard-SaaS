@@ -52,7 +52,7 @@
     }
     else
     {
-        var summary = StaffTaskSummary.From(Scoped);
+        var summary = StaffTaskSummary.From(Scoped, _now);
         <MudGrid>
             <MudItem xs="6" md="3">
                 <MudPaper Class="@CardClass(OpenFilter)" Style="@StatusStyle(OpenFilter)" @onclick="@(() => _statusFilter = OpenFilter)">
@@ -71,7 +71,7 @@
             <MudItem xs="6" md="3">
                 <MudPaper Class="@CardClass(LateFilter)" Style="@StatusStyle(LateFilter)" @onclick="@(() => _statusFilter = LateFilter)">
                     <MudText Typo="Typo.subtitle2">Trễ hạn hoàn thành</MudText>
-                    <div class="todox-stat-value st-tone-text">@LateCount</div>
+                    <div class="todox-stat-value st-tone-text">@summary.Late</div>
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa xong mà đã qua giờ hoàn thành</MudText>
                 </MudPaper>
             </MudItem>
@@ -167,7 +167,6 @@
                         @if (StaffTaskRules.IsLate(context, _now))
                         {
                             <span style="color:var(--mud-palette-error);font-weight:600">@When(context.CompletedAt)</span>
-                            <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block">Trễ hạn</MudText>
                         }
                         else
                         {
@@ -179,7 +178,7 @@
                         {
                             <MudMenu Dense="true" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Disabled="_busy">
                                 <ActivatorContent Context="menuContext">
-                                    <span class="st-chip st-chip--small is-selected" style="@StatusStyle(context.Status)" role="button">@StaffTaskStatuses.Label(context.Status) <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" /></span>
+                                    <span class="st-chip st-chip--small is-selected" style="@StatusStyle(Shown(context))" role="button">@ShownLabel(context) <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" /></span>
                                 </ActivatorContent>
                                 <ChildContent>
                                     @foreach (var status in StaffTaskStatuses.All.Where(x => x != StaffTaskStatuses.Normalize(context.Status)))
@@ -191,7 +190,11 @@
                         }
                         else
                         {
-                            <span class="st-chip st-chip--small is-selected" style="@StatusStyle(context.Status)">@StaffTaskStatuses.Label(context.Status)</span>
+                            <span class="st-chip st-chip--small is-selected" style="@StatusStyle(Shown(context))">@ShownLabel(context)</span>
+                        }
+                        @if (Shown(context) == LateFilter)
+                        {
+                            <MudText Typo="Typo.caption" Class="todox-page-subtitle d-block">@StaffTaskStatuses.Label(context.Status), quá giờ hoàn thành</MudText>
                         }
                     </MudTd>
                     <MudTd DataLabel="Thao tác" Style="text-align:right;white-space:nowrap">
@@ -274,7 +277,7 @@
             yield return (status, StaffTaskStatuses.Label(status), summary.Count(status));
             if (status == StaffTaskStatuses.Done)
             {
-                yield return (LateFilter, "Trễ hạn", LateCount);
+                yield return (LateFilter, "Trễ hạn", summary.Late);
             }
         }
     }
@@ -283,7 +286,10 @@
 
     private static string Short(string text) => text.Length <= 140 ? text : text[..140].TrimEnd() + "…";
 
-    private int LateCount => Scoped.Count(x => StaffTaskRules.IsLate(x, _now));
+    /// <summary>Trạng thái hiển thị: "Trễ hạn" tự động khi việc chưa xong đã quá giờ hoàn thành.</summary>
+    private string Shown(StaffTask task) => StaffTaskRules.IsLate(task, _now) ? LateFilter : StaffTaskStatuses.Normalize(task.Status);
+
+    private string ShownLabel(StaffTask task) => Shown(task) == LateFilter ? "Trễ hạn" : StaffTaskStatuses.Label(task.Status);
 
     protected override async Task OnInitializedAsync()
     {
@@ -339,7 +345,7 @@
         null or "" => Scoped,
         OpenFilter => Scoped.Where(x => StaffTaskStatuses.IsOpen(x.Status)),
         LateFilter => Scoped.Where(x => StaffTaskRules.IsLate(x, _now)),
-        var status => Scoped.Where(x => StaffTaskStatuses.Normalize(x.Status) == status)
+        var status => Scoped.Where(x => Shown(x) == status)
     };
 
     private Task OpenCreate() => OpenDialog(null);

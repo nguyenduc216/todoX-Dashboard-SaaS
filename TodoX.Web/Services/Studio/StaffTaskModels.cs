@@ -54,16 +54,24 @@ public static class StaffTaskStatuses
     };
 }
 
-/// <summary>Counts for the summary cards: per status, plus done / not done.</summary>
-public sealed record StaffTaskSummary(IReadOnlyDictionary<string, int> ByStatus)
+/// <summary>
+/// Counts for the summary cards and filters. "Trễ hạn" is automatic (not stored): an unfinished task past its
+/// completion time counts as late only, not also as Mới / Đang thực hiện.
+/// </summary>
+public sealed record StaffTaskSummary(IReadOnlyDictionary<string, int> ByStatus, int Late = 0)
 {
     public int Count(string status) => ByStatus.TryGetValue(status, out var n) ? n : 0;
     public int Done => Count(StaffTaskStatuses.Done);
-    public int Open => StaffTaskStatuses.All.Where(StaffTaskStatuses.IsOpen).Sum(Count);
-    public int Total => ByStatus.Values.Sum();
+    public int Open => StaffTaskStatuses.All.Where(StaffTaskStatuses.IsOpen).Sum(Count) + Late;
+    public int Total => ByStatus.Values.Sum() + Late;
 
-    public static StaffTaskSummary From(IEnumerable<StaffTask> tasks)
-        => new(StaffTaskStatuses.All.ToDictionary(s => s, s => tasks.Count(t => StaffTaskStatuses.Normalize(t.Status) == s)));
+    public static StaffTaskSummary From(IEnumerable<StaffTask> tasks, DateTime? now = null)
+    {
+        var list = tasks.ToList();
+        var late = now is { } at ? list.Where(t => StaffTaskRules.IsLate(t, at)).ToHashSet() : [];
+        var rest = list.Where(t => !late.Contains(t)).ToList();
+        return new(StaffTaskStatuses.All.ToDictionary(s => s, s => rest.Count(t => StaffTaskStatuses.Normalize(t.Status) == s)), late.Count);
+    }
 }
 
 public static class StaffTaskRules
