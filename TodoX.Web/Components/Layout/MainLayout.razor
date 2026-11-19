@@ -814,6 +814,28 @@
             }
         }
 
+        if (!existingCodes.Contains("staff_tasks"))
+        {
+            var tasksItem = new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                Code = "staff_tasks",
+                Title = "Công việc nhân viên",
+                Href = "/staff-tasks",
+                IconKey = "TaskAlt",
+                ModuleKeys = new[] { "staff_tasks" },
+                VisibilityPolicy = "admin_or_module",
+                MatchAll = false,
+                SortOrder = 16
+            };
+            var administration = list.FirstOrDefault(g => g.Code.Equals("administration", StringComparison.OrdinalIgnoreCase));
+            if (administration is not null)
+            {
+                tasksItem.GroupId = administration.Id;
+                administration.Items.Add(tasksItem);
+            }
+        }
+
         if (!existingCodes.Contains("video_plans"))
         {
             var plansItem = new NavigationMenuItemDto
@@ -1091,6 +1113,7 @@
         "PriceChange" => Icons.Material.Filled.PriceChange,
         "Badge" => Icons.Material.Filled.Badge,
         "EventNote" => Icons.Material.Filled.EventNote,
+        "TaskAlt" => Icons.Material.Filled.TaskAlt,
         _ => Icons.Material.Filled.Circle
     };
 
@@ -1137,6 +1160,7 @@
             Group("administration", "Quản trị hệ thống", "AdminPanelSettings", 20, true,
                 Item("admin_users", "Quản trị viên", "/admin-users", "AdminPanelSettings", new[] { "admin_users" }, sort: 10),
                 Item("staff_members", "Nhân viên TodoX", "/staff", "Badge", new[] { "staff_members" }, "admin_or_module", sort: 15),
+                Item("staff_tasks", "Công việc nhân viên", "/staff-tasks", "TaskAlt", new[] { "staff_tasks" }, "admin_or_module", sort: 16),
                 Item("customers", "Quản lý khách hàng", "/customers", "Groups", new[] { "customers" }, sort: 20),
                 Item("customer_accounts", "Quản lý tài khoản", "/customer-accounts", "ManageAccounts", new[] { "customer_accounts" }, sort: 30),
                 Item("affiliates", "Đại lý & hoa hồng", "/affiliates", "Handshake", Array.Empty<string>(), "admin_job_monitor", sort: 35),

@@ -134,6 +134,14 @@ public sealed class CustomerVideoTests
         {
             var files = new CustomerVideoMediaService(paths, options, auth).ListLibrary(video: true);
             Assert.Equal(2, files.Count);
+
+            // Staff with a task permission may open it to pick a task's products; without one they may not.
+            typeof(AuthStateService).GetProperty(nameof(AuthStateService.CurrentUser))!
+                .SetValue(auth, new CurrentUserSession { UserId = Guid.NewGuid(), Role = TodoXUserRole.Staff, IsAuthenticated = true,
+                    Permissions = new HashSet<string> { "staff_tasks.update" } });
+            var media = new CustomerVideoMediaService(paths, options, auth);
+            Assert.Equal(2, media.ListLibrary(true, 120, "staff_tasks.create", "staff_tasks.update").Count);
+            Assert.Throws<UnauthorizedAccessException>(() => media.ListLibrary(video: true));
             Assert.Contains(files, f => f.Url == "/media/customer-videos/videos/a.mp4" && f.Source == CustomerVideoMediaService.SourceCustomerVideos);
             Assert.Contains(files, f => f.Url == "/media/landing/video-samples/videos/b.mp4" && f.Source == CustomerVideoMediaService.SourceVideoSamples);
         }

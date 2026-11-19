@@ -350,11 +350,24 @@ AOS.init({
       sectionLinks.forEach(link => link.classList.toggle("active", link === active));
     }
 
-    window.addEventListener("scroll", () => {
+    function syncScrollState() {
       header.classList.toggle("scrolled", window.scrollY > 20);
       backTop.classList.toggle("show", window.scrollY > 700);
       setActiveNav();
-    }, { passive: true });
+    }
+    window.addEventListener("scroll", syncScrollState, { passive: true });
+    // Trình duyệt có thể mở lại trang ở vị trí đã cuộn (tải lại, quay lại) mà không phát sự kiện scroll:
+    // đặt nền thanh menu ngay, nếu không chữ bên dưới lộ qua menu trong suốt.
+    syncScrollState();
+    window.addEventListener("pageshow", syncScrollState);
+    window.addEventListener("load", syncScrollState);
+    if ("IntersectionObserver" in window) {
+      const topSentinel = document.createElement("div");
+      topSentinel.setAttribute("aria-hidden", "true");
+      topSentinel.style.cssText = "position:absolute;top:0;left:0;width:1px;height:21px;pointer-events:none;";
+      document.body.prepend(topSentinel);
+      new IntersectionObserver(() => syncScrollState()).observe(topSentinel);
+    }
     menuBtn.addEventListener("click", () => navLinks.classList.toggle("open"));
     sectionLinks.forEach(a => a.addEventListener("click", event => {
       const target = document.querySelector(a.getAttribute("href"));

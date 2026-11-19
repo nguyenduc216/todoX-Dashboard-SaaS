@@ -22,9 +22,13 @@ public sealed class CustomerVideoMediaService(SharedMediaPathService paths, IOpt
     /// Files already on the server, newest first, so an admin can reuse one instead of uploading again:
     /// earlier customer-video uploads and the landing "Kho mẫu video" files.
     /// </summary>
-    public IReadOnlyList<CustomerVideoLibraryFile> ListLibrary(bool video, int take = 120)
+    /// <param name="alsoAllowed">Permissions that open the library besides admin (e.g. staff_tasks.update, to pick a task's products).</param>
+    public IReadOnlyList<CustomerVideoLibraryFile> ListLibrary(bool video, int take = 120, params string[] alsoAllowed)
     {
-        if (!AdminEndpointAuthorization.IsAdmin(auth.CurrentUser)) throw new UnauthorizedAccessException("Chỉ quản trị viên TodoX được xem thư viện.");
+        var user = auth.CurrentUser;
+        var mayOpen = AdminEndpointAuthorization.IsAdmin(user)
+                      || (user is { IsAuthenticated: true, IsCustomer: false } && alsoAllowed.Any(user.Can));
+        if (!mayOpen) throw new UnauthorizedAccessException("Bạn không có quyền xem thư viện video.");
         if (!paths.IsConfigured) return [];
         var folder = video ? "videos" : "posters";
         string[] allowed = video ? [".mp4", ".webm"] : [".jpg", ".jpeg", ".png", ".webp"];

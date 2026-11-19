@@ -56,5 +56,5 @@
 }
 
 /* Affiliate video page: its first section starts under the fixed header. */
-.affiliate-page main > .section:first-child { padding-top: 150px; }
-@media (max-width: 700px) { .affiliate-page main > .section:first-child { padding-top: 120px; } }
+.affiliate-page main > .section:first-child { padding-top: 150px !important; }
+@media (max-width: 700px) { .affiliate-page main > .section:first-child { padding-top: 120px !important; } }
