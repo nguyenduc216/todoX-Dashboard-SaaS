@@ -80,12 +80,14 @@ public sealed partial class MainForm
         tools.SetFlowBreak(remove, true);
         _tickAll.CheckedChanged += TickAllChanged;
         _noPageHint.LinkClicked += (_, _) => OpenSettingsTab(EnabledPages().Count == 0 ? SettingsTabPages : SettingsTabMapping);
-        tools.Controls.AddRange([_tickAll, _tickedLabel, _noPageHint]);
+        tools.Controls.AddRange([_tickAll, _tickedLabel, _clearFilters, _noPageHint]);
 
         // --- list
         // Column 0 holds only the tick box; "Kênh" is sized to the longest channel name in RefreshHome.
-        _fitLinkColumns = Columns(_links, ("", 30), ("Ngày TikTok", 92), ("Kênh", 140), ("Nội dung", -1), ("Trạng thái", 150), ("Đã lên", 64), ("Còn chờ đăng lên fanpage", 240));
+        _fitLinkColumns = Columns(_links, ("", 30), ("Ngày TikTok", 88), ("Kênh", 140), ("Nội dung", -1), ("Trạng thái", 130), ("Đã lên", 58), ("Còn chờ đăng lên fanpage", 190));
         _links.Dock = DockStyle.Fill;
+        _links.ShowItemToolTips = true; // hover a row: the whole TikTok text
+        BuildFilterBar();
         _links.ItemChecked += (_, e) =>
         {
             if (_fillingLinks || e.Item.Tag is not VideoItem v)
@@ -148,14 +150,17 @@ public sealed partial class MainForm
                 OpenUrl(FacebookUrl(id));
             }
         };
-        var detail = new Panel { Dock = DockStyle.Bottom, Height = S(150), BackColor = Ground, Padding = P(0, 6, 0, 0) };
+        var detail = new Panel { Dock = DockStyle.Bottom, Height = S(165), BackColor = Ground, Padding = P(0, 6, 0, 0) };
         _linkPagesTitle.Dock = DockStyle.Top;
+        _linkText.Dock = DockStyle.Top;
         detail.Controls.Add(_linkPages);
+        detail.Controls.Add(_linkText);
         detail.Controls.Add(_linkPagesTitle);
 
         // Docking: the last added Top control sits highest.
         page.Controls.Add(_links);
         page.Controls.Add(detail);
+        page.Controls.Add(_filterBar);
         page.Controls.Add(tools);
         page.Controls.Add(cards);
         page.Controls.Add(runBar);
@@ -199,7 +204,7 @@ public sealed partial class MainForm
 
         _listTitle.Text = view switch
         {
-            HomeView.Pending => "LINK CHỜ REUP (GỒM CẢ LINK ĐÃ LÊN MỘT SỐ PAGE)",
+            HomeView.Pending => "LINK CHỜ REUP",
             HomeView.Failed => "REUP LỖI — DANH SÁCH REUP LẠI",
             HomeView.Posted => "LINK ĐÃ LÊN ĐỦ MỌI FANPAGE",
             HomeView.Inactive => "LINK KHÔNG CÒN ACTIVE (KHÔNG ĐĂNG)",
@@ -253,10 +258,7 @@ public sealed partial class MainForm
             .ToList();
 
         var selected = _links.SelectedItems.Cast<ListViewItem>().Select(i => i.Tag).OfType<VideoItem>().Select(v => v.VideoId).ToHashSet();
-        _ticked.IntersectWith(items.Select(v => v.VideoId));
-        _fillingLinks = true;
-        _links.BeginUpdate();
-        _links.Items.Clear();
+        var rows = new List<ListViewItem>();
         foreach (var v in items)
         {
             var targets = targetsOf[v.VideoId];
@@ -272,10 +274,28 @@ public sealed partial class MainForm
                 state,
                 targets.Count == 0 ? "—" : $"{onTargets}/{targets.Count}",
                 WaitingColumn(status)
-            ]) { Tag = v, UseItemStyleForSubItems = false, Selected = selected.Contains(v.VideoId), Checked = _ticked.Contains(v.VideoId) };
+            ]) { Tag = v, UseItemStyleForSubItems = false, ToolTipText = text.Length > 600 ? text[..600] + "…" : text };
+            if (!MatchesFilters(row))
+            {
+                continue;
+            }
+
             row.SubItems[4].ForeColor = color;
             row.SubItems[5].ForeColor = targets.Count > 0 && onTargets == targets.Count ? Green : onTargets > 0 ? Yellow : Muted;
             row.SubItems[6].ForeColor = status.Any(s => s.State is PageReupState.Failed or PageReupState.GaveUp) ? Red : Ink;
+            rows.Add(row);
+        }
+
+        // Ticks only on rows that are shown, so "Chọn tất cả" / "Xoá" act on what the search found.
+        _ticked.IntersectWith(rows.Select(r => ((VideoItem)r.Tag!).VideoId));
+        _fillingLinks = true;
+        _links.BeginUpdate();
+        _links.Items.Clear();
+        foreach (var row in rows)
+        {
+            var id = ((VideoItem)row.Tag!).VideoId;
+            row.Selected = selected.Contains(id);
+            row.Checked = _ticked.Contains(id);
             _links.Items.Add(row);
         }
 
@@ -306,7 +326,9 @@ public sealed partial class MainForm
 
         _linkPagesTitle.Text = link is null
             ? "TỪNG FANPAGE CỦA LINK — CHỌN MỘT LINK Ở DANH SÁCH TRÊN"
-            : $"TÌNH TRẠNG TRÊN TỪNG FANPAGE · @{link.Author} · {Short(link.Description, 70)}";
+            : $"TÌNH TRẠNG TRÊN TỪNG FANPAGE · LINK CỦA @{link.Author}";
+        _linkText.Text = link is null ? "" : "Nội dung: " + Short(link.Description, 1000);
+        _linkText.Height = string.IsNullOrEmpty(_linkText.Text) ? 0 : TextRenderer.MeasureText(_linkText.Text, _linkText.Font, new Size(Math.Max(S(200), _linkText.Width), 0), TextFormatFlags.WordBreak).Height + S(4);
         FillPageStatus(_linkPages, link);
     }
 
@@ -363,7 +385,8 @@ public sealed partial class MainForm
     private void UpdateTickState()
     {
         var total = _links.Items.Count;
-        _tickedLabel.Text = _ticked.Count == 0 ? $"{total:N0} link" : $"Đã chọn {_ticked.Count:N0}/{total:N0} link";
+        var filtered = _filters.Values.Any(b => b.Text.Trim().Length > 0) ? " tìm thấy" : "";
+        _tickedLabel.Text = _ticked.Count == 0 ? $"{total:N0} link{filtered}" : $"Đã chọn {_ticked.Count:N0}/{total:N0} link{filtered}";
         _tickedLabel.ForeColor = _ticked.Count == 0 ? Muted : Yellow;
         _tickAll.CheckedChanged -= TickAllChanged;
         _tickAll.CheckState = _ticked.Count == 0 ? CheckState.Unchecked : _ticked.Count >= total ? CheckState.Checked : CheckState.Indeterminate;

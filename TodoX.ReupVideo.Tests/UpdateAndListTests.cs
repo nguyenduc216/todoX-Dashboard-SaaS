@@ -108,3 +108,13 @@ public class PageStatusTests
         Assert.True(PageReupStatuses.IsComplete(PageReupStatuses.For(video, settings, pages)));
     }
 }
+
+public class SearchFoldTests
+{
+    [Theory]
+    [InlineData("Tất Vớ Nam Nữ Đẹp", "tat vo nam nu dep")]
+    [InlineData("HOÀNH THÁNH", "hoanh thanh")]
+    [InlineData(null, "")]
+    public void SearchIgnoresCaseAndAccents(string? text, string expected) =>
+        Assert.Equal(expected, TodoX.ReupVideo.App.MainForm.Fold(text));
+}
