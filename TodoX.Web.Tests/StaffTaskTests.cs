@@ -78,6 +78,36 @@ public sealed class StaffTaskTests
     }
 
     [Fact]
+    public void Products_are_library_videos_named_after_their_customer_video_or_sample()
+    {
+        Assert.True(StaffTaskRules.IsLibraryUrl("/media/customer-videos/videos/a.mp4"));
+        Assert.True(StaffTaskRules.IsLibraryUrl("/media/landing/video-samples/videos/b.mp4"));
+        Assert.False(StaffTaskRules.IsLibraryUrl("https://evil.example/a.mp4"));
+        Assert.False(StaffTaskRules.IsLibraryUrl("/media/../secret.mp4"));
+        Assert.False(StaffTaskRules.IsLibraryUrl(null));
+
+        Assert.Equal("Quinter YEP", new StaffTaskProduct("/media/x/a.mp4", "Quinter YEP", "Kho mẫu video", null).DisplayTitle);
+        Assert.Equal("a.mp4", new StaffTaskProduct("/media/x/a.mp4", null, null, null).DisplayTitle);
+
+        var sql = Read("database", "manual", "studio", "20261119_staff_task_products.sql");
+        Assert.Contains("references studio.staff_tasks (id) on delete cascade", sql);
+        Assert.Contains("unique (task_id, video_url)", sql);
+        Assert.DoesNotContain("alter table", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(Root, "database", "manual", "studio", "20261119_staff_task_products.test.sql")));
+
+        var repo = Read("TodoX.Web", "Services", "Studio", "StaffTaskRepository.cs");
+        Assert.Contains("_media.ListLibrary(video: true, take: 400, \"staff_tasks.create\", \"staff_tasks.update\")", repo);
+        Assert.Contains("FROM studio.customer_videos v", repo);
+        Assert.Contains("FROM landing.video_samples s", repo);
+        Assert.Contains(".Where(p => StaffTaskRules.IsLibraryUrl(p.VideoUrl))", repo);
+
+        var dialog = Read("TodoX.Web", "Components", "Dialogs", "StaffTaskDialog.razor");
+        Assert.Contains("Chọn video từ thư viện", dialog);
+        Assert.Contains("Products = Source.Products.ToList()", dialog);
+        Assert.Contains("<MudTh>Sản phẩm</MudTh>", Read("TodoX.Web", "Components", "Pages", "StaffTasks.razor"));
+    }
+
+    [Fact]
     public void Migration_is_additive_with_permissions_and_page_is_wired()
     {
         var sql = Read("database", "manual", "studio", "20261119_staff_tasks.sql");

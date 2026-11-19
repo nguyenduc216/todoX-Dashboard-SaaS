@@ -75,7 +75,7 @@
         <MudPaper Class="todox-table-card pa-4" rounded="true">
             <MudGrid Spacing="2" Class="mb-2">
                 <MudItem xs="12" md="4">
-                    <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tiêu đề, ghi chú, khách hàng, người thực hiện..."
+                    <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tiêu đề, ghi chú, khách hàng, người thực hiện, sản phẩm..."
                                   Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" autocomplete="off"
                                   Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
                 </MudItem>
@@ -114,6 +114,7 @@
                     <MudTh>Tiêu đề</MudTh>
                     <MudTh>Người thực hiện</MudTh>
                     <MudTh>Khách hàng</MudTh>
+                    <MudTh>Sản phẩm</MudTh>
                     <MudTh>Thực hiện</MudTh>
                     <MudTh>Hoàn thành</MudTh>
                     <MudTh>Trạng thái</MudTh>
@@ -129,6 +130,26 @@
                     </MudTd>
                     <MudTd DataLabel="Người thực hiện" Style="white-space:nowrap">@(context.AssigneeName ?? "Chưa giao")</MudTd>
                     <MudTd DataLabel="Khách hàng">@(context.CustomerName ?? "—")</MudTd>
+                    <MudTd DataLabel="Sản phẩm" Style="max-width:240px">
+                        @if (context.Products.Count == 0)
+                        {
+                            <span class="todox-page-subtitle">—</span>
+                        }
+                        else
+                        {
+                            @foreach (var product in context.Products.Take(2))
+                            {
+                                <a href="@product.VideoUrl" target="_blank" rel="noopener" title="@product.DisplayTitle"
+                                   style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
+                                    <MudIcon Icon="@Icons.Material.Filled.PlayCircle" Size="Size.Small" />@product.DisplayTitle
+                                </a>
+                            }
+                            @if (context.Products.Count > 2)
+                            {
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">+@(context.Products.Count - 2) video khác</MudText>
+                            }
+                        }
+                    </MudTd>
                     <MudTd DataLabel="Thực hiện" Style="white-space:nowrap">@When(context.StartAt)</MudTd>
                     <MudTd DataLabel="Hoàn thành" Style="white-space:nowrap">
                         @if (StaffTaskRules.IsLate(context, _now))
@@ -256,6 +277,7 @@
                 list = list.Where(x =>
                     x.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
                     || (x.Note ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || x.Products.Any(p => p.DisplayTitle.Contains(q, StringComparison.OrdinalIgnoreCase))
                     || (x.CustomerName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
                     || (x.AssigneeName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
             }
@@ -282,7 +304,8 @@
             { x => x.Source, source },
             { x => x.DefaultAssigneeId, _assigneeFilter is { } a && a != Unassigned ? a : null },
             { x => x.Customers, _customers },
-            { x => x.Assignees, _assignees }
+            { x => x.Assignees, _assignees },
+            { x => x.ProductsEnabled, Tasks.ProductsEnabled }
         };
         var dialog = await DialogService.ShowAsync<StaffTaskDialog>(source is null ? "Tạo công việc" : "Sửa công việc", parameters,
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false });

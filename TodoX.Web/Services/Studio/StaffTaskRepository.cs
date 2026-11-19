@@ -1,6 +1,7 @@
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Services.CustomerVideos;
 
 namespace TodoX.Web.Services.Studio;
 
@@ -13,24 +14,33 @@ public sealed class StaffTaskRepository
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly AuthStateService _auth;
+    private readonly CustomerVideoMediaService _media;
     private readonly ILogger<StaffTaskRepository> _logger;
 
-    public StaffTaskRepository(TodoXConnectionFactory factory, TenantContext tenant, AuthStateService auth, ILogger<StaffTaskRepository> logger)
+    public StaffTaskRepository(TodoXConnectionFactory factory, TenantContext tenant, AuthStateService auth,
+        CustomerVideoMediaService media, ILogger<StaffTaskRepository> logger)
     {
         _factory = factory;
         _tenant = tenant;
         _auth = auth;
+        _media = media;
         _logger = logger;
     }
 
     public const string Script = "database/manual/studio/20261119_staff_tasks.sql";
+    public const string ProductsScript = "database/manual/studio/20261119_staff_task_products.sql";
+    public const int MaxProducts = 20;
+    private bool? _productsReady;
 
     public async Task<bool> IsReadyAsync()
     {
         try
         {
             using var conn = await _factory.OpenAsync();
-            return await conn.ExecuteScalarAsync<bool>("SELECT to_regclass('studio.staff_tasks') IS NOT NULL;");
+            var ready = await conn.QuerySingleAsync<(bool Tasks, bool Products)>(
+                "SELECT to_regclass('studio.staff_tasks') IS NOT NULL, to_regclass('studio.staff_task_products') IS NOT NULL;");
+            _productsReady = ready.Products;
+            return ready.Tasks;
         }
         catch (Exception ex)
         {
@@ -75,8 +85,74 @@ public sealed class StaffTaskRepository
                      """,
             new { tenant = _tenant.TenantId })).ToList();
         foreach (var row in rows) ToLocal(row);
+        if (rows.Count > 0 && await ProductsReadyAsync(conn))
+        {
+            var products = await conn.QueryAsync<(Guid TaskId, string VideoUrl, string? Title, string? Source, string? PosterUrl)>(
+                """
+                SELECT p.task_id, p.video_url, p.title, p.source, p.poster_url
+                  FROM studio.staff_task_products p
+                  JOIN studio.staff_tasks t ON t.id = p.task_id
+                 WHERE t.tenant_id = @tenant
+                 ORDER BY p.task_id, p.sort_order, p.created_at;
+                """, new { tenant = _tenant.TenantId });
+            var byTask = rows.ToDictionary(x => x.Id);
+            foreach (var p in products)
+                if (byTask.TryGetValue(p.TaskId, out var task))
+                    task.Products.Add(new StaffTaskProduct(p.VideoUrl, p.Title, p.Source, p.PosterUrl));
+        }
         return rows;
     }
+
+    /// <summary>True once 20261119_staff_task_products.sql has run (the page works without it, minus "Sản phẩm").</summary>
+    public bool ProductsEnabled => _productsReady == true;
+
+    private async Task<bool> ProductsReadyAsync(System.Data.IDbConnection conn)
+        => _productsReady ??= await conn.ExecuteScalarAsync<bool>("SELECT to_regclass('studio.staff_task_products') IS NOT NULL;");
+
+    /// <summary>
+    /// The uploaded video library (Video khách hàng, Kho mẫu video), newest first, each file named after the customer
+    /// video or sample that uses it, so a task's product can be picked without guessing file names.
+    /// </summary>
+    public async Task<IReadOnlyList<StaffTaskProduct>> ListLibraryAsync()
+    {
+        var files = _media.ListLibrary(video: true, take: 400, "staff_tasks.create", "staff_tasks.update");
+        if (files.Count == 0) return [];
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        var urls = files.Select(f => f.Url).ToArray();
+        var names = new Dictionary<string, (string Title, string? Poster)>(StringComparer.OrdinalIgnoreCase);
+        async Task AddAsync(string sql)
+        {
+            try
+            {
+                foreach (var row in await conn.QueryAsync<(string Url, string Title, string? Poster)>(sql, new { urls, tenant = _tenant.TenantId }))
+                    names.TryAdd(row.Url, (row.Title, row.Poster));
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staff task library: title lookup failed."); }
+        }
+        await AddAsync(LibraryCustomerVideosSql);
+        await AddAsync(LibrarySamplesSql);
+        await AddAsync(LibrarySampleVersionsSql);
+        return files.Select(f => names.TryGetValue(f.Url, out var n)
+                ? new StaffTaskProduct(f.Url, n.Title, f.Source, n.Poster) { UploadedAt = VietnamTime.FromUtc(f.UploadedAtUtc) }
+                : new StaffTaskProduct(f.Url, null, f.Source, null) { UploadedAt = VietnamTime.FromUtc(f.UploadedAtUtc) })
+            .ToList();
+    }
+
+    private const string LibraryCustomerVideosSql = """
+        SELECT v.video_url, v.title, v.poster_url FROM studio.customer_videos v
+          JOIN crm.customers c ON c.id = v.customer_id
+         WHERE c.tenant_id = @tenant AND v.video_url = ANY(@urls) ORDER BY v.updated_at DESC;
+        """;
+
+    private const string LibrarySamplesSql =
+        "SELECT s.video_url, s.title, s.poster_url FROM landing.video_samples s WHERE s.video_url = ANY(@urls);";
+
+    private const string LibrarySampleVersionsSql = """
+        SELECT x.video_url, s.title || ' (bản cũ)', COALESCE(x.poster_url, s.poster_url)
+          FROM landing.video_sample_versions x JOIN landing.video_samples s ON s.id = x.sample_id
+         WHERE x.video_url = ANY(@urls);
+        """;
 
     public async Task<(bool Ok, string? Error)> SaveAsync(StaffTask task)
     {
@@ -135,7 +211,31 @@ public sealed class StaffTaskRepository
                 """, args);
             if (updated == 0) return (false, "Công việc không còn tồn tại.");
         }
+        if (await ProductsReadyAsync(conn)) await SaveProductsAsync(conn, args.id, task.Products, user.UserId);
         return (true, null);
+    }
+
+    private static async Task SaveProductsAsync(System.Data.IDbConnection conn, Guid taskId, IEnumerable<StaffTaskProduct> products, Guid? by)
+    {
+        var list = products
+            .Where(p => StaffTaskRules.IsLibraryUrl(p.VideoUrl))
+            .DistinctBy(p => p.VideoUrl, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxProducts)
+            .Select((p, i) => new
+            {
+                id = Guid.NewGuid(), taskId, url = p.VideoUrl, title = p.Title, source = p.Source,
+                poster = StaffTaskRules.IsLibraryUrl(p.PosterUrl) ? p.PosterUrl : null, sort = i, by
+            })
+            .ToList();
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync("DELETE FROM studio.staff_task_products WHERE task_id = @taskId;", new { taskId }, tx);
+        if (list.Count > 0)
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO studio.staff_task_products (id, task_id, video_url, title, source, poster_url, sort_order, created_at, created_by)
+                VALUES (@id, @taskId, @url, @title, @source, @poster, @sort, now(), @by);
+                """, list, tx);
+        tx.Commit();
     }
 
     /// <summary>Quick status change from the list; "Đã hoàn thành" stamps the completion time when it is empty.</summary>

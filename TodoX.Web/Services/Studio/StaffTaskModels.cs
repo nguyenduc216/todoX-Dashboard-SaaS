@@ -16,6 +16,17 @@ public sealed class StaffTask
     public string? CreatedByName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    /// <summary>"Sản phẩm": library videos this task produced (studio.staff_task_products).</summary>
+    public List<StaffTaskProduct> Products { get; set; } = [];
+}
+
+/// <summary>A video from the uploaded video library (Video khách hàng / Kho mẫu video), as a task's product or a library choice.</summary>
+public sealed record StaffTaskProduct(string VideoUrl, string? Title, string? Source, string? PosterUrl)
+{
+    public DateTime? UploadedAt { get; init; }
+
+    /// <summary>Title of the customer video or sample that uses the file, else the file name.</summary>
+    public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? Path.GetFileName(VideoUrl) : Title!;
 }
 
 public static class StaffTaskStatuses
@@ -72,6 +83,10 @@ public static class StaffTaskRules
     /// <summary>Marking a task done without a completion time stamps it now; other statuses keep what was entered.</summary>
     public static DateTime? CompletedAtFor(string status, DateTime? completedAt, DateTime now)
         => status == StaffTaskStatuses.Done && completedAt is null ? now : completedAt;
+
+    /// <summary>Products are files in this server's media folder only (the library), never outside links.</summary>
+    public static bool IsLibraryUrl(string? url)
+        => !string.IsNullOrWhiteSpace(url) && url.StartsWith("/media/", StringComparison.Ordinal) && !url.Contains("..");
 
     /// <summary>Open task whose planned completion time has passed.</summary>
     public static bool IsLate(StaffTask task, DateTime now)

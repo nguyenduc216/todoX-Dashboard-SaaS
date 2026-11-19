@@ -1,5 +1,7 @@
 @using TodoX.Web.Models
 @using TodoX.Web.Services.Studio
+@inject StaffTaskRepository Tasks
+@inject ILogger<StaffTaskDialog> Logger
 
 <MudDialog>
     <TitleContent>
@@ -54,6 +56,86 @@
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">Để trống ngày hoàn thành: hệ thống ghi giờ lúc lưu.</MudText>
                 }
             </MudItem>
+            @if (ProductsEnabled)
+            {
+                <MudItem xs="12">
+                    @* Sản phẩm: the library videos this task produced. *@
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap" Class="gap-2">
+                        <MudText Typo="Typo.subtitle2">Sản phẩm (@_model.Products.Count)</MudText>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.VideoLibrary"
+                                   OnClick="ToggleLibraryAsync" Disabled="_loadingLibrary">
+                            @(_libraryOpen ? "Đóng thư viện" : "Chọn video từ thư viện")
+                        </MudButton>
+                    </MudStack>
+                    @if (_model.Products.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa có sản phẩm. Chọn video công việc này làm ra từ thư viện.</MudText>
+                    }
+                    else
+                    {
+                        <MudStack Spacing="1" Class="mt-1">
+                            @foreach (var product in _model.Products)
+                            {
+                                <MudPaper Outlined="true" Class="pa-2 d-flex align-center gap-2">
+                                    <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Small" />
+                                    <a href="@product.VideoUrl" target="_blank" rel="noopener" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@product.DisplayTitle</a>
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle" Style="white-space:nowrap">@product.Source</MudText>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Bỏ sản phẩm" OnClick="@(() => Remove(product))" />
+                                </MudPaper>
+                            }
+                        </MudStack>
+                    }
+                    @if (_libraryOpen)
+                    {
+                        <MudPaper Outlined="true" Class="pa-3 mt-2">
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" sm="7">
+                                    <MudTextField T="string" @bind-Value="_librarySearch" Placeholder="Tìm theo tên video..." Immediate="true" autocomplete="off"
+                                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                                </MudItem>
+                                <MudItem xs="12" sm="5">
+                                    <MudSelect T="string" @bind-Value="_librarySource" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                        <MudSelectItem Value="@string.Empty">Tất cả nguồn</MudSelectItem>
+                                        @foreach (var source in _library.Select(x => x.Source).OfType<string>().Distinct())
+                                        {
+                                            <MudSelectItem Value="@source">@source</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </MudItem>
+                            </MudGrid>
+                            @if (!LibraryShown.Any())
+                            {
+                                <MudText Typo="Typo.caption" Class="mt-2 d-block">Không có video nào khớp.</MudText>
+                            }
+                            else
+                            {
+                                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;max-height:420px;overflow:auto;margin-top:8px">
+                                    @foreach (var file in LibraryShown)
+                                    {
+                                        var picked = IsPicked(file);
+                                        <div style="border:2px solid @(picked ? "var(--mud-palette-warning)" : "var(--mud-palette-lines-default)");border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px">
+                                            @if (!string.IsNullOrWhiteSpace(file.PosterUrl))
+                                            {
+                                                <img src="@file.PosterUrl" alt="" loading="lazy" style="width:100%;height:150px;object-fit:contain;background:#111;cursor:pointer" @onclick="() => Toggle(file)" />
+                                            }
+                                            else
+                                            {
+                                                <video src="@file.VideoUrl" preload="metadata" muted playsinline style="width:100%;height:150px;object-fit:contain;background:#000;cursor:pointer" @onclick="() => Toggle(file)"></video>
+                                            }
+                                            <MudText Typo="Typo.caption" Style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@file.DisplayTitle">@file.DisplayTitle</MudText>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@file.Source@(file.UploadedAt is { } at ? " · " + at.ToString("dd/MM/yyyy") : "")</MudText>
+                                            <MudStack Row="true" Spacing="1">
+                                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="@(picked ? Color.Default : Color.Warning)" OnClick="() => Toggle(file)" Style="flex:1">@(picked ? "Bỏ chọn" : "Chọn")</MudButton>
+                                                <MudIconButton Icon="@Icons.Material.Filled.PlayCircle" Size="Size.Small" Href="@file.VideoUrl" Target="_blank" aria-label="Xem video" />
+                                            </MudStack>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </MudPaper>
+                    }
+                </MudItem>
+            }
             <MudItem xs="12">
                 <MudTextField T="string" Label="Ghi chú" @bind-Value="_model.Note" Variant="Variant.Outlined" Lines="4" AutoGrow="true"
                               autocomplete="off" Placeholder="Yêu cầu, địa điểm, tài liệu cần chuẩn bị..." />
@@ -77,6 +159,55 @@
     [Parameter] public Guid? DefaultAssigneeId { get; set; }
     [Parameter] public IReadOnlyList<CustomerProfile> Customers { get; set; } = [];
     [Parameter] public IReadOnlyList<PlanAssignee> Assignees { get; set; } = [];
+    [Parameter] public bool ProductsEnabled { get; set; }
+
+    private bool _libraryOpen;
+    private bool _loadingLibrary;
+    private IReadOnlyList<StaffTaskProduct>? _libraryCache;
+    private IReadOnlyList<StaffTaskProduct> _library = [];
+    private string _librarySearch = string.Empty;
+    private string _librarySource = string.Empty;
+
+    private IEnumerable<StaffTaskProduct> LibraryShown => _library
+        .Where(x => string.IsNullOrEmpty(_librarySource) || x.Source == _librarySource)
+        .Where(x => string.IsNullOrWhiteSpace(_librarySearch)
+                    || x.DisplayTitle.Contains(_librarySearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private bool IsPicked(StaffTaskProduct file)
+        => _model.Products.Any(p => string.Equals(p.VideoUrl, file.VideoUrl, StringComparison.OrdinalIgnoreCase));
+
+    private async Task ToggleLibraryAsync()
+    {
+        _error = null;
+        if (_libraryOpen) { _libraryOpen = false; return; }
+        _loadingLibrary = true;
+        try
+        {
+            _library = _libraryCache ??= await Tasks.ListLibraryAsync();
+            _libraryOpen = true;
+        }
+        catch (UnauthorizedAccessException ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Staff task library listing failed.");
+            _error = "Không mở được thư viện video. Vui lòng thử lại.";
+        }
+        finally { _loadingLibrary = false; }
+    }
+
+    private void Toggle(StaffTaskProduct file)
+    {
+        if (IsPicked(file)) { Remove(file); return; }
+        if (_model.Products.Count >= StaffTaskRepository.MaxProducts)
+        {
+            _error = $"Mỗi công việc tối đa {StaffTaskRepository.MaxProducts} sản phẩm.";
+            return;
+        }
+        _model.Products.Add(file with { UploadedAt = null });
+    }
+
+    private void Remove(StaffTaskProduct product)
+        => _model.Products.RemoveAll(p => string.Equals(p.VideoUrl, product.VideoUrl, StringComparison.OrdinalIgnoreCase));
 
     private StaffTask _model = new();
     private DateTime? _startDate;
@@ -100,7 +231,8 @@
                 AssigneeUserId = Source.AssigneeUserId,
                 StartAt = Source.StartAt,
                 CompletedAt = Source.CompletedAt,
-                Status = Source.Status
+                Status = Source.Status,
+                Products = Source.Products.ToList()
             };
         _startDate = _model.StartAt?.Date;
         _startTime = _model.StartAt?.TimeOfDay;
