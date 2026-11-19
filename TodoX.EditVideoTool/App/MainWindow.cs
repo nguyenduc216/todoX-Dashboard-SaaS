@@ -46,9 +46,23 @@ public sealed partial class MainWindow : Form
 
     private readonly Panel _content = new() { Dock = DockStyle.Fill, BackColor = Ground, Padding = new Padding(36, 24, 36, 16) };
     private readonly Dictionary<Screen, Control> _screens = [];
-    private readonly Panel _licenseChip = new() { Height = 40, Width = 420, Cursor = Cursors.Hand, BackColor = Panel };
-    private readonly LineIcon _licenseIcon = new(TileArt.Key, 22) { Location = new Point(12, 9), BackColor = Color.Transparent };
-    private readonly Label _licenseText = new() { AutoSize = false, Location = new Point(42, 0), Height = 40, Width = 370, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10, FontStyle.Bold), BackColor = Color.Transparent, Cursor = Cursors.Hand };
+    // Account chip: the account name on top, package · days · points smaller below; both stay inside the border.
+    private readonly Panel _licenseChip = new() { Height = 48, Width = 420, Cursor = Cursors.Hand, BackColor = Panel };
+    private readonly LineIcon _licenseIcon = new(TileArt.Key, 22) { Location = new Point(12, 13), BackColor = Color.Transparent };
+    private readonly Label _licenseText = new() { AutoSize = false, Location = new Point(42, 4), Height = 40, Width = 368, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10, FontStyle.Bold), BackColor = Color.Transparent, Cursor = Cursors.Hand, UseMnemonic = false };
+    private readonly Label _licenseSub = new() { AutoSize = false, Location = new Point(42, 25), Height = 19, Width = 368, AutoEllipsis = true, TextAlign = ContentAlignment.TopLeft, Font = new Font("Segoe UI", 8.5f), BackColor = Color.Transparent, Cursor = Cursors.Hand, UseMnemonic = false, Visible = false };
+
+    /// <summary>One line (status) or two lines (account name + package details), always inside the chip's border.</summary>
+    private void SetChipLines(string main, string? sub)
+    {
+        var two = !string.IsNullOrWhiteSpace(sub);
+        _licenseText.Text = main;
+        _licenseSub.Text = sub ?? "";
+        _licenseSub.Visible = two;
+        _licenseText.TextAlign = two ? ContentAlignment.BottomLeft : ContentAlignment.MiddleLeft;
+        _licenseText.SetBounds(42, 4, _licenseChip.Width - 52, two ? 21 : _licenseChip.Height - 8);
+        _licenseSub.SetBounds(42, 25, _licenseChip.Width - 52, 19);
+    }
     private readonly ToolTip _tips = new();
     private readonly Label _status = new() { AutoSize = false, Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false, Padding = new Padding(36, 0, 0, 0) };
     private readonly Panel _updateBanner = new() { Dock = DockStyle.Top, Height = 0, BackColor = ColorTranslator.FromHtml("#3A2E0A"), Visible = false, Padding = new Padding(36, 8, 36, 8) };
@@ -280,6 +294,7 @@ public sealed partial class MainWindow : Form
 
         _licenseChip.Controls.Add(_licenseIcon);
         _licenseChip.Controls.Add(_licenseText);
+        _licenseChip.Controls.Add(_licenseSub);
         _licenseChip.Paint += (_, e) =>
         {
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
@@ -287,7 +302,7 @@ public sealed partial class MainWindow : Form
             using var path = Ui.Rounded(new RectangleF(0.5f, 0.5f, _licenseChip.Width - 1.5f, _licenseChip.Height - 1.5f), 8);
             e.Graphics.DrawPath(pen, path);
         };
-        foreach (Control c in new Control[] { _licenseChip, _licenseText, _licenseIcon })
+        foreach (Control c in new Control[] { _licenseChip, _licenseText, _licenseSub, _licenseIcon })
         {
             c.Click += (_, _) => OpenSettings(SettingsPage.License);
         }
@@ -298,7 +313,7 @@ public sealed partial class MainWindow : Form
         bar.Layout += (_, _) =>
         {
             settings.Location = new Point(bar.ClientSize.Width - settings.Width - 28, 28);
-            _licenseChip.Location = new Point(settings.Left - _licenseChip.Width - 12, 28);
+            _licenseChip.Location = new Point(settings.Left - _licenseChip.Width - 12, settings.Top + settings.Height / 2 - _licenseChip.Height / 2);
         };
         return bar;
     }
@@ -1051,12 +1066,22 @@ public sealed partial class MainWindow : Form
             if (status.IsUsable && await AccountInfo.LoadAsync(_services.GetRequiredService<Server.TodoXServerClient>(), _closing.Token) is { } account)
             {
                 // Package, days left and points in the top bar.
-                var parts = new[] { account.Package, account.DaysLeftText, account.PointsText }.Where(p => !string.IsNullOrWhiteSpace(p));
-                _licenseText.Text = string.Join(" · ", parts);
-                var tip = $"Gói: {account.Package ?? "—"}{(account.Ends is { } end ? $", đến {end.ToLocalTime():dd/MM/yyyy}" : "")}{Environment.NewLine}"
+                var parts = string.Join(" · ", new[] { account.Package, account.DaysLeftText, account.PointsText }.Where(p => !string.IsNullOrWhiteSpace(p)));
+                if (account.CustomerName is { } name)
+                {
+                    SetChipLines(name, parts);
+                }
+                else
+                {
+                    SetChipLines(parts, null);
+                }
+
+                _licenseSub.ForeColor = Muted;
+                var tip = (account.CustomerName is { } who ? $"Tài khoản: {who}{Environment.NewLine}" : "") + $"Gói: {account.Package ?? "—"}{(account.Ends is { } end ? $", đến {end.ToLocalTime():dd/MM/yyyy}" : "")}{Environment.NewLine}"
                           + $"Điểm: {account.PointsText}{Environment.NewLine}Lưu trữ: {account.StorageText}{Environment.NewLine}Bấm để mở Cài đặt › Kích hoạt";
                 _tips.SetToolTip(_licenseChip, tip);
                 _tips.SetToolTip(_licenseText, tip);
+                _tips.SetToolTip(_licenseSub, tip);
             }
         }
         catch (OperationCanceledException)
@@ -1069,11 +1094,11 @@ public sealed partial class MainWindow : Form
         _licensed = status?.IsUsable == true;
         var (title, detail) = status is null ? ("Đang kiểm tra license...", "") : SettingsForm.LicenseText(status);
         var color = status is null ? Muted : _licensed ? Ui.Green : Ui.Red;
-        _licenseText.Text = title;
+        SetChipLines(title, null);
         _licenseText.ForeColor = color;
         _licenseIcon.ForeColor = color;
         _licenseChip.BackColor = status is null || _licensed ? Panel : ColorTranslator.FromHtml("#2A1416");
-        _licenseText.BackColor = _licenseChip.BackColor;
+        _licenseText.BackColor = _licenseSub.BackColor = _licenseChip.BackColor;
         _licenseIcon.Invalidate();
         _licenseChip.Invalidate();
         var tip = string.IsNullOrEmpty(detail) ? title : $"{title}{Environment.NewLine}{detail}{Environment.NewLine}Bấm để mở Cài đặt › Kích hoạt";

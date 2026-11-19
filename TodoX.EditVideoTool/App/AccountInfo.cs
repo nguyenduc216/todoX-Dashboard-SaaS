@@ -4,7 +4,7 @@ using TodoX.EditVideoTool.Server;
 namespace TodoX.EditVideoTool.App;
 
 /// <summary>The customer's package, its end date, points and storage, as shown in the window and Settings.</summary>
-public sealed record AccountInfo(string? Package, DateTimeOffset? Ends, decimal Points, long UsedBytes, long LimitBytes)
+public sealed record AccountInfo(string? Package, DateTimeOffset? Ends, decimal Points, long UsedBytes, long LimitBytes, string? CustomerName = null)
 {
     public static async Task<AccountInfo?> LoadAsync(TodoXServerClient server, CancellationToken ct)
     {
@@ -22,7 +22,8 @@ public sealed record AccountInfo(string? Package, DateTimeOffset? Ends, decimal 
             ends,
             d.TryGetProperty("points", out var pts) && pts.ValueKind == JsonValueKind.Number ? pts.GetDecimal() : 0,
             storage.ValueKind == JsonValueKind.Object && storage.TryGetProperty("usedBytes", out var u) ? u.GetInt64() : 0,
-            storage.ValueKind == JsonValueKind.Object && storage.TryGetProperty("limitBytes", out var l) ? l.GetInt64() : 0);
+            storage.ValueKind == JsonValueKind.Object && storage.TryGetProperty("limitBytes", out var l) ? l.GetInt64() : 0,
+            d.TryGetProperty("customerName", out var n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString()) ? n.GetString()!.Trim() : null);
     }
 
     public string PointsText => $"{Points:N0} điểm".Replace(',', '.');
