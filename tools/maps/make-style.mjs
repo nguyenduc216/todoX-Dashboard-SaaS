@@ -1,0 +1,71 @@
+// node make-style.mjs <baseUrl> <out.json>  -> TodoX dark map style for the Protomaps v4 schema.
+import fs from 'node:fs';
+const [base, out] = process.argv.slice(2);
+const name = ['coalesce', ['get', 'name:vi'], ['get', 'name']];
+const font = (w) => [`Noto Sans ${w}`];
+const roadW = (k) => ['interpolate', ['exponential', 1.6], ['zoom'], 6, 0.3 * k, 10, 1 * k, 14, 3 * k, 17, 10 * k];
+
+const style = {
+  version: 8,
+  name: 'TodoX Dark',
+  glyphs: `${base}/fonts/{fontstack}/{range}.pbf`,
+  sprite: `${base}/sprites/v4/dark`,
+  sources: {
+    vn: { type: 'vector', url: `pmtiles://${base}/vietnam.pmtiles`, attribution: '© OpenStreetMap contributors' },
+  },
+  layers: [
+    { id: 'background', type: 'background', paint: { 'background-color': '#0a0e15' } },
+    { id: 'earth', type: 'fill', source: 'vn', 'source-layer': 'earth', paint: { 'fill-color': '#121822' } },
+    { id: 'landcover', type: 'fill', source: 'vn', 'source-layer': 'landcover', paint: { 'fill-color': '#13201b', 'fill-opacity': 0.6 } },
+    { id: 'landuse-green', type: 'fill', source: 'vn', 'source-layer': 'landuse',
+      filter: ['in', ['get', 'kind'], ['literal', ['park', 'forest', 'wood', 'nature_reserve', 'grass', 'garden', 'golf_course', 'cemetery', 'farmland', 'orchard']]],
+      paint: { 'fill-color': '#14251d', 'fill-opacity': 0.8 } },
+    { id: 'landuse-urban', type: 'fill', source: 'vn', 'source-layer': 'landuse',
+      filter: ['in', ['get', 'kind'], ['literal', ['residential', 'commercial', 'industrial', 'school', 'university', 'hospital', 'military']]],
+      paint: { 'fill-color': '#161c27' } },
+    { id: 'water', type: 'fill', source: 'vn', 'source-layer': 'water', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#0c2033' } },
+    { id: 'water-line', type: 'line', source: 'vn', 'source-layer': 'water', filter: ['==', ['geometry-type'], 'LineString'],
+      paint: { 'line-color': '#0f2a42', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 15, 3] } },
+    { id: 'buildings', type: 'fill', source: 'vn', 'source-layer': 'buildings', minzoom: 14, paint: { 'fill-color': '#1b2230', 'fill-outline-color': '#222b3b' } },
+    { id: 'roads-minor', type: 'line', source: 'vn', 'source-layer': 'roads', minzoom: 12,
+      filter: ['in', ['get', 'kind'], ['literal', ['minor_road', 'other']]], layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#222b39', 'line-width': roadW(0.6) } },
+    { id: 'roads-path', type: 'line', source: 'vn', 'source-layer': 'roads', minzoom: 14, filter: ['==', ['get', 'kind'], 'path'],
+      paint: { 'line-color': '#1e2633', 'line-width': 1, 'line-dasharray': [2, 2] } },
+    { id: 'roads-medium', type: 'line', source: 'vn', 'source-layer': 'roads', minzoom: 9, filter: ['==', ['get', 'kind'], 'medium_road'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2b3546', 'line-width': roadW(0.9) } },
+    { id: 'roads-major', type: 'line', source: 'vn', 'source-layer': 'roads', filter: ['==', ['get', 'kind'], 'major_road'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#36425a', 'line-width': roadW(1.1) } },
+    { id: 'roads-highway', type: 'line', source: 'vn', 'source-layer': 'roads', filter: ['==', ['get', 'kind'], 'highway'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#5b4a26', 'line-width': roadW(1.4) } },
+    { id: 'rail', type: 'line', source: 'vn', 'source-layer': 'roads', minzoom: 10, filter: ['==', ['get', 'kind'], 'rail'],
+      paint: { 'line-color': '#2f3a4d', 'line-width': 1.2, 'line-dasharray': [3, 2] } },
+    { id: 'boundaries-country', type: 'line', source: 'vn', 'source-layer': 'boundaries',
+      filter: ['all', ['==', ['get', 'kind'], 'country'], ['!=', ['get', 'disputed'], true]],
+      paint: { 'line-color': '#5d6b82', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.8, 10, 2], 'line-dasharray': [3, 2] } },
+    { id: 'boundaries-region', type: 'line', source: 'vn', 'source-layer': 'boundaries', minzoom: 6, filter: ['==', ['get', 'kind'], 'region'],
+      paint: { 'line-color': '#3a4558', 'line-width': 0.8, 'line-dasharray': [2, 2] } },
+    { id: 'label-water', type: 'symbol', source: 'vn', 'source-layer': 'water', minzoom: 10, filter: ['has', 'name'],
+      layout: { 'text-field': name, 'text-font': font('Italic'), 'text-size': 13, 'symbol-placement': 'point' },
+      paint: { 'text-color': '#4f7598', 'text-halo-color': '#0a0e15', 'text-halo-width': 1.2 } },
+    { id: 'label-road', type: 'symbol', source: 'vn', 'source-layer': 'roads', minzoom: 14,
+      filter: ['in', ['get', 'kind'], ['literal', ['highway', 'major_road', 'medium_road', 'minor_road']]],
+      layout: { 'text-field': name, 'text-font': font('Regular'), 'text-size': 12, 'symbol-placement': 'line' },
+      paint: { 'text-color': '#8a96a8', 'text-halo-color': '#0a0e15', 'text-halo-width': 1.4 } },
+    { id: 'label-places-small', type: 'symbol', source: 'vn', 'source-layer': 'places', minzoom: 15,
+      filter: ['in', ['get', 'kind'], ['literal', ['neighbourhood', 'macrohood', 'suburb', 'quarter']]],
+      layout: { 'text-field': name, 'text-font': font('Regular'), 'text-size': 13, 'text-transform': 'uppercase', 'text-letter-spacing': 0.08 },
+      paint: { 'text-color': '#7c889b', 'text-halo-color': '#0a0e15', 'text-halo-width': 1.4 } },
+    { id: 'label-places', type: 'symbol', source: 'vn', 'source-layer': 'places', filter: ['==', ['get', 'kind'], 'locality'],
+      layout: { 'text-field': name, 'text-font': font('Medium'), 'text-size': ['interpolate', ['linear'], ['zoom'], 6, 12, 12, 18] },
+      paint: { 'text-color': '#d6dde8', 'text-halo-color': '#0a0e15', 'text-halo-width': 1.6 } },
+    { id: 'label-region', type: 'symbol', source: 'vn', 'source-layer': 'places', maxzoom: 9, filter: ['==', ['get', 'kind'], 'region'],
+      layout: { 'text-field': name, 'text-font': font('Medium'), 'text-size': 13, 'text-transform': 'uppercase', 'text-letter-spacing': 0.15 },
+      paint: { 'text-color': '#8692a6', 'text-halo-color': '#0a0e15', 'text-halo-width': 1.4 } },
+    { id: 'label-country', type: 'symbol', source: 'vn', 'source-layer': 'places', maxzoom: 7, filter: ['==', ['get', 'kind'], 'country'],
+      layout: { 'text-field': name, 'text-font': font('Medium'), 'text-size': 16, 'text-transform': 'uppercase', 'text-letter-spacing': 0.2 },
+      paint: { 'text-color': '#e6c46a', 'text-halo-color': '#0a0e15', 'text-halo-width': 1.6 } },
+  ],
+};
+fs.writeFileSync(out, JSON.stringify(style, null, 1));
+console.log('style', out, style.layers.length, 'layers');
