@@ -361,6 +361,13 @@ AOS.init({
     syncScrollState();
     window.addEventListener("pageshow", syncScrollState);
     window.addEventListener("load", syncScrollState);
+    if ("IntersectionObserver" in window) {
+      const topSentinel = document.createElement("div");
+      topSentinel.setAttribute("aria-hidden", "true");
+      topSentinel.style.cssText = "position:absolute;top:0;left:0;width:1px;height:21px;pointer-events:none;";
+      document.body.prepend(topSentinel);
+      new IntersectionObserver(() => syncScrollState()).observe(topSentinel);
+    }
     menuBtn.addEventListener("click", () => navLinks.classList.toggle("open"));
     sectionLinks.forEach(a => a.addEventListener("click", event => {
       const target = document.querySelector(a.getAttribute("href"));
