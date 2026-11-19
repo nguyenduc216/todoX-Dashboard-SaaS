@@ -32,21 +32,21 @@ public sealed record StaffTaskProduct(string VideoUrl, string? Title, string? So
 public static class StaffTaskStatuses
 {
     public const string New = "new";
+    /// <summary>Đã bỏ (gộp vào "Mới"); chỉ còn để đọc dữ liệu cũ.</summary>
     public const string Pending = "pending";
     public const string InProgress = "in_progress";
     public const string Done = "done";
     public const string Cancelled = "cancelled";
 
-    public static readonly IReadOnlyList<string> All = [New, Pending, InProgress, Done, Cancelled];
+    public static readonly IReadOnlyList<string> All = [New, InProgress, Done, Cancelled];
 
-    /// <summary>"Chưa hoàn thành": mới, chờ thực hiện, đang thực hiện (hủy is neither done nor open).</summary>
+    /// <summary>"Chưa hoàn thành": mới, đang thực hiện (hủy is neither done nor open).</summary>
     public static bool IsOpen(string? status) => status is New or Pending or InProgress;
 
     public static string Normalize(string? status) => All.Contains(status ?? string.Empty) ? status! : New;
 
     public static string Label(string? status) => Normalize(status) switch
     {
-        Pending => "Chờ thực hiện",
         InProgress => "Đang thực hiện",
         Done => "Đã hoàn thành",
         Cancelled => "Hủy",

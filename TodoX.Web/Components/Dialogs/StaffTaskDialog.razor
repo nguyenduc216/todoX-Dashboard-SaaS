@@ -231,7 +231,7 @@
                 AssigneeUserId = Source.AssigneeUserId,
                 StartAt = Source.StartAt,
                 CompletedAt = Source.CompletedAt,
-                Status = Source.Status,
+                Status = StaffTaskStatuses.Normalize(Source.Status),
                 Products = Source.Products.ToList()
             };
         _startDate = _model.StartAt?.Date;

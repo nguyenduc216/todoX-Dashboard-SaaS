@@ -58,7 +58,7 @@
                 <MudPaper Class="@CardClass(OpenFilter)" Style="@StatusStyle(OpenFilter)" @onclick="@(() => _statusFilter = OpenFilter)">
                     <MudText Typo="Typo.subtitle2">Chưa hoàn thành</MudText>
                     <div class="todox-stat-value st-tone-text">@summary.Open</div>
-                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Mới, chờ và đang thực hiện</MudText>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Mới và đang thực hiện</MudText>
                 </MudPaper>
             </MudItem>
             <MudItem xs="6" md="3">
@@ -182,7 +182,7 @@
                                     <span class="st-chip st-chip--small is-selected" style="@StatusStyle(context.Status)" role="button">@StaffTaskStatuses.Label(context.Status) <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" /></span>
                                 </ActivatorContent>
                                 <ChildContent>
-                                    @foreach (var status in StaffTaskStatuses.All.Where(x => x != context.Status))
+                                    @foreach (var status in StaffTaskStatuses.All.Where(x => x != StaffTaskStatuses.Normalize(context.Status)))
                                     {
                                         <MudMenuItem OnClick="@(() => SetStatus(context, status))">@StaffTaskStatuses.Label(status)</MudMenuItem>
                                     }
@@ -250,8 +250,7 @@
         _ => StaffTaskStatuses.Normalize(key) switch
         {
             StaffTaskStatuses.New => "#A78BFA",
-            StaffTaskStatuses.Pending => "#38BDF8",
-            StaffTaskStatuses.InProgress => "#F5B301",
+            StaffTaskStatuses.InProgress => "#38BDF8",
             StaffTaskStatuses.Done => "#22C55E",
             StaffTaskStatuses.Cancelled => "#94A3B8",
             _ => "#CBD5E1"
@@ -340,7 +339,7 @@
         null or "" => Scoped,
         OpenFilter => Scoped.Where(x => StaffTaskStatuses.IsOpen(x.Status)),
         LateFilter => Scoped.Where(x => StaffTaskRules.IsLate(x, _now)),
-        var status => Scoped.Where(x => x.Status == status)
+        var status => Scoped.Where(x => StaffTaskStatuses.Normalize(x.Status) == status)
     };
 
     private Task OpenCreate() => OpenDialog(null);
