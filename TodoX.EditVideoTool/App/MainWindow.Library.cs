@@ -230,14 +230,12 @@ public sealed partial class MainWindow
             e.Graphics.FillRectangle(back, e.Bounds);
             TextRenderer.DrawText(e.Graphics, e.Header!.Text, new Font("Segoe UI", 9.5f), Rectangle.Inflate(e.Bounds, -4, 0), Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         };
-        list.DrawItem += (_, e) => e.DrawDefault = true;
-        list.DrawSubItem += (_, e) => e.DrawDefault = true;
         foreach (var (title, width) in columns)
         {
             list.Columns.Add(title, width);
         }
 
-        list.Resize += (_, _) => list.Columns[0].Width = Math.Max(160, list.ClientSize.Width - list.Columns.Cast<ColumnHeader>().Skip(1).Sum(c => c.Width));
+        Ui.FitList(list, 160);
         foreach (var o in items)
         {
             var values = cells(o);

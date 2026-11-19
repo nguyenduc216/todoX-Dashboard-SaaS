@@ -24,7 +24,7 @@ public sealed class ScrollHost : Panel, IMessageFilter
         DoubleBuffered = true;
         _content.Location = Point.Empty;
         Controls.Add(_content);
-        _bar = new ThinBar(this) { Dock = DockStyle.Right, Width = 10, BackColor = background };
+        _bar = new ThinBar(this) { Dock = DockStyle.Right, Width = 8, BackColor = background };
         Controls.Add(_bar);
         _bar.BringToFront();
         _content.SizeChanged += (_, _) => Clamp();
@@ -109,8 +109,10 @@ public sealed class ScrollHost : Panel, IMessageFilter
     /// <summary>The thin bar: a rounded thumb, grey at rest and TodoX yellow while hovered or dragged.</summary>
     private sealed class ThinBar : Control
     {
-        private static readonly Color Rest = ColorTranslator.FromHtml("#4A505E");
+        // Thin and yellow like todox.vn: a soft yellow at rest, full yellow under the mouse or while dragging.
+        private static readonly Color Rest = Color.FromArgb(150, 0xFF, 0xBE, 0x2E);
         private static readonly Color Active = ColorTranslator.FromHtml("#FFBE2E");
+        private static readonly Color Track = ColorTranslator.FromHtml("#1C1F26");
 
         private readonly ScrollHost _host;
         private bool _hover;
@@ -129,13 +131,18 @@ public sealed class ScrollHost : Panel, IMessageFilter
             var track = Height - 8;
             var length = Math.Max(40, (int)(track * (double)_host.ViewHeight / Math.Max(1, _host.ContentHeight)));
             var top = 4 + (int)((track - length) * (_host.Overflow == 0 ? 0 : (double)_host.Offset / _host.Overflow));
-            return new Rectangle(2, top, Width - 4, length);
+            return new Rectangle((Width - 4) / 2, top, 4, length);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var thumb = Thumb();
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var track = new Pen(Track, 2))
+            {
+                e.Graphics.DrawLine(track, Width / 2, 4, Width / 2, Height - 4);
+            }
+
             using var brush = new SolidBrush(_hover || _dragFrom is not null ? Active : Rest);
             using var path = new GraphicsPath();
             var r = thumb.Width;

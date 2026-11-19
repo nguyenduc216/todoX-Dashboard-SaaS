@@ -9,6 +9,96 @@ namespace TodoX.EditVideoTool.App;
 /// <summary>TodoX's dark look shared by the main window and the settings window.</summary>
 internal static class Ui
 {
+    [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hwnd, string? app, string? idList);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowScrollBar(IntPtr hwnd, int bar, bool show);
+
+    /// <summary>
+    /// A dark list: Windows' dark scroll bar (a list's own bar cannot be painted yellow) and columns that always fit
+    /// the width — the first column takes the rest, and all shrink together in a narrow window — so no sideways bar.
+    /// </summary>
+    public static void DarkScrollBars(Control list)
+    {
+        void Theme() => SetWindowTheme(list.Handle, "DarkMode_Explorer", null);
+        if (list.IsHandleCreated)
+        {
+            Theme();
+        }
+
+        list.HandleCreated += (_, _) => Theme();
+    }
+
+    public static void FitList(ListView list, int firstMin = 120)
+    {
+        DarkScrollBars(list);
+        if (list.OwnerDraw)
+        {
+            // Rows drawn by us, so the selected one stays clearly readable on the dark theme.
+            list.DrawSubItem += (_, e) =>
+            {
+                var selected = e.Item!.Selected;
+                using (var back = new SolidBrush(selected ? ColorTranslator.FromHtml("#3A3220") : list.BackColor))
+                {
+                    e.Graphics.FillRectangle(back, e.Bounds);
+                }
+
+                var right = e.Header?.TextAlign == HorizontalAlignment.Right;
+                TextRenderer.DrawText(e.Graphics, e.SubItem?.Text ?? "", list.Font, Rectangle.Inflate(e.Bounds, -6, 0),
+                    selected ? Color.White : e.Item.ForeColor,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | (right ? TextFormatFlags.Right : TextFormatFlags.Left));
+            };
+            list.SelectedIndexChanged += (_, _) => list.Invalidate();
+        }
+
+        list.Resize += (_, _) =>
+        {
+            var columns = list.Columns.Cast<ColumnHeader>().ToList();
+            if (columns.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var c in columns)
+            {
+                c.Tag ??= c.Width; // the width it was designed with
+            }
+
+            // The columns fill the visible width exactly (no white header end) and never more (no sideways bar).
+            var width = list.ClientSize.Width - 1;
+            var others = columns.Skip(1).Sum(c => (int)c.Tag!);
+            if (width - others >= firstMin)
+            {
+                foreach (var c in columns.Skip(1))
+                {
+                    c.Width = (int)c.Tag!;
+                }
+
+                columns[0].Width = width - others;
+                if (list.IsHandleCreated)
+                {
+                    ShowScrollBar(list.Handle, 0, false);
+                }
+
+                return;
+            }
+
+            // Too narrow: every column shrinks by the same factor; the first one takes what rounding left over.
+            var total = firstMin + others;
+            foreach (var c in columns.Skip(1))
+            {
+                c.Width = Math.Max(30, (int)c.Tag! * width / total);
+            }
+
+            columns[0].Width = Math.Max(40, width - columns.Skip(1).Sum(c => c.Width));
+            if (list.IsHandleCreated)
+            {
+                ShowScrollBar(list.Handle, 0, false); // SB_HORZ: the columns fit, so no sideways bar
+            }
+        };
+    }
+
     public static readonly Color Ground = MainWindow.Ground;
     public static readonly Color Panel = MainWindow.Panel;
     public static readonly Color Card = ColorTranslator.FromHtml("#13161C");
