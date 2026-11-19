@@ -58,7 +58,7 @@ public sealed class LibraryTools
         return JsonSerializer.Serialize(new
         {
             note = error is null
-                ? "Video chưa đồng bộ: mở cửa sổ TodoX EditVideo và bấm 'Đồng bộ' để đưa lên Dashboard (Jobs của tôi)."
+                ? "Chỉ video xuất cuối cùng của mỗi dự án được đồng bộ (bản cũ hơn bỏ qua). Video chưa đồng bộ: mở cửa sổ TodoX EditVideo và bấm 'Đồng bộ' để đưa lên Dashboard (Jobs của tôi)."
                 : "Không kết nối được TodoX: " + error,
             pending = pending.Count,
             videos = videos.Select(v => new { project = v.Project, file = v.Path, synced = v.Synced })

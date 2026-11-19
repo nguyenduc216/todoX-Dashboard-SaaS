@@ -87,6 +87,24 @@ public sealed class ProjectSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task Only_the_last_export_of_each_project_is_pending_and_times_go_up_in_utc()
+    {
+        var old = MakeVideo("Rong biển", "old.mp4");
+        File.SetLastWriteTime(old, DateTime.Now.AddHours(-2));
+        MakeVideo("Rong biển", "new.mp4");
+        MakeVideo("Khác", "k.mp4");
+        var rows = _sync.Videos().Select(v => new { clientId = v.ClientId, id = Guid.NewGuid(), status = "local" }).ToArray();
+        _handler.Replies.Enqueue((HttpStatusCode.OK, JsonSerializer.Serialize(new { success = true, data = rows })));
+
+        var (pending, error) = await _sync.SyncInfoAsync();
+
+        Assert.Null(error);
+        Assert.Equal(["k.mp4", "new.mp4"], pending.Select(v => v.FileName).Order());
+        Assert.Contains("+00:00", Assert.Single(_handler.Requests).Body); // the server writes timestamptz in UTC only
+        Assert.DoesNotContain("+07:00", _handler.Requests[0].Body);
+    }
+
+    [Fact]
     public void Library_folder_is_not_a_project()
     {
         Directory.CreateDirectory(Path.Combine(_projects.Root, LibrarySync.FolderName));
