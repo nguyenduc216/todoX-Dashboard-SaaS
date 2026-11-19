@@ -148,4 +148,14 @@ public sealed class StaffTaskTests
         Assert.Null(StaffTasks.DefaultAssignee(null, Guid.NewGuid(), people));
         Assert.Null(StaffTasks.DefaultAssignee(null, null, people));
     }
+
+    [Fact]
+    public void EachStatusFilterHasItsOwnColor()
+    {
+        var keys = StaffTaskStatuses.All.Append("__late").ToList();
+        var colors = keys.Select(StaffTasks.StatusHex).ToList();
+        Assert.Equal(colors.Count, colors.Distinct().Count());
+        Assert.Equal(StaffTasks.StatusHex(StaffTaskStatuses.Done), StaffTasks.StatusHex("done"));
+        Assert.Equal("#EF4444", StaffTasks.StatusHex("__late"));
+    }
 }

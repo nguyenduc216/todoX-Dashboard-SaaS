@@ -12,6 +12,18 @@
 
 <PageTitle>Công việc nhân viên</PageTitle>
 
+<style>
+    .st-card { cursor: pointer; border: 1px solid transparent; transition: border-color .15s, box-shadow .15s; }
+    .st-card.is-selected { border-color: var(--st-tone); box-shadow: 0 0 0 1px var(--st-tone) inset; }
+    .st-tone-text { color: var(--st-tone); }
+    .st-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .st-chip { display: inline-flex; align-items: center; gap: 2px; padding: 4px 12px; border-radius: 999px; font-size: 13px; line-height: 20px;
+               border: 1px solid var(--st-tone); color: var(--st-tone); background: transparent; cursor: pointer; font-family: inherit; white-space: nowrap; }
+    .st-chip:hover { background: color-mix(in srgb, var(--st-tone) 16%, transparent); }
+    .st-chip.is-selected { background: var(--st-tone); color: #fff; font-weight: 600; }
+    .st-chip--small { padding: 1px 6px 1px 10px; font-size: 12px; }
+</style>
+
 <MudStack Spacing="3">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
@@ -43,30 +55,30 @@
         var summary = StaffTaskSummary.From(Scoped);
         <MudGrid>
             <MudItem xs="6" md="3">
-                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = OpenFilter)">
+                <MudPaper Class="@CardClass(OpenFilter)" Style="@StatusStyle(OpenFilter)" @onclick="@(() => _statusFilter = OpenFilter)">
                     <MudText Typo="Typo.subtitle2">Chưa hoàn thành</MudText>
-                    <div class="todox-stat-value" style="color:var(--mud-palette-warning)">@summary.Open</div>
+                    <div class="todox-stat-value st-tone-text">@summary.Open</div>
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">Mới, chờ và đang thực hiện</MudText>
                 </MudPaper>
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = StaffTaskStatuses.Done)">
+                <MudPaper Class="@CardClass(StaffTaskStatuses.Done)" Style="@StatusStyle(StaffTaskStatuses.Done)" @onclick="@(() => _statusFilter = StaffTaskStatuses.Done)">
                     <MudText Typo="Typo.subtitle2">Đã hoàn thành</MudText>
-                    <div class="todox-stat-value" style="color:var(--mud-palette-success)">@summary.Done</div>
+                    <div class="todox-stat-value st-tone-text">@summary.Done</div>
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">Trên tổng @summary.Total công việc</MudText>
                 </MudPaper>
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = LateFilter)">
+                <MudPaper Class="@CardClass(LateFilter)" Style="@StatusStyle(LateFilter)" @onclick="@(() => _statusFilter = LateFilter)">
                     <MudText Typo="Typo.subtitle2">Trễ hạn hoàn thành</MudText>
-                    <div class="todox-stat-value" style="@(LateCount > 0 ? "color:var(--mud-palette-error)" : null)">@LateCount</div>
+                    <div class="todox-stat-value st-tone-text">@LateCount</div>
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa xong mà đã qua giờ hoàn thành</MudText>
                 </MudPaper>
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudPaper Class="todox-card pa-4" Style="cursor:pointer" @onclick="@(() => _statusFilter = StaffTaskStatuses.Cancelled)">
+                <MudPaper Class="@CardClass(StaffTaskStatuses.Cancelled)" Style="@StatusStyle(StaffTaskStatuses.Cancelled)" @onclick="@(() => _statusFilter = StaffTaskStatuses.Cancelled)">
                     <MudText Typo="Typo.subtitle2">Hủy</MudText>
-                    <div class="todox-stat-value">@summary.Count(StaffTaskStatuses.Cancelled)</div>
+                    <div class="todox-stat-value st-tone-text">@summary.Count(StaffTaskStatuses.Cancelled)</div>
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">Không tính vào chưa/đã hoàn thành</MudText>
                 </MudPaper>
             </MudItem>
@@ -101,13 +113,13 @@
                     </MudSelect>
                 </MudItem>
             </MudGrid>
-            <MudChipSet T="string" @bind-SelectedValue="_statusFilter" SelectionMode="SelectionMode.SingleSelection" Class="mb-3">
-                <MudChip T="string" Value="@string.Empty" Variant="Variant.Outlined">Tất cả (@summary.Total)</MudChip>
-                @foreach (var status in StaffTaskStatuses.All)
+            <div class="st-chips mb-3" role="group" aria-label="Lọc trạng thái">
+                @foreach (var (key, label, count) in FilterChips(summary))
                 {
-                    <MudChip T="string" Value="@status" Variant="Variant.Outlined" Color="@StatusColor(status)">@StaffTaskStatuses.Label(status) (@summary.Count(status))</MudChip>
+                    <button type="button" class="@ChipClass(key)" style="@StatusStyle(key)" aria-pressed="@(IsSelected(key) ? "true" : "false")"
+                            @onclick="@(() => _statusFilter = key)">@label (@count)</button>
                 }
-            </MudChipSet>
+            </div>
 
             <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" HorizontalScrollbar="true">
                 <HeaderContent>
@@ -167,7 +179,7 @@
                         {
                             <MudMenu Dense="true" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Disabled="_busy">
                                 <ActivatorContent Context="menuContext">
-                                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)" Icon="@Icons.Material.Filled.ArrowDropDown">@StaffTaskStatuses.Label(context.Status)</MudChip>
+                                    <span class="st-chip st-chip--small is-selected" style="@StatusStyle(context.Status)" role="button">@StaffTaskStatuses.Label(context.Status) <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" /></span>
                                 </ActivatorContent>
                                 <ChildContent>
                                     @foreach (var status in StaffTaskStatuses.All.Where(x => x != context.Status))
@@ -179,7 +191,7 @@
                         }
                         else
                         {
-                            <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StaffTaskStatuses.Label(context.Status)</MudChip>
+                            <span class="st-chip st-chip--small is-selected" style="@StatusStyle(context.Status)">@StaffTaskStatuses.Label(context.Status)</span>
                         }
                     </MudTd>
                     <MudTd DataLabel="Thao tác" Style="text-align:right;white-space:nowrap">
@@ -229,14 +241,44 @@
         return currentUserId is { } me && assignees.Any(x => x.UserId == me) ? me : null;
     }
 
-    internal static Color StatusColor(string? status) => StaffTaskStatuses.Normalize(status) switch
+    /// <summary>Một màu cho mỗi trạng thái, dùng chung cho số trên thẻ, nút lọc và nhãn trong bảng.</summary>
+    internal static string StatusHex(string? key) => key switch
     {
-        StaffTaskStatuses.Pending => Color.Info,
-        StaffTaskStatuses.InProgress => Color.Warning,
-        StaffTaskStatuses.Done => Color.Success,
-        StaffTaskStatuses.Cancelled => Color.Dark,
-        _ => Color.Default
+        OpenFilter => "#F5B301",
+        LateFilter => "#EF4444",
+        null or "" => "#64748B",
+        _ => StaffTaskStatuses.Normalize(key) switch
+        {
+            StaffTaskStatuses.New => "#A78BFA",
+            StaffTaskStatuses.Pending => "#38BDF8",
+            StaffTaskStatuses.InProgress => "#F5B301",
+            StaffTaskStatuses.Done => "#22C55E",
+            StaffTaskStatuses.Cancelled => "#94A3B8",
+            _ => "#CBD5E1"
+        }
     };
+
+    private static string StatusStyle(string? key) => $"--st-tone:{StatusHex(key)}";
+
+    private bool IsSelected(string key) => (_statusFilter ?? string.Empty) == key;
+
+    private string ChipClass(string key) => IsSelected(key) ? "st-chip is-selected" : "st-chip";
+
+    private string CardClass(string key) => IsSelected(key) ? "todox-card pa-4 st-card is-selected" : "todox-card pa-4 st-card";
+
+    private IEnumerable<(string Key, string Label, int Count)> FilterChips(StaffTaskSummary summary)
+    {
+        yield return (string.Empty, "Tất cả", summary.Total);
+        yield return (OpenFilter, "Chưa hoàn thành", summary.Open);
+        foreach (var status in StaffTaskStatuses.All)
+        {
+            yield return (status, StaffTaskStatuses.Label(status), summary.Count(status));
+            if (status == StaffTaskStatuses.Done)
+            {
+                yield return (LateFilter, "Trễ hạn", LateCount);
+            }
+        }
+    }
 
     private static string When(DateTime? value) => value?.ToString("dd/MM/yyyy HH:mm") ?? "—";
 
