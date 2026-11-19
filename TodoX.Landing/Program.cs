@@ -316,6 +316,7 @@ app.MapGet("/bat-dong-san", () => Results.File(Path.Combine(app.Environment.WebR
 app.MapGet("/video-ngan", () => Results.File(Path.Combine(app.Environment.WebRootPath, "video-ngan.html"), "text/html; charset=utf-8"));
 app.MapGet("/affiliate-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "affiliate-video.html"), "text/html; charset=utf-8"));
 app.MapGet("/mau-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "mau-video.html"), "text/html; charset=utf-8"));
+app.MapGet("/todo-app", () => Results.File(Path.Combine(app.Environment.WebRootPath, "todo-app.html"), "text/html; charset=utf-8"));
 app.MapGet("/editvideo", () => Results.File(Path.Combine(app.Environment.WebRootPath, "editvideo.html"), "text/html; charset=utf-8"));
 app.MapGet("/reupvideo", () => Results.File(Path.Combine(app.Environment.WebRootPath, "reupvideo.html"), "text/html; charset=utf-8"));
 
