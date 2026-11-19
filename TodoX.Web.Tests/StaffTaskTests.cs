@@ -1,4 +1,5 @@
 using TodoX.Web.Components.Dialogs;
+using TodoX.Web.Components.Pages;
 using TodoX.Web.Services.Studio;
 using Xunit;
 
@@ -132,5 +133,19 @@ public sealed class StaffTaskTests
         Assert.Contains("@page \"/staff-tasks\"", page);
         Assert.Contains("Chưa hoàn thành", page);
         Assert.Contains("Đã hoàn thành", page);
+    }
+
+    [Fact]
+    public void NewTaskDefaultsToSignedInStaffWhenInList()
+    {
+        var me = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        PlanAssignee[] people = [new(me, "Tôi", true), new(other, "Khác", true)];
+
+        Assert.Equal(me, StaffTasks.DefaultAssignee(null, me, people));
+        Assert.Equal(other, StaffTasks.DefaultAssignee(other, me, people));
+        Assert.Null(StaffTasks.DefaultAssignee(Guid.Empty, me, people));
+        Assert.Null(StaffTasks.DefaultAssignee(null, Guid.NewGuid(), people));
+        Assert.Null(StaffTasks.DefaultAssignee(null, null, people));
     }
 }

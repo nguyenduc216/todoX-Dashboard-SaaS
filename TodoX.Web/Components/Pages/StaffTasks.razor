@@ -221,6 +221,14 @@
     private bool Can(string permission)
         => AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser) || AuthState.CurrentUser?.Can(permission) == true;
 
+    /// <summary>Người thực hiện mặc định khi tạo việc: người đang lọc, nếu không thì chính người đang đăng nhập (khi có trong danh sách).</summary>
+    internal static Guid? DefaultAssignee(Guid? filter, Guid? currentUserId, IEnumerable<PlanAssignee> assignees)
+    {
+        if (filter == Unassigned) return null;
+        if (filter is { } chosen) return chosen;
+        return currentUserId is { } me && assignees.Any(x => x.UserId == me) ? me : null;
+    }
+
     internal static Color StatusColor(string? status) => StaffTaskStatuses.Normalize(status) switch
     {
         StaffTaskStatuses.Pending => Color.Info,
@@ -302,7 +310,7 @@
         var parameters = new DialogParameters<StaffTaskDialog>
         {
             { x => x.Source, source },
-            { x => x.DefaultAssigneeId, _assigneeFilter is { } a && a != Unassigned ? a : null },
+            { x => x.DefaultAssigneeId, DefaultAssignee(_assigneeFilter, AuthState.CurrentUser?.UserId, _assignees) },
             { x => x.Customers, _customers },
             { x => x.Assignees, _assignees },
             { x => x.ProductsEnabled, Tasks.ProductsEnabled }
