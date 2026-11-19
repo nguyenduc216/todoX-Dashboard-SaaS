@@ -77,6 +77,7 @@ public sealed partial class MainForm : Form
         Controls.Add(_content);
         Controls.Add(_sidebar);
         Controls.Add(BuildHeader());
+        Controls.Add(BuildStatusBar());
 
         AddPage("Trang chính", BuildHomePage());
         AddPage("Lịch sử reup", BuildHistoryPage());
@@ -131,6 +132,42 @@ public sealed partial class MainForm : Form
     }
 
     // ------------------------------------------------------------------ shell
+
+    public const string Hotline = "0366 699 961";
+    public const string Website = "https://todox.vn";
+    public const string Email = "hello@todox.vn";
+
+    /// <summary>Bottom bar across the window: TodoX contact (hotline, website, email — clickable) and the version.</summary>
+    private Control BuildStatusBar()
+    {
+        var bar = new Panel { Dock = DockStyle.Bottom, Height = S(36), BackColor = Surface, Padding = P(16, 0, 16, 0) };
+        var left = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Surface };
+
+        LinkLabel Link(string text, string target)
+        {
+            var link = new LinkLabel { Text = text, AutoSize = true, LinkColor = Yellow, ActiveLinkColor = Ink, VisitedLinkColor = Yellow, LinkBehavior = LinkBehavior.HoverUnderline, Font = F(9.5f), Margin = P(0, 9, 18, 0) };
+            link.LinkClicked += (_, _) => OpenUrl(target);
+            return link;
+        }
+
+        Label Plain(string text) => new() { Text = text, AutoSize = true, ForeColor = Muted, Font = F(9.5f), Margin = P(0, 9, 4, 0) };
+
+        left.Controls.AddRange([
+            new Label { Text = "TodoX", AutoSize = true, ForeColor = Ink, Font = F(9.5f, FontStyle.Bold), Margin = P(0, 9, 18, 0) },
+            Plain("Hotline:"), Link(Hotline, "tel:" + Hotline.Replace(" ", "")),
+            Plain("Website:"), Link("todox.vn", Website),
+            Plain("Email:"), Link(Email, "mailto:" + Email)
+        ]);
+        var right = new Label { Text = $"todoX ReupVideo {Version} · chạy offline trên máy", AutoSize = true, Dock = DockStyle.Right, ForeColor = Muted, Font = F(9), Padding = P(0, 10, 0, 0) };
+        bar.Controls.Add(left);
+        bar.Controls.Add(right);
+        bar.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Border);
+            e.Graphics.DrawLine(pen, 0, 0, bar.Width, 0);
+        };
+        return bar;
+    }
 
     private Control BuildHeader()
     {

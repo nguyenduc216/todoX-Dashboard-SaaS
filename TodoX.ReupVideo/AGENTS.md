@@ -32,3 +32,11 @@ dotnet build TodoX.ReupVideo/TodoX.ReupVideo.csproj
 dotnet test TodoX.ReupVideo.Tests/TodoX.ReupVideo.Tests.csproj
 dotnet publish TodoX.ReupVideo/TodoX.ReupVideo.csproj -c Release   # single self-contained exe
 ```
+
+## Release (website "Tải app")
+
+`powershell -NoProfile -ExecutionPolicy Bypass -File tools/reupvideo/Build-ReupVideoRelease.ps1 -Upload` builds
+`todoX-ReupVideo-<Version>.exe` + `manifest.json` and copies them to `C:/TodoXDeploy/downloads/reupvideo` on the prod
+server (manifest last, old exe removed). The landing site serves it at `https://todox.vn/downloads/reupvideo/latest`
+(`TodoX.Landing/Services/AppDownloads.cs`); pages: `/reupvideo`, home section `#tai-app`, `/editvideo#tai-app-khac`.
+Bump `<Version>` in the csproj for every release. The window's bottom bar shows TodoX hotline, website and email.

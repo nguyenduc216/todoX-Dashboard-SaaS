@@ -317,5 +317,25 @@ app.MapGet("/video-ngan", () => Results.File(Path.Combine(app.Environment.WebRoo
 app.MapGet("/affiliate-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "affiliate-video.html"), "text/html; charset=utf-8"));
 app.MapGet("/mau-video", () => Results.File(Path.Combine(app.Environment.WebRootPath, "mau-video.html"), "text/html; charset=utf-8"));
 app.MapGet("/editvideo", () => Results.File(Path.Combine(app.Environment.WebRootPath, "editvideo.html"), "text/html; charset=utf-8"));
+app.MapGet("/reupvideo", () => Results.File(Path.Combine(app.Environment.WebRootPath, "reupvideo.html"), "text/html; charset=utf-8"));
+
+// "Tải app": desktop apps whose builds sit in {Downloads:Root}/{app} on the server (see AppDownloads).
+var appDownloadsRoot = app.Configuration["Downloads:Root"] is { Length: > 0 } configuredRoot ? configuredRoot : AppDownloads.DefaultRoot;
+const string downloadNotReady = "Bản cài đặt đang được cập nhật, vui lòng thử lại sau ít phút hoặc gọi 0366 699 961.";
+app.MapGet("/api/landing/apps/{app}", (string app) =>
+    AppDownloads.Latest(appDownloadsRoot, app) is { } release
+        ? Results.Json(new { release.Version, release.PublishedAt, release.Size, Url = $"/downloads/{release.App}/latest" })
+        : Results.NotFound());
+app.MapGet("/downloads/{app}/latest", (string app, HttpContext http) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    return AppDownloads.Latest(appDownloadsRoot, app) is { } release
+        ? Results.Redirect($"/downloads/{release.App}/{Uri.EscapeDataString(release.FileName)}")
+        : Results.Text(downloadNotReady, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+});
+app.MapGet("/downloads/{app}/{name}", (string app, string name) =>
+    AppDownloads.Latest(appDownloadsRoot, app) is { } release && string.Equals(release.FileName, name, StringComparison.Ordinal)
+        ? Results.File(release.FilePath, "application/octet-stream", release.FileName, enableRangeProcessing: true)
+        : Results.Text(downloadNotReady, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 app.Run();
