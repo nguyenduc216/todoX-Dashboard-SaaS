@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <title>TodoApp – các ứng dụng TodoX cho máy tính | TodoX</title>
+  <meta name="description" content="TodoApp: bộ ứng dụng TodoX chạy trên máy tính của bạn – TodoX EditVideo dựng video AI bằng Claude/Codex, todoX ReupVideo tự đăng video TikTok lên fanpage Facebook.">
+  <link rel="canonical" href="https://todox.vn/todo-app">
+  <link rel="icon" href="/img/favicon/favicon.ico">
+  <link rel="stylesheet" href="/vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="/css/real-estate.css?v=3">
+  <style>
+    .ta-hero { padding: 72px 0 24px; }
+    .ta-hero h1 { font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.1; margin: 12px 0 16px; }
+    .ta-hero h1 strong { color: #ffbe2e; }
+    .ta-hero p.lead { font-size: 1.15rem; max-width: 760px; opacity: .85; }
+    .ta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 22px; padding: 16px 0 72px; }
+    .ta-app { display: flex; flex-direction: column; gap: 14px; background: #16181e; border: 1px solid #2a2d36; border-radius: 22px; padding: 28px; color: inherit; text-decoration: none; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+    .ta-app:hover, .ta-app:focus-visible { transform: translateY(-4px); border-color: #ffbe2e; box-shadow: 0 18px 40px rgba(255, 190, 46, .12); outline: none; }
+    .ta-icon { width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center; font-size: 2.3rem; color: #0b0d10; background: linear-gradient(135deg, #ffd56b, #ffbe2e); box-shadow: 0 10px 24px rgba(255, 190, 46, .25); }
+    .ta-icon--reup { background: linear-gradient(135deg, #7dd3fc, #3b82f6); color: #fff; box-shadow: 0 10px 24px rgba(59, 130, 246, .25); }
+    .ta-app h2 { margin: 4px 0 0; font-size: 1.45rem; }
+    .ta-app p { margin: 0; opacity: .8; line-height: 1.6; }
+    .ta-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+    .ta-tags span { background: #111317; border: 1px solid #2a2d36; border-radius: 999px; padding: 5px 12px; font-size: .85rem; opacity: .85; }
+    .ta-more { margin-top: auto; padding-top: 6px; color: #ffbe2e; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; }
+    .ta-version { font-size: .85rem; opacity: .6; }
+  </style>
+  <link rel="stylesheet" href="/css/chatstaff-widget.css?v=20261113-3">
+  <script async src="https://chat-api.genstaff.net/widget/chatstaff-widget.js" data-channel-key="wlc_Z1RU-uztGV-CChNMsOyMOS1N2eN8Gpyb" data-lang="vi"></script>
+</head>
+<body>
+  <header class="site-header" id="header">
+    <div class="container navigation">
+      <a class="brand" href="/" aria-label="TodoX - Trang chủ"><img src="/img/logo/todox-logo.png" alt="TodoX" width="46" height="46"><span>Todo<strong>X</strong><small>TODO EXCELLENCE</small></span></a>
+      <a class="button header-cta" href="/#contact">Nhận tư vấn ngay</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="container ta-hero">
+      <span class="eyebrow">TODOAPP</span>
+      <h1>Ứng dụng <strong>TodoX</strong> cho máy tính của bạn</h1>
+      <p class="lead">Các công cụ chạy ngay trên máy tính Windows, giúp bạn làm video và đăng nội dung nhanh hơn. Chọn một ứng dụng để xem tính năng và tải về.</p>
+    </section>
+
+    <section class="container ta-grid" aria-label="Danh sách ứng dụng">
+      <a class="ta-app" href="/editvideo" data-todo-app="editvideo">
+        <span class="ta-icon"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+        <h2>TodoX EditVideo</h2>
+        <p>Nói với Claude hoặc Codex, video được dựng ngay trên máy bạn: cắt ghép, intro, phụ đề tiếng Việt, nhạc nền, giọng đọc AI và xuất video hoàn chỉnh.</p>
+        <div class="ta-tags"><span>Dựng video AI</span><span>Claude / Codex</span><span>Windows</span></div>
+        <span class="ta-more">Xem và tải EditVideo <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+      </a>
+      <a class="ta-app" href="/reupvideo" data-todo-app="reupvideo">
+        <span class="ta-icon ta-icon--reup"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i></span>
+        <h2>todoX ReupVideo</h2>
+        <p>Video TikTok mới tự lên fanpage Facebook kèm nội dung, hashtag – theo giờ hẹn hoặc bằng một nút bấm. Tự lọc link đã đăng, chỉ đăng link còn hoạt động.</p>
+        <div class="ta-tags"><span>TikTok → Facebook</span><span>Tự động đăng</span><span>Windows</span></div>
+        <span class="ta-version" data-app-release="reupvideo">Phiên bản 1.0 · Windows 10/11 64-bit</span>
+        <span class="ta-more">Xem và tải ReupVideo <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+      </a>
+    </section>
+  </main>
+
+  <footer><div class="container footer-grid"><div><a class="brand" href="/"><img src="/img/logo/todox-logo.png" alt="TodoX" width="46" height="46"><span>Todo<strong>X</strong><small>TODO EXCELLENCE</small></span></a><p>Nền tảng AI Video và ChatStaff giúp doanh nghiệp tạo nội dung bán hàng chuyên nghiệp và vận hành hiệu quả hơn.</p></div><div><h3>Giải pháp</h3><a href="/todo-app">TodoApp</a><a href="/editvideo">TodoX EditVideo</a><a href="/reupvideo">todoX ReupVideo</a><a href="/mau-video">Mẫu video</a><a href="/video-ngan">Video truyền thông</a></div><div><h3>Liên hệ</h3><p>Nha Trang, Khánh Hòa<br>0366 699 961<br>hello@todox.vn</p></div></div><div class="container copyright">© 2026 TodoX.</div></footer>
+  <script src="/js/app-release.js?v=20261119" defer></script>
+</body>
+</html>
