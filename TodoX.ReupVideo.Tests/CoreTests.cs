@@ -188,10 +188,18 @@ public class ReupRunnerTests : IDisposable
     {
         public List<(string Page, string Caption)> Posts { get; } = [];
         public HashSet<string> FailingPages { get; } = [];
+        public HashSet<string> ExpiredPages { get; } = [];
+        public int Calls { get; private set; }
 
         public Task<FacebookPostResult> PublishAsync(string pageId, string pageToken, FacebookPostKind kind, string videoFile, string description, double? durationSeconds, CancellationToken ct)
         {
+            Calls++;
             Assert.Equal("token-" + pageId, pageToken);
+            if (ExpiredPages.Contains(pageId))
+            {
+                return Task.FromResult(new FacebookPostResult(false, null, "Error validating access token: Session has expired (mã 190) → Token hết hạn", kind));
+            }
+
             if (FailingPages.Contains(pageId))
             {
                 return Task.FromResult(new FacebookPostResult(false, null, "denied", kind));
@@ -263,6 +271,35 @@ public class ReupRunnerTests : IDisposable
         settings.FacebookPages[1].Enabled = true;
         await runner.RunAsync(settings, new Progress<string>(), CancellationToken.None);
         Assert.Equal(3, facebook.Posts.Count(p => p.Page == "P2"));
+    }
+
+    [Fact]
+    public async Task ExpiredTokenStopsThatPageWithoutUsingRetries()
+    {
+        var (runner, library, settings, tiktok, facebook) = Setup();
+        facebook.ExpiredPages.Add("P1");
+        settings.Post.MaxVideosPerRun = 10;
+
+        var run = await runner.RunAsync(settings, new Progress<string>(), CancellationToken.None);
+
+        var p1 = settings.FacebookPages[0];
+        Assert.True(p1.TokenExpired);
+        Assert.Equal(3, facebook.Posts.Count(p => p.Page == "P2")); // the other page keeps going
+        Assert.Equal(4, facebook.Calls); // P1 tried once, then skipped for the rest of the run
+        Assert.Equal(1, run!.Failed);
+        Assert.All(library.Snapshot(), v => Assert.Null(v.PostFor("P1"))); // still waiting for P1, no retry used
+
+        // Only P1 left to post and its token is expired: nothing is downloaded or posted.
+        var downloads = tiktok.Downloaded.Count;
+        await runner.RunAsync(settings, new Progress<string>(), CancellationToken.None);
+        Assert.Equal(downloads, tiktok.Downloaded.Count);
+        Assert.Equal(4, facebook.Calls);
+
+        // New token saved: the links go to P1.
+        p1.TokenExpired = false;
+        facebook.ExpiredPages.Clear();
+        await runner.RunAsync(settings, new Progress<string>(), CancellationToken.None);
+        Assert.Equal(3, facebook.Posts.Count(p => p.Page == "P1"));
     }
 
     [Fact]

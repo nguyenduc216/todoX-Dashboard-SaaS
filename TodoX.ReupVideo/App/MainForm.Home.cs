@@ -79,7 +79,7 @@ public sealed partial class MainForm
         tools.Controls.AddRange([_listTitle, reupSelected, _retryAllButton, linkHistory, open, skip, remove]);
         tools.SetFlowBreak(remove, true);
         _tickAll.CheckedChanged += TickAllChanged;
-        _noPageHint.LinkClicked += (_, _) => OpenSettingsTab(EnabledPages().Count == 0 ? SettingsTabPages : SettingsTabMapping);
+        _noPageHint.LinkClicked += (_, _) => OpenSettingsTab(_noPageHint.Tag is int tab ? tab : SettingsTabPages);
         tools.Controls.AddRange([_tickAll, _tickedLabel, _clearFilters, _noPageHint]);
 
         // --- list
@@ -223,10 +223,14 @@ public sealed partial class MainForm
 
         var pages = EnabledPages();
         var unmapped = ReupTargets.Unmapped(_settings);
-        _noPageHint.Visible = pages.Count == 0 || unmapped.Count > 0;
-        _noPageHint.Text = pages.Count == 0
-            ? "⚠ Chưa chọn fanpage nào để đăng — bấm để thêm fanpage"
-            : $"⚠ Kênh {string.Join(", ", unmapped.Take(3).Select(s => "@" + s.Username))}{(unmapped.Count > 3 ? $" và {unmapped.Count - 3} kênh khác" : "")} chưa chọn fanpage để đăng — bấm để chọn";
+        var expired = pages.Where(p => p.TokenExpired).ToList();
+        _noPageHint.Visible = pages.Count == 0 || unmapped.Count > 0 || expired.Count > 0;
+        _noPageHint.Tag = expired.Count > 0 || pages.Count == 0 ? SettingsTabPages : SettingsTabMapping;
+        _noPageHint.Text = expired.Count > 0
+            ? $"⚠ Token fanpage {string.Join(", ", expired.Take(3).Select(p => p.Name))}{(expired.Count > 3 ? $" và {expired.Count - 3} page khác" : "")} đã hết hạn — chưa đăng được, bấm để cập nhật token"
+            : pages.Count == 0
+                ? "⚠ Chưa chọn fanpage nào để đăng — bấm để thêm fanpage"
+                : $"⚠ Kênh {string.Join(", ", unmapped.Take(3).Select(s => "@" + s.Username))}{(unmapped.Count > 3 ? $" và {unmapped.Count - 3} kênh khác" : "")} chưa chọn fanpage để đăng — bấm để chọn";
         var all = _library.Snapshot();
         // Fanpages each link goes to (ticked fanpages mapped to its TikTok channel).
         var targetsOf = all.ToDictionary(v => v.VideoId, v => ReupTargets.For(v, _settings, pages));

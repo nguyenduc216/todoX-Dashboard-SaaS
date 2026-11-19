@@ -181,6 +181,9 @@ public sealed class FacebookClient : IFacebookPublisher
         return json;
     }
 
+    /// <summary>Error text from <see cref="DescribeError"/> that means the token is expired or wrong (code 190).</summary>
+    public static bool IsTokenError(string? error) => error is not null && error.Contains("(mã 190)", StringComparison.Ordinal);
+
     internal static string DescribeError(JsonElement error)
     {
         var message = Str(error, "error_user_msg") ?? Str(error, "message") ?? "Lỗi Facebook";

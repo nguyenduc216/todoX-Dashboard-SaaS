@@ -103,13 +103,15 @@ public sealed partial class MainForm
         page.Controls.Add(Theme.Text("Reels: video dọc tối đa 90 giây (dài hơn tự đăng dạng Video). Token được mã hoá bằng Windows (DPAPI), chỉ dùng được trên máy và tài khoản Windows này.", Muted));
 
         page.Controls.Add(Section("Thêm fanpage — cách 1: lấy tất cả bằng User access token"));
-        page.Controls.Add(Theme.Text("Tạo token trên Graph API Explorer với quyền pages_show_list, pages_manage_posts, pages_read_engagement, publish_video. Ứng dụng tự lấy Page token cho từng fanpage; nên dùng token dài hạn để không phải nhập lại.", Muted));
+        page.Controls.Add(Theme.Text("Tạo token trên Graph API Explorer với quyền pages_show_list, pages_manage_posts, pages_read_engagement, publish_video. Ứng dụng tự lấy Page token cho từng fanpage.\n\nQUAN TRỌNG — token Graph API Explorer chỉ sống khoảng 1–2 giờ, page token lấy từ nó cũng hết hạn theo. Để token không hết hạn: copy token ở Graph API Explorer → bấm \"Gia hạn token\" bên dưới → dán token, bấm Debug → bấm \"Extend Access Token\" (ở cuối trang) → copy token mới (dài hạn) rồi dán vào ô này. Page token lấy từ token dài hạn sẽ không hết hạn.", Muted));
         var userRow = Row();
         var load = Theme.Button("Lấy danh sách fanpage", primary: true);
         load.Click += async (_, _) => await ImportPagesAsync(load);
         var explorer = Theme.Button("Mở Graph API Explorer");
         explorer.Click += (_, _) => OpenUrl("https://developers.facebook.com/tools/explorer/");
-        userRow.Controls.AddRange([_userTokenInput, load, explorer]);
+        var extend = Theme.Button("Gia hạn token (Access Token Debugger)");
+        extend.Click += (_, _) => OpenUrl("https://developers.facebook.com/tools/debug/accesstoken/");
+        userRow.Controls.AddRange([_userTokenInput, load, explorer, extend]);
         page.Controls.Add(userRow);
 
         page.Controls.Add(Section("Thêm fanpage — cách 2: 1 trang bằng Page access token"));
@@ -201,6 +203,7 @@ public sealed partial class MainForm
         existing.ProtectedToken = SecretProtector.Protect(info.AccessToken ?? "");
         existing.LastCheckAt = DateTime.Now;
         existing.LastCheckResult = "OK";
+        existing.TokenExpired = false;
         return isNew;
     }
 
@@ -222,10 +225,12 @@ public sealed partial class MainForm
                     var info = await _facebook.VerifyPageAsync(fb.PageId, SecretProtector.Unprotect(fb.ProtectedToken), CancellationToken.None);
                     fb.Name = info.Name;
                     fb.LastCheckResult = "OK";
+                    fb.TokenExpired = false;
                 }
                 catch (Exception ex)
                 {
                     fb.LastCheckResult = "Lỗi: " + ex.Message;
+                    fb.TokenExpired = FacebookClient.IsTokenError(ex.Message);
                 }
 
                 fb.LastCheckAt = DateTime.Now;
@@ -254,11 +259,11 @@ public sealed partial class MainForm
                 fb.PageId,
                 ChannelsOf(fb),
                 fb.PostKind == FacebookPostKind.Reels ? "Reels" : "Video",
-                token.Length == 0 ? "cần nhập lại" : SecretProtector.Mask(token),
+                token.Length == 0 ? "cần nhập lại" : fb.TokenExpired ? "HẾT HẠN — nhập token mới" : SecretProtector.Mask(token),
                 fb.LastCheckAt is null ? "" : $"{fb.LastCheckAt:HH:mm dd/MM} {fb.LastCheckResult}"
             ]) { Tag = fb, Checked = fb.Enabled, UseItemStyleForSubItems = false };
             item.SubItems[2].ForeColor = item.SubItems[2].Text == "—" ? Muted : Ink;
-            item.SubItems[4].ForeColor = token.Length == 0 ? Red : Ink;
+            item.SubItems[4].ForeColor = token.Length == 0 || fb.TokenExpired ? Red : Ink;
             item.SubItems[5].ForeColor = fb.LastCheckResult == "OK" ? Green : Red;
             _pages.Items.Add(item);
         }

@@ -129,7 +129,19 @@ public sealed class ReupRunner
                 log.Report($"Fanpage {page.Name}: chưa có token (hoặc token lưu ở máy/tài khoản Windows khác) — bỏ qua.");
             }
 
-            pages = pages.Where(p => tokens[p.PageId].Length > 0).ToList();
+            foreach (var page in pages.Where(p => p.TokenExpired))
+            {
+                log.Report($"Fanpage {page.Name}: token đã hết hạn — bỏ qua cho tới khi cập nhật token (Cài đặt → Fanpage Facebook).");
+            }
+
+            pages = pages.Where(p => tokens[p.PageId].Length > 0 && !p.TokenExpired).ToList();
+            if (pages.Count == 0)
+            {
+                log.Report("Không còn fanpage nào dùng được token để đăng.");
+                run.Error = "Token fanpage hết hạn";
+                return Summary(run);
+            }
+
             foreach (var source in ReupTargets.Unmapped(settings))
             {
                 log.Report($"Kênh {source} chưa chọn fanpage để đăng (Cài đặt → Kênh → Fanpage) — bỏ qua.");
@@ -201,6 +213,11 @@ public sealed class ReupRunner
                     var caption = CaptionBuilder.Build(settings.Post.CaptionTemplate, info, settings.Post.ExtraHashtags);
                     foreach (var page in targets)
                     {
+                        if (page.TokenExpired)
+                        {
+                            continue; // token found expired earlier in this run
+                        }
+
                         if (!firstPost)
                         {
                             await _delay(TimeSpan.FromSeconds(Math.Max(0, settings.Post.DelaySecondsBetweenPosts)), ct);
@@ -209,8 +226,22 @@ public sealed class ReupRunner
                         firstPost = false;
                         log.Report($"  Đăng lên {page.Name} ({(page.PostKind == FacebookPostKind.Reels ? "Reels" : "Video")})...");
                         var result = await _facebook.PublishAsync(page.PageId, tokens[page.PageId], page.PostKind, file, caption, info.DurationSeconds, ct);
-                        _library.RecordPost(item.VideoId, page.PageId, result.Ok, result.Id, result.Error);
                         attempted.Add(page.PageId);
+                        if (!result.Ok && FacebookClient.IsTokenError(result.Error))
+                        {
+                            // Not the video's fault: the link stays "chờ đăng" for this page (no retry used up),
+                            // and the page is skipped until its token is renewed.
+                            page.TokenExpired = true;
+                            page.LastCheckAt = DateTime.Now;
+                            page.LastCheckResult = "Token hết hạn";
+                            pages.Remove(page);
+                            run.Failed++;
+                            run.Entries.Add(Entry(RunEntryKind.Failed, item, page, null, "Token fanpage hết hạn — cập nhật token rồi link sẽ tự được đăng lại. " + result.Error));
+                            log.Report($"  ✗ {page.Name}: token hết hạn — bỏ qua fanpage này cho tới khi cập nhật token.");
+                            continue;
+                        }
+
+                        _library.RecordPost(item.VideoId, page.PageId, result.Ok, result.Id, result.Error);
                         if (result.Ok)
                         {
                             run.Posted++;

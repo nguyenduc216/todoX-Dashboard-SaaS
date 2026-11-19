@@ -50,6 +50,12 @@ public sealed class FacebookPage
     public DateTime? LastCheckAt { get; set; }
     public string? LastCheckResult { get; set; }
 
+    /// <summary>
+    /// Facebook said the token is expired/invalid (code 190). The page is left out of every run until a new token
+    /// is saved or "Kiểm tra token" passes, so no video is downloaded for it and no retry is used up.
+    /// </summary>
+    public bool TokenExpired { get; set; }
+
     public override string ToString() => $"{Name} ({PageId})";
 }
 
