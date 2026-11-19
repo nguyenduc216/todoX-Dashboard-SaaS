@@ -159,12 +159,28 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         }
         psi.ArgumentList.Add(finalPath);
 
+        psi.RedirectStandardInput = true;
+        psi.ArgumentList.Insert(0, "-nostdin");
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
+        process.StandardInput.Close();
+        // Read both pipes at once and bound the whole run: reading stdout to the end first deadlocks once FFmpeg
+        // fills the stderr pipe, which hung the shared render worker and blocked every queued job behind it.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromMinutes(Math.Max(1, _options.CurrentValue.MergeTimeoutMinutes)));
-        await process.WaitForExitAsync(timeout.Token);
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            ct.ThrowIfCancellationRequested();
+            throw new TimeoutException($"FFmpeg mux timed out after {Math.Max(1, _options.CurrentValue.MergeTimeoutMinutes)} minutes.");
+        }
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
         await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg.log"), stdout + Environment.NewLine + stderr, ct);
         if (process.ExitCode != 0)
         {
