@@ -1,6 +1,7 @@
 # TodoX monorepo
 
-Projects: `TodoX.Web` (dashboard), `TodoX.Landing`, `TodoX.EditVideoTool` (local MCP exe). Per-project rules live in
+Projects: `TodoX.Web` (dashboard), `TodoX.Landing`, `TodoX.EditVideoTool` (local MCP exe), `TodoX.ReupVideo` (local
+TikTok → Facebook reup app, offline). Per-project rules live in
 each project's `AGENTS.md` — read them before editing that project.
 
 ## Deploy
