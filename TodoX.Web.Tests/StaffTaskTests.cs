@@ -14,16 +14,17 @@ public sealed class StaffTaskTests
     private static StaffTask Task(string status, DateTime? due = null) => new() { Title = "x", Status = status, CompletedAt = due };
 
     [Fact]
-    public void Statuses_have_vietnamese_labels_and_only_new_pending_in_progress_are_open()
+    public void Statuses_have_vietnamese_labels_and_only_new_in_progress_are_open()
     {
-        Assert.Equal(["new", "pending", "in_progress", "done", "cancelled"], StaffTaskStatuses.All);
-        Assert.Equal(["Mới", "Chờ thực hiện", "Đang thực hiện", "Đã hoàn thành", "Hủy"], StaffTaskStatuses.All.Select(StaffTaskStatuses.Label));
+        Assert.Equal(["new", "in_progress", "done", "cancelled"], StaffTaskStatuses.All);
+        Assert.Equal(["Mới", "Đang thực hiện", "Đã hoàn thành", "Hủy"], StaffTaskStatuses.All.Select(StaffTaskStatuses.Label));
         Assert.True(StaffTaskStatuses.IsOpen("new"));
         Assert.True(StaffTaskStatuses.IsOpen("pending"));
         Assert.True(StaffTaskStatuses.IsOpen("in_progress"));
         Assert.False(StaffTaskStatuses.IsOpen("done"));
         Assert.False(StaffTaskStatuses.IsOpen("cancelled"));
         Assert.Equal("Mới", StaffTaskStatuses.Label("bogus"));
+        Assert.Equal("Mới", StaffTaskStatuses.Label("pending"));
     }
 
     [Fact]
@@ -35,6 +36,7 @@ public sealed class StaffTaskTests
         Assert.Equal(6, summary.Total);
         Assert.Equal(2, summary.Count("in_progress"));
         Assert.Equal(1, summary.Count("cancelled"));
+        Assert.Equal(2, summary.Count("new"));
     }
 
     [Fact]
@@ -157,5 +159,21 @@ public sealed class StaffTaskTests
         Assert.Equal(colors.Count, colors.Distinct().Count());
         Assert.Equal(StaffTasks.StatusHex(StaffTaskStatuses.Done), StaffTasks.StatusHex("done"));
         Assert.Equal("#EF4444", StaffTasks.StatusHex("__late"));
+        Assert.NotEqual(StaffTasks.StatusHex("__open"), StaffTasks.StatusHex(StaffTaskStatuses.InProgress));
+    }
+
+    [Fact]
+    public void Late_is_automatic_and_counted_only_once()
+    {
+        var now = new DateTime(2026, 11, 19, 15, 0, 0);
+        var summary = StaffTaskSummary.From(
+            [Task("in_progress", now.AddHours(-1)), Task("in_progress", now.AddHours(1)), Task("new", now.AddDays(-1)), Task("done", now.AddDays(-1)), Task("cancelled", now.AddDays(-1))],
+            now);
+        Assert.Equal(2, summary.Late);
+        Assert.Equal(1, summary.Count("in_progress"));
+        Assert.Equal(0, summary.Count("new"));
+        Assert.Equal(3, summary.Open);
+        Assert.Equal(1, summary.Done);
+        Assert.Equal(5, summary.Total);
     }
 }

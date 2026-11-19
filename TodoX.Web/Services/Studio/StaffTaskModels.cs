@@ -32,21 +32,21 @@ public sealed record StaffTaskProduct(string VideoUrl, string? Title, string? So
 public static class StaffTaskStatuses
 {
     public const string New = "new";
+    /// <summary>Đã bỏ (gộp vào "Mới"); chỉ còn để đọc dữ liệu cũ.</summary>
     public const string Pending = "pending";
     public const string InProgress = "in_progress";
     public const string Done = "done";
     public const string Cancelled = "cancelled";
 
-    public static readonly IReadOnlyList<string> All = [New, Pending, InProgress, Done, Cancelled];
+    public static readonly IReadOnlyList<string> All = [New, InProgress, Done, Cancelled];
 
-    /// <summary>"Chưa hoàn thành": mới, chờ thực hiện, đang thực hiện (hủy is neither done nor open).</summary>
+    /// <summary>"Chưa hoàn thành": mới, đang thực hiện (hủy is neither done nor open).</summary>
     public static bool IsOpen(string? status) => status is New or Pending or InProgress;
 
     public static string Normalize(string? status) => All.Contains(status ?? string.Empty) ? status! : New;
 
     public static string Label(string? status) => Normalize(status) switch
     {
-        Pending => "Chờ thực hiện",
         InProgress => "Đang thực hiện",
         Done => "Đã hoàn thành",
         Cancelled => "Hủy",
@@ -54,16 +54,24 @@ public static class StaffTaskStatuses
     };
 }
 
-/// <summary>Counts for the summary cards: per status, plus done / not done.</summary>
-public sealed record StaffTaskSummary(IReadOnlyDictionary<string, int> ByStatus)
+/// <summary>
+/// Counts for the summary cards and filters. "Trễ hạn" is automatic (not stored): an unfinished task past its
+/// completion time counts as late only, not also as Mới / Đang thực hiện.
+/// </summary>
+public sealed record StaffTaskSummary(IReadOnlyDictionary<string, int> ByStatus, int Late = 0)
 {
     public int Count(string status) => ByStatus.TryGetValue(status, out var n) ? n : 0;
     public int Done => Count(StaffTaskStatuses.Done);
-    public int Open => StaffTaskStatuses.All.Where(StaffTaskStatuses.IsOpen).Sum(Count);
-    public int Total => ByStatus.Values.Sum();
+    public int Open => StaffTaskStatuses.All.Where(StaffTaskStatuses.IsOpen).Sum(Count) + Late;
+    public int Total => ByStatus.Values.Sum() + Late;
 
-    public static StaffTaskSummary From(IEnumerable<StaffTask> tasks)
-        => new(StaffTaskStatuses.All.ToDictionary(s => s, s => tasks.Count(t => StaffTaskStatuses.Normalize(t.Status) == s)));
+    public static StaffTaskSummary From(IEnumerable<StaffTask> tasks, DateTime? now = null)
+    {
+        var list = tasks.ToList();
+        var late = now is { } at ? list.Where(t => StaffTaskRules.IsLate(t, at)).ToHashSet() : [];
+        var rest = list.Where(t => !late.Contains(t)).ToList();
+        return new(StaffTaskStatuses.All.ToDictionary(s => s, s => rest.Count(t => StaffTaskStatuses.Normalize(t.Status) == s)), late.Count);
+    }
 }
 
 public static class StaffTaskRules
