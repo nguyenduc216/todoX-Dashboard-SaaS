@@ -61,3 +61,60 @@ public class LinkListTests
         Assert.True(library.Find("2")!.IsPending([]));
     }
 }
+
+public class PageStatusTests
+{
+    private static (AppSettings Settings, List<FacebookPage> Pages) Setup()
+    {
+        var a = new FacebookPage { PageId = "A", Name = "Page A", Enabled = true };
+        var b = new FacebookPage { PageId = "B", Name = "Page B", Enabled = true };
+        var c = new FacebookPage { PageId = "C", Name = "Page C", Enabled = true };
+        var settings = new AppSettings();
+        settings.FacebookPages.AddRange([a, b, c]);
+        settings.TikTokSources.Add(new TikTokSource { Id = "s1", Username = "kenh1", PageIds = ["A", "B"] });
+        return (settings, [a, b, c]);
+    }
+
+    [Fact]
+    public void LinkPostedOnOnePageStillWaitsForTheOtherMappedPage()
+    {
+        var (settings, pages) = Setup();
+        var video = new VideoItem { VideoId = "1", SourceId = "s1", Author = "kenh1", State = VideoState.Active };
+        video.Posts.Add(new PostRecord { PageId = "A", State = PostState.Posted, FacebookId = "fb1" });
+
+        var rows = PageReupStatuses.For(video, settings, pages);
+        Assert.Equal(2, rows.Count); // C is not mapped to kenh1
+        Assert.Equal(PageReupState.Posted, rows.Single(r => r.PageId == "A").State);
+        Assert.Equal(PageReupState.Waiting, rows.Single(r => r.PageId == "B").State);
+        Assert.False(PageReupStatuses.IsComplete(rows));
+        Assert.True(video.IsPending(ReupTargets.For(video, settings, pages)));
+    }
+
+    [Fact]
+    public void FailuresCountTowardsRetryLimitAndOldPagesStayVisible()
+    {
+        var (settings, pages) = Setup();
+        settings.Post.MaxAttempts = 2;
+        var video = new VideoItem { VideoId = "1", SourceId = "s1", Author = "kenh1", State = VideoState.Active };
+        video.Posts.Add(new PostRecord { PageId = "A", State = PostState.Posted });
+        video.Posts.Add(new PostRecord { PageId = "B", State = PostState.Failed, Attempts = 2 });
+        video.Posts.Add(new PostRecord { PageId = "C", State = PostState.Posted });
+
+        var rows = PageReupStatuses.For(video, settings, pages);
+        Assert.Equal(PageReupState.GaveUp, rows.Single(r => r.PageId == "B").State);
+        Assert.Equal(PageReupState.NotMapped, rows.Single(r => r.PageId == "C").State);
+
+        video.Posts.Single(p => p.PageId == "B").State = PostState.Posted;
+        Assert.True(PageReupStatuses.IsComplete(PageReupStatuses.For(video, settings, pages)));
+    }
+}
+
+public class SearchFoldTests
+{
+    [Theory]
+    [InlineData("Tất Vớ Nam Nữ Đẹp", "tat vo nam nu dep")]
+    [InlineData("HOÀNH THÁNH", "hoanh thanh")]
+    [InlineData(null, "")]
+    public void SearchIgnoresCaseAndAccents(string? text, string expected) =>
+        Assert.Equal(expected, TodoX.ReupVideo.App.MainForm.Fold(text));
+}
