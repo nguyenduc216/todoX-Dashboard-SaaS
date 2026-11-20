@@ -1,11 +1,13 @@
 @page "/customers"
 @using TodoX.Web.Components.Dialogs
 @inject AccountService Accounts
+@inject WalletService WalletSeeder
 @inject TodoX.Web.Services.Affiliate.AffiliateRepository Affiliates
 @inject AuditRepository Audit
 @inject AuthStateService AuthState
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject ILogger<Customers> Logger
 @inject TodoX.Web.Services.EditVideoTool.EditVideoLicenseService EditVideoLicenses
 @inject TodoX.Web.Services.EditVideoTool.EditVideoUsageService EditVideoUsage
 @inject TodoX.Web.Services.Studio.StudioRepository Studio
@@ -460,12 +462,26 @@
             Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
             if (ok)
             {
+                await EnsureWalletsAsync();
+                if (model.CreateLogin)
+                {
+                    await DialogService.ShowMessageBoxAsync("Tài khoản đăng nhập của khách",
+                        (MarkupString)$"Tên đăng nhập: <b>{System.Net.WebUtility.HtmlEncode(model.LoginUsername)}</b><br />Mật khẩu: <b>{System.Net.WebUtility.HtmlEncode(model.LoginPassword)}</b><br /><br />Gửi thông tin này cho khách. Khách có thể đổi mật khẩu sau khi đăng nhập.",
+                        yesText: "Đã ghi lại");
+                }
                 await SaveAffiliateAsync(model, null);
                 await SaveSegmentAsync(model, null);
                 await Audit.LogAsync(AuthState.CurrentUser, "customers", "create", entityDisplay: model.CompanyName);
                 await Reload();
             }
         }
+    }
+
+    /// <summary>New customers get their point wallet now, so they show in "Quản lý điểm" straight away.</summary>
+    private async Task EnsureWalletsAsync()
+    {
+        try { await WalletSeeder.SeedCustomerWalletsAsync(); }
+        catch (Exception ex) { Logger.LogWarning(ex, "Could not create point wallet for new customer."); }
     }
 
     private async Task OpenEdit(CustomerProfile customer)

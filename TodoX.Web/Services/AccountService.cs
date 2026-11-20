@@ -381,12 +381,68 @@ public sealed class AccountService
 
         if (model.Id == Guid.Empty)
         {
-            model.Id = await _customers.InsertCustomerAsync(model);
-            return (true, "Đã thêm khách hàng.");
+            if (!model.CreateLogin)
+            {
+                model.Id = await _customers.InsertCustomerAsync(model);
+                return (true, "Đã thêm khách hàng.");
+            }
+
+            return await InsertCustomerWithLoginAsync(model);
         }
 
         await _customers.UpdateCustomerAsync(model);
         return (true, "Đã cập nhật khách hàng.");
+    }
+
+    /// <summary>
+    /// New customer plus its owner login named after the brand. Email/phone already used by another login stay on the
+    /// customer only (auth.app_users keeps them unique), so the login still gets created.
+    /// </summary>
+    private async Task<(bool Success, string Message)> InsertCustomerWithLoginAsync(CustomerProfile model)
+    {
+        var username = (model.LoginUsername ?? string.Empty).Trim().ToLowerInvariant();
+        if (username.Length == 0)
+        {
+            username = await CustomerLoginNames.FirstFreeAsync(
+                CustomerLoginNames.FromBrand(model.CompanyName, model.ContactName), u => _accounts.UsernameExistsAsync(u));
+        }
+        else if (await _accounts.UsernameExistsAsync(username))
+        {
+            return (false, $"Tên đăng nhập \"{username}\" đã có người dùng. Chọn tên khác.");
+        }
+
+        if (string.IsNullOrWhiteSpace(model.LoginPassword) || model.LoginPassword.Trim().Length < 8)
+        {
+            return (false, "Mật khẩu tài khoản cần ít nhất 8 ký tự.");
+        }
+
+        var email = model.Email.Trim();
+        var phone = model.Phone?.Trim() ?? string.Empty;
+        var emailOnLogin = email.Length > 0 && !await _accounts.EmailExistsAsync(email);
+        var phoneOnLogin = phone.Length > 0 && await _accounts.FindPhoneOwnerAsync(phone) is null;
+
+        model.Id = await _customers.InsertCustomerAsync(model);
+        try
+        {
+            await _customers.InsertCustomerAccountAsync(new CustomerAccount
+            {
+                CustomerId = model.Id,
+                FullName = model.ContactName.Trim(),
+                Username = username,
+                Email = emailOnLogin ? email : string.Empty,
+                Phone = phoneOnLogin ? phone : string.Empty,
+                Role = TodoXUserRole.CustomerOwner,
+                Status = model.Status == TodoXAccountStatus.Active ? TodoXAccountStatus.Active : TodoXAccountStatus.Locked
+            }, _passwords.Hash(model.LoginPassword.Trim()));
+        }
+        catch
+        {
+            await _customers.DeleteCustomerAsync(model.Id);
+            throw;
+        }
+
+        model.LoginUsername = username;
+        return (true, $"Đã thêm khách hàng và tài khoản đăng nhập \"{username}\".");
     }
 
     public Task SetCustomerStatusAsync(Guid id, TodoXAccountStatus status)

@@ -51,6 +51,7 @@ public sealed partial class MainForm : Form
         _ytdlp = new YtDlpClient(paths, () => _settings.Post.TikTokCookiesFile, _http);
         _facebook = new FacebookClient(_http);
         _runner = new ReupRunner(paths, _library, _ytdlp, _facebook, history: _history);
+        SetupTokens();
 
         Text = "todoX ReupVideo";
         Icon = AppIcon();
@@ -306,6 +307,7 @@ public sealed partial class MainForm : Form
         UpdateScheduleLabel();
         if (_runner.IsRunning || !SchedulePlanner.IsDue(_settings.Schedule, DateTime.Now))
         {
+            await MaybeCheckTokensAsync();
             return;
         }
 

@@ -7,7 +7,8 @@
     <DialogContent>
         <MudGrid>
             <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Tên công ty" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Required="true" />
+                <MudTextField T="string" Label="Tên công ty" Value="_model.CompanyName" ValueChanged="OnBrandChanged" Immediate="true"
+                              Variant="Variant.Outlined" Required="true" autocomplete="off" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField T="string" Label="Người liên hệ" @bind-Value="_model.ContactName" Variant="Variant.Outlined" Required="true" />
@@ -42,6 +43,25 @@
             <MudItem xs="12">
                 <MudTextField T="string" Label="Địa chỉ" @bind-Value="_model.Address" Variant="Variant.Outlined" Lines="2" />
             </MudItem>
+            @if (_isNew)
+            {
+                <MudItem xs="12">
+                    <MudCheckBox T="bool" @bind-Value="_model.CreateLogin" Label="Tạo tài khoản đăng nhập cho khách" Color="Color.Warning" />
+                </MudItem>
+                @if (_model.CreateLogin)
+                {
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Tên đăng nhập" Value="_model.LoginUsername" ValueChanged="OnUsernameChanged"
+                                      Variant="Variant.Outlined" autocomplete="off"
+                                      HelperText="Tự đặt theo tên thương hiệu; trùng thì thêm số." />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Mật khẩu" @bind-Value="_model.LoginPassword" Variant="Variant.Outlined"
+                                      autocomplete="new-password" HelperText="Mật khẩu tạo sẵn – gửi cho khách cùng tên đăng nhập."
+                                      Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Refresh" OnAdornmentClick="NewPassword" />
+                    </MudItem>
+                }
+            }
             @if (AffiliateEnabled)
             {
                 <MudItem xs="12" sm="6">
@@ -86,7 +106,7 @@
     {
         _isNew = Source is null;
         _model = Source is null
-            ? new CustomerProfile { Id = Guid.Empty, Status = TodoXAccountStatus.Active }
+            ? new CustomerProfile { Id = Guid.Empty, Status = TodoXAccountStatus.Active, CreateLogin = true, LoginPassword = TodoX.Web.Services.CustomerLoginNames.NewPassword() }
             : new CustomerProfile
             {
                 Id = Source.Id,
@@ -106,6 +126,25 @@
                 Segment = Source.Segment
             };
     }
+
+    private bool _usernameEdited;
+
+    private void OnBrandChanged(string? value)
+    {
+        _model.CompanyName = value ?? string.Empty;
+        if (_isNew && !_usernameEdited)
+        {
+            _model.LoginUsername = TodoX.Web.Services.CustomerLoginNames.FromBrand(_model.CompanyName);
+        }
+    }
+
+    private void OnUsernameChanged(string? value)
+    {
+        _model.LoginUsername = (value ?? string.Empty).Trim().ToLowerInvariant();
+        _usernameEdited = _model.LoginUsername.Length > 0;
+    }
+
+    private void NewPassword() => _model.LoginPassword = TodoX.Web.Services.CustomerLoginNames.NewPassword();
 
     private void Submit() => MudDialog.Close(DialogResult.Ok(_model));
     private void Cancel() => MudDialog.Cancel();

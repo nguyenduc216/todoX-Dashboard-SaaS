@@ -56,7 +56,33 @@ public sealed class FacebookPage
     /// </summary>
     public bool TokenExpired { get; set; }
 
+    /// <summary>When Facebook last told us this token's expiry (null = never checked).</summary>
+    public DateTime? TokenCheckedAt { get; set; }
+    /// <summary>Token expiry; null with <see cref="TokenCheckedAt"/> set = never expires.</summary>
+    public DateTime? TokenExpiresAt { get; set; }
+    /// <summary>After this date Facebook wants the user to log in again (data access expiry).</summary>
+    public DateTime? DataAccessExpiresAt { get; set; }
+
     public override string ToString() => $"{Name} ({PageId})";
+}
+
+/// <summary>
+/// The user's own Facebook app (optional). With App ID + Secret a short-lived token is exchanged for a long-lived one
+/// and page tokens are renewed by themselves before they expire.
+/// </summary>
+public sealed class FacebookAppSettings
+{
+    public string AppId { get; set; } = "";
+    /// <summary>App Secret, DPAPI-protected.</summary>
+    public string ProtectedSecret { get; set; } = "";
+    /// <summary>Last long-lived user token (DPAPI) — used to fetch fresh page tokens without asking the user.</summary>
+    public string ProtectedUserToken { get; set; } = "";
+    public string? UserName { get; set; }
+    /// <summary>null = never expires (or unknown when there is no user token).</summary>
+    public DateTime? UserTokenExpiresAt { get; set; }
+    public DateTime? LastAutoCheckAt { get; set; }
+
+    [JsonIgnore] public bool HasCredentials => AppId.Length > 0 && ProtectedSecret.Length > 0;
 }
 
 public sealed class ScheduleSettings
@@ -92,6 +118,7 @@ public sealed class AppSettings
 {
     public List<TikTokSource> TikTokSources { get; set; } = [];
     public List<FacebookPage> FacebookPages { get; set; } = [];
+    public FacebookAppSettings FacebookApp { get; set; } = new();
     public ScheduleSettings Schedule { get; set; } = new();
     public PostSettings Post { get; set; } = new();
     public bool StartWithWindows { get; set; }

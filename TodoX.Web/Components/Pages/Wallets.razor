@@ -325,6 +325,13 @@
             }
         }
 
+        if (!IsCustomer)
+        {
+            // Customers added since the last restart have no wallet yet; create it so they are listed here.
+            try { await WalletService.SeedCustomerWalletsAsync(); }
+            catch (Exception ex) { Logger.LogWarning(ex, "Could not create missing customer point wallets."); }
+        }
+
         try
         {
             _wallets = await Billing.GetWalletsAsync(cid, AuthState.CurrentUser);
