@@ -253,7 +253,7 @@ public sealed class CustomerRepository
                 {
                     id,
                     tenant = _tenant.TenantId,
-                    username = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
+                    username = !string.IsNullOrWhiteSpace(a.Username) ? a.Username.Trim() : string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
                     email = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
                     phone = string.IsNullOrWhiteSpace(a.Phone) ? null : a.Phone,
                     hash = passwordHash,

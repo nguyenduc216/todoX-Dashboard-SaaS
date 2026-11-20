@@ -55,6 +55,11 @@ public sealed class CustomerProfile
 
     /// <summary>Loại khách (studio.customer_profiles): tiem_nang / bam_duoi / thong_thuong / vip.</summary>
     public string Segment { get; set; } = "thong_thuong";
+
+    /// <summary>Thêm khách mới: tạo luôn tài khoản đăng nhập (tên theo thương hiệu). Không lưu vào crm.customers.</summary>
+    public bool CreateLogin { get; set; }
+    public string LoginUsername { get; set; } = string.Empty;
+    public string LoginPassword { get; set; } = string.Empty;
 }
 
 public sealed class CustomerAccount
@@ -67,6 +72,8 @@ public sealed class CustomerAccount
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
+    /// <summary>Tên đăng nhập; trống thì dùng email.</summary>
+    public string? Username { get; set; }
     public TodoXUserRole Role { get; set; } = TodoXUserRole.CustomerOwner;
     public TodoXAccountStatus Status { get; set; } = TodoXAccountStatus.Active;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
