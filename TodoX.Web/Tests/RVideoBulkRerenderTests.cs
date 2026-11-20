@@ -136,6 +136,17 @@ public sealed class RVideoBulkRerenderTests
         Assert.True(save >= 0 && save < quote);
     }
 
+    [Fact]
+    public void V2SavesTheShownModelForScenesWithoutASavedModel()
+    {
+        // Scenes created without an explicit model fail the draft validator ("cấu hình chưa hợp lệ").
+        var flow = Source("Components", "Pages", "RVideo", "RVideoV2Preview.BulkRerender.cs");
+        var pin = flow.IndexOf("metadata.Extra[\"video_model\"] = shownModel", StringComparison.Ordinal);
+        var save = flow.IndexOf("SceneDraftSave.SaveAsync(", StringComparison.Ordinal);
+        Assert.Contains("ResolveModelKey(scene)", flow);
+        Assert.True(pin >= 0 && pin < save);
+    }
+
     [Theory]
     [InlineData(10, true, 0, false, true)]
     [InlineData(10, false, 5, false, true)]

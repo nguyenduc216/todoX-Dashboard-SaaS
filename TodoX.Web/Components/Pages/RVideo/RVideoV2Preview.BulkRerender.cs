@@ -136,8 +136,12 @@ public partial class RVideoV2Preview
     {
         var settings = RVideoRules.ResolveRenderSettings(JobView!.Project.OriginalPrompt);
         var metadata = ScenePromptMetadata.FromScene(scene);
-        if (metadata.Extra.GetValueOrDefault("aspect_ratio") == settings.AspectRatio
+        // The draft validator requires a saved video model; older scenes have none and the page only shows
+        // the resolved one. Save exactly that shown model, as the per-scene "Tạo lượt video mới" does.
+        var hasModel = !string.IsNullOrWhiteSpace(metadata.Extra.GetValueOrDefault("video_model"));
+        if (hasModel && metadata.Extra.GetValueOrDefault("aspect_ratio") == settings.AspectRatio
             && metadata.Extra.GetValueOrDefault("resolution") == settings.Resolution) return true;
+        if (!hasModel && ResolveModelKey(scene) is { Length: > 0 } shownModel) metadata.Extra["video_model"] = shownModel;
         WithRenderSettings(metadata);
         var request = new VideoProjectSaveSceneDraftRequest { SceneId = scene.Id, Status = scene.Status, Title = scene.Title, SceneIndex = scene.SceneIndex, ScenePrompt = metadata.Serialize(), ImagePrompt = metadata.ImagePrompt, VideoPrompt = metadata.MotionPrompt, ImageUrl = scene.StaticImageUrl, ImagePath = scene.StaticImagePath, VideoUrl = scene.SceneVideoUrl, VideoPath = scene.SceneVideoPath, DurationSeconds = scene.DurationSeconds, ErrorMessage = scene.ErrorMessage };
         var result = await SceneDraftSave.SaveAsync(request, user.UserId, metadata);
