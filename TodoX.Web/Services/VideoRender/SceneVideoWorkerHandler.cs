@@ -3669,6 +3669,13 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
     internal static bool ShouldFallbackAfterProviderFailure(string classification)
         => classification is not ("AUTHENTICATION_FAILURE" or "BILLING_FAILURE");
 
+    /// <summary>
+    /// A fallback job may start only while no provider task exists for the failed attempt. After the provider
+    /// accepted a task, only a superseding operation may replace it (see SceneVideoOperationDraftService).
+    /// </summary>
+    internal static bool CanStartFallbackJobAfterProviderFailure(string? providerTaskId)
+        => string.IsNullOrWhiteSpace(providerTaskId);
+
     internal static string BuildModelFallbackLogicalRequestId(string logicalRequestId, int failedModels)
         => $"{System.Text.RegularExpressions.Regex.Replace(logicalRequestId, ":fb\\d+$", string.Empty)}:fb{failedModels}";
 
@@ -3690,6 +3697,24 @@ public sealed partial class SceneVideoWorkerHandler : IRenderJobHandler
         await AddFallbackFailedEventAsync(project, scene, job, input, failed.Policy, providerTaskId, classification, errorCode,
             providerResponseJson, failure, ct);
         if (!ShouldFallbackAfterProviderFailure(classification)) return false;
+        if (!CanStartFallbackJobAfterProviderFailure(providerTaskId))
+        {
+            // The provider already accepted this attempt's task: the duplicate-submit fence keeps every other job
+            // for the scene from submitting until a new operation supersedes it, so a plain fallback job could never
+            // run and only sat quarantined. Fail the scene cleanly instead; the customer re-renders it.
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_SKIPPED", "warning",
+                "Scene-video model failed after the provider accepted the task; automatic model fallback is not started.",
+                new
+                {
+                    projectId = input.ProjectId,
+                    sceneId = input.SceneId,
+                    renderJobId = job.Id,
+                    failedModel = failed.Policy.Model,
+                    providerTaskId,
+                    classification
+                }, ct);
+            return false;
+        }
 
         var excluded = (input.ExcludedModelKeys ?? new List<string>())
             .Append(RVideoVideoModelPolicy.BuildKey(failed.Policy))

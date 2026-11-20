@@ -68,6 +68,19 @@ public sealed class SceneVideoReconciliationRecoveryTests
         Assert.Equal(new[] { "CancelAsync" }, proxy.Writes);
     }
 
+    [Fact]
+    public void Fallback_job_is_not_started_after_the_provider_accepted_the_task()
+    {
+        Assert.True(SceneVideoWorkerHandler.CanStartFallbackJobAfterProviderFailure(null));
+        Assert.True(SceneVideoWorkerHandler.CanStartFallbackJobAfterProviderFailure(" "));
+        Assert.False(SceneVideoWorkerHandler.CanStartFallbackJobAfterProviderFailure("16352363f4bb4685"));
+
+        var source = Read("TodoX.Web", "Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var guard = source.IndexOf("if (!CanStartFallbackJobAfterProviderFailure(providerTaskId))", StringComparison.Ordinal);
+        var enqueue = source.IndexOf("await _jobs.EnqueueForLogCodeIfNoneActiveAsync", guard, StringComparison.Ordinal);
+        Assert.True(guard > 0 && enqueue > guard);
+    }
+
     public class ScheduleProxy : DispatchProxy
     {
         public Guid Throws { get; set; }
