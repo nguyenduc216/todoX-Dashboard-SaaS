@@ -22,6 +22,8 @@ public sealed partial class MainForm
     private string? _downloadedUpdate;
     private DateTime _lastUpdateCheck = DateTime.MinValue;
     private bool _checkingUpdate;
+    /// <summary>Auto-update on and the window open: install at this time unless the user pressed "Để sau".</summary>
+    private DateTime? _autoInstallAt;
 
     private void SetupUpdater()
     {
@@ -32,7 +34,11 @@ public sealed partial class MainForm
         _updateNowButton.Margin = P(0, 5, 8, 0);
         _updateNowButton.Click += (_, _) => InstallUpdate(askFirst: false);
         var later = new LinkLabel { Text = "Để sau", AutoSize = true, LinkColor = Muted, ActiveLinkColor = Yellow, Font = F(9.5f), Margin = P(4, 13, 0, 0) };
-        later.LinkClicked += (_, _) => _updateBar.Visible = false;
+        later.LinkClicked += (_, _) =>
+        {
+            _updateBar.Visible = false;
+            _autoInstallAt = null; // installs when the window is hidden, or at the next check
+        };
         flow.Controls.AddRange([_updateText, _updateNowButton, later]);
         _updateBar.Height = S(46);
         _updateBar.Controls.Add(flow);
@@ -97,7 +103,10 @@ public sealed partial class MainForm
             _updateState.Text = $"Đang tải phiên bản {info.Version.ToString(3)}...";
             _downloadedUpdate = await _updater.DownloadAsync(info, CancellationToken.None);
             _log.Report($"Đã tải xong phiên bản {info.Version.ToString(3)}.");
-            ShowUpdateBar($"Phiên bản mới {info.Version.ToString(3)} đã sẵn sàng (bạn đang dùng {Version}). Ứng dụng sẽ khởi động lại trong vài giây.", "Cập nhật ngay");
+            _autoInstallAt = manual ? null : DateTime.Now.AddMinutes(2);
+            ShowUpdateBar(manual
+                ? $"Phiên bản mới {info.Version.ToString(3)} đã sẵn sàng (bạn đang dùng {Version})."
+                : $"Phiên bản mới {info.Version.ToString(3)} đã sẵn sàng (bạn đang dùng {Version}). Ứng dụng tự khởi động lại để cập nhật lúc {_autoInstallAt:HH:mm} (khi không có lượt reup đang chạy).", "Cập nhật ngay");
             if (manual)
             {
                 InstallUpdate(askFirst: true);
@@ -129,10 +138,14 @@ public sealed partial class MainForm
         }
     }
 
-    /// <summary>Hidden in the tray, idle and auto-update on: install without asking.</summary>
+    /// <summary>
+    /// Auto-update on and idle: install without asking when the window is hidden in the tray, or when it is open and the
+    /// announced restart time has come (the window used to stay open for days and never got the update).
+    /// </summary>
     private void TryInstallQuietly()
     {
-        if (_downloadedUpdate is not null && _settings.AutoUpdate && !Visible && !_runner.IsRunning && !_installingUpdate)
+        var timeHasCome = _autoInstallAt is { } at && DateTime.Now >= at;
+        if (_downloadedUpdate is not null && _settings.AutoUpdate && (!Visible || timeHasCome) && !_runner.IsRunning && !_tokenCheckRunning && !_installingUpdate)
         {
             InstallUpdate(askFirst: false);
         }

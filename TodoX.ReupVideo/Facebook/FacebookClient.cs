@@ -8,6 +8,19 @@ public sealed record FacebookPageInfo(string Id, string Name, string? AccessToke
 
 public sealed record FacebookPostResult(bool Ok, string? Id, string? Error, FacebookPostKind UsedKind);
 
+/// <summary>What Facebook says about a token (debug_token). <see cref="ExpiresAt"/> null = never expires.</summary>
+public sealed record TokenDebugInfo(bool IsValid, string? AppId, string? Type, DateTime? ExpiresAt, DateTime? DataAccessExpiresAt, string? Error);
+
+public sealed record ExchangedToken(string AccessToken, DateTime? ExpiresAt);
+
+/// <summary>Token calls used by <see cref="Core.TokenKeeper"/>: check expiry, short → long-lived exchange, page tokens.</summary>
+public interface IFacebookTokens
+{
+    Task<TokenDebugInfo> DebugTokenAsync(string token, string? appAccessToken, CancellationToken ct);
+    Task<ExchangedToken> ExchangeForLongLivedAsync(string appId, string appSecret, string token, CancellationToken ct);
+    Task<List<FacebookPageInfo>> ListPagesAsync(string userToken, CancellationToken ct);
+}
+
 public interface IFacebookPublisher
 {
     Task<FacebookPostResult> PublishAsync(string pageId, string pageToken, FacebookPostKind kind, string videoFile, string description, double? durationSeconds, CancellationToken ct);
@@ -17,7 +30,7 @@ public interface IFacebookPublisher
 /// Facebook Graph API with a Page access token (needs pages_manage_posts + pages_read_engagement, and
 /// publish_video for video). Reels: 3-phase upload (start → binary to rupload → finish/publish).
 /// </summary>
-public sealed class FacebookClient : IFacebookPublisher
+public sealed class FacebookClient : IFacebookPublisher, IFacebookTokens
 {
     public const string GraphVersion = "v23.0";
     private const string Graph = "https://graph.facebook.com/" + GraphVersion;
@@ -65,6 +78,80 @@ public sealed class FacebookClient : IFacebookPublisher
 
         return pages;
     }
+
+    /// <summary>
+    /// Expiry of a token. Asked with the token itself first (works for any token), then with the app token
+    /// ("appId|secret") so an already expired token still returns its details. Sent as a POST body, never in the URL.
+    /// </summary>
+    public async Task<TokenDebugInfo> DebugTokenAsync(string token, string? appAccessToken, CancellationToken ct)
+    {
+        Exception? first = null;
+        foreach (var asker in new[] { token, appAccessToken })
+        {
+            if (string.IsNullOrEmpty(asker))
+            {
+                continue;
+            }
+
+            try
+            {
+                var json = await PostAsync($"{Graph}/debug_token", new Dictionary<string, string>
+                {
+                    ["method"] = "GET",
+                    ["input_token"] = token,
+                    ["access_token"] = asker
+                }, ct);
+                var data = json.TryGetProperty("data", out var d) ? d : json;
+                var valid = data.TryGetProperty("is_valid", out var v) && v.ValueKind == JsonValueKind.True;
+                var error = data.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.Object ? Str(e, "message") : null;
+                return new TokenDebugInfo(valid, Str(data, "app_id"), Str(data, "type"), UnixTime(data, "expires_at"), UnixTime(data, "data_access_expires_at"), valid ? null : error ?? "Token không còn dùng được");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                first ??= ex;
+            }
+        }
+
+        // The token cannot even ask about itself and there is no app token: Facebook rejected it.
+        if (first is not null && IsTokenError(first.Message))
+        {
+            return new TokenDebugInfo(false, null, null, null, null, first.Message);
+        }
+
+        throw first ?? new InvalidOperationException("Không có token để kiểm tra");
+    }
+
+    /// <summary>Short-lived user token → long-lived (about 60 days). Needs the App ID + App Secret of the app that made the token.</summary>
+    public async Task<ExchangedToken> ExchangeForLongLivedAsync(string appId, string appSecret, string token, CancellationToken ct)
+    {
+        var json = await PostAsync($"{Graph}/oauth/access_token", new Dictionary<string, string>
+        {
+            ["grant_type"] = "fb_exchange_token",
+            ["client_id"] = appId,
+            ["client_secret"] = appSecret,
+            ["fb_exchange_token"] = token
+        }, ct);
+        var longLived = Str(json, "access_token") ?? throw new InvalidOperationException("Facebook không trả token dài hạn");
+        DateTime? expires = json.TryGetProperty("expires_in", out var e) && e.ValueKind == JsonValueKind.Number && e.GetInt64() > 0
+            ? DateTime.Now.AddSeconds(e.GetInt64())
+            : null;
+        return new ExchangedToken(longLived, expires);
+    }
+
+    private async Task<JsonElement> PostAsync(string url, Dictionary<string, string> form, CancellationToken ct)
+    {
+        using var response = await _http.PostAsync(url, new FormUrlEncodedContent(form), ct);
+        return await ReadAsync(response, ct);
+    }
+
+    private static DateTime? UnixTime(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.GetInt64() > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(v.GetInt64()).LocalDateTime
+            : null;
 
     public async Task<FacebookPostResult> PublishAsync(string pageId, string pageToken, FacebookPostKind kind, string videoFile, string description, double? durationSeconds, CancellationToken ct)
     {

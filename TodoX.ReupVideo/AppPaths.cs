@@ -13,6 +13,7 @@ public sealed class AppPaths
     public string SettingsFile => Path.Combine(Root, "settings.json");
     public string LibraryFile => Path.Combine(Root, "library.json");
     public string HistoryFile => Path.Combine(Root, "history.json");
+    public string TokenHistoryFile => Path.Combine(Root, "token-history.json");
     public string ToolsDir => Path.Combine(Root, "tools");
     public string YtDlpExe => Path.Combine(ToolsDir, "yt-dlp.exe");
     public string DownloadsDir => Path.Combine(Root, "downloads");

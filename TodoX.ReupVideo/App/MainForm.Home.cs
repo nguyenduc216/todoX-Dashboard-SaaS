@@ -224,10 +224,13 @@ public sealed partial class MainForm
         var pages = EnabledPages();
         var unmapped = ReupTargets.Unmapped(_settings);
         var expired = pages.Where(p => p.TokenExpired).ToList();
-        _noPageHint.Visible = pages.Count == 0 || unmapped.Count > 0 || expired.Count > 0;
-        _noPageHint.Tag = expired.Count > 0 || pages.Count == 0 ? SettingsTabPages : SettingsTabMapping;
+        var expiring = pages.Where(p => !p.TokenExpired && TokenKeeper.NeedsRenew(p, DateTime.Now)).ToList();
+        _noPageHint.Visible = pages.Count == 0 || unmapped.Count > 0 || expired.Count > 0 || expiring.Count > 0;
+        _noPageHint.Tag = expired.Count > 0 || expiring.Count > 0 || pages.Count == 0 ? SettingsTabPages : SettingsTabMapping;
         _noPageHint.Text = expired.Count > 0
             ? $"⚠ Token fanpage {string.Join(", ", expired.Take(3).Select(p => p.Name))}{(expired.Count > 3 ? $" và {expired.Count - 3} page khác" : "")} đã hết hạn — chưa đăng được, bấm để cập nhật token"
+            : expiring.Count > 0
+                ? $"⚠ Token fanpage {string.Join(", ", expiring.Take(3).Select(p => p.Name))}{(expiring.Count > 3 ? $" và {expiring.Count - 3} page khác" : "")} sắp hết hạn ({TokenKeeper.ProblemText(expiring[0])}) — bấm để gia hạn"
             : pages.Count == 0
                 ? "⚠ Chưa chọn fanpage nào để đăng — bấm để thêm fanpage"
                 : $"⚠ Kênh {string.Join(", ", unmapped.Take(3).Select(s => "@" + s.Username))}{(unmapped.Count > 3 ? $" và {unmapped.Count - 3} kênh khác" : "")} chưa chọn fanpage để đăng — bấm để chọn";
@@ -390,7 +393,7 @@ public sealed partial class MainForm
     {
         var total = _links.Items.Count;
         var filtered = _filters.Values.Any(b => b.Text.Trim().Length > 0) ? " tìm thấy" : "";
-        _tickedLabel.Text = _ticked.Count == 0 ? $"{total:N0} link{filtered}" : $"Đã chọn {_ticked.Count:N0}/{total:N0} link{filtered}";
+        _tickedLabel.Text = _ticked.Count == 0 ? $"{total:N0} link{filtered}" : $"Đã chọn {_ticked.Count:N0}/{total:N0} link{filtered} · chỉ cho nút \"Reup link đã chọn\" — lượt theo lịch vẫn reup các link đang chờ";
         _tickedLabel.ForeColor = _ticked.Count == 0 ? Muted : Yellow;
         _tickAll.CheckedChanged -= TickAllChanged;
         _tickAll.CheckState = _ticked.Count == 0 ? CheckState.Unchecked : _ticked.Count >= total ? CheckState.Checked : CheckState.Indeterminate;
