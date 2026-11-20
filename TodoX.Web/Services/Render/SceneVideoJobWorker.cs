@@ -103,7 +103,7 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
-                    await jobs.CancelAsync(job.Id, "Scene video worker cancellation requested.", ct: CancellationToken.None);
+                    await StopForShutdownAsync(jobs, job.Id, _logger);
                 }
                 catch (Exception ex)
                 {
@@ -133,6 +133,35 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 await Task.Delay(idleDelay, stoppingToken);
             }
         }
+    }
+
+    /// <summary>
+    /// App shutdown (deploy/restart) while a job runs. A job already holding a 79AI task keeps it: it goes to
+    /// pending_reconciliation so the reconciliation worker polls the same task after restart. Cancelling it left the
+    /// scene video "processing" forever even after 79AI finished or failed the task.
+    /// </summary>
+    internal static async Task StopForShutdownAsync(IRenderJobService jobs, Guid jobId, ILogger logger)
+    {
+        try
+        {
+            var current = await jobs.GetAsync(jobId, CancellationToken.None);
+            if (current is not null
+                && !string.IsNullOrWhiteSpace(current.ProviderTaskId)
+                && !string.IsNullOrWhiteSpace(current.ProviderVideoIdBase))
+            {
+                await jobs.MarkStatusAsync(jobId, RenderJobStatuses.PendingReconciliation,
+                    errorCode: "SCENE_VIDEO_SHUTDOWN_RETAINED",
+                    errorMessage: "App stopped while the provider task was running; the same task will be polled after restart.",
+                    ct: CancellationToken.None);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not retain provider task of scene video job {JobId} on shutdown; cancelling it.", jobId);
+        }
+
+        await jobs.CancelAsync(jobId, "Scene video worker cancellation requested.", ct: CancellationToken.None);
     }
 
     // FEATURE_ID: TODOX-RVIDEO-VIDEO-RERENDER; CHANGE_ID: TODOX-20261025-RVIDEO-LIVE-REMERGE-003.

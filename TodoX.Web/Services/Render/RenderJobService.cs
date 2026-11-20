@@ -1422,7 +1422,9 @@ public sealed class RenderJobService : IRenderJobService
                AND (retry_after IS NULL OR retry_after <= now())
                AND (lock_until IS NULL OR lock_until <= now());
             """,
-            new { jobId, delaySeconds, reasonCode, reasonMessage,
+            // sceneVideo/tenant are referenced by the guards above; without them every call failed (since 2026-10-28)
+            // and no known provider task was ever re-polled.
+            new { jobId, delaySeconds, reasonCode, reasonMessage, sceneVideo = sceneTx is not null, tenant = _tenant.TenantId,
                 maxRecoveryPolls = GetMaxKnownTaskRecoveryPolls(), recoveryWindowMinutes = GetKnownTaskRecoveryWindowMinutes() }, sceneTx);
         sceneTx?.Commit();
 

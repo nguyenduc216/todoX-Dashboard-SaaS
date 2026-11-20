@@ -48,7 +48,8 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
                     await repository.ListPersistentSceneVideoReconciliationJobsAsync(stoppingToken),
                     jobs,
                     delay,
-                    stoppingToken);
+                    stoppingToken,
+                    _logger);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -67,16 +68,29 @@ public sealed class SceneVideoReconciliationWorker : BackgroundService
         IReadOnlyList<Guid> jobIds,
         IRenderJobService jobs,
         TimeSpan delay,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger? logger = null)
     {
         foreach (var jobId in jobIds)
         {
-            await jobs.SchedulePersistentProviderPollAsync(
-                jobId,
-                delay,
-                "SCENE_VIDEO_RECONCILIATION_WORKER",
-                "Persistent reconciliation worker retained the existing provider task and scheduled another poll.",
-                ct);
+            // One job that cannot be scheduled must not stop every other job from being re-polled.
+            try
+            {
+                await jobs.SchedulePersistentProviderPollAsync(
+                    jobId,
+                    delay,
+                    "SCENE_VIDEO_RECONCILIATION_WORKER",
+                    "Persistent reconciliation worker retained the existing provider task and scheduled another poll.",
+                    ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Scene video reconciliation could not schedule job {JobId}; continuing with the others.", jobId);
+            }
         }
     }
 }
