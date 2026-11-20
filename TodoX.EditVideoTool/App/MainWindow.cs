@@ -156,6 +156,8 @@ public sealed partial class MainWindow : Form
                 return;
             }
 
+            // After an update the taskbar/shortcuts still show the old icon from Windows' cache until told.
+            _ = Task.Run(() => _services.GetRequiredService<Installer>().RefreshIconsOnce());
             await RefreshLicenseAsync();
             _ = StartupSyncAsync();
             _ = SkillLoopAsync();

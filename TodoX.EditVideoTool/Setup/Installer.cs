@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Win32;
 using TodoX.EditVideoTool.Components;
@@ -494,6 +495,56 @@ public sealed class Installer
 
         return desktop ? "Desktop và Start menu" : "Start menu";
     }
+
+    /// <summary>
+    /// An update swaps the exe in place (same path), so Windows keeps showing the old icon on the taskbar, Start menu
+    /// and Desktop from its icon cache. Once per new version, the window app tells Windows the exe and its shortcuts
+    /// changed so the new icon shows.
+    /// </summary>
+    public void RefreshIconsOnce()
+    {
+        try
+        {
+            var marker = Path.Combine(_paths.AppDir, "icon-version.txt");
+            if (File.Exists(marker) && File.ReadAllText(marker).Trim() == StatusService.Version)
+            {
+                return;
+            }
+
+            foreach (var path in ShortcutPaths(desktop: true).Where(File.Exists).Prepend(InstalledExe))
+            {
+                ShellChanged(ShcneUpdateItem, path);
+            }
+
+            ShellChanged(ShcneAssocChanged, null);
+            File.WriteAllText(marker, StatusService.Version);
+        }
+        catch (Exception)
+        {
+            // Only cosmetic; tried again on the next start.
+        }
+    }
+
+    private const int ShcneUpdateItem = 0x00002000, ShcneAssocChanged = 0x08000000;
+
+    private static void ShellChanged(int eventId, string? path)
+    {
+        var text = path is null ? IntPtr.Zero : Marshal.StringToHGlobalUni(path);
+        try
+        {
+            SHChangeNotify(eventId, path is null ? 0x0000 /* SHCNF_IDLIST */ : 0x0005 /* SHCNF_PATHW */, text, IntPtr.Zero);
+        }
+        finally
+        {
+            if (text != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(text);
+            }
+        }
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern void SHChangeNotify(int eventId, int flags, IntPtr item1, IntPtr item2);
 
     /// <summary>At sign-in the exe runs "autostart": checks for updates and skills quietly, then exits.</summary>
     private string SetStartWithWindows(bool on)
