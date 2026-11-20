@@ -103,6 +103,7 @@ public sealed partial class MainWindow : Form
     private bool _syncing;
     private bool _licensed;
     private bool _updateStaged;
+    private string? _updateAsked;
 
     private MainWindow(IServiceProvider services)
     {
@@ -158,7 +159,7 @@ public sealed partial class MainWindow : Form
             await RefreshLicenseAsync();
             _ = StartupSyncAsync();
             _ = SkillLoopAsync();
-            _ = RefreshUpdateBannerAsync();
+            _ = UpdateLoopAsync();
             _ = _services.GetRequiredService<InstallLogUploader>().UploadPendingAsync(_closing.Token);
             await RunHealthAsync();
         };
@@ -1203,7 +1204,54 @@ public sealed partial class MainWindow : Form
         _tips.SetToolTip(_licenseText, tip);
     }
 
-    private async Task RefreshUpdateBannerAsync()
+    /// <summary>While the window stays open: checks TodoX for a newer version now and every 30 minutes.</summary>
+    internal static readonly TimeSpan UpdateCheckEvery = TimeSpan.FromMinutes(30);
+
+    private async Task UpdateLoopAsync()
+    {
+        while (!_closing.IsCancellationRequested)
+        {
+            if (await RefreshUpdateBannerAsync() is { } info)
+            {
+                await AskToUpdateAsync(info);
+            }
+
+            try
+            {
+                await Task.Delay(UpdateCheckEvery, _closing.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Popup once per new version: "Có bản mới ... Cập nhật ngay?". Yes downloads it and reopens the window on the new
+    /// version; No keeps the banner (the person can update later). Not shown over another dialog or a running sync.
+    /// </summary>
+    private async Task AskToUpdateAsync(UpdateInfo info)
+    {
+        if (!UpdatePopup.ShouldAsk(info, _updateAsked) || _syncing || _updateOverlay.Visible || !_updateButton.Enabled
+            || Application.OpenForms.Cast<Form>().Any(f => f != this && f.Visible && f.Modal))
+        {
+            return;
+        }
+
+        _updateAsked = info.Latest;
+        if (MessageBox.Show(this, UpdatePopup.Text(info), "TodoX EditVideo — Có bản cập nhật mới",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+        {
+            await UpdateOrRestartAsync(restartWhenReady: true);
+        }
+        else
+        {
+            Say($"Bản {info.Latest} chưa cài. Bấm \"{_updateButton.Text}\" ở thanh vàng phía trên khi muốn cập nhật.");
+        }
+    }
+
+    private async Task<UpdateInfo?> RefreshUpdateBannerAsync()
     {
         UpdateInfo info;
         try
@@ -1212,13 +1260,13 @@ public sealed partial class MainWindow : Form
         }
         catch (Exception)
         {
-            return;
+            return null;
         }
 
         if (!info.UpdateAvailable)
         {
             _updateBanner.Visible = false;
-            return;
+            return info;
         }
 
         _updateStaged = info.Staged;
@@ -1231,9 +1279,10 @@ public sealed partial class MainWindow : Form
         _updateBanner.BackColor = ColorTranslator.FromHtml(info.BelowMinimum ? "#4A1A1A" : "#3A2E0A");
         _updateBanner.Height = 56;
         _updateBanner.Visible = true;
+        return info;
     }
 
-    private async Task UpdateOrRestartAsync()
+    private async Task UpdateOrRestartAsync(bool restartWhenReady = false)
     {
         if (_updateStaged)
         {
@@ -1264,6 +1313,12 @@ public sealed partial class MainWindow : Form
         {
             _updateOverlay.Hide();
             _updateButton.Enabled = true;
+        }
+
+        // The person already agreed in the popup: open the new version right away.
+        if (restartWhenReady && _updateStaged)
+        {
+            await UpdateOrRestartAsync();
         }
     }
 
