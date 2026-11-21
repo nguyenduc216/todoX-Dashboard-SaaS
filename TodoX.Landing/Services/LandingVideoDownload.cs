@@ -66,6 +66,19 @@ public static class LandingVideoDownload
         catch (CryptographicException) { return false; }
     }
 
+    /// <summary>
+    /// ".../videos/{id}.mp4" → ".../originals/{id}.mp4|.webm": the dashboard keeps the untouched upload there (same
+    /// rule as TodoX.Web MediaOriginals).
+    /// </summary>
+    public static IReadOnlyList<string> OriginalCandidates(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return [];
+        var match = System.Text.RegularExpressions.Regex.Match(url.Split('?', '#')[0], @"^(?<dir>.*)/videos/(?<name>[a-f0-9]{32})\.(mp4|webm)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!match.Success) return [];
+        return new[] { ".mp4", ".webm" }.Select(ext => $"{match.Groups["dir"].Value}/originals/{match.Groups["name"].Value}{ext}").ToList();
+    }
+
     public static string DownloadPath(string sharePath, string? token) =>
         string.IsNullOrEmpty(token) ? sharePath + RouteSuffix : $"{sharePath}{RouteSuffix}?{TokenQuery}={Uri.EscapeDataString(token)}";
 
@@ -75,7 +88,9 @@ public static class LandingVideoDownload
         var allowed = IsFromOwnPage(http.Request)
                       || (protection is not null && IsValidToken(protection, http.Request.Query[TokenQuery].ToString(), slug));
         if (!allowed) return Results.Redirect(pagePath);
-        var file = ResolveFile(videoUrl, media.StorageRoot, media.RequestPath);
+        // The full-quality original kept beside the 720p web copy; older uploads only have the web copy.
+        var file = OriginalCandidates(videoUrl).Select(url => ResolveFile(url, media.StorageRoot, media.RequestPath)).FirstOrDefault(f => f is not null)
+                   ?? ResolveFile(videoUrl, media.StorageRoot, media.RequestPath);
         if (file is null) return Results.Redirect(pagePath);
         var ext = Path.GetExtension(file).ToLowerInvariant();
         http.Response.Headers.CacheControl = "private, no-store";

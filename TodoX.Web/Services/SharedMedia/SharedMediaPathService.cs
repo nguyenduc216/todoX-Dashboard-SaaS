@@ -62,7 +62,7 @@ public sealed class SharedMediaPathService
     public string GetLandingMediaPhysicalFolder(string area, string subfolder)
     {
         if (area is not ("intro" or "short-video" or "video-samples")) throw new ArgumentException("Invalid media area.");
-        if (subfolder is not ("videos" or "posters" or "temp")) throw new ArgumentException("Invalid media folder.");
+        if (subfolder is not ("videos" or "posters" or "temp" or "originals")) throw new ArgumentException("Invalid media folder.");
         return CombineInsideRoot(StorageRoot ?? throw new InvalidOperationException("SharedMedia storage unavailable."), "landing", area, subfolder);
     }
 
@@ -76,7 +76,7 @@ public sealed class SharedMediaPathService
     /// <summary>Videos TodoX produced for a customer (shown under that customer's "Jobs của tôi").</summary>
     public string GetCustomerVideoPhysicalFolder(string subfolder)
     {
-        if (subfolder is not ("videos" or "posters" or "temp")) throw new ArgumentException("Invalid media folder.");
+        if (subfolder is not ("videos" or "posters" or "temp" or "originals")) throw new ArgumentException("Invalid media folder.");
         return CombineInsideRoot(StorageRoot ?? throw new InvalidOperationException("SharedMedia storage unavailable."), "customer-videos", subfolder);
     }
 

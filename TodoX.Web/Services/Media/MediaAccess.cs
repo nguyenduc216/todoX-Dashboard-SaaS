@@ -285,6 +285,12 @@ public static class MediaAccessEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
 
             var fileName = SafeFileName(ticket.FileName);
+            // The full-quality original the admin uploaded, when it was kept beside the web copy.
+            var original = MediaOriginals.Candidates(ticket.Url)
+                .Select(url => TryLocalPath(url, context.Request, config) is { } p ? files.Resolve(p) : null)
+                .FirstOrDefault(p => p is not null);
+            if (original is not null)
+                return Results.File(original, ContentType(original), MediaOriginals.WithExtensionOf(fileName, original), enableRangeProcessing: true);
             var localPath = TryLocalPath(ticket.Url, context.Request, config) is { } urlPath ? files.Resolve(urlPath) : null;
             if (localPath is not null)
                 return Results.File(localPath, ContentType(localPath), fileName, enableRangeProcessing: true);

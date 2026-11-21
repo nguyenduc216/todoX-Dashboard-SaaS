@@ -83,8 +83,10 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
             if (video && transcode.Enabled)
             {
                 // Camera/AI exports are often 1440p+ at ~15 Mbps, more than the landing server can stream smoothly.
+                // The 720p copy is what the sites play; the untouched upload is kept for "Tải xuống".
                 optimized = Path.Combine(temp, token + ".web.mp4");
                 await LandingWebVideoTranscoder.TranscodeAsync(source, optimized, transcode, ct);
+                KeepOriginal(source, paths.GetLandingMediaPhysicalFolder(area, Media.MediaOriginals.Folder), token + ext);
                 File.Move(optimized, Path.Combine(destination, token + ".mp4"));
                 return paths.GetLandingMediaPublicUrl(area, folder, token + ".mp4");
             }
@@ -113,7 +115,23 @@ public sealed class LandingIntroVideoMediaService(SharedMediaPathService paths, 
         var path = Path.Combine(paths.GetLandingMediaPhysicalFolder(LandingVideoSampleRepository.MediaArea, folder), Path.GetFileName(url));
         if (!File.Exists(path)) return false;
         File.Delete(path);
+        if (folder == "videos")
+        {
+            var originals = paths.GetLandingMediaPhysicalFolder(LandingVideoSampleRepository.MediaArea, Media.MediaOriginals.Folder);
+            foreach (var original in Media.MediaOriginals.Candidates(url))
+            {
+                var file = Path.Combine(originals, Path.GetFileName(original));
+                if (File.Exists(file)) File.Delete(file);
+            }
+        }
         return true;
+    }
+
+    /// <summary>Moves the uploaded file into the "originals" folder (full quality, for downloads).</summary>
+    public static void KeepOriginal(string source, string originalsFolder, string fileName)
+    {
+        Directory.CreateDirectory(originalsFolder);
+        File.Move(source, Path.Combine(originalsFolder, fileName), overwrite: true);
     }
 
     /// <summary>Files already uploaded to a landing media area, newest first, so an admin can reuse one instead of uploading again.</summary>

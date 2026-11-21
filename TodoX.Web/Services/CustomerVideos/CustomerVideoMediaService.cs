@@ -9,7 +9,8 @@ public sealed record CustomerVideoLibraryFile(string Url, string FileName, long 
 
 /// <summary>
 /// Uploads the video / poster of a customer video into SharedMedia "customer-videos". Same checks and web
-/// transcode (720p) as landing uploads; files get a random 32-hex name and stay behind the media guard.
+/// transcode (720p) as landing uploads (the original is kept in "originals" for downloads); files get a random
+/// 32-hex name and stay behind the media guard.
 /// </summary>
 public sealed class CustomerVideoMediaService(SharedMediaPathService paths, IOptions<SharedMediaOptions> options, AuthStateService auth)
 {
@@ -74,6 +75,8 @@ public sealed class CustomerVideoMediaService(SharedMediaPathService paths, IOpt
             {
                 optimized = Path.Combine(temp, token + ".web.mp4");
                 await LandingWebVideoTranscoder.TranscodeAsync(source, optimized, transcode, ct);
+                // Customers download the untouched upload; the 720p copy is only for playing on the page.
+                LandingIntroVideoMediaService.KeepOriginal(source, paths.GetCustomerVideoPhysicalFolder(Media.MediaOriginals.Folder), token + ext);
                 File.Move(optimized, Path.Combine(destination, token + ".mp4"));
                 return paths.GetCustomerVideoPublicUrl(folder, token + ".mp4");
             }
