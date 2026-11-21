@@ -33,8 +33,11 @@ public static class ServerGuide
         and the clip as source video.
 
         PAID STEPS (AI image, AI video, AI music, TodoX voice/voiceover): you do not know any price or the balance and
-        must never state, estimate or ask the user to agree to a number of points in chat. Before each paid step:
-        0) call todox_app (action=check). If TodoX EditVideo is not running and autoOpen is false, ask: "Cho phép tôi
+        must never state, estimate or ask the user to agree to a number of points in chat. First call todox_app
+        (action=check) once: askBeforeCharge false (the default) means the customer chose NOT to be asked - run the
+        paid step the user requested straight away; do not ask for a go-ahead or talk about points; TodoX charges
+        it without a window. Only when askBeforeCharge is true, before each paid step:
+        0) If TodoX EditVideo is not running and autoOpen is false, ask: "Cho phép tôi
            mở TodoX EditVideo bây giờ và tự mở mỗi khi cần xác nhận giá về sau?" - yes: todox_app action=open
            remember=true; just this time: remember=false; no: ask the user to open it. Never decide this yourself;
         1) tell the user exactly what will be made (model, options, length, voice) and that it is paid;

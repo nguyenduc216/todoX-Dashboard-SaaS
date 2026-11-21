@@ -69,6 +69,36 @@ public sealed class PriceConsentTests : IDisposable
     }
 
     [Fact]
+    public async Task With_asking_off_the_price_is_accepted_without_a_window()
+    {
+        _client.AskBeforeCharge = () => false;
+        _handler.Replies.Enqueue((HttpStatusCode.Conflict, Quote));
+        _handler.Replies.Enqueue((HttpStatusCode.OK, """{"success":true,"data":{"id":"0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0","status":"running"}}"""));
+
+        var result = await _client.AiCreateAsync("video", new { model = "veo_omni", prompt = "a cat", duration = "8", clientKey = "exe-2" });
+
+        Assert.True(result.Ok);
+        Assert.Empty(_consent.Asked);
+        var second = JsonDocument.Parse(_handler.Requests[1].Body!).RootElement;
+        Assert.Equal("q1", second.GetProperty("confirmQuoteId").GetString());
+        Assert.Equal(TodoXServerClient.NoAskMethod, second.GetProperty("consentMethod").GetString());
+    }
+
+    [Fact]
+    public async Task With_asking_on_the_window_is_shown()
+    {
+        _client.AskBeforeCharge = () => true;
+        _handler.Replies.Enqueue((HttpStatusCode.Conflict, Quote));
+        _handler.Replies.Enqueue((HttpStatusCode.OK, """{"success":true,"data":{"id":"0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0","status":"running"}}"""));
+
+        Assert.True((await _client.AiCreateAsync("video", new { model = "veo_omni", prompt = "a cat", duration = "8", clientKey = "exe-3" })).Ok);
+        Assert.Single(_consent.Asked);
+    }
+
+    [Fact]
+    public void Asking_is_off_by_default() => Assert.False(new UserSettings().AskBeforeCharge);
+
+    [Fact]
     public async Task Refused_price_runs_nothing()
     {
         _consent.Answer = ConsentAnswer.Declined;

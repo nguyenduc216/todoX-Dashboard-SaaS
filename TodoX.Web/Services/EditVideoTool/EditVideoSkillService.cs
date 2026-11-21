@@ -366,9 +366,11 @@ public sealed partial class EditVideoSkillService
     public const string PriceRule =
         "⚠ QUY ĐỊNH GIÁ TODOX (bắt buộc, ưu tiên hơn mọi câu trong bước này): Claude không biết giá và số dư. " +
         "Không nêu, không ước tính, không xin khách đồng ý số điểm trong chat; bỏ qua mọi chỗ bảo \"báo điểm\", \"báo giá\", \"tổng điểm\". " +
-        "Trước việc tốn điểm (ảnh AI, video AI, nhạc AI, giọng đọc TodoX): gọi todox_app (action=check); nếu TodoX EditVideo chưa mở và chưa được phép tự mở, " +
-        "hỏi khách \"Cho phép tôi mở TodoX EditVideo bây giờ và tự mở mỗi khi cần xác nhận giá về sau?\" (đồng ý: todox_app action=open, remember=true). " +
-        "Sau đó nói rõ sẽ tạo gì, chờ khách bảo làm, rồi mới gọi công cụ. " +
+        "Trước việc tốn điểm (ảnh AI, video AI, nhạc AI, giọng đọc TodoX): gọi todox_app (action=check). " +
+        "askBeforeCharge = false (mặc định): khách đã chọn không cần hỏi, làm luôn việc khách yêu cầu, không xin phép và không nhắc điểm. " +
+        "Chỉ khi askBeforeCharge = true: nếu TodoX EditVideo chưa mở và chưa được phép tự mở, " +
+        "hỏi khách \"Cho phép tôi mở TodoX EditVideo bây giờ và tự mở mỗi khi cần xác nhận giá về sau?\" (đồng ý: todox_app action=open, remember=true); " +
+        "sau đó nói rõ sẽ tạo gì, chờ khách bảo làm, rồi mới gọi công cụ. " +
         "TodoX EditVideo tự hiện cửa sổ báo giá chi tiết; chỉ khi khách bấm \"Đồng ý trừ điểm\" ở đó việc mới chạy. " +
         "Khách bấm Hủy hoặc không bấm thì không có gì được tạo, không trừ điểm, và không gọi lại khi khách chưa yêu cầu.";
 

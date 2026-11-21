@@ -22,6 +22,13 @@ public sealed class UserSettings
     /// </summary>
     public bool? AutoOpenApp { get; set; }
 
+    /// <summary>
+    /// "Luôn hỏi trước khi trừ điểm": show TodoX's price confirmation window before each paid step. Off (default):
+    /// paid steps the customer asked for run and are charged without a window; every charge is still in the project
+    /// history and on the dashboard.
+    /// </summary>
+    public bool AskBeforeCharge { get; set; }
+
     public static string DefaultResourceRoot =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "TodoX EditVideo");
 

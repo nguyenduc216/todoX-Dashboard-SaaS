@@ -41,6 +41,12 @@ public sealed class TodoXServerClient
 
     public const string AppNotRunning = "app_not_running";
 
+    /// <summary>The customer's "Luôn hỏi trước khi trừ điểm" setting; null (tests) = always ask.</summary>
+    public Func<bool>? AskBeforeCharge { get; set; }
+
+    /// <summary>How a charge without a window is logged at TodoX (the customer turned asking off).</summary>
+    public const string NoAskMethod = "no_ask_setting";
+
     /// <summary>Shows "points used" when a project allowed its paid commands without asking; null in tests.</summary>
     public INotifier? Notifier { get; set; }
 
@@ -72,7 +78,16 @@ public sealed class TodoXServerClient
             var scope = Projects.PaidScope.Project;
             quote = quote with { Project = scope?.Name };
             string method;
-            if (scope is { } granted && Projects.ProjectHistory.IsGranted(granted.Dir))
+            if (AskBeforeCharge is { } ask && !ask())
+            {
+                // Default: the customer does not want to be asked; charged straight away, kept in the project history.
+                method = NoAskMethod;
+                if (scope is { } quiet)
+                {
+                    Projects.ProjectHistory.Add(quiet.Dir, Entry(quote, Projects.ProjectHistory.Auto));
+                }
+            }
+            else if (scope is { } granted && Projects.ProjectHistory.IsGranted(granted.Dir))
             {
                 // The person allowed every paid command of this project: no window, only a notice of the points used.
                 method = "project_grant";

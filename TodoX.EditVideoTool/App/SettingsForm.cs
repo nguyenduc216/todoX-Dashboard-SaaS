@@ -263,11 +263,28 @@ public sealed class SettingsForm : Form
         page.Controls.Add(updateRow);
 
         page.Controls.Add(Ui.Section("Xác nhận trừ điểm"));
+        var askFirst = new CheckBox
+        {
+            Text = "Luôn hỏi trước khi trừ điểm",
+            AutoSize = true, ForeColor = Ui.Ink, Margin = new Padding(0, 0, 0, 6),
+            Checked = UserSettings.Load(_paths).AskBeforeCharge
+        };
+        page.Controls.Add(askFirst);
+        page.Controls.Add(Ui.Text("Tắt (mặc định): các việc tốn điểm bạn yêu cầu (ảnh/video/nhạc AI, giọng đọc) chạy và trừ điểm luôn, không hỏi. " +
+            "Bật: mỗi lần trừ điểm TodoX hiện cửa sổ báo giá để bạn đồng ý. Điểm đã dùng luôn xem được trong lịch sử dự án và trên Dashboard.", 9.5f, Ui.Muted));
         var autoOpen = new CheckBox
         {
             Text = "Cho phép Claude tự mở TodoX EditVideo khi cần xác nhận trừ điểm",
             AutoSize = true, ForeColor = Ui.Ink, Margin = new Padding(0, 0, 0, 6),
             Checked = UserSettings.Load(_paths).AutoOpenApp == true
+        };
+        autoOpen.Enabled = askFirst.Checked;
+        askFirst.CheckedChanged += (_, _) =>
+        {
+            var current = UserSettings.Load(_paths);
+            current.AskBeforeCharge = askFirst.Checked;
+            current.Save(_paths);
+            autoOpen.Enabled = askFirst.Checked;
         };
         autoOpen.CheckedChanged += (_, _) =>
         {
