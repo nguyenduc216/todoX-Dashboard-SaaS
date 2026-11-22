@@ -1,7 +1,7 @@
 namespace TodoX.EditVideo.Planning;
 
 /// <summary>One step-by-step change to an existing plan, as asked by the assistant through a todox_* tool.</summary>
-public sealed record PlanSceneInput(string Clip, double? From = null, double? Duration = null);
+public sealed record PlanSceneInput(string Clip, double? From = null, double? Duration = null, double? Zoom = null);
 
 public sealed record PlanEdit(
     string Op,
@@ -29,7 +29,13 @@ public sealed record PlanEdit(
     bool? KeepClipAudio = null,
     // look
     string? StyleId = null,
-    string? AccentColor = null);
+    string? AccentColor = null,
+    // headlines (empty list removes them) and logo (true = the media "logo", false = none)
+    IReadOnlyList<PlanHeadline>? Headlines = null,
+    bool? Logo = null,
+    string? LogoCorner = null,
+    // cut: punch-in of that scene
+    double? Zoom = null);
 
 /// <summary>The current signed plan plus the clip metadata it was built from (still only ids and durations).</summary>
 public sealed record PlanEditRequest(string Document, IReadOnlyList<ClipInput> Clips, PlanEdit Edit);
@@ -43,7 +49,9 @@ public static class PlanEditor
     public const double MinSceneSeconds = 0.5;
     public const double MaxTotalSeconds = 600;
     public const int MaxScenes = 300;
-    public static readonly string[] CaptionStyles = ["karaoke", "box", "pop", "plain"];
+    public static readonly string[] CaptionStyles = ["karaoke", "box", "pop", "plain", "tiktok"];
+    public static readonly string[] LogoCorners = ["top-right", "top-left", "bottom-right", "bottom-left"];
+    public const int MaxHeadlines = 60;
     public static readonly string[] Transitions = ["fade", "slide", "mix"];
 
     public static AutoEditPlan Apply(AutoEditPlan plan, IReadOnlyList<ClipInput> clips, PlanEdit edit)
@@ -57,7 +65,9 @@ public static class PlanEditor
             "titles" => SetTitles(plan, edit),
             "audio" => SetAudio(plan, known, edit),
             "look" => SetLook(plan, edit),
-            _ => throw new ArgumentException("Thao tác không hợp lệ. Dùng: cut, arrange, captions, titles, audio, look.")
+            "headlines" => SetHeadlines(plan, edit),
+            "logo" => SetLogo(plan, edit),
+            _ => throw new ArgumentException("Thao tác không hợp lệ. Dùng: cut, arrange, captions, titles, audio, look, headlines, logo.")
         };
 
         if (result.TotalSeconds > MaxTotalSeconds)
@@ -65,11 +75,12 @@ public static class PlanEditor
             throw new ArgumentException($"Video dài tối đa {MaxTotalSeconds / 60:0} phút.");
         }
 
-        // Scenes moved or shortened: keep only captions that still fit inside the video.
+        // Scenes moved or shortened: keep only captions and headlines that still fit inside the video.
         var end = result.TotalSeconds;
         return result with
         {
-            Captions = result.Captions.Where(c => c.Start < end).Select(c => c with { End = Math.Min(c.End, end) }).ToList()
+            Captions = result.Captions.Where(c => c.Start < end).Select(c => c with { End = Math.Min(c.End, end) }).ToList(),
+            Headlines = result.Headlines?.Where(h => h.Start < end).Select(h => h with { End = Math.Min(h.End, end) }).ToList()
         };
     }
 
@@ -83,7 +94,7 @@ public static class PlanEditor
 
         var scene = plan.Clips[index];
         var clips = plan.Clips.ToList();
-        clips[index] = Trim(scene with { From = edit.From ?? scene.From, Duration = edit.Duration ?? scene.Duration }, known);
+        clips[index] = Trim(scene with { From = edit.From ?? scene.From, Duration = edit.Duration ?? scene.Duration, Zoom = ZoomOf(edit.Zoom ?? scene.Zoom) }, known);
         return plan with { Clips = clips };
     }
 
@@ -104,7 +115,7 @@ public static class PlanEditor
                 var source = Source(known, s.Clip);
                 var length = Math.Min(s.Duration ?? Math.Min(source.DurationSeconds, 4), source.DurationSeconds);
                 var from = s.From ?? Math.Max(0, (source.DurationSeconds - length) * 0.4);
-                return Trim(new PlanClip(source.Id, from, length, keepAudio && source.HasAudio), known);
+                return Trim(new PlanClip(source.Id, from, length, keepAudio && source.HasAudio, ZoomOf(s.Zoom ?? 0)), known);
             }).ToList();
         }
 
@@ -223,6 +234,44 @@ public static class PlanEditor
 
         return plan with { Style = style, AccentColor = accent };
     }
+
+    private static AutoEditPlan SetHeadlines(AutoEditPlan plan, PlanEdit edit)
+    {
+        var given = edit.Headlines ?? [];
+        if (given.Count > MaxHeadlines)
+        {
+            throw new ArgumentException($"Tối đa {MaxHeadlines} tiêu đề lớn.");
+        }
+
+        var headlines = given
+            .Where(h => !string.IsNullOrWhiteSpace(h.Text))
+            .Select(h =>
+            {
+                if (h.Start < 0 || h.End <= h.Start || h.End - h.Start > 30)
+                {
+                    throw new ArgumentException($"Tiêu đề \"{h.Text}\": thời gian không hợp lệ ({h.Start}–{h.End}, tối đa 30 giây).");
+                }
+
+                return new PlanHeadline(Limit(h.Text, 60)!, Limit(h.Sub, 80) ?? string.Empty, Math.Round(h.Start, 3), Math.Round(h.End, 3));
+            })
+            .OrderBy(h => h.Start)
+            .ToList();
+        return plan with { Headlines = headlines.Count == 0 ? null : headlines };
+    }
+
+    private static AutoEditPlan SetLogo(AutoEditPlan plan, PlanEdit edit)
+    {
+        if (edit.Logo == false)
+        {
+            return plan with { Logo = null };
+        }
+
+        var corner = edit.LogoCorner is { } c ? OneOf(c, LogoCorners, "Góc logo") : plan.Logo?.Corner ?? "top-right";
+        return plan with { Logo = new PlanLogo("logo", corner) };
+    }
+
+    private static double ZoomOf(double zoom) =>
+        zoom is < 0 or > 0.35 ? throw new ArgumentException("Zoom (phóng to) từ 0 đến 0.35.") : Math.Round(zoom, 3);
 
     private static ClipInput Source(IReadOnlyDictionary<string, ClipInput> known, string id) =>
         known.TryGetValue(id ?? string.Empty, out var c) && c.HasVideo

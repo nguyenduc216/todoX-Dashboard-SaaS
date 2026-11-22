@@ -11,7 +11,14 @@ namespace TodoX.EditVideoTool.Mcp;
 public sealed record SceneSpec(
     [property: Description("Clip id from the timeline (c0, c1…) or the path of another video file to add.")] string Clip,
     [property: Description("Start inside the clip, seconds; omit to let TodoX choose.")] double? From = null,
-    [property: Description("Scene length, seconds; omit to let TodoX choose.")] double? Seconds = null);
+    [property: Description("Scene length, seconds; omit to let TodoX choose.")] double? Seconds = null,
+    [property: Description("Punch-in 0–0.35: cut in closer on this scene (talking-head style, e.g. alternate 0 and 0.18 between sentences); omit for the slow push-in.")] double? Zoom = null);
+
+public sealed record HeadlineSpec(
+    [property: Description("Big headline text (short, upper case reads best), e.g. 'PHƯỚC ĐÔNG NEW CITY'.")] string Text,
+    [property: Description("Start time in the finished video, seconds.")] double Start,
+    [property: Description("End time in the finished video, seconds (at most 30 s after start).")] double End,
+    [property: Description("Optional smaller line under it.")] string? Sub = null);
 
 public sealed record CaptionSpec(
     [property: Description("Caption text.")] string Text,
@@ -98,8 +105,9 @@ public sealed partial class VideoTools
         CancellationToken ct,
         [Description("Start inside the clip, seconds.")] double? from = null,
         [Description("Scene length, seconds.")] double? seconds = null,
+        [Description("Punch-in 0–0.35 for this scene (0 = slow push-in).")] double? zoom = null,
         [Description(EditParam)] string? edit = null) =>
-        ChangeAsync(edit, _ => new { op = "cut", scene, from, duration = seconds }, ct);
+        ChangeAsync(edit, _ => new { op = "cut", scene, from, duration = seconds, zoom }, ct);
 
     [McpServerTool(Name = "todox_join", Destructive = false)]
     [Description("Set the order of scenes: reorder, drop, repeat, or add new video files. Optionally choose the transition between scenes (fade, slide, mix) and its length. Returns the updated timeline.")]
@@ -129,7 +137,7 @@ public sealed partial class VideoTools
                     return $"Không tìm thấy clip \"{s.Clip}\". Dùng mã clip trong timeline (c0, c1…) hoặc đường dẫn file video.";
                 }
 
-                specs.Add(new { clip = id, from = s.From, duration = s.Seconds });
+                specs.Add(new { clip = id, from = s.From, duration = s.Seconds, zoom = s.Zoom });
             }
         }
 
@@ -137,12 +145,12 @@ public sealed partial class VideoTools
     }
 
     [McpServerTool(Name = "todox_caption", Destructive = false)]
-    [Description("Set the on-screen captions: either a script that TodoX splits and times across the video, or exact lines with start/end times. Optionally change the caption look (karaoke, box, pop, plain). Pass an empty script to remove captions. Returns the updated timeline.")]
+    [Description("Set the on-screen captions: either a script that TodoX splits and times across the video, or exact lines with start/end times. Optionally change the caption look (karaoke, box, pop, plain, tiktok). tiktok = big bold white words with a dark outline above the lower third, the spoken word pops; wrap keywords in *stars* to colour them yellow. Pass an empty script to remove captions. Returns the updated timeline.")]
     public Task<string> Caption(
         CancellationToken ct,
         [Description("Text to show as captions, timed automatically; \"\" removes all captions.")] string? script = null,
         [Description("Exact caption lines with times in the finished video (instead of script).")] CaptionSpec[]? captions = null,
-        [Description("Caption look: karaoke, box, pop or plain.")] string? captionStyle = null,
+        [Description("Caption look: karaoke, box, pop, plain or tiktok.")] string? captionStyle = null,
         [Description(EditParam)] string? edit = null) =>
         ChangeAsync(edit, _ => new
         {
@@ -161,6 +169,61 @@ public sealed partial class VideoTools
         [Description("Closing card text, e.g. a call to action; \"\" removes it.")] string? outroText = null,
         [Description(EditParam)] string? edit = null) =>
         ChangeAsync(edit, _ => new { op = "titles", title, subtitle, outroText }, ct);
+
+    [McpServerTool(Name = "todox_headlines", Destructive = false)]
+    [Description("Big on-screen headlines (bold yellow with a red outline, they pop in over the video at the given times — like TikTok/Reels real-estate and talk videos) and the brand logo in a corner. Pass an empty headlines list to remove them, logo \"none\" to remove the logo. Returns the updated timeline.")]
+    public async Task<string> Headlines(
+        CancellationToken ct,
+        [Description("Headlines with times in the finished video; [] removes all.")] HeadlineSpec[]? headlines = null,
+        [Description("Logo image file (.png with transparency is best), or \"none\".")] string? logo = null,
+        [Description("Logo corner: top-right (default), top-left, bottom-right, bottom-left.")] string? logoCorner = null,
+        [Description(EditParam)] string? edit = null)
+    {
+        var project = _edits.Find(edit);
+        if (project is null)
+        {
+            return NoEdit(edit);
+        }
+
+        string? result = null;
+        if (headlines is not null)
+        {
+            result = await ChangeAsync(project, _ => new
+            {
+                op = "headlines",
+                headlines = headlines.Select(h => new { text = h.Text, sub = h.Sub ?? "", start = h.Start, end = h.End })
+            }, ct);
+        }
+
+        if (logo is not null || logoCorner is not null)
+        {
+            bool? on = null;
+            if (IsNone(logo))
+            {
+                on = false;
+                project.Media.Remove("logo");
+            }
+            else if (logo is not null)
+            {
+                var path = Path.GetFullPath(logo);
+                if (!File.Exists(path) || !new[] { ".png", ".jpg", ".jpeg", ".webp" }.Contains(Path.GetExtension(path).ToLowerInvariant()))
+                {
+                    return $"Không tìm thấy ảnh logo (.png/.jpg/.webp): {path}";
+                }
+
+                project.Media["logo"] = path;
+                on = true;
+            }
+            else if (!project.Media.ContainsKey("logo"))
+            {
+                return "Chưa có logo: truyền đường dẫn ảnh logo.";
+            }
+
+            result = await ChangeAsync(project, _ => new { op = "logo", logo = on ?? true, logoCorner }, ct);
+        }
+
+        return result ?? "Không có thay đổi: truyền headlines và/hoặc logo.";
+    }
 
     [McpServerTool(Name = "todox_audio", Destructive = false)]
     [Description("Set the sound: background music file and volume, a voiceover (an audio file, or a TodoX voice reading a script — paid, the user accepts TodoX's price in its confirmation window), and whether the clips' own sound is kept. Use \"none\" to remove music or voiceover. Returns the updated timeline.")]

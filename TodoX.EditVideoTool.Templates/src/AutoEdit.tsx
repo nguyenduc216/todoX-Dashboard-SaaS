@@ -2,6 +2,7 @@ import React from 'react';
 import {
   AbsoluteFill,
   Audio,
+  Img,
   OffthreadVideo,
   interpolate,
   spring,
@@ -11,7 +12,8 @@ import {
 import { TransitionSeries, linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import { slide } from '@remotion/transitions/slide';
-import type { AutoEditProps, Caption, Clip, Style } from './types';
+
+import type { AutoEditProps, Caption, Clip, Headline, Logo, Style } from './types';
 
 const useUnit = () => {
   const { width, height } = useVideoConfig();
@@ -54,7 +56,10 @@ const Outro: React.FC<{ text: string; style: Style; accent: string }> = ({ text,
 const ClipScene: React.FC<{ clip: Clip; fps: number; frames: number; index: number; zoom: number }> = ({ clip, fps, frames, index, zoom }) => {
   const frame = useCurrentFrame();
   const zoomIn = index % 2 === 0;
-  const scale = interpolate(frame, [0, frames], zoomIn ? [1, 1 + zoom] : [1 + zoom, 1], { extrapolateRight: 'clamp' });
+  // A punch-in scene starts closer and drifts a little; otherwise the slow push-in/out.
+  const scale = clip.zoom && clip.zoom > 0
+    ? interpolate(frame, [0, frames], [1 + clip.zoom, 1 + clip.zoom + 0.02], { extrapolateRight: 'clamp' })
+    : interpolate(frame, [0, frames], zoomIn ? [1, 1 + zoom] : [1 + zoom, 1], { extrapolateRight: 'clamp' });
   return (
     <AbsoluteFill style={{ backgroundColor: '#000000', overflow: 'hidden' }}>
       <OffthreadVideo
@@ -65,6 +70,98 @@ const ClipScene: React.FC<{ clip: Clip; fps: number; frames: number; index: numb
       />
     </AbsoluteFill>
   );
+};
+
+/** Words wrapped in *stars* are keywords (coloured); returns the words without the stars. */
+const keywords = (text: string) => {
+  let inside = false;
+  return text.split(/\s+/).filter(Boolean).map((w) => {
+    const opens = w.startsWith('*');
+    const closes = w.endsWith('*') && (w.length > 1 || inside);
+    const hot = inside || opens;
+    if (opens) inside = true;
+    if (closes) inside = false;
+    return { word: w.replace(/\*/g, ''), hot };
+  }).filter((w) => w.word.length > 0);
+};
+
+/** TikTok-style captions: big heavy white words with a dark outline, the spoken word pops, keywords in yellow. */
+const TikTokCaptions: React.FC<{ captions: Caption[]; style: Style; accent: string }> = ({ captions, style }) => {
+  const frame = useCurrentFrame();
+  const { fps, height } = useVideoConfig();
+  const unit = useUnit();
+  const t = frame / fps;
+  const active = captions.find((c) => t >= c.start && t < c.end);
+  if (!active) {
+    return null;
+  }
+
+  const words = keywords(active.text);
+  const progress = (t - active.start) / Math.max(0.01, active.end - active.start);
+  const current = Math.min(words.length - 1, Math.floor(progress * words.length));
+  const enter = spring({ frame: Math.round((t - active.start) * fps), fps, config: { damping: 12, mass: 0.5 } });
+  return (
+    <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: height * 0.26 }}>
+      <div style={{ maxWidth: '88%', textAlign: 'center', fontFamily: `"Segoe UI Black", ${style.fontFamily}`, fontWeight: 900,
+        fontSize: 66 * unit, lineHeight: 1.18, textTransform: 'uppercase', transform: `scale(${0.9 + 0.1 * enter})` }}>
+        {words.map((w, i) => {
+          const pop = i === current ? 1.12 : 1;
+          return (
+            <span key={i} style={{
+              display: 'inline-block', margin: `0 ${8 * unit}px`, transform: `scale(${pop})`,
+              color: w.hot ? '#FFE11A' : '#FFFFFF',
+              WebkitTextStroke: `${9 * unit}px #0B0B0B`, paintOrder: 'stroke fill',
+              textShadow: `0 ${6 * unit}px ${14 * unit}px rgba(0,0,0,0.55)`,
+            }}>{w.word}</span>
+          );
+        })}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+/** Big headlines: heavy yellow letters with a thick red outline, popping in over the video. */
+const Headlines: React.FC<{ headlines: Headline[]; style: Style }> = ({ headlines, style }) => {
+  const frame = useCurrentFrame();
+  const { fps, height } = useVideoConfig();
+  const unit = useUnit();
+  const t = frame / fps;
+  const h = headlines.find((x) => t >= x.start && t < x.end);
+  if (!h) {
+    return null;
+  }
+
+  const local = Math.round((t - h.start) * fps);
+  const pop = spring({ frame: local, fps, config: { damping: 9, mass: 0.7, stiffness: 160 } });
+  const out = interpolate(t, [h.end - 0.2, h.end], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const letters: React.CSSProperties = {
+    fontFamily: `"Segoe UI Black", ${style.fontFamily}`, fontWeight: 900, textTransform: 'uppercase', lineHeight: 1.05,
+    WebkitTextStroke: `${12 * unit}px #D7141A`, paintOrder: 'stroke fill',
+    textShadow: `0 ${8 * unit}px 0 #7A0A0D, 0 ${14 * unit}px ${24 * unit}px rgba(0,0,0,0.5)`,
+  };
+  return (
+    <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'center', paddingTop: height * 0.2 }}>
+      <div style={{ textAlign: 'center', maxWidth: '92%', opacity: out, transform: `scale(${0.4 + 0.6 * pop}) rotate(${(1 - pop) * -6}deg)` }}>
+        <div style={{ ...letters, color: '#FFE11A', fontSize: 104 * unit }}>{h.text}</div>
+        {h.sub ? (
+          <div style={{ display: 'inline-block', marginTop: 18 * unit, background: '#D7141A', color: '#FFFFFF', borderRadius: 14 * unit,
+            padding: `${8 * unit}px ${22 * unit}px`, fontFamily: style.fontFamily, fontWeight: 800, fontSize: 44 * unit, textTransform: 'uppercase' }}>{h.sub}</div>
+        ) : null}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const LogoMark: React.FC<{ logo: Logo }> = ({ logo }) => {
+  const unit = useUnit();
+  const pad = 40 * unit;
+  const pos: React.CSSProperties = {
+    position: 'absolute', width: 190 * unit, height: 120 * unit, objectFit: 'contain',
+    ...(logo.corner.includes('bottom') ? { bottom: pad } : { top: pad }),
+    ...(logo.corner.includes('left') ? { left: pad } : { right: pad }),
+    filter: `drop-shadow(0 ${4 * unit}px ${10 * unit}px rgba(0,0,0,0.45))`,
+  };
+  return <Img src={logo.src} style={pos} />;
 };
 
 /** Captions in the style's look: karaoke (words light up), box, pop (bouncy), plain. */
@@ -147,7 +244,11 @@ export const AutoEdit: React.FC<AutoEditProps> = (p) => {
           </React.Fragment>
         ))}
       </TransitionSeries>
-      <Captions captions={p.captions} style={style} accent={p.accentColor} />
+      {style.captionStyle === 'tiktok'
+        ? <TikTokCaptions captions={p.captions} style={style} accent={p.accentColor} />
+        : <Captions captions={p.captions} style={style} accent={p.accentColor} />}
+      {p.headlines?.length ? <Headlines headlines={p.headlines} style={style} /> : null}
+      {p.logo ? <LogoMark logo={p.logo} /> : null}
       {p.music ? <Audio src={p.music.src} volume={p.voiceover ? p.music.volume * 0.35 : p.music.volume} /> : null}
       {p.voiceover ? <Audio src={p.voiceover.src} volume={p.voiceover.volume} /> : null}
     </AbsoluteFill>

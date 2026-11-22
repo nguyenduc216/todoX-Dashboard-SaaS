@@ -20,7 +20,7 @@ public static class ServerGuide
         The account's AI characters, voices, music and VFX: todox_library. Help / "trợ giúp": skill todox-tro-giup.
 
         Quick result: todox_auto_edit. Step by step: todox_edit_start -> todox_cut (trim a scene),
-        todox_join (order/drop/add clips, transition), todox_caption (captions), todox_titles (intro, closing
+        todox_join (order/drop/add clips, transition), todox_caption (captions), todox_headlines (big headlines, logo), todox_titles (intro, closing
         card), todox_audio (music, voiceover, clip sound), todox_look (style, brand color) -> todox_export.
         todox_timeline shows the numbered scenes; edits are remembered, so later changes apply to the latest one.
         Footage: todox_project_folder / todox_projects / todox_probe. Voice: todox_voice_list, todox_voice_tts.

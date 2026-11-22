@@ -9,7 +9,14 @@ export type Clip = {
   duration: number;
   /** Keep the clip's own sound (otherwise muted under voice/music). */
   keepAudio: boolean;
+  /** Punch-in for this scene (0 = slow push-in/out; 0.1-0.35 = cut in closer). */
+  zoom?: number;
 };
+
+/** Big bold headline over the video (yellow, red outline). */
+export type Headline = { text: string; sub: string; start: number; end: number };
+
+export type Logo = { src: string; corner: string };
 
 export type Caption = {
   text: string;
@@ -24,7 +31,7 @@ export type Style = {
   background: string;
   text: string;
   fontFamily: string;
-  /** karaoke | box | pop | plain */
+  /** karaoke | box | pop | plain | tiktok */
   captionStyle: string;
   /** fade | slide | mix */
   transition: string;
@@ -56,6 +63,8 @@ export type AutoEditProps = {
   music: { src: string; volume: number } | null;
   accentColor: string;
   style: Style;
+  headlines?: Headline[] | null;
+  logo?: Logo | null;
 };
 
 export const defaultProps: AutoEditProps = {
