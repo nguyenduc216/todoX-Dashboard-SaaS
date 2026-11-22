@@ -108,9 +108,9 @@ const TikTokCaptions: React.FC<{ captions: Caption[]; style: Style; accent: stri
           const pop = i === current ? 1.12 : 1;
           return (
             <span key={i} style={{
-              display: 'inline-block', margin: `0 ${8 * unit}px`, transform: `scale(${pop})`,
+              display: 'inline-block', margin: `0 ${14 * unit}px`, transform: `scale(${pop})`,
               color: w.hot ? '#FFE11A' : '#FFFFFF',
-              WebkitTextStroke: `${9 * unit}px #0B0B0B`, paintOrder: 'stroke fill',
+              WebkitTextStroke: `${8 * unit}px #0B0B0B`, paintOrder: 'stroke fill',
               textShadow: `0 ${6 * unit}px ${14 * unit}px rgba(0,0,0,0.55)`,
             }}>{w.word}</span>
           );
@@ -239,7 +239,7 @@ export const AutoEdit: React.FC<AutoEditProps> = (p) => {
       <TransitionSeries>
         {scenes.map((s, i) => (
           <React.Fragment key={s.key}>
-            {i > 0 ? <TransitionSeries.Transition presentation={transitionFor(i)} timing={linearTiming({ durationInFrames: tf })} /> : null}
+            {i > 0 && p.transitionSeconds > 0 ? <TransitionSeries.Transition presentation={transitionFor(i)} timing={linearTiming({ durationInFrames: tf })} /> : null}
             <TransitionSeries.Sequence durationInFrames={s.frames}>{s.node}</TransitionSeries.Sequence>
           </React.Fragment>
         ))}
