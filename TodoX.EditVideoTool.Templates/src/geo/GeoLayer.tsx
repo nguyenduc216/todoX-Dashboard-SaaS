@@ -186,6 +186,12 @@ const Markers: React.FC<{ f: number; cam: Cam; fps: number; p: GeoLayerProps; tl
   const pop = (s: number) => spring({ frame: f - s, fps, config: { damping: 12, stiffness: 140 } });
   const out: React.ReactNode[] = [];
 
+  /** Horizontal shift that keeps a label of this text inside the frame. */
+  const keepInside = (at: LonLat, title: string, sub: string) => {
+    const w = Math.max(title.length * 17, sub.length * 14) + 60;
+    const x = project(at, cam, W, H).sx;
+    return Math.min(W - 28 - w / 2, Math.max(28 + w / 2, x)) - x;
+  };
   // Site pin with its name: shown in the intro and again at the end (hidden while plots are labelled).
   const plotsOn = tl.plots ? interpolate(f, [tl.plots[0], tl.plots[0] + 20], [0, 1], clamp) - interpolate(f, [tl.plots[1] - 10, tl.plots[1] + 10], [0, 1], clamp) : 0;
   const pinIn = pop(22);
@@ -195,7 +201,7 @@ const Markers: React.FC<{ f: number; cam: Cam; fps: number; p: GeoLayerProps; tl
     out.push(
       <Standing key="pin" at={p.site.position} cam={cam} W={W} H={H}>
         <div style={{ opacity: Math.min(1, pinOpacity), transform: `translateY(${(1 - pinIn) * -160}px)`, textAlign: 'center' }}>
-          {showName && <Pill title={p.site.name} sub={p.place} color={p.accent} />}
+          {showName && <div style={{ transform: `translateX(${keepInside(p.site.position, p.site.name, p.place)}px)` }}><Pill title={p.site.name} sub={p.place} color={p.accent} /></div>}
           <svg width="70" height="90" viewBox="-35 -10 70 90" style={{ display: 'block', margin: '4px auto 0' }}>
             <path d="M0,78 C-6,60 -30,44 -30,22 A30,30 0 1 1 30,22 C30,44 6,60 0,78 Z" fill={p.accent} stroke="#fff" strokeWidth="3" />
             <circle cy="22" r="11" fill="#1a1406" />
@@ -255,12 +261,6 @@ const Markers: React.FC<{ f: number; cam: Cam; fps: number; p: GeoLayerProps; tl
     });
   }
 
-  /** Horizontal shift that keeps a label of this text inside the frame. */
-  const keepInside = (at: LonLat, title: string, sub: string) => {
-    const w = Math.max(title.length * 17, sub.length * 14) + 60;
-    const x = project(at, cam, W, H).sx;
-    return Math.min(W - 28 - w / 2, Math.max(28 + w / 2, x)) - x;
-  };
   if (tl.routes) {
     const [a] = tl.routes;
     p.routes.forEach((r, i) => {
