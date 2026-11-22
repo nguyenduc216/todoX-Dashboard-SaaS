@@ -46,4 +46,8 @@ public sealed class PlanHighlightsTests
     [Fact]
     public void Tiktok_is_a_caption_style() =>
         Assert.Equal("tiktok", PlanEditor.Apply(Plan(), Clips, new PlanEdit("captions", CaptionStyle: "tiktok")).Style.CaptionStyle);
+
+    [Fact]
+    public void Sparkle_is_a_caption_style() =>
+        Assert.Equal("sparkle", PlanEditor.Apply(Plan(), Clips, new PlanEdit("captions", CaptionStyle: "sparkle")).Style.CaptionStyle);
 }

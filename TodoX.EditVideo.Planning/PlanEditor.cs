@@ -49,7 +49,7 @@ public static class PlanEditor
     public const double MinSceneSeconds = 0.5;
     public const double MaxTotalSeconds = 600;
     public const int MaxScenes = 300;
-    public static readonly string[] CaptionStyles = ["karaoke", "box", "pop", "plain", "tiktok"];
+    public static readonly string[] CaptionStyles = ["karaoke", "box", "pop", "plain", "tiktok", "sparkle"];
     public static readonly string[] LogoCorners = ["top-right", "top-left", "bottom-right", "bottom-left"];
     public const int MaxHeadlines = 60;
     public static readonly string[] Transitions = ["fade", "slide", "mix"];

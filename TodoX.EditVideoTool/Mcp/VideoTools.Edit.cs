@@ -145,12 +145,12 @@ public sealed partial class VideoTools
     }
 
     [McpServerTool(Name = "todox_caption", Destructive = false)]
-    [Description("Set the on-screen captions: either a script that TodoX splits and times across the video, or exact lines with start/end times. Optionally change the caption look (karaoke, box, pop, plain, tiktok). tiktok = big bold white words with a dark outline above the lower third, the spoken word pops; wrap keywords in *stars* to colour them yellow. Pass an empty script to remove captions. Returns the updated timeline.")]
+    [Description("Set the on-screen captions: either a script that TodoX splits and times across the video, or exact lines with start/end times. Optionally change the caption look (karaoke, box, pop, plain, tiktok, sparkle). tiktok = big bold white words with a dark outline above the lower third, the spoken word pops. sparkle = each line in a white sticker box with a dark border and coloured shadow, keywords on a yellow marker, gold stars twinkling around it (best for short social videos). In tiktok and sparkle, wrap keywords in *stars* to highlight them. Pass an empty script to remove captions. Returns the updated timeline.")]
     public Task<string> Caption(
         CancellationToken ct,
         [Description("Text to show as captions, timed automatically; \"\" removes all captions.")] string? script = null,
         [Description("Exact caption lines with times in the finished video (instead of script).")] CaptionSpec[]? captions = null,
-        [Description("Caption look: karaoke, box, pop, plain or tiktok.")] string? captionStyle = null,
+        [Description("Caption look: karaoke, box, pop, plain, tiktok or sparkle.")] string? captionStyle = null,
         [Description(EditParam)] string? edit = null) =>
         ChangeAsync(edit, _ => new
         {

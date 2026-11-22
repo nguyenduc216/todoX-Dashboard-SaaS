@@ -120,6 +120,86 @@ const TikTokCaptions: React.FC<{ captions: Caption[]; style: Style; accent: stri
   );
 };
 
+/** A 4-point twinkle star. */
+const Star: React.FC<{ size: number; color: string }> = ({ size, color }) => (
+  <svg width={size} height={size} viewBox="-10 -10 20 20" style={{ overflow: 'visible' }}>
+    <path d="M0,-10 C1,-2 2,-1 10,0 C2,1 1,2 0,10 C-1,2 -2,1 -10,0 C-2,-1 -1,-2 0,-10 Z" fill={color} />
+  </svg>
+);
+
+const seeded = (n: number) => {
+  const x = Math.sin(n * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+};
+
+/**
+ * Sparkle captions: each line sits in a white sticker box with a dark border and a coloured offset shadow, pops in with a
+ * small tilt; *keywords* get a yellow marker box; the spoken word grows; gold and white stars twinkle around the box.
+ */
+const SparkleCaptions: React.FC<{ captions: Caption[]; style: Style; accent: string }> = ({ captions, style, accent }) => {
+  const frame = useCurrentFrame();
+  const { fps, height } = useVideoConfig();
+  const unit = useUnit();
+  const t = frame / fps;
+  const index = captions.findIndex((c) => t >= c.start && t < c.end);
+  if (index < 0) {
+    return null;
+  }
+
+  const active = captions[index];
+  const words = keywords(active.text);
+  const local = Math.round((t - active.start) * fps);
+  const progress = (t - active.start) / Math.max(0.01, active.end - active.start);
+  const current = Math.min(words.length - 1, Math.floor(progress * words.length));
+  const pop = spring({ frame: local, fps, config: { damping: 11, mass: 0.55, stiffness: 170 } });
+  const tilt = (index % 2 === 0 ? -1.6 : 1.6) * (0.4 + 0.6 * pop);
+  const shadow = accent && accent.toUpperCase() !== '#FFFFFF' ? accent : '#FFE11A';
+
+  // Stars around the box: positions are stable per caption line, each twinkles on its own phase.
+  const stars = Array.from({ length: 6 }, (_, i) => {
+    const r = seeded(index * 7.31 + i * 3.17);
+    const side = i % 2 === 0 ? -1 : 1;
+    const x = 50 + side * (44 + r * 8);            // % from left: just outside the left/right edge
+    const y = [-18, 50, 112][Math.floor(i / 2)] + (r - 0.5) * 24; // % from top: above, middle, below
+    const phase = seeded(i * 5.7 + index) * Math.PI * 2;
+    const tw = 0.5 + 0.5 * Math.sin(t * 7 + phase);
+    const size = (26 + r * 30) * unit * (0.55 + 0.45 * tw) * pop;
+    const color = i % 3 === 1 ? '#FFFFFF' : '#FFD84A';
+    return (
+      <div key={i} style={{ position: 'absolute', left: `${x}%`, top: `${y}%`, transform: `translate(-50%, -50%) rotate(${t * 60 + i * 40}deg)`,
+        opacity: 0.35 + 0.65 * tw, filter: `drop-shadow(0 0 ${10 * unit}px ${color})` }}>
+        <Star size={size} color={color} />
+      </div>
+    );
+  });
+
+  return (
+    <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: height * 0.22 }}>
+      <div style={{ position: 'relative', maxWidth: '86%', transform: `scale(${0.55 + 0.45 * pop}) rotate(${tilt}deg)` }}>
+        <div style={{
+          background: 'linear-gradient(180deg, #FFFFFF 0%, #FFF7DA 100%)', border: `${6 * unit}px solid #111111`, borderRadius: 26 * unit,
+          boxShadow: `${10 * unit}px ${12 * unit}px 0 ${shadow}, 0 ${18 * unit}px ${30 * unit}px rgba(0,0,0,0.45)`,
+          padding: `${14 * unit}px ${26 * unit}px`, textAlign: 'center', lineHeight: 1.3,
+          fontFamily: `"Segoe UI Black", ${style.fontFamily}`, fontWeight: 900, fontSize: 58 * unit, textTransform: 'uppercase', color: '#111111',
+        }}>
+          {words.map((w, i) => {
+            const on = i === current;
+            return (
+              <span key={i} style={{
+                display: 'inline-block', margin: `${4 * unit}px ${13 * unit}px`, padding: w.hot ? `0 ${12 * unit}px` : 0,
+                background: w.hot ? '#FFE11A' : 'transparent', borderRadius: 12 * unit,
+                boxShadow: w.hot ? `inset 0 -${6 * unit}px 0 rgba(215,20,26,0.25)` : undefined,
+                color: w.hot ? '#C8102E' : '#111111', transform: `scale(${on ? 1.12 : 1}) rotate(${w.hot ? -2 : 0}deg)`,
+              }}>{w.word}</span>
+            );
+          })}
+        </div>
+        {stars}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
 /** Big headlines: heavy yellow letters with a thick red outline, popping in over the video. */
 const Headlines: React.FC<{ headlines: Headline[]; style: Style }> = ({ headlines, style }) => {
   const frame = useCurrentFrame();
@@ -246,7 +326,9 @@ export const AutoEdit: React.FC<AutoEditProps> = (p) => {
       </TransitionSeries>
       {style.captionStyle === 'tiktok'
         ? <TikTokCaptions captions={p.captions} style={style} accent={p.accentColor} />
-        : <Captions captions={p.captions} style={style} accent={p.accentColor} />}
+        : style.captionStyle === 'sparkle'
+          ? <SparkleCaptions captions={p.captions} style={style} accent={p.accentColor} />
+          : <Captions captions={p.captions} style={style} accent={p.accentColor} />}
       {p.headlines?.length ? <Headlines headlines={p.headlines} style={style} /> : null}
       {p.logo ? <LogoMark logo={p.logo} /> : null}
       {p.music ? <Audio src={p.music.src} volume={p.voiceover ? p.music.volume * 0.35 : p.music.volume} /> : null}
