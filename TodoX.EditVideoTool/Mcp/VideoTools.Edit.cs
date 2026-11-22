@@ -15,6 +15,17 @@ public sealed record SceneSpec(
     [property: Description("Punch-in 0–0.35: cut in closer on this scene (talking-head style, e.g. alternate 0 and 0.18 between sentences); omit for the slow push-in.")] double? Zoom = null,
     [property: Description("Effect on the cut into this scene: flash (white blink), whip (fast swipe with a light streak), zoom (blurred zoom punch), shake; none removes it. Use on a few cuts only (every 3-5 scenes, at topic changes), not on every cut; the timing of the video does not change.")] string? Fx = null);
 
+/// <summary>A cutaway for todox_broll: picture from another clip shown over the main scenes for a while.</summary>
+public sealed record BrollSpec(
+    [property: Description("Clip id from the timeline (c0, c1…) or the path of a video file (footage, a map video from todox_geo_video, a customer's edited video).")] string Clip,
+    [property: Description("When the cutaway appears in the finished video, seconds (match it to the words it illustrates).")] double At,
+    [property: Description("How long it stays on screen, seconds (at least 0.3).")] double Seconds,
+    [property: Description("Start inside the cutaway clip, seconds (default 0).")] double? From = null,
+    [property: Description("Playback speed 0.25–4 (default 1); e.g. 1.3–2 to fit a map flight or a long shot into a short sentence.")] double? Speed = null,
+    [property: Description("Crop away burned-in text: none (default), top = keep the upper part (text at the bottom), bottom = keep the lower part (text at the top), center.")] string? Crop = null,
+    [property: Description("Share of the picture height kept when cropping, 0.5–1 (default 0.75).")] double? Keep = null,
+    [property: Description("Effect on the cut into the cutaway: flash, whip, zoom, shake (a few only, at topic changes).")] string? Fx = null);
+
 public sealed record HeadlineSpec(
     [property: Description("Big headline text (short, upper case reads best), e.g. 'PHƯỚC ĐÔNG NEW CITY'.")] string Text,
     [property: Description("Start time in the finished video, seconds.")] double Start,
@@ -161,6 +172,59 @@ public sealed partial class VideoTools
             captions = captions?.Select(c => new { text = c.Text, start = c.Start, end = c.End }),
             captionStyle
         }, ct);
+
+    [McpServerTool(Name = "todox_broll", Destructive = false)]
+    [Description("Cutaways (B-roll) over the main scenes: show picture from other clips (project footage, map videos from todox_geo_video, parts of the customer's edited videos) while the main scenes keep playing underneath, so the speaker's voice runs on unbroken. Pass the full list each time; [] removes all. Each cutaway can be cropped to drop burned-in text, sped up, and get a cut effect. TodoX moves a cutaway's start by up to 0.6 s when it would begin or end on a shot change of its source. For talking-head videos keep the clips' own sound (todox_audio keepClipAudio=true) and cover most sentences that name a place, a number or a thing with matching footage. Returns the updated timeline.")]
+    public async Task<string> Broll(
+        CancellationToken ct,
+        [Description("All cutaways, with times in the finished video; [] removes all.")] BrollSpec[] broll,
+        [Description("Nudge starts off shot changes (default true).")] bool avoidShotCuts = true,
+        [Description(EditParam)] string? edit = null)
+    {
+        var project = _edits.Find(edit);
+        if (project is null)
+        {
+            return NoEdit(edit);
+        }
+
+        var specs = new List<object>();
+        var moved = new List<string>();
+        foreach (var b in broll ?? [])
+        {
+            var id = project.Clips.Any(c => c.Id == b.Clip) ? b.Clip : await AddClipAsync(project, b.Clip, ct);
+            var clip = project.Clips.FirstOrDefault(c => c.Id == id);
+            if (clip is null)
+            {
+                return $"Không tìm thấy clip \"{b.Clip}\". Dùng mã clip trong timeline (c0, c1…) hoặc đường dẫn file video.";
+            }
+
+            var from = b.From ?? 0;
+            if (avoidShotCuts && clip.HasVideo)
+            {
+                var used = b.Seconds * (b.Speed ?? 1);
+                var scanFrom = Math.Max(0, from - ClipNormalizer.ShotNudge);
+                try
+                {
+                    var cuts = (await _normalizer.ShotCutsAsync(clip.Path, scanFrom, used + 2 * ClipNormalizer.ShotNudge, ct)).Select(c => c + scanFrom).ToList();
+                    var better = ClipNormalizer.AvoidShotCuts(from, used, clip.Seconds, cuts);
+                    if (Math.Abs(better - from) > 0.001)
+                    {
+                        moved.Add($"giây {b.At:0.##}: {from:0.##}s → {better:0.##}s");
+                        from = better;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // keep the given start; the cutaway still works
+                }
+            }
+
+            specs.Add(new { clip = id, at = b.At, seconds = b.Seconds, from, speed = b.Speed, crop = b.Crop, keep = b.Keep, fx = b.Fx });
+        }
+
+        var result = await ChangeAsync(project, _ => new { op = "broll", overlays = specs }, ct);
+        return moved.Count == 0 ? result : result + "\nĐã dời điểm bắt đầu để tránh dính cảnh khác: " + string.Join("; ", moved);
+    }
 
     [McpServerTool(Name = "todox_titles", Destructive = false)]
     [Description("Set the intro title/subtitle and the closing card text. Pass \"\" to remove the intro (title) or the closing card (outroText). Returns the updated timeline.")]
@@ -492,7 +556,20 @@ public sealed partial class VideoTools
             clipsReady.Add(clip with { Src = await _normalizer.PrepareAsync(info, ct) });
         }
 
-        plan = plan with { Clips = clipsReady };
+        var overlaysReady = new List<PlanOverlay>();
+        foreach (var overlay in plan.Overlays ?? [])
+        {
+            var info = await _probe.ProbeAsync(overlay.Src, ct);
+            if (ClipNormalizer.NeedsProxy(info))
+            {
+                Report(progress, baseProgress + 3, $"Chuẩn hóa clip {Path.GetFileName(info.Path)}");
+                proxied++;
+            }
+
+            overlaysReady.Add(overlay with { Src = await _normalizer.PrepareAsync(info, ct) });
+        }
+
+        plan = plan with { Clips = clipsReady, Overlays = overlaysReady.Count == 0 ? null : overlaysReady };
         session.Info("export", null, new { edit = project.Id, scenes = plan.Clips.Count, plan.TotalSeconds, style = plan.Style.Id, proxied, project.Aspect });
 
         var outPath = output ?? Path.Combine(OutputFolder(project), $"todox-{DateTime.Now:yyyyMMdd-HHmmss}-{project.Aspect.Replace(':', 'x')}.mp4");
@@ -639,6 +716,18 @@ public sealed partial class VideoTools
                 seconds = Math.Round(c.Duration, 2),
                 startsAt = starts[i],
                 clipSound = c.KeepAudio
+            }),
+            broll = plan.Overlays?.Select(o => new
+            {
+                clip = o.Src,
+                file = files.TryGetValue(o.Src, out var f) ? Path.GetFileName(f.Path) : o.Src,
+                at = Math.Round(o.Start, 2),
+                seconds = Math.Round(o.Duration, 2),
+                from = Math.Round(o.From, 2),
+                o.Speed,
+                o.Crop,
+                o.Keep,
+                o.Fx
             }),
             outro = plan.Outro is null ? null : new { plan.Outro.Text, plan.Outro.Seconds },
             captions = plan.Captions.Select(c => new { c.Text, start = Math.Round(c.Start, 2), end = Math.Round(c.End, 2) }),

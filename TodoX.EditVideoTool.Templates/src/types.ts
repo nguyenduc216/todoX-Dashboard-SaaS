@@ -15,6 +15,24 @@ export type Clip = {
   fx?: string;
 };
 
+/**
+ * Cutaway (B-roll) shown over the main scenes from `start` for `duration` seconds; picture only, so the main scenes'
+ * sound (the speaker's voice) runs on underneath.
+ */
+export type Overlay = {
+  src: string;
+  from: number;
+  start: number;
+  duration: number;
+  /** Playback speed (1 = normal). */
+  speed?: number;
+  /** none | top (keep the upper part) | bottom (keep the lower part) | center. */
+  crop?: string;
+  /** Share of the picture height kept by the crop (0.5-1). */
+  keep?: number;
+  fx?: string;
+};
+
 /** Big bold headline over the video (yellow, red outline). */
 export type Headline = { text: string; sub: string; start: number; end: number };
 
@@ -67,6 +85,7 @@ export type AutoEditProps = {
   style: Style;
   headlines?: Headline[] | null;
   logo?: Logo | null;
+  overlays?: Overlay[] | null;
 };
 
 export const defaultProps: AutoEditProps = {

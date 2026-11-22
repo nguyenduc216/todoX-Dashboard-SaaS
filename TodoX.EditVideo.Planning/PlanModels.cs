@@ -29,6 +29,16 @@ public sealed record PlanRequest(
 /// <param name="Zoom">Punch-in for this scene (0 = the slow push-in/out; 0.1-0.3 = cut in closer, talking-head style).</param>
 /// <param name="Fx">Effect on the cut into this scene: flash, whip, zoom, shake; null = plain cut.</param>
 public sealed record PlanClip(string Src, double From, double Duration, bool KeepAudio, double Zoom = 0, string? Fx = null);
+/// <summary>
+/// A cutaway (B-roll) shown over the main scenes from <paramref name="Start"/> for <paramref name="Duration"/> seconds of
+/// the finished video. Picture only: the main scenes keep playing underneath, so the speaker's voice runs on unbroken.
+/// </summary>
+/// <param name="From">Start inside the cutaway clip, seconds.</param>
+/// <param name="Speed">Playback speed of the cutaway (0.25-4; e.g. 1.5 to fit a map flight into a short sentence).</param>
+/// <param name="Crop">none, top (keep the upper part), bottom (keep the lower part) or center: drops burned-in text.</param>
+/// <param name="Keep">Share of the picture height kept by the crop (0.5-1).</param>
+/// <param name="Fx">Effect on the cut into the cutaway: flash, whip, zoom, shake; null = plain cut.</param>
+public sealed record PlanOverlay(string Src, double From, double Start, double Duration, double Speed = 1, string Crop = "none", double Keep = 1, string? Fx = null);
 /// <summary>A big on-screen headline (bold yellow with a red outline) shown over the video for a while.</summary>
 public sealed record PlanHeadline(string Text, string Sub, double Start, double End);
 /// <summary>The brand logo in a corner; Src is the media id "logo".</summary>
@@ -63,7 +73,8 @@ public sealed record AutoEditPlan(
     string AccentColor,
     PlanStyle Style,
     IReadOnlyList<PlanHeadline>? Headlines = null,
-    PlanLogo? Logo = null)
+    PlanLogo? Logo = null,
+    IReadOnlyList<PlanOverlay>? Overlays = null)
 {
     public double TotalSeconds
     {

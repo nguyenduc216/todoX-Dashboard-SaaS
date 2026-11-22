@@ -78,6 +78,43 @@ public sealed class ClipNormalizer
         return Path.GetFullPath(output);
     }
 
+    /// <summary>
+    /// Shot changes inside [from, from + seconds] of a video, in seconds from <paramref name="from"/>. Used so a cutaway
+    /// taken from an edited video does not flash a frame or two of the neighbouring shot.
+    /// </summary>
+    public async Task<IReadOnlyList<double>> ShotCutsAsync(string path, double from, double seconds, CancellationToken ct = default)
+    {
+        var log = await RunFfmpegAsync(["-hide_banner", "-ss", Num(from), "-i", path, "-t", Num(seconds), "-an",
+            "-vf", "scale=320:-2,select='gt(scene,0.25)',showinfo", "-f", "null", "-"], ct, captureError: true);
+        return System.Text.RegularExpressions.Regex.Matches(log, @"pts_time:([0-9.]+)")
+            .Select(m => double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Picks a start near <paramref name="from"/> (at most <see cref="ShotNudge"/> s away) so the cutaway does not begin
+    /// or end on a shot change: none in its first 0.45 s or last 0.35 s. <paramref name="cuts"/> are absolute times in
+    /// the clip. Returns <paramref name="from"/> when it is already clean or nothing nearby is.
+    /// </summary>
+    public static double AvoidShotCuts(double from, double used, double clipSeconds, IReadOnlyList<double> cuts)
+    {
+        bool Bad(double s) => cuts.Any(c => (c > s && c < s + 0.45) || (c > s + used - 0.35 && c < s + used));
+        if (!Bad(from))
+        {
+            return from;
+        }
+
+        var candidates = cuts.SelectMany(c => new[] { c + 0.05, c - used - 0.05 })
+            .Where(s => s >= 0 && s + used <= clipSeconds && Math.Abs(s - from) <= ShotNudge && !Bad(s))
+            .OrderBy(s => Math.Abs(s - from))
+            .ToList();
+        return candidates.Count > 0 ? Math.Round(candidates[0], 3) : from;
+    }
+
+    public const double ShotNudge = 0.6;
+
+    private static string Num(double v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
     private async Task<string> PickEncoderAsync(CancellationToken ct)
     {
         if (_encoder is not null)
@@ -103,7 +140,7 @@ public sealed class ClipNormalizer
         return _encoder = "mpeg4";
     }
 
-    private async Task<string> RunFfmpegAsync(IReadOnlyList<string> args, CancellationToken ct, bool captureOutput = false)
+    private async Task<string> RunFfmpegAsync(IReadOnlyList<string> args, CancellationToken ct, bool captureOutput = false, bool captureError = false)
     {
         var ffmpeg = _components.Locate("ffmpeg");
         if (!ffmpeg.Installed)
@@ -131,6 +168,6 @@ public sealed class ClipNormalizer
             throw new InvalidOperationException("Bộ xử lý video báo lỗi: " + (err.Length > 400 ? err[^400..] : err));
         }
 
-        return captureOutput ? await stdout : string.Empty;
+        return captureError ? await stderr : captureOutput ? await stdout : string.Empty;
     }
 }

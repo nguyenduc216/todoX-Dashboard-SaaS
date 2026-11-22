@@ -3,6 +3,9 @@ namespace TodoX.EditVideo.Planning;
 /// <summary>One step-by-step change to an existing plan, as asked by the assistant through a todox_* tool.</summary>
 public sealed record PlanSceneInput(string Clip, double? From = null, double? Duration = null, double? Zoom = null, string? Fx = null);
 
+/// <summary>A cutaway asked for by the assistant: clip id, when it appears in the video and for how long.</summary>
+public sealed record PlanOverlayInput(string Clip, double At, double Seconds, double? From = null, double? Speed = null, string? Crop = null, double? Keep = null, string? Fx = null);
+
 public sealed record PlanEdit(
     string Op,
     // cut
@@ -36,7 +39,9 @@ public sealed record PlanEdit(
     string? LogoCorner = null,
     // cut: punch-in of that scene and the effect on the cut into it ("none" removes it)
     double? Zoom = null,
-    string? Fx = null);
+    string? Fx = null,
+    // broll: the full list of cutaways (empty list removes them)
+    IReadOnlyList<PlanOverlayInput>? Overlays = null);
 
 /// <summary>The current signed plan plus the clip metadata it was built from (still only ids and durations).</summary>
 public sealed record PlanEditRequest(string Document, IReadOnlyList<ClipInput> Clips, PlanEdit Edit);
@@ -54,6 +59,9 @@ public static class PlanEditor
     public static readonly string[] LogoCorners = ["top-right", "top-left", "bottom-right", "bottom-left"];
     public const int MaxHeadlines = 60;
     public static readonly string[] Transitions = ["fade", "slide", "mix"];
+    public static readonly string[] Crops = ["none", "top", "bottom", "center"];
+    public const int MaxOverlays = 200;
+    public const double MinOverlaySeconds = 0.3;
 
     public static AutoEditPlan Apply(AutoEditPlan plan, IReadOnlyList<ClipInput> clips, PlanEdit edit)
     {
@@ -68,7 +76,8 @@ public static class PlanEditor
             "look" => SetLook(plan, edit),
             "headlines" => SetHeadlines(plan, edit),
             "logo" => SetLogo(plan, edit),
-            _ => throw new ArgumentException("Thao tác không hợp lệ. Dùng: cut, arrange, captions, titles, audio, look, headlines, logo.")
+            "broll" => SetOverlays(plan, known, edit),
+            _ => throw new ArgumentException("Thao tác không hợp lệ. Dùng: cut, arrange, captions, titles, audio, look, headlines, logo, broll.")
         };
 
         if (result.TotalSeconds > MaxTotalSeconds)
@@ -81,7 +90,9 @@ public static class PlanEditor
         return result with
         {
             Captions = result.Captions.Where(c => c.Start < end).Select(c => c with { End = Math.Min(c.End, end) }).ToList(),
-            Headlines = result.Headlines?.Where(h => h.Start < end).Select(h => h with { End = Math.Min(h.End, end) }).ToList()
+            Headlines = result.Headlines?.Where(h => h.Start < end).Select(h => h with { End = Math.Min(h.End, end) }).ToList(),
+            Overlays = result.Overlays?.Where(o => o.Start < end - MinOverlaySeconds)
+                .Select(o => o with { Duration = Math.Round(Math.Min(o.Duration, end - o.Start), 3) }).ToList() is { Count: > 0 } kept ? kept : null
         };
     }
 
@@ -258,6 +269,57 @@ public static class PlanEditor
             .OrderBy(h => h.Start)
             .ToList();
         return plan with { Headlines = headlines.Count == 0 ? null : headlines };
+    }
+
+    private static AutoEditPlan SetOverlays(AutoEditPlan plan, IReadOnlyDictionary<string, ClipInput> known, PlanEdit edit)
+    {
+        var given = edit.Overlays ?? [];
+        if (given.Count > MaxOverlays)
+        {
+            throw new ArgumentException($"Tối đa {MaxOverlays} cảnh chen.");
+        }
+
+        var overlays = given.Select(o =>
+        {
+            var source = Source(known, o.Clip);
+            var speed = o.Speed ?? 1;
+            if (speed is < 0.25 or > 4)
+            {
+                throw new ArgumentException("Tốc độ cảnh chen từ 0.25 đến 4.");
+            }
+
+            if (o.At < 0 || o.Seconds < MinOverlaySeconds)
+            {
+                throw new ArgumentException($"Cảnh chen ở giây {o.At:0.##}: thời điểm phải ≥ 0 và dài ít nhất {MinOverlaySeconds}s.");
+            }
+
+            var from = o.From ?? 0;
+            var used = o.Seconds * speed;
+            if (from < 0 || from + used > source.DurationSeconds + 0.05)
+            {
+                throw new ArgumentException($"Cảnh chen từ clip {o.Clip}: đoạn {from:0.##}s + {used:0.##}s vượt quá độ dài clip ({source.DurationSeconds:0.##}s).");
+            }
+
+            var keep = o.Keep ?? (o.Crop is null or "none" ? 1 : 0.75);
+            if (keep is < 0.5 or > 1)
+            {
+                throw new ArgumentException("Phần giữ lại khi cắt khung (keep) từ 0.5 đến 1.");
+            }
+
+            var crop = OneOf(o.Crop ?? "none", Crops, "Cắt khung");
+            return new PlanOverlay(source.Id, Math.Round(from, 3), Math.Round(o.At, 3), Math.Round(o.Seconds, 3), Math.Round(speed, 3),
+                crop, crop == "none" ? 1 : Math.Round(keep, 3), FxOf(o.Fx));
+        }).OrderBy(o => o.Start).ToList();
+
+        for (var i = 1; i < overlays.Count; i++)
+        {
+            if (overlays[i].Start < overlays[i - 1].Start + overlays[i - 1].Duration - 0.01)
+            {
+                throw new ArgumentException($"Hai cảnh chen chồng lên nhau ở giây {overlays[i].Start:0.##}.");
+            }
+        }
+
+        return plan with { Overlays = overlays.Count == 0 ? null : overlays };
     }
 
     private static AutoEditPlan SetLogo(AutoEditPlan plan, PlanEdit edit)

@@ -22,6 +22,8 @@ public static class ServerGuide
         Quick result: todox_auto_edit. Step by step: todox_edit_start -> todox_cut (trim a scene),
         todox_join (order/drop/add clips, transition), todox_caption (captions), todox_headlines (big headlines, logo), todox_titles (intro, closing
         card), todox_audio (music, voiceover, clip sound), todox_look (style, brand color) -> todox_export.
+        Cutaways (B-roll) over a talking head with the voice running on: todox_broll (crop away burned-in text, speed,
+        cut effects flash/whip/zoom/shake; also on scenes via todox_cut fx). Skill todox-bds-chia-se-canh-chen.
         todox_timeline shows the numbered scenes; edits are remembered, so later changes apply to the latest one.
         Footage: todox_project_folder / todox_projects / todox_probe. Voice: todox_voice_list, todox_voice_tts.
         AI images/videos (paid): todox_ai_models first, then todox_image_create / todox_video_create;

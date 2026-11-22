@@ -6,6 +6,7 @@ namespace TodoX.EditVideoTool.Media;
 // Shape of the edit plan TodoX's server returns (TodoX.EditVideo.Planning). The exe only reads it: deciding the
 // cuts, lengths and caption timing happens on the server.
 public sealed record PlanClip(string Src, double From, double Duration, bool KeepAudio, double Zoom = 0, string? Fx = null);
+public sealed record PlanOverlay(string Src, double From, double Start, double Duration, double Speed = 1, string Crop = "none", double Keep = 1, string? Fx = null);
 public sealed record PlanHeadline(string Text, string Sub, double Start, double End);
 public sealed record PlanLogo(string Src, string Corner);
 public sealed record PlanCaption(string Text, double Start, double End);
@@ -29,7 +30,8 @@ public sealed record AutoEditPlan(
     PlanStyle Style,
     double TotalSeconds,
     IReadOnlyList<PlanHeadline>? Headlines = null,
-    PlanLogo? Logo = null);
+    PlanLogo? Logo = null,
+    IReadOnlyList<PlanOverlay>? Overlays = null);
 
 public static class PlanDocument
 {
@@ -54,7 +56,8 @@ public static class PlanDocument
             Clips = plan.Clips.Select(c => c with { Src = Local(c.Src) }).ToList(),
             Voiceover = plan.Voiceover is null ? null : plan.Voiceover with { Src = Local(plan.Voiceover.Src) },
             Music = plan.Music is null ? null : plan.Music with { Src = Local(plan.Music.Src) },
-            Logo = plan.Logo is null ? null : plan.Logo with { Src = Local(plan.Logo.Src) }
+            Logo = plan.Logo is null ? null : plan.Logo with { Src = Local(plan.Logo.Src) },
+            Overlays = plan.Overlays?.Select(o => o with { Src = Local(o.Src) }).ToList()
         };
     }
 

@@ -4,6 +4,7 @@ import {
   Audio,
   Img,
   OffthreadVideo,
+  Sequence,
   Easing,
   interpolate,
   spring,
@@ -14,7 +15,7 @@ import { TransitionSeries, linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import { slide } from '@remotion/transitions/slide';
 
-import type { AutoEditProps, Caption, Clip, Headline, Logo, Style } from './types';
+import type { AutoEditProps, Caption, Clip, Headline, Logo, Overlay, Style } from './types';
 
 const useUnit = () => {
   const { width, height } = useVideoConfig();
@@ -92,6 +93,44 @@ const ClipScene: React.FC<{ clip: Clip; fps: number; frames: number; index: numb
         style={{ width: '100%', height: '100%', objectFit: 'cover',
           transform: `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${scale})`, filter: blur > 0.3 ? `blur(${blur}px)` : undefined }}
       />
+    </AbsoluteFill>
+  );
+};
+
+/** A cutaway over the main scenes: cropped to drop burned-in text, optional speed, entry effect (whip also leaves by a swipe). */
+const OverlayScene: React.FC<{ overlay: Overlay; fps: number; frames: number; index: number }> = ({ overlay, fps, frames, index }) => {
+  const frame = useCurrentFrame();
+  const { width } = useVideoConfig();
+  const keep = overlay.crop && overlay.crop !== 'none' ? Math.min(1, Math.max(0.5, overlay.keep ?? 0.75)) : 1;
+  const grow = 1 / keep;
+  const inner: React.CSSProperties = { position: 'absolute', width: `${grow * 100}%`, height: `${grow * 100}%`, left: `${-(grow - 1) * 50}%` };
+  if (overlay.crop === 'top') inner.top = 0;
+  else if (overlay.crop === 'bottom') inner.bottom = 0;
+  else inner.top = `${-(grow - 1) * 50}%`;
+
+  let x = 0, y = 0, blur = 0, rot = 0;
+  let scale = interpolate(frame, [0, frames], index % 2 === 0 ? [1, 1.05] : [1.05, 1], { extrapolateRight: 'clamp' });
+  const dir = index % 2 === 0 ? 1 : -1;
+  const inK = interpolate(frame, [0, FX_IN], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
+  if (overlay.fx === 'whip') {
+    x += dir * 0.12 * width * inK; scale *= 1 + 0.26 * inK; blur += 24 * inK;
+    const out = interpolate(frame, [frames - FX_OUT, frames], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.in(Easing.cubic) });
+    x -= dir * 0.12 * width * out; scale *= 1 + 0.26 * out; blur += 24 * out;
+  } else if (overlay.fx === 'zoom') {
+    scale *= 1 + 0.35 * inK; blur += 18 * inK; rot += dir * 3 * inK;
+  } else if (overlay.fx === 'flash') {
+    scale *= 1 + 0.08 * inK;
+  } else if (overlay.fx === 'shake' && frame < FX_IN) {
+    x += Math.sin(frame * 2.7) * 22 * inK; y += Math.cos(frame * 3.1) * 16 * inK; rot += Math.sin(frame * 1.9) * 1.5 * inK;
+  }
+  return (
+    <AbsoluteFill style={{ backgroundColor: '#000000', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, transform: `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${scale})`, filter: blur > 0.3 ? `blur(${blur}px)` : undefined }}>
+        <div style={inner}>
+          <OffthreadVideo src={overlay.src} startFrom={Math.round(overlay.from * fps)} playbackRate={overlay.speed ?? 1} muted
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        </div>
+      </div>
     </AbsoluteFill>
   );
 };
@@ -365,6 +404,11 @@ export const AutoEdit: React.FC<AutoEditProps> = (p) => {
     scenes.push({ key: `clip-${i}`, frames, node: <ClipScene clip={clip} fps={fps} frames={frames} index={i} zoom={style.zoomAmount} nextFx={p.clips[i + 1]?.fx} /> });
     at += frames;
   });
+  (p.overlays ?? []).forEach((o, i) => {
+    if (!o.fx) return;
+    cuts.push({ frame: Math.round(o.start * fps), fx: o.fx, index: i });
+    if (o.fx === 'whip') cuts.push({ frame: Math.round((o.start + o.duration) * fps), fx: 'whip', index: i + 1 });
+  });
   if (p.outro) {
     scenes.push({ key: 'outro', frames: Math.round(p.outro.seconds * fps), node: <Outro text={p.outro.text} style={style} accent={p.accentColor} /> });
   }
@@ -382,6 +426,14 @@ export const AutoEdit: React.FC<AutoEditProps> = (p) => {
           </React.Fragment>
         ))}
       </TransitionSeries>
+      {(p.overlays ?? []).map((o, i) => {
+        const frames = Math.max(1, Math.round(o.duration * fps));
+        return (
+          <Sequence key={`overlay-${i}`} from={Math.round(o.start * fps)} durationInFrames={frames} layout="none">
+            <OverlayScene overlay={o} fps={fps} frames={frames} index={i} />
+          </Sequence>
+        );
+      })}
       {cuts.length ? <CutFx cuts={cuts} /> : null}
       {style.captionStyle === 'tiktok'
         ? <TikTokCaptions captions={p.captions} style={style} accent={p.accentColor} />
