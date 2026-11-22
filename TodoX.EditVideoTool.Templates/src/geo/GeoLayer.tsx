@@ -222,7 +222,7 @@ const Markers: React.FC<{ f: number; cam: Cam; fps: number; p: GeoLayerProps; tl
       out.push(
         <Standing key={`plotlabel${i}`} at={centroid(pl.ring)} cam={cam} W={W} H={H} dx={dx} dy={dy}>
           <div style={{ opacity: Math.min(1, k * 1.5) }}>
-            <Pill scale={k} color={pl.color} title={`LÔ ${pl.id} · ${pl.name}`} sub={[pl.area, pl.direction].filter(Boolean).join(' · ')} />
+            <Pill scale={k} color={pl.color} title={pl.id ? `LÔ ${pl.id} · ${pl.name}` : pl.name} sub={[pl.area, pl.direction].filter(Boolean).join(' · ')} />
           </div>
         </Standing>,
       );
@@ -353,9 +353,9 @@ export const GeoLayer: React.FC<GeoLayerProps> = (p) => {
         <Panel style={{ ...panelPos, padding: '30px 36px', opacity: legendK, transform: `translateY(${(1 - legendK) * 60}px)` }}>
           <div style={{ fontSize: 26, letterSpacing: 4, color: p.accent, fontWeight: 700, marginBottom: 14 }}>CHÚ THÍCH QUY HOẠCH</div>
           {p.plots.map((pl) => (
-            <div key={pl.id} style={{ display: 'flex', alignItems: 'center', fontSize: 32, margin: '10px 0' }}>
+            <div key={pl.id + pl.name} style={{ display: 'flex', alignItems: 'center', fontSize: 32, margin: '10px 0' }}>
               <div style={{ width: 46, height: 26, borderRadius: 6, background: `${pl.color}55`, border: `4px solid ${pl.color}`, marginRight: 20, boxShadow: `0 0 14px ${pl.color}` }} />
-              <div style={{ flex: 1 }}><b>Lô {pl.id}</b> · {pl.name}</div>
+              <div style={{ flex: 1 }}>{pl.id ? <><b>Lô {pl.id}</b> · </> : null}{pl.name}</div>
               <div style={{ fontWeight: 700, marginLeft: 16 }}>{pl.area}</div>
             </div>
           ))}
