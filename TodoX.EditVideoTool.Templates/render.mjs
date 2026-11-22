@@ -87,7 +87,10 @@ const main = async () => {
     });
 
     emit({ type: 'stage', stage: 'compose' });
-    const composition = await selectComposition({ serveUrl: job.bundle, id: 'AutoEdit', inputProps });
+    // GeoLayer draws TodoX's map with WebGL (MapLibre): the headless browser needs a GL backend, and each frame waits for map tiles.
+    const id = job.composition ?? 'AutoEdit';
+    const gl = id === 'GeoLayer' ? { chromiumOptions: { gl: 'angle' }, timeoutInMilliseconds: 180000 } : {};
+    const composition = await selectComposition({ serveUrl: job.bundle, id, inputProps, ...gl });
 
     emit({ type: 'stage', stage: 'render', frames: composition.durationInFrames, width: composition.width, height: composition.height });
     let last = -1;
@@ -98,6 +101,8 @@ const main = async () => {
       outputLocation: job.output,
       inputProps,
       crf: job.crf ?? 20,
+      ...gl,
+      ...(id === 'GeoLayer' ? { concurrency: 2 } : {}),
       onProgress: ({ progress, renderedFrames, encodedFrames }) => {
         const pct = Math.floor(progress * 100);
         if (pct !== last) {

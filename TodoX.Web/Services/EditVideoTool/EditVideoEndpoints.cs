@@ -117,6 +117,22 @@ public static class EditVideoEndpoints
                 : Results.Json(new { success = true, data = result.Value is { } video ? (object)new { done = true, video } : new { done = false } });
         }).DisableAntiforgery();
 
+        // A driving route for the geo-layer video, from TodoX's own router (GraphHopper on the server, localhost only).
+        group.MapGet("/route", async (HttpContext http, double fromLon, double fromLat, double toLon, double toLat,
+            EditVideoLicenseService licenses, TodoX.Web.Services.Maps.RoutingService routing, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            if (!auth.Ok)
+            {
+                return ToResult(auth);
+            }
+
+            var (route, error, message) = await routing.RouteAsync(fromLon, fromLat, toLon, toLat, ct);
+            return route is null
+                ? Results.Json(new { success = false, code = error, message }, statusCode: error == "invalid_request" ? 400 : error == TodoX.Web.Services.Maps.RoutingService.Unavailable ? 503 : 404)
+                : Results.Json(new { success = true, data = new { coords = route.Coords, distanceMeters = Math.Round(route.DistanceMeters), seconds = Math.Round(route.Seconds) } });
+        });
+
         // The account's characters, voices, music and VFX models, for the app to show and download.
         group.MapGet("/library", async (HttpContext http, string? kind, EditVideoLicenseService licenses, EditVideoLibraryService library, CancellationToken ct) =>
         {

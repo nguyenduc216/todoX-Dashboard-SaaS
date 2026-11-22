@@ -1,0 +1,40 @@
+# TodoX routing (GraphHopper 11.1) - Vietnam, car. Listens on localhost only; the dashboard proxies it
+# (EditVideo API /route, Maps:RoutingUrl). Installed by tools/routing/Install-Routing.ps1.
+graphhopper:
+  datareader.file: H:/WEBDEPLOYED/todoX/routing/vietnam-latest.osm.pbf
+  graph.location: H:/WEBDEPLOYED/todoX/routing/graph-cache
+  profiles:
+   - name: car
+     custom_model_files: [car.json]
+  profiles_ch:
+    - profile: car
+  profiles_lm: []
+  graph.encoded_values: car_access, car_average_speed, road_access
+  prepare.min_network_size: 200
+  prepare.subnetworks.threads: 1
+  routing.snap_preventions_default: tunnel, bridge, ferry
+  routing.non_ch.max_waypoint_distance: 1000000
+  import.osm.ignored_highways: footway,construction,cycleway,path,steps
+  graph.dataaccess.default_type: RAM_STORE
+server:
+  application_connectors:
+  - type: http
+    port: 8989
+    bind_host: localhost
+    max_request_header_size: 50k
+  request_log:
+      appenders: []
+  admin_connectors:
+  - type: http
+    port: 8990
+    bind_host: localhost
+logging:
+  appenders:
+    - type: file
+      time_zone: UTC
+      current_log_filename: H:/WEBDEPLOYED/todoX/routing/logs/graphhopper.log
+      log_format: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+      archive: true
+      archived_log_filename_pattern: H:/WEBDEPLOYED/todoX/routing/logs/graphhopper-%d.log.gz
+      archived_file_count: 7
+      never_block: true

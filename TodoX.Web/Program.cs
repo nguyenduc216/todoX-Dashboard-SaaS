@@ -334,6 +334,7 @@ builder.Services.AddScoped<EditVideoConsentService>();
 builder.Services.AddScoped<TodoX.Web.Services.VoicePreviewGenerator>();
 builder.Services.AddScoped<EditVideoProjectService>();
 builder.Services.AddScoped<EditVideoLibraryService>();
+builder.Services.AddHttpClient<TodoX.Web.Services.Maps.RoutingService>();
 builder.Services.AddScoped<EditVideoAiService>();
 builder.Services.AddScoped<EditVideoSkillService>();
 builder.Services.AddScoped<EditVideoSkillRunService>();

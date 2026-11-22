@@ -45,7 +45,12 @@ public sealed class RemotionRenderer
         Directory.Exists(Path.Combine(remotionDir, "node_modules", ".remotion"))
         && Directory.EnumerateFiles(Path.Combine(remotionDir, "node_modules", ".remotion"), "*.exe", SearchOption.AllDirectories).Any();
 
-    public async Task<RenderResult> RenderAsync(AutoEditPlan plan, string outputPath, IProgress<RenderProgress>? progress, CancellationToken ct = default)
+    public Task<RenderResult> RenderAsync(AutoEditPlan plan, string outputPath, IProgress<RenderProgress>? progress, CancellationToken ct = default) =>
+        RenderCompositionAsync("AutoEdit", plan, plan.TotalSeconds, outputPath, progress, ct);
+
+    /// <summary>Renders one composition of the TodoX bundle (AutoEdit, GeoLayer) with these props.</summary>
+    public async Task<RenderResult> RenderCompositionAsync(string composition, object props, double totalSeconds, string outputPath,
+        IProgress<RenderProgress>? progress, CancellationToken ct = default)
     {
         var node = _components.Locate("node");
         if (!node.Installed)
@@ -61,7 +66,8 @@ public sealed class RemotionRenderer
         {
             bundle = Path.Combine(dir, "build"),
             output = Path.GetFullPath(outputPath),
-            props = plan
+            composition,
+            props
         }, Json), ct);
 
         var psi = new ProcessStartInfo(node.Path!)
@@ -78,7 +84,7 @@ public sealed class RemotionRenderer
 
         var started = Stopwatch.StartNew();
         string? error = null;
-        double seconds = plan.TotalSeconds;
+        double seconds = totalSeconds;
         var stderrTail = new Queue<string>();
         try
         {

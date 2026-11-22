@@ -28,6 +28,8 @@ public static class ServerGuide
         never guess ratio, resolution, mode or duration - use the model's listed values the user confirmed. Results are saved on this computer (pass project to save
         into that project's folder); a video still running returns a task to check with todox_video_status
         (images: todox_image_status). todox_ai_tasks lists recent tasks. Local photos can be used as inputs.
+        Real-estate location video on TodoX's own map (plots, amenities, routes; free): todox_geo_video - needs exact
+        [lon, lat] from the customer (skill todox-bds-vi-tri).
         AI music (Suno, paid): todox_music_create (title, style, optional lyrics), saved into the project's
         03-am-thanh; todox_music_status for one still running. VFX on a clip: a video model with the edit ability
         and the clip as source video.

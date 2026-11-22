@@ -254,6 +254,11 @@ public sealed class TodoXServerClient
         SendAsync<JsonElement>(HttpMethod.Post, $"projects/videos/{videoId}/chunk?size={size}&offset={offset}", null, true, ct, TimeSpan.FromMinutes(3),
             new ByteArrayContent(data, 0, count));
 
+    /// <summary>A driving route inside Vietnam from TodoX's own router: coords [[lon,lat]...], distanceMeters, seconds.</summary>
+    public Task<ServerResult<JsonElement>> RouteAsync(double fromLon, double fromLat, double toLon, double toLat, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"route?fromLon={fromLon}&fromLat={fromLat}&toLon={toLon}&toLat={toLat}"), null, true, ct, TimeSpan.FromSeconds(30));
+
     /// <summary>The account's characters, voices, music and VFX models (kind: characters | voices | music | vfx | all).</summary>
     public Task<ServerResult<JsonElement>> LibraryAsync(string? kind, CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"library?kind={Uri.EscapeDataString(kind ?? "all")}", null, true, ct, TimeSpan.FromSeconds(60));
