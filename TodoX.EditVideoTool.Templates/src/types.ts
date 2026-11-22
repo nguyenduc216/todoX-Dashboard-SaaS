@@ -11,6 +11,8 @@ export type Clip = {
   keepAudio: boolean;
   /** Punch-in for this scene (0 = slow push-in/out; 0.1-0.35 = cut in closer). */
   zoom?: number;
+  /** Effect on the cut into this scene: flash (white blink), whip (fast swipe with blur), zoom (blurred zoom punch), shake. */
+  fx?: string;
 };
 
 /** Big bold headline over the video (yellow, red outline). */

@@ -12,7 +12,8 @@ public sealed record SceneSpec(
     [property: Description("Clip id from the timeline (c0, c1…) or the path of another video file to add.")] string Clip,
     [property: Description("Start inside the clip, seconds; omit to let TodoX choose.")] double? From = null,
     [property: Description("Scene length, seconds; omit to let TodoX choose.")] double? Seconds = null,
-    [property: Description("Punch-in 0–0.35: cut in closer on this scene (talking-head style, e.g. alternate 0 and 0.18 between sentences); omit for the slow push-in.")] double? Zoom = null);
+    [property: Description("Punch-in 0–0.35: cut in closer on this scene (talking-head style, e.g. alternate 0 and 0.18 between sentences); omit for the slow push-in.")] double? Zoom = null,
+    [property: Description("Effect on the cut into this scene: flash (white blink), whip (fast swipe with a light streak), zoom (blurred zoom punch), shake; none removes it. Use on a few cuts only (every 3-5 scenes, at topic changes), not on every cut; the timing of the video does not change.")] string? Fx = null);
 
 public sealed record HeadlineSpec(
     [property: Description("Big headline text (short, upper case reads best), e.g. 'PHƯỚC ĐÔNG NEW CITY'.")] string Text,
@@ -106,8 +107,9 @@ public sealed partial class VideoTools
         [Description("Start inside the clip, seconds.")] double? from = null,
         [Description("Scene length, seconds.")] double? seconds = null,
         [Description("Punch-in 0–0.35 for this scene (0 = slow push-in).")] double? zoom = null,
+        [Description("Effect on the cut into this scene: flash (white blink), whip (fast swipe with a light streak), zoom (blurred zoom punch), shake; none removes it. Use on a few cuts only (every 3-5 scenes, at topic changes), not on every cut; the timing of the video does not change.")] string? fx = null,
         [Description(EditParam)] string? edit = null) =>
-        ChangeAsync(edit, _ => new { op = "cut", scene, from, duration = seconds, zoom }, ct);
+        ChangeAsync(edit, _ => new { op = "cut", scene, from, duration = seconds, zoom, fx }, ct);
 
     [McpServerTool(Name = "todox_join", Destructive = false)]
     [Description("Set the order of scenes: reorder, drop, repeat, or add new video files. Optionally choose the transition between scenes (fade, slide, mix) and its length. Returns the updated timeline.")]
@@ -137,7 +139,7 @@ public sealed partial class VideoTools
                     return $"Không tìm thấy clip \"{s.Clip}\". Dùng mã clip trong timeline (c0, c1…) hoặc đường dẫn file video.";
                 }
 
-                specs.Add(new { clip = id, from = s.From, duration = s.Seconds, zoom = s.Zoom });
+                specs.Add(new { clip = id, from = s.From, duration = s.Seconds, zoom = s.Zoom, fx = s.Fx });
             }
         }
 

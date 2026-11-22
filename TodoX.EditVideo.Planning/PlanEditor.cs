@@ -1,7 +1,7 @@
 namespace TodoX.EditVideo.Planning;
 
 /// <summary>One step-by-step change to an existing plan, as asked by the assistant through a todox_* tool.</summary>
-public sealed record PlanSceneInput(string Clip, double? From = null, double? Duration = null, double? Zoom = null);
+public sealed record PlanSceneInput(string Clip, double? From = null, double? Duration = null, double? Zoom = null, string? Fx = null);
 
 public sealed record PlanEdit(
     string Op,
@@ -34,8 +34,9 @@ public sealed record PlanEdit(
     IReadOnlyList<PlanHeadline>? Headlines = null,
     bool? Logo = null,
     string? LogoCorner = null,
-    // cut: punch-in of that scene
-    double? Zoom = null);
+    // cut: punch-in of that scene and the effect on the cut into it ("none" removes it)
+    double? Zoom = null,
+    string? Fx = null);
 
 /// <summary>The current signed plan plus the clip metadata it was built from (still only ids and durations).</summary>
 public sealed record PlanEditRequest(string Document, IReadOnlyList<ClipInput> Clips, PlanEdit Edit);
@@ -94,7 +95,7 @@ public static class PlanEditor
 
         var scene = plan.Clips[index];
         var clips = plan.Clips.ToList();
-        clips[index] = Trim(scene with { From = edit.From ?? scene.From, Duration = edit.Duration ?? scene.Duration, Zoom = ZoomOf(edit.Zoom ?? scene.Zoom) }, known);
+        clips[index] = Trim(scene with { From = edit.From ?? scene.From, Duration = edit.Duration ?? scene.Duration, Zoom = ZoomOf(edit.Zoom ?? scene.Zoom), Fx = edit.Fx is null ? scene.Fx : FxOf(edit.Fx) }, known);
         return plan with { Clips = clips };
     }
 
@@ -115,7 +116,7 @@ public static class PlanEditor
                 var source = Source(known, s.Clip);
                 var length = Math.Min(s.Duration ?? Math.Min(source.DurationSeconds, 4), source.DurationSeconds);
                 var from = s.From ?? Math.Max(0, (source.DurationSeconds - length) * 0.4);
-                return Trim(new PlanClip(source.Id, from, length, keepAudio && source.HasAudio, ZoomOf(s.Zoom ?? 0)), known);
+                return Trim(new PlanClip(source.Id, from, length, keepAudio && source.HasAudio, ZoomOf(s.Zoom ?? 0), FxOf(s.Fx)), known);
             }).ToList();
         }
 
@@ -269,6 +270,14 @@ public static class PlanEditor
         var corner = edit.LogoCorner is { } c ? OneOf(c, LogoCorners, "Góc logo") : plan.Logo?.Corner ?? "top-right";
         return plan with { Logo = new PlanLogo("logo", corner) };
     }
+
+    /// <summary>Effects on the cut into a scene: white blink, fast swipe with blur, blurred zoom punch, camera shake.</summary>
+    public static readonly string[] CutEffects = ["flash", "whip", "zoom", "shake"];
+
+    private static string? FxOf(string? fx) =>
+        string.IsNullOrWhiteSpace(fx) || fx.Equals("none", StringComparison.OrdinalIgnoreCase) ? null
+        : CutEffects.FirstOrDefault(e => e.Equals(fx.Trim(), StringComparison.OrdinalIgnoreCase))
+          ?? throw new ArgumentException("Hiệu ứng chuyển cảnh: flash, whip, zoom, shake hoặc none.");
 
     private static double ZoomOf(double zoom) =>
         zoom is < 0 or > 0.35 ? throw new ArgumentException("Zoom (phóng to) từ 0 đến 0.35.") : Math.Round(zoom, 3);

@@ -27,7 +27,8 @@ public sealed record PlanRequest(
 // The plan mirrors TodoX.EditVideoTool.Templates/src/types.ts (serialized camelCase). Media `Src` values are
 // clip ids ("c0", "music", "voiceover"); the tool swaps them for local paths before rendering.
 /// <param name="Zoom">Punch-in for this scene (0 = the slow push-in/out; 0.1-0.3 = cut in closer, talking-head style).</param>
-public sealed record PlanClip(string Src, double From, double Duration, bool KeepAudio, double Zoom = 0);
+/// <param name="Fx">Effect on the cut into this scene: flash, whip, zoom, shake; null = plain cut.</param>
+public sealed record PlanClip(string Src, double From, double Duration, bool KeepAudio, double Zoom = 0, string? Fx = null);
 /// <summary>A big on-screen headline (bold yellow with a red outline) shown over the video for a while.</summary>
 public sealed record PlanHeadline(string Text, string Sub, double Start, double End);
 /// <summary>The brand logo in a corner; Src is the media id "logo".</summary>

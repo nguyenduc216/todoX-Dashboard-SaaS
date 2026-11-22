@@ -50,4 +50,14 @@ public sealed class PlanHighlightsTests
     [Fact]
     public void Sparkle_is_a_caption_style() =>
         Assert.Equal("sparkle", PlanEditor.Apply(Plan(), Clips, new PlanEdit("captions", CaptionStyle: "sparkle")).Style.CaptionStyle);
+
+    [Fact]
+    public void Cut_sets_and_clears_the_cut_effect()
+    {
+        var plan = PlanEditor.Apply(Plan(), Clips, new PlanEdit("cut", Scene: 1, Fx: "Whip"));
+        Assert.Equal("whip", plan.Clips[0].Fx);
+        Assert.Equal("whip", PlanEditor.Apply(plan, Clips, new PlanEdit("cut", Scene: 1, Zoom: 0.1)).Clips[0].Fx);
+        Assert.Null(PlanEditor.Apply(plan, Clips, new PlanEdit("cut", Scene: 1, Fx: "none")).Clips[0].Fx);
+        Assert.Throws<ArgumentException>(() => PlanEditor.Apply(plan, Clips, new PlanEdit("cut", Scene: 1, Fx: "boom")));
+    }
 }

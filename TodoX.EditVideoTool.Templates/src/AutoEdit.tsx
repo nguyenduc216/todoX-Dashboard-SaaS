@@ -4,6 +4,7 @@ import {
   Audio,
   Img,
   OffthreadVideo,
+  Easing,
   interpolate,
   spring,
   useCurrentFrame,
@@ -52,24 +53,76 @@ const Outro: React.FC<{ text: string; style: Style; accent: string }> = ({ text,
   );
 };
 
-/** A clip scene with a slow push-in/out so still-ish footage keeps moving. */
-const ClipScene: React.FC<{ clip: Clip; fps: number; frames: number; index: number; zoom: number }> = ({ clip, fps, frames, index, zoom }) => {
+const FX_IN = 8;   // frames of the entry effect
+const FX_OUT = 5;  // frames of the exit swipe before a whip cut
+
+/** A clip scene with a slow push-in/out so still-ish footage keeps moving; optional cut effects in and out. */
+const ClipScene: React.FC<{ clip: Clip; fps: number; frames: number; index: number; zoom: number; nextFx?: string }> = ({ clip, fps, frames, index, zoom, nextFx }) => {
   const frame = useCurrentFrame();
+  const { width } = useVideoConfig();
   const zoomIn = index % 2 === 0;
   // A punch-in scene starts closer and drifts a little; otherwise the slow push-in/out.
-  const scale = clip.zoom && clip.zoom > 0
+  let scale = clip.zoom && clip.zoom > 0
     ? interpolate(frame, [0, frames], [1 + clip.zoom, 1 + clip.zoom + 0.02], { extrapolateRight: 'clamp' })
     : interpolate(frame, [0, frames], zoomIn ? [1, 1 + zoom] : [1 + zoom, 1], { extrapolateRight: 'clamp' });
+  let x = 0, y = 0, blur = 0, rot = 0;
+  const dir = index % 2 === 0 ? 1 : -1;
+  const inK = interpolate(frame, [0, FX_IN], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
+  if (clip.fx === 'whip') {
+    // Small shift with an over-scale so the picture always covers the frame; blur and the streak sell the speed.
+    x += dir * 0.12 * width * inK; scale *= 1 + 0.26 * inK; blur += 24 * inK;
+  } else if (clip.fx === 'zoom') {
+    scale *= 1 + 0.35 * inK; blur += 18 * inK; rot += dir * 3 * inK;
+  } else if (clip.fx === 'flash') {
+    scale *= 1 + 0.08 * inK;
+  } else if (clip.fx === 'shake' && frame < FX_IN) {
+    x += Math.sin(frame * 2.7) * 22 * inK; y += Math.cos(frame * 3.1) * 16 * inK; rot += Math.sin(frame * 1.9) * 1.5 * inK;
+  }
+  if (nextFx === 'whip' && frames > FX_OUT * 3) {
+    const out = interpolate(frame, [frames - FX_OUT, frames], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.in(Easing.cubic) });
+    // Leave in the opposite direction of the next scene's arrival so the motion reads as one swipe.
+    x -= (index % 2 === 0 ? -1 : 1) * 0.12 * width * out; scale *= 1 + 0.26 * out; blur += 24 * out;
+  }
   return (
     <AbsoluteFill style={{ backgroundColor: '#000000', overflow: 'hidden' }}>
       <OffthreadVideo
         src={clip.src}
         startFrom={Math.round(clip.from * fps)}
         muted={!clip.keepAudio}
-        style={{ width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${scale})` }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover',
+          transform: `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${scale})`, filter: blur > 0.3 ? `blur(${blur}px)` : undefined }}
       />
     </AbsoluteFill>
   );
+};
+
+/** Overlays on the cuts: a white blink for flash/zoom, a light streak sweeping across for whip. */
+const CutFx: React.FC<{ cuts: { frame: number; fx: string; index: number }[] }> = ({ cuts }) => {
+  const frame = useCurrentFrame();
+  const { width } = useVideoConfig();
+  const cut = cuts.find((c) => frame >= c.frame - FX_OUT && frame < c.frame + FX_IN);
+  if (!cut) {
+    return null;
+  }
+  const d = frame - cut.frame;
+  if (cut.fx === 'flash' || cut.fx === 'zoom') {
+    const o = interpolate(d, [-2, 0, 6], [0, cut.fx === 'flash' ? 0.9 : 0.55, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+    return <AbsoluteFill style={{ background: 'radial-gradient(circle at 50% 45%, #FFFFFF 0%, #FFF4C2 55%, #FFE11A 100%)', opacity: o }} />;
+  }
+  if (cut.fx === 'whip') {
+    const dir = cut.index % 2 === 0 ? -1 : 1;  // streak runs the way the picture moves
+    const p = interpolate(d, [-FX_OUT, FX_IN], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+    const pos = dir > 0 ? -0.6 + 2.2 * p : 1.6 - 2.2 * p;
+    const o = interpolate(d, [-FX_OUT, 0, FX_IN], [0, 0.85, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+    return (
+      <AbsoluteFill style={{ overflow: 'hidden', mixBlendMode: 'screen', opacity: o }}>
+        <div style={{ position: 'absolute', top: '-20%', height: '140%', width: width * 0.55, left: pos * width - width * 0.275,
+          transform: 'skewX(-18deg)', filter: 'blur(18px)',
+          background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,236,150,0.9) 40%, #FFFFFF 50%, rgba(255,236,150,0.9) 60%, rgba(255,255,255,0) 100%)' }} />
+      </AbsoluteFill>
+    );
+  }
+  return null;
 };
 
 /** Words wrapped in *stars* are keywords (coloured); returns the words without the stars. */
@@ -174,7 +227,7 @@ const SparkleCaptions: React.FC<{ captions: Caption[]; style: Style; accent: str
   });
 
   return (
-    <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: height * 0.22 }}>
+    <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: height * 0.11 }}>
       <div style={{ position: 'relative', maxWidth: '86%', transform: `scale(${0.55 + 0.45 * pop}) rotate(${tilt}deg)` }}>
         <div style={{
           background: 'linear-gradient(180deg, #FFFFFF 0%, #FFF7DA 100%)', border: `${6 * unit}px solid #111111`, borderRadius: 26 * unit,
@@ -220,7 +273,7 @@ const Headlines: React.FC<{ headlines: Headline[]; style: Style }> = ({ headline
     textShadow: `0 ${8 * unit}px 0 #7A0A0D, 0 ${14 * unit}px ${24 * unit}px rgba(0,0,0,0.5)`,
   };
   return (
-    <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'center', paddingTop: height * 0.2 }}>
+    <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'center', paddingTop: height * (style.captionStyle === 'sparkle' ? 0.09 : 0.2) }}>
       <div style={{ textAlign: 'center', maxWidth: '92%', opacity: out, transform: `scale(${0.4 + 0.6 * pop}) rotate(${(1 - pop) * -6}deg)` }}>
         <div style={{ ...letters, color: '#FFE11A', fontSize: 104 * unit }}>{h.text}</div>
         {h.sub ? (
@@ -303,9 +356,14 @@ export const AutoEdit: React.FC<AutoEditProps> = (p) => {
   if (p.intro) {
     scenes.push({ key: 'intro', frames: Math.round(p.intro.seconds * fps), node: <Intro title={p.intro.title} subtitle={p.intro.subtitle} style={style} accent={p.accentColor} /> });
   }
+  const cuts: { frame: number; fx: string; index: number }[] = [];
+  let at = scenes.reduce((n, s) => n + s.frames, 0) - (p.transitionSeconds > 0 ? scenes.length * tf : 0);
   p.clips.forEach((clip, i) => {
     const frames = Math.round(clip.duration * fps);
-    scenes.push({ key: `clip-${i}`, frames, node: <ClipScene clip={clip} fps={fps} frames={frames} index={i} zoom={style.zoomAmount} /> });
+    if (i > 0 && p.transitionSeconds > 0) at -= tf;
+    if (clip.fx && i > 0) cuts.push({ frame: at, fx: clip.fx, index: i });
+    scenes.push({ key: `clip-${i}`, frames, node: <ClipScene clip={clip} fps={fps} frames={frames} index={i} zoom={style.zoomAmount} nextFx={p.clips[i + 1]?.fx} /> });
+    at += frames;
   });
   if (p.outro) {
     scenes.push({ key: 'outro', frames: Math.round(p.outro.seconds * fps), node: <Outro text={p.outro.text} style={style} accent={p.accentColor} /> });
@@ -324,6 +382,7 @@ export const AutoEdit: React.FC<AutoEditProps> = (p) => {
           </React.Fragment>
         ))}
       </TransitionSeries>
+      {cuts.length ? <CutFx cuts={cuts} /> : null}
       {style.captionStyle === 'tiktok'
         ? <TikTokCaptions captions={p.captions} style={style} accent={p.accentColor} />
         : style.captionStyle === 'sparkle'

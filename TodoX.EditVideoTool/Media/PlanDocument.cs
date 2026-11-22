@@ -5,7 +5,7 @@ namespace TodoX.EditVideoTool.Media;
 
 // Shape of the edit plan TodoX's server returns (TodoX.EditVideo.Planning). The exe only reads it: deciding the
 // cuts, lengths and caption timing happens on the server.
-public sealed record PlanClip(string Src, double From, double Duration, bool KeepAudio, double Zoom = 0);
+public sealed record PlanClip(string Src, double From, double Duration, bool KeepAudio, double Zoom = 0, string? Fx = null);
 public sealed record PlanHeadline(string Text, string Sub, double Start, double End);
 public sealed record PlanLogo(string Src, string Corner);
 public sealed record PlanCaption(string Text, double Start, double End);
