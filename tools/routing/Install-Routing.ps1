@@ -62,7 +62,7 @@ Copy-Item "$d\dl\graphhopper-web-11.1.jar" "$d\graphhopper-web.jar" -Force
 Copy-Item "$d\dl\vietnam-latest.osm.pbf" "$d\vietnam-latest.osm.pbf" -Force
 if (Test-Path "$PSScriptRoot\config.yml") { Copy-Item "$PSScriptRoot\config.yml" "$d\config.yml" -Force }
 if (-not (Test-Path "$d\config.yml")) { throw "config.yml missing: copy tools/routing/config.yml next to this script." }
-& $java -version 2>&1 | Select-Object -First 1
+Write-Host "  Java: $((Get-Item $java).VersionInfo.ProductVersion)"
 
 # ------------------------------------------------------------------ graph
 Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue | Stop-ScheduledTask -ErrorAction SilentlyContinue
@@ -70,7 +70,8 @@ Get-CimInstance Win32_Process -Filter "Name='java.exe'" | Where-Object { $_.Comm
 if ($Rebuild -and (Test-Path "$d\graph-cache")) { Remove-Item "$d\graph-cache" -Recurse -Force }
 if (-not (Test-Path "$d\graph-cache\properties.txt")) {
     Step 'Build road graph (5-15 minutes)'
-    & $java -Xmx5g -Xms1g -jar "$d\graphhopper-web.jar" import "$d\config.yml" *> "$d\logs\import.log"
+    # Java writes its log to stderr: run it through cmd so PowerShell does not treat that as an error.
+    cmd /c "`"$java`" -Xmx5g -Xms1g -jar `"$d\graphhopper-web.jar`" import `"$d\config.yml`" > `"$d\logs\import.log`" 2>&1"
     if ($LASTEXITCODE -ne 0) { throw "Graph import failed (exit $LASTEXITCODE): see $d\logs\import.log" }
 }
 
