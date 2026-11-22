@@ -47,6 +47,9 @@ public sealed class HealthCheck
         _paths = paths;
     }
 
+    /// <summary>Status ids are TodoX names (the assistant reads them), never the programs behind them.</summary>
+    public const string BrowserId = "trinh-duyet-dung-hinh";
+
     /// <param name="serverAttempts">Connectivity attempts (15 s apart); 0 = until cancelled.</param>
     public async Task<HealthReport> RunAsync(int serverAttempts = 1, Action<string>? status = null, bool reportProblems = true, CancellationToken ct = default)
     {
@@ -55,17 +58,17 @@ public sealed class HealthCheck
         foreach (var (id, name) in new[] { ("ffmpeg", "Bộ ghép & xử lý video"), ("ffprobe", "Bộ đọc thông tin video"), ("node", ComponentNames.Of("node")) })
         {
             var c = _components.Locate(id);
-            items.Add(new HealthItem(id, name, c.Installed, c.Installed ? "sẵn sàng" : "chưa cài", c.Installed ? null : "Chạy lại bộ cài TodoX EditVideo."));
+            items.Add(new HealthItem(ComponentNames.StepId(id), name, c.Installed, c.Installed ? "sẵn sàng" : "chưa cài", c.Installed ? null : "Chạy lại bộ cài TodoX EditVideo."));
         }
 
         var remotionDir = _remotion.RemotionDir;
-        items.Add(new HealthItem("remotion", ComponentNames.Of("remotion"), remotionDir is not null,
+        items.Add(new HealthItem(ComponentNames.StepId("remotion"),ComponentNames.Of("remotion"), remotionDir is not null,
             remotionDir is not null ? "sẵn sàng" : "chưa cài", remotionDir is null ? "Chạy lại bộ cài TodoX EditVideo." : null));
         var browser = remotionDir is not null && RemotionRenderer.HasRenderBrowser(remotionDir);
-        items.Add(new HealthItem("browser", "Trình duyệt dựng hình", browser,
+        items.Add(new HealthItem(BrowserId,"Trình duyệt dựng hình", browser,
             browser ? "sẵn sàng" : "chưa tải (sẽ tự tải ~150 MB ở lần dựng đầu)", null));
 
-        items.Add(new HealthItem("whisper", ComponentNames.Of("whisper"), _transcriber.IsAvailable,
+        items.Add(new HealthItem(ComponentNames.StepId("whisper"),ComponentNames.Of("whisper"), _transcriber.IsAvailable,
             _transcriber.IsAvailable ? "sẵn sàng" : "chưa cài (tự tải khi cập nhật)", null));
 
         status?.Invoke("Đang kết nối máy chủ TodoX...");
@@ -100,7 +103,7 @@ public sealed class HealthCheck
             : $"{StatusService.Version} (mới nhất)",
             updateAvailable ? $"Bản mới được tải tự động. {Updater.RestartHint}" : null));
 
-        var report = new HealthReport(StatusService.Version, !outdated && items.All(i => i.Ok || i.Id is "browser" or "update" or "whisper"),
+        var report = new HealthReport(StatusService.Version, !outdated && items.All(i => i.Ok || i.Id == BrowserId || i.Id == "update" || i.Id == ComponentNames.StepId("whisper")),
             reachable, license.Code, latest, updateAvailable, items);
 
         if (reportProblems && reachable && license.IsUsable && report.Problems.Any(p => p.Id is not "update"))

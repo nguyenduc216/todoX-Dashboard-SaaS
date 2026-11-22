@@ -165,7 +165,24 @@ static async Task RunMcpServerAsync(string[] args)
             // Claude Desktop, Claude Code and Codex each send their own name when they connect.
             CallerApp.Set(context.Server.ClientInfo?.Name ?? "mcp", context.Server.ClientInfo?.Version);
             var scope = TodoX.EditVideoTool.Projects.PaidScope.Begin();
-            var result = await next(context, ct);
+            CallToolResult result;
+            try
+            {
+                result = await next(context, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // An unexpected error may carry the output of a program TodoX runs: answer with the scrubbed message.
+                result = new CallToolResult { IsError = true, Content = [new TextContentBlock { Text = ex.Message }] };
+            }
+
+            // The programs TodoX runs on this computer stay private: no tool result names them or their folders.
+            InternalNames.UseComponentsDir(context.Services?.GetService<AgentPaths>()?.ComponentsDir);
+            foreach (var block in result.Content.OfType<TextContentBlock>())
+            {
+                block.Text = InternalNames.Scrub(block.Text);
+            }
+
             // Every command the assistant runs is written to its project's history (seen in the TodoX window).
             TodoX.EditVideoTool.Projects.CommandHistory.Record(context.Services, scope, context.Params?.Name, context.Params?.Arguments,
                 result.IsError == true, result.Content.OfType<TextContentBlock>().FirstOrDefault()?.Text);

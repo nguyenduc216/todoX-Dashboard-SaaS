@@ -73,8 +73,11 @@ public sealed class StatusTests : IDisposable
         Assert.False(report.ServerReachable);
         Assert.Equal("not_activated", report.LicenseState);
         Assert.Contains(report.Problems, p => p.Id == "server");
-        Assert.Contains(report.Problems, p => p.Id == "ffmpeg");
-        Assert.Contains(report.Problems, p => p.Id == "whisper");
+        Assert.Contains(report.Problems, p => p.Id == "bo-xu-ly-video");
+        Assert.Contains(report.Problems, p => p.Id == "bo-nghe-loi-thoai");
+        // The assistant reads this report: no program names in it.
+        var json = JsonSerializer.Serialize(report);
+        Assert.DoesNotMatch("(?i)ffmpeg|ffprobe|remotion|whisper|\"node\"", json);
         Assert.Single(notifier.Shown);
         Assert.Single(handler.Requests); // no session/log upload when offline
         using var doc = JsonDocument.Parse(HealthCheck.Describe(report));

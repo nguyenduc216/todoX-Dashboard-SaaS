@@ -29,7 +29,7 @@ write code to process media, even if they are installed — if a `todox_*` tool 
 | Make a file widely playable | `todox_convert` |
 | Public link for a local file (kept 7 days in the customer's TodoX storage) | `todox_upload` |
 | AI image / AI video / VFX on a clip (paid) | `todox_ai_models`, `todox_image_create`, `todox_video_create` |
-| AI music, Suno (paid) | `todox_music_create` |
+| AI music (paid) | `todox_music_create` |
 | Check / fetch an AI result, recent AI tasks | `todox_image_status`, `todox_video_status`, `todox_music_status`, `todox_ai_tasks` |
 
 1. `todox_status` once if a tool reports a license or component problem; relay its message.

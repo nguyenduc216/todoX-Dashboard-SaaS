@@ -82,7 +82,7 @@ public sealed partial class VideoTools
     }
 
     [McpServerTool(Name = "todox_music_create", Destructive = false)]
-    [Description("Make AI music (Suno) with TodoX for a video: background music or a song with lyrics. Paid: confirm name and style with the user first; costs TodoX points; you never see or state a price: before calling, tell the user TodoX will show the exact price in its confirmation window and they must click \"Đồng ý trừ điểm\" there; if they refuse nothing is made or charged - do not retry unless they ask. Usually returns two versions, saved into the project's 03-am-thanh folder; or a task id to check with todox_music_status.")]
+    [Description("Make AI music with TodoX for a video: background music or a song with lyrics. Paid: confirm name and style with the user first; costs TodoX points; you never see or state a price: before calling, tell the user TodoX will show the exact price in its confirmation window and they must click \"Đồng ý trừ điểm\" there; if they refuse nothing is made or charged - do not retry unless they ask. Usually returns two versions, saved into the project's 03-am-thanh folder; or a task id to check with todox_music_status.")]
     public async Task<string> AiMusicCreate(
         [Description("Song / track title, at least 4 characters.")] string name,
         [Description("Style: genre, mood, instruments, tempo (BPM), vocal tone, e.g. upbeat pop, guitar, 120 BPM, bright female vocal.")] string styles,
