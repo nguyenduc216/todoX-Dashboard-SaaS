@@ -406,7 +406,7 @@ public sealed class LandingVideoSampleTests
         var js = File.ReadAllText(Path.Combine(www, "js", "video-samples.js"));
         Assert.Contains("const description = el('p', '', video.description || '');", js);
         var html = File.ReadAllText(Path.Combine(www, "mau-video.html"));
-        Assert.Contains("/css/video-samples.css?v=5", html);
+        Assert.Contains("/css/video-samples.css?v=6", html);
         Assert.Contains("/js/video-samples.js?v=6", html);
     }
 
