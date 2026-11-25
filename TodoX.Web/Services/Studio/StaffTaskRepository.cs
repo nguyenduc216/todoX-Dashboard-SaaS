@@ -29,6 +29,8 @@ public sealed class StaffTaskRepository
 
     public const string Script = "database/manual/studio/20261119_staff_tasks.sql";
     public const string ProductsScript = "database/manual/studio/20261119_staff_task_products.sql";
+    /// <summary>Người giao việc, hạn hoàn thành, lịch sử phản hồi.</summary>
+    public const string CommentsScript = "database/manual/studio/20261125_staff_task_assigner_due_comments.sql";
     public const int MaxProducts = 20;
     private bool? _productsReady;
 
@@ -63,13 +65,23 @@ public sealed class StaffTaskRepository
         SELECT t.id AS Id, t.title AS Title, t.note AS Note,
                t.customer_id AS CustomerId, COALESCE(NULLIF(c.company_name, ''), c.full_name) AS CustomerName,
                t.assignee_user_id AS AssigneeUserId, COALESCE(a.full_name, a.display_name, a.username) AS AssigneeName,
-               t.start_at AS StartAt, t.completed_at AS CompletedAt, t.status AS Status,
+               t.assigner_user_id AS AssignerUserId, COALESCE(g.full_name, g.display_name, g.username) AS AssignerName,
+               t.start_at AS StartAt, t.due_at AS DueAt, t.completed_at AS CompletedAt, t.status AS Status,
                COALESCE(cb.full_name, cb.display_name, cb.username) AS CreatedByName,
-               t.created_at AS CreatedAt, t.updated_at AS UpdatedAt
+               t.created_at AS CreatedAt, t.updated_at AS UpdatedAt,
+               (SELECT count(*)::int FROM studio.staff_task_comments k WHERE k.task_id = t.id) AS CommentCount,
+               lc.body AS LastComment, lc.author AS LastCommentBy, lc.created_at AS LastCommentAt
           FROM studio.staff_tasks t
           LEFT JOIN crm.customers c ON c.id = t.customer_id
           LEFT JOIN auth.app_users a ON a.id = t.assignee_user_id
+          LEFT JOIN auth.app_users g ON g.id = t.assigner_user_id
           LEFT JOIN auth.app_users cb ON cb.id = t.created_by
+          LEFT JOIN LATERAL (
+                SELECT k.body, k.created_at, COALESCE(u.full_name, u.display_name, u.username) AS author
+                  FROM studio.staff_task_comments k
+                  LEFT JOIN auth.app_users u ON u.id = k.created_by
+                 WHERE k.task_id = t.id AND k.kind = 'comment'
+                 ORDER BY k.created_at DESC LIMIT 1) lc ON true
         """;
 
     public async Task<IReadOnlyList<StaffTask>> ListAsync()
@@ -159,6 +171,7 @@ public sealed class StaffTaskRepository
         var isNew = task.Id == Guid.Empty;
         var user = Require(isNew ? "staff_tasks.create" : "staff_tasks.update");
         task.Title = task.Title?.Trim() ?? string.Empty;
+        if (isNew && task.AssignerUserId is null) task.AssignerUserId = user.UserId;
         task.CompletedAt = StaffTaskRules.CompletedAtFor(task.Status, task.CompletedAt, VietnamTime.Now);
         var error = StaffTaskRules.Validate(task);
         if (error is not null) return (false, error);
@@ -173,6 +186,10 @@ public sealed class StaffTaskRepository
                 "SELECT EXISTS(SELECT 1 FROM auth.app_users WHERE id = @id AND tenant_id = @tenant);",
                 new { id = assigneeId, tenant = _tenant.TenantId }))
             return (false, "Người thực hiện không tồn tại.");
+        if (task.AssignerUserId is { } assignerId && !await conn.ExecuteScalarAsync<bool>(
+                "SELECT EXISTS(SELECT 1 FROM auth.app_users WHERE id = @id AND tenant_id = @tenant);",
+                new { id = assignerId, tenant = _tenant.TenantId }))
+            return (false, "Người giao việc không tồn tại.");
 
         var args = new
         {
@@ -182,34 +199,47 @@ public sealed class StaffTaskRepository
             note = string.IsNullOrWhiteSpace(task.Note) ? null : task.Note.Trim(),
             customerId = task.CustomerId,
             assignee = task.AssigneeUserId,
+            assigner = task.AssignerUserId,
             startAt = VietnamTime.ToUtc(task.StartAt),
+            dueAt = VietnamTime.ToUtc(task.DueAt),
             completedAt = VietnamTime.ToUtc(task.CompletedAt),
             status = task.Status,
             by = user.UserId
         };
-        if (isNew)
+        using (var tx = conn.BeginTransaction())
         {
-            await conn.ExecuteAsync(
-                """
-                INSERT INTO studio.staff_tasks
-                    (id, tenant_id, title, note, customer_id, assignee_user_id, start_at, completed_at, status,
-                     created_at, created_by, updated_at, updated_by)
-                VALUES (@id, @tenant, @title, @note, @customerId, @assignee, @startAt, @completedAt, @status,
-                        now(), @by, now(), @by);
-                """, args);
-            task.Id = args.id;
-        }
-        else
-        {
-            var updated = await conn.ExecuteAsync(
-                """
-                UPDATE studio.staff_tasks
-                   SET title = @title, note = @note, customer_id = @customerId, assignee_user_id = @assignee,
-                       start_at = @startAt, completed_at = @completedAt, status = @status,
-                       updated_at = now(), updated_by = @by
-                 WHERE id = @id AND tenant_id = @tenant;
-                """, args);
-            if (updated == 0) return (false, "Công việc không còn tồn tại.");
+            if (isNew)
+            {
+                await conn.ExecuteAsync(
+                    """
+                    INSERT INTO studio.staff_tasks
+                        (id, tenant_id, title, note, customer_id, assignee_user_id, assigner_user_id, start_at, due_at,
+                         completed_at, status, created_at, created_by, updated_at, updated_by)
+                    VALUES (@id, @tenant, @title, @note, @customerId, @assignee, @assigner, @startAt, @dueAt,
+                            @completedAt, @status, now(), @by, now(), @by);
+                    """, args, tx);
+                task.Id = args.id;
+                await AddHistoryAsync(conn, tx, args.id, StaffTaskComment.KindCreated, "Tạo công việc", null, task.Status, user.UserId);
+            }
+            else
+            {
+                // Old status in the same transaction, so the history line matches the change actually made.
+                var oldStatus = await conn.ExecuteScalarAsync<string?>(
+                    "SELECT status FROM studio.staff_tasks WHERE id = @id AND tenant_id = @tenant FOR UPDATE;", args, tx);
+                if (oldStatus is null) return (false, "Công việc không còn tồn tại.");
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE studio.staff_tasks
+                       SET title = @title, note = @note, customer_id = @customerId, assignee_user_id = @assignee,
+                           assigner_user_id = @assigner, start_at = @startAt, due_at = @dueAt,
+                           completed_at = @completedAt, status = @status, updated_at = now(), updated_by = @by
+                     WHERE id = @id AND tenant_id = @tenant;
+                    """, args, tx);
+                if (StaffTaskStatuses.Normalize(oldStatus) != task.Status)
+                    await AddHistoryAsync(conn, tx, args.id, StaffTaskComment.KindStatus,
+                        StaffTaskRules.StatusChangeText(oldStatus, task.Status), oldStatus, task.Status, user.UserId);
+            }
+            tx.Commit();
         }
         if (await ProductsReadyAsync(conn)) await SaveProductsAsync(conn, args.id, task.Products, user.UserId);
         return (true, null);
@@ -238,21 +268,78 @@ public sealed class StaffTaskRepository
         tx.Commit();
     }
 
-    /// <summary>Quick status change from the list; "Đã hoàn thành" stamps the completion time when it is empty.</summary>
+    /// <summary>
+    /// Quick status change from the list; "Đã hoàn thành" stamps the completion time when it is empty, reopening a
+    /// task clears it. The change is written to the task's history.
+    /// </summary>
     public async Task SetStatusAsync(Guid id, string status)
     {
         var user = Require("staff_tasks.update");
         if (!StaffTaskStatuses.All.Contains(status)) throw new ArgumentException("Trạng thái không hợp lệ.", nameof(status));
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
+        using var tx = conn.BeginTransaction();
+        var args = new { id, status, by = user.UserId, tenant = _tenant.TenantId };
+        var oldStatus = await conn.ExecuteScalarAsync<string?>(
+            "SELECT status FROM studio.staff_tasks WHERE id = @id AND tenant_id = @tenant FOR UPDATE;", args, tx);
+        if (oldStatus is null) return;
         await conn.ExecuteAsync(
             """
             UPDATE studio.staff_tasks
                SET status = @status,
-                   completed_at = CASE WHEN @status = 'done' THEN COALESCE(completed_at, now()) ELSE completed_at END,
+                   completed_at = CASE WHEN @status = 'done' THEN COALESCE(completed_at, now())
+                                       WHEN @status = 'cancelled' THEN completed_at ELSE NULL END,
                    updated_at = now(), updated_by = @by
              WHERE id = @id AND tenant_id = @tenant;
-            """, new { id, status, by = user.UserId, tenant = _tenant.TenantId });
+            """, args, tx);
+        if (StaffTaskStatuses.Normalize(oldStatus) != status)
+            await AddHistoryAsync(conn, tx, id, StaffTaskComment.KindStatus, StaffTaskRules.StatusChangeText(oldStatus, status), oldStatus, status, user.UserId);
+        tx.Commit();
+    }
+
+    private static Task AddHistoryAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid taskId,
+        string kind, string body, string? oldStatus, string? newStatus, Guid? by)
+        => conn.ExecuteAsync(
+            """
+            INSERT INTO studio.staff_task_comments (id, task_id, kind, body, old_status, new_status, created_at, created_by)
+            VALUES (@id, @taskId, @kind, @body, @oldStatus, @newStatus, now(), @by);
+            """, new { id = Guid.NewGuid(), taskId, kind, body, oldStatus, newStatus, by }, tx);
+
+    /// <summary>Lịch sử phản hồi of one task, oldest first.</summary>
+    public async Task<IReadOnlyList<StaffTaskComment>> ListCommentsAsync(Guid taskId)
+    {
+        Require("staff_tasks.view");
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<StaffTaskComment>(
+            """
+            SELECT k.id AS Id, k.kind AS Kind, k.body AS Body, k.old_status AS OldStatus, k.new_status AS NewStatus,
+                   k.created_at AS CreatedAt, COALESCE(u.full_name, u.display_name, u.username) AS AuthorName
+              FROM studio.staff_task_comments k
+              JOIN studio.staff_tasks t ON t.id = k.task_id
+              LEFT JOIN auth.app_users u ON u.id = k.created_by
+             WHERE k.task_id = @taskId AND t.tenant_id = @tenant
+             ORDER BY k.created_at, k.id;
+            """, new { taskId, tenant = _tenant.TenantId });
+        return rows.Select(r => r with { CreatedAt = VietnamTime.FromUtc(r.CreatedAt) }).ToList();
+    }
+
+    /// <summary>Writes a comment into the task's history (permission staff_tasks.comment).</summary>
+    public async Task<(bool Ok, string? Error)> AddCommentAsync(Guid taskId, string? body)
+    {
+        var user = Require("staff_tasks.comment");
+        var error = StaffTaskRules.ValidateComment(body);
+        if (error is not null) return (false, error);
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        var inserted = await conn.ExecuteAsync(
+            """
+            INSERT INTO studio.staff_task_comments (id, task_id, kind, body, created_at, created_by)
+            SELECT @id, t.id, 'comment', @body, now(), @by
+              FROM studio.staff_tasks t
+             WHERE t.id = @taskId AND t.tenant_id = @tenant;
+            """, new { id = Guid.NewGuid(), taskId, body = body!.Trim(), by = user.UserId, tenant = _tenant.TenantId });
+        return inserted == 1 ? (true, null) : (false, "Công việc không còn tồn tại.");
     }
 
     public async Task DeleteAsync(Guid id)
@@ -267,6 +354,8 @@ public sealed class StaffTaskRepository
     private static void ToLocal(StaffTask task)
     {
         task.StartAt = VietnamTime.FromUtc(task.StartAt);
+        task.DueAt = VietnamTime.FromUtc(task.DueAt);
+        task.LastCommentAt = VietnamTime.FromUtc(task.LastCommentAt);
         task.CompletedAt = VietnamTime.FromUtc(task.CompletedAt);
         task.CreatedAt = VietnamTime.FromUtc(task.CreatedAt);
         task.UpdatedAt = VietnamTime.FromUtc(task.UpdatedAt);

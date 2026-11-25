@@ -10,7 +10,13 @@ public sealed class StaffTask
     public string? CustomerName { get; set; }
     public Guid? AssigneeUserId { get; set; }
     public string? AssigneeName { get; set; }
+    /// <summary>Người giao việc (mặc định người tạo).</summary>
+    public Guid? AssignerUserId { get; set; }
+    public string? AssignerName { get; set; }
     public DateTime? StartAt { get; set; }
+    /// <summary>Thời gian dự kiến hoàn thành (hạn). "Trễ hạn" reads this.</summary>
+    public DateTime? DueAt { get; set; }
+    /// <summary>Thời gian hoàn thành thực tế.</summary>
     public DateTime? CompletedAt { get; set; }
     public string Status { get; set; } = StaffTaskStatuses.New;
     public string? CreatedByName { get; set; }
@@ -18,6 +24,23 @@ public sealed class StaffTask
     public DateTime UpdatedAt { get; set; }
     /// <summary>"Sản phẩm": library videos this task produced (studio.staff_task_products).</summary>
     public List<StaffTaskProduct> Products { get; set; } = [];
+    /// <summary>Number of entries in the task's feedback history (studio.staff_task_comments).</summary>
+    public int CommentCount { get; set; }
+    /// <summary>Newest written comment, shown under the title in the list.</summary>
+    public string? LastComment { get; set; }
+    public string? LastCommentBy { get; set; }
+    public DateTime? LastCommentAt { get; set; }
+}
+
+/// <summary>One entry of a task's feedback history: a written comment, a status change, or the task's creation.</summary>
+public sealed record StaffTaskComment(Guid Id, string Kind, string Body, string? OldStatus, string? NewStatus, DateTime CreatedAt, string? AuthorName)
+{
+    public const string KindComment = "comment";
+    public const string KindStatus = "status";
+    public const string KindCreated = "created";
+    public const int MaxLength = 4000;
+
+    public bool IsComment => Kind == KindComment;
 }
 
 /// <summary>A video from the uploaded video library (Video khách hàng / Kho mẫu video), as a task's product or a library choice.</summary>
@@ -85,20 +108,37 @@ public static class StaffTaskRules
         if (!StaffTaskStatuses.All.Contains(task.Status)) return "Trạng thái không hợp lệ.";
         if (task.StartAt is { } start && task.CompletedAt is { } end && end < start)
             return "Ngày giờ hoàn thành phải sau ngày giờ thực hiện.";
+        if (task.StartAt is { } begin && task.DueAt is { } due && due < begin)
+            return "Hạn hoàn thành phải sau ngày giờ thực hiện.";
         return null;
     }
 
-    /// <summary>Marking a task done without a completion time stamps it now; other statuses keep what was entered.</summary>
+    public static string? ValidateComment(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return "Nhập nội dung phản hồi.";
+        if (body.Trim().Length > StaffTaskComment.MaxLength) return $"Phản hồi tối đa {StaffTaskComment.MaxLength} ký tự.";
+        return null;
+    }
+
+    /// <summary>History line written when a task's status changes.</summary>
+    public static string StatusChangeText(string? from, string to)
+        => $"Đổi trạng thái: {StaffTaskStatuses.Label(from)} → {StaffTaskStatuses.Label(to)}";
+
+    /// <summary>
+    /// Marking a task done without a completion time stamps it now; a cancelled task keeps what was entered; an
+    /// unfinished task has no completion time (its plan is the due time, DueAt).
+    /// </summary>
     public static DateTime? CompletedAtFor(string status, DateTime? completedAt, DateTime now)
-        => status == StaffTaskStatuses.Done && completedAt is null ? now : completedAt;
+        => StaffTaskStatuses.IsOpen(status) ? null
+            : status == StaffTaskStatuses.Done && completedAt is null ? now : completedAt;
 
     /// <summary>Products are files in this server's media folder only (the library), never outside links.</summary>
     public static bool IsLibraryUrl(string? url)
         => !string.IsNullOrWhiteSpace(url) && url.StartsWith("/media/", StringComparison.Ordinal) && !url.Contains("..");
 
-    /// <summary>Open task whose planned completion time has passed.</summary>
+    /// <summary>Open task whose due time (thời gian dự kiến hoàn thành) has passed.</summary>
     public static bool IsLate(StaffTask task, DateTime now)
-        => StaffTaskStatuses.IsOpen(task.Status) && task.CompletedAt is { } due && due < now;
+        => StaffTaskStatuses.IsOpen(task.Status) && task.DueAt is { } due && due < now;
 }
 
 /// <summary>Vietnam time (UTC+7, no DST) for task times, independent of the server's time zone.</summary>

@@ -1,0 +1,105 @@
+@using TodoX.Web.Services.Studio
+@inject StaffTaskRepository Tasks
+@inject ILogger<StaffTaskHistory> Logger
+
+@* Lịch sử phản hồi của một công việc: comment do người viết, cùng các dòng tự ghi khi tạo việc và đổi trạng thái. *@
+<MudStack Spacing="2">
+    <MudText Typo="Typo.subtitle2">Lịch sử phản hồi (@_items.Count)</MudText>
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_items.Count == 0)
+    {
+        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa có phản hồi nào.</MudText>
+    }
+    else
+    {
+        <div style="max-height:320px;overflow:auto;display:flex;flex-direction:column;gap:8px" data-testid="staff-task-history">
+            @foreach (var item in _items)
+            {
+                @if (item.IsComment)
+                {
+                    <MudPaper Outlined="true" Class="pa-2">
+                        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Class="gap-1">
+                            <MudText Typo="Typo.body2"><b>@(item.AuthorName ?? "Không rõ")</b></MudText>
+                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@item.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudText>
+                        </MudStack>
+                        <MudText Typo="Typo.body2" Style="white-space:pre-line;overflow-wrap:anywhere">@item.Body</MudText>
+                    </MudPaper>
+                }
+                else
+                {
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="px-1">
+                        <MudIcon Icon="@(item.Kind == StaffTaskComment.KindCreated ? Icons.Material.Filled.AddTask : Icons.Material.Filled.SwapHoriz)" Size="Size.Small" />
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            @item.Body · @(item.AuthorName ?? "Không rõ") · @item.CreatedAt.ToString("dd/MM/yyyy HH:mm")
+                        </MudText>
+                    </MudStack>
+                }
+            }
+        </div>
+    }
+    @if (CanComment)
+    {
+        <MudTextField T="string" @bind-Value="_draft" Label="Viết phản hồi" Variant="Variant.Outlined" Lines="2" AutoGrow="true"
+                      MaxLength="@StaffTaskComment.MaxLength" autocomplete="off" Disabled="_sending"
+                      Placeholder="Tiến độ, vướng mắc, kết quả..." />
+        <MudStack Row="true" Justify="Justify.FlexEnd">
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Send"
+                       OnClick="SendAsync" Disabled="@(_sending || string.IsNullOrWhiteSpace(_draft))">Gửi phản hồi</MudButton>
+        </MudStack>
+    }
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+    }
+</MudStack>
+
+@code {
+    [Parameter, EditorRequired] public Guid TaskId { get; set; }
+    [Parameter] public bool CanComment { get; set; }
+    /// <summary>Raised after a comment is saved, so the list can refresh its count and latest comment.</summary>
+    [Parameter] public EventCallback OnCommented { get; set; }
+
+    private IReadOnlyList<StaffTaskComment> _items = [];
+    private string? _draft;
+    private string? _error;
+    private bool _loading = true;
+    private bool _sending;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try { _items = await Tasks.ListCommentsAsync(TaskId); }
+        catch (UnauthorizedAccessException ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Staff task history load failed. taskId={TaskId}", TaskId);
+            _error = "Không tải được lịch sử phản hồi.";
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task SendAsync()
+    {
+        _error = null;
+        _sending = true;
+        try
+        {
+            var (ok, error) = await Tasks.AddCommentAsync(TaskId, _draft);
+            if (!ok) { _error = error; return; }
+            _draft = null;
+            await LoadAsync();
+            await OnCommented.InvokeAsync();
+        }
+        catch (UnauthorizedAccessException ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Staff task comment failed. taskId={TaskId}", TaskId);
+            _error = "Chưa gửi được phản hồi. Vui lòng thử lại.";
+        }
+        finally { _sending = false; }
+    }
+}

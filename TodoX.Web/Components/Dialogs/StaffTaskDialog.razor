@@ -15,6 +15,15 @@
                               autocomplete="off" Placeholder="Ví dụ: Quay video khai trương cửa hàng" />
             </MudItem>
             <MudItem xs="12" sm="6">
+                <MudSelect T="Guid?" Label="Người giao việc" @bind-Value="_model.AssignerUserId" Variant="Variant.Outlined" Clearable="true"
+                           Placeholder="Chưa rõ" data-testid="staff-task-assigner">
+                    @foreach (var person in Assignees)
+                    {
+                        <MudSelectItem T="Guid?" Value="@person.UserId">@person.Name@(person.IsStaff ? "" : " (quản trị)")</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
                 <MudSelect T="Guid?" Label="Người thực hiện" @bind-Value="_model.AssigneeUserId" Variant="Variant.Outlined" Clearable="true"
                            Placeholder="Chưa giao">
                     @foreach (var person in Assignees)
@@ -23,7 +32,7 @@
                     }
                 </MudSelect>
             </MudItem>
-            <MudItem xs="12" sm="6">
+            <MudItem xs="12">
                 <MudSelect T="Guid?" Label="Khách hàng (không bắt buộc)" @bind-Value="_model.CustomerId" Variant="Variant.Outlined" Clearable="true"
                            Placeholder="Không gắn khách hàng">
                     @foreach (var customer in Customers.OrderBy(x => x.CompanyName))
@@ -39,11 +48,21 @@
                 <MudTimePicker Label="Giờ" @bind-Time="_startTime" Variant="Variant.Outlined" AmPm="false" Clearable="true" Disabled="@(_startDate is null)" />
             </MudItem>
             <MudItem xs="7" sm="4">
-                <MudDatePicker Label="Ngày hoàn thành" @bind-Date="_endDate" Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Clearable="true" />
+                <MudDatePicker Label="Dự kiến hoàn thành" @bind-Date="_dueDate" Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Clearable="true"
+                               HelperText="Quá hạn mà chưa xong sẽ báo Trễ hạn" />
             </MudItem>
             <MudItem xs="5" sm="2">
-                <MudTimePicker Label="Giờ" @bind-Time="_endTime" Variant="Variant.Outlined" AmPm="false" Clearable="true" Disabled="@(_endDate is null)" />
+                <MudTimePicker Label="Giờ" @bind-Time="_dueTime" Variant="Variant.Outlined" AmPm="false" Clearable="true" Disabled="@(_dueDate is null)" />
             </MudItem>
+            @if (!StaffTaskStatuses.IsOpen(_model.Status))
+            {
+                <MudItem xs="7" sm="4">
+                    <MudDatePicker Label="Hoàn thành thực tế" @bind-Date="_endDate" Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Clearable="true" />
+                </MudItem>
+                <MudItem xs="5" sm="2">
+                    <MudTimePicker Label="Giờ" @bind-Time="_endTime" Variant="Variant.Outlined" AmPm="false" Clearable="true" Disabled="@(_endDate is null)" />
+                </MudItem>
+            }
             <MudItem xs="12" sm="6">
                 <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
                     @foreach (var status in StaffTaskStatuses.All)
@@ -53,7 +72,7 @@
                 </MudSelect>
                 @if (_model.Status == StaffTaskStatuses.Done && _endDate is null)
                 {
-                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Để trống ngày hoàn thành: hệ thống ghi giờ lúc lưu.</MudText>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Để trống ngày hoàn thành thực tế: hệ thống ghi giờ lúc lưu.</MudText>
                 }
             </MudItem>
             @if (ProductsEnabled)
@@ -140,6 +159,13 @@
                 <MudTextField T="string" Label="Ghi chú" @bind-Value="_model.Note" Variant="Variant.Outlined" Lines="4" AutoGrow="true"
                               autocomplete="off" Placeholder="Yêu cầu, địa điểm, tài liệu cần chuẩn bị..." />
             </MudItem>
+            @if (!_isNew)
+            {
+                <MudItem xs="12">
+                    <MudDivider Class="mb-3" />
+                    <StaffTaskHistory TaskId="@_model.Id" CanComment="@CanComment" />
+                </MudItem>
+            }
         </MudGrid>
         @if (!string.IsNullOrEmpty(_error))
         {
@@ -157,6 +183,9 @@
 
     [Parameter] public StaffTask? Source { get; set; }
     [Parameter] public Guid? DefaultAssigneeId { get; set; }
+    /// <summary>Người giao việc mặc định khi tạo việc: người đang đăng nhập.</summary>
+    [Parameter] public Guid? DefaultAssignerId { get; set; }
+    [Parameter] public bool CanComment { get; set; }
     [Parameter] public IReadOnlyList<CustomerProfile> Customers { get; set; } = [];
     [Parameter] public IReadOnlyList<PlanAssignee> Assignees { get; set; } = [];
     [Parameter] public bool ProductsEnabled { get; set; }
@@ -212,6 +241,8 @@
     private StaffTask _model = new();
     private DateTime? _startDate;
     private TimeSpan? _startTime;
+    private DateTime? _dueDate;
+    private TimeSpan? _dueTime;
     private DateTime? _endDate;
     private TimeSpan? _endTime;
     private bool _isNew;
@@ -221,7 +252,7 @@
     {
         _isNew = Source is null;
         _model = Source is null
-            ? new StaffTask { Status = StaffTaskStatuses.New, AssigneeUserId = DefaultAssigneeId }
+            ? new StaffTask { Status = StaffTaskStatuses.New, AssigneeUserId = DefaultAssigneeId, AssignerUserId = DefaultAssignerId }
             : new StaffTask
             {
                 Id = Source.Id,
@@ -229,13 +260,17 @@
                 Note = Source.Note,
                 CustomerId = Source.CustomerId,
                 AssigneeUserId = Source.AssigneeUserId,
+                AssignerUserId = Source.AssignerUserId,
                 StartAt = Source.StartAt,
+                DueAt = Source.DueAt,
                 CompletedAt = Source.CompletedAt,
                 Status = StaffTaskStatuses.Normalize(Source.Status),
                 Products = Source.Products.ToList()
             };
         _startDate = _model.StartAt?.Date;
         _startTime = _model.StartAt?.TimeOfDay;
+        _dueDate = _model.DueAt?.Date;
+        _dueTime = _model.DueAt?.TimeOfDay;
         _endDate = _model.CompletedAt?.Date;
         _endTime = _model.CompletedAt?.TimeOfDay;
     }
@@ -245,7 +280,8 @@
     private void Submit()
     {
         _model.StartAt = Combine(_startDate, _startTime);
-        _model.CompletedAt = Combine(_endDate, _endTime);
+        _model.DueAt = Combine(_dueDate, _dueTime);
+        _model.CompletedAt = StaffTaskStatuses.IsOpen(_model.Status) ? null : Combine(_endDate, _endTime);
         _error = StaffTaskRules.Validate(_model);
         if (_error is null) MudDialog.Close(DialogResult.Ok(_model));
     }

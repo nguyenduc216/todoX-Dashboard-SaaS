@@ -28,7 +28,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Công việc nhân viên</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Giao việc, theo dõi trạng thái, ngày giờ thực hiện và hoàn thành của từng nhân viên.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Giao việc, theo dõi trạng thái, hạn hoàn thành và phản hồi tiến độ của từng nhân viên.</MudText>
         </div>
         @if (_ready && Can("staff_tasks.create"))
         {
@@ -72,7 +72,7 @@
                 <MudPaper Class="@CardClass(LateFilter)" Style="@StatusStyle(LateFilter)" @onclick="@(() => _statusFilter = LateFilter)">
                     <MudText Typo="Typo.subtitle2">Trễ hạn hoàn thành</MudText>
                     <div class="todox-stat-value st-tone-text">@summary.Late</div>
-                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa xong mà đã qua giờ hoàn thành</MudText>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chưa xong mà đã qua hạn hoàn thành</MudText>
                 </MudPaper>
             </MudItem>
             <MudItem xs="6" md="3">
@@ -87,7 +87,7 @@
         <MudPaper Class="todox-table-card pa-4" rounded="true">
             <MudGrid Spacing="2" Class="mb-2">
                 <MudItem xs="12" md="4">
-                    <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tiêu đề, ghi chú, khách hàng, người thực hiện, sản phẩm..."
+                    <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tiêu đề, ghi chú, khách hàng, người giao / thực hiện, sản phẩm, phản hồi..."
                                   Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" autocomplete="off"
                                   Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
                 </MudItem>
@@ -124,10 +124,12 @@
             <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" HorizontalScrollbar="true">
                 <HeaderContent>
                     <MudTh>Tiêu đề</MudTh>
+                    <MudTh>Người giao</MudTh>
                     <MudTh>Người thực hiện</MudTh>
                     <MudTh>Khách hàng</MudTh>
                     <MudTh>Sản phẩm</MudTh>
                     <MudTh>Thực hiện</MudTh>
+                    <MudTh>Dự kiến hoàn thành</MudTh>
                     <MudTh>Hoàn thành</MudTh>
                     <MudTh>Trạng thái</MudTh>
                     <MudTh Style="text-align:right">Thao tác</MudTh>
@@ -139,7 +141,16 @@
                         {
                             <MudText Typo="Typo.caption" Class="d-block todox-page-subtitle" Style="white-space:pre-line">@Short(context.Note)</MudText>
                         }
+                        @if (!string.IsNullOrWhiteSpace(context.LastComment))
+                        {
+                            <MudText Typo="Typo.caption" Class="d-block mt-1" Style="cursor:pointer" @onclick="@(() => OpenHistory(context))"
+                                     title="Xem lịch sử phản hồi">
+                                <MudIcon Icon="@Icons.Material.Filled.ChatBubbleOutline" Style="font-size:14px;vertical-align:middle" />
+                                <b>@(context.LastCommentBy ?? "Không rõ")</b>@(context.LastCommentAt is { } at ? " · " + at.ToString("dd/MM HH:mm") : ""): @Short(context.LastComment)
+                            </MudText>
+                        }
                     </MudTd>
+                    <MudTd DataLabel="Người giao" Style="white-space:nowrap">@(context.AssignerName ?? "—")</MudTd>
                     <MudTd DataLabel="Người thực hiện" Style="white-space:nowrap">@(context.AssigneeName ?? "Chưa giao")</MudTd>
                     <MudTd DataLabel="Khách hàng">@(context.CustomerName ?? "—")</MudTd>
                     <MudTd DataLabel="Sản phẩm" Style="max-width:240px">
@@ -163,16 +174,17 @@
                         }
                     </MudTd>
                     <MudTd DataLabel="Thực hiện" Style="white-space:nowrap">@When(context.StartAt)</MudTd>
-                    <MudTd DataLabel="Hoàn thành" Style="white-space:nowrap">
+                    <MudTd DataLabel="Dự kiến hoàn thành" Style="white-space:nowrap">
                         @if (StaffTaskRules.IsLate(context, _now))
                         {
-                            <span style="color:var(--mud-palette-error);font-weight:600">@When(context.CompletedAt)</span>
+                            <span style="color:var(--mud-palette-error);font-weight:600">@When(context.DueAt)</span>
                         }
                         else
                         {
-                            @When(context.CompletedAt)
+                            @When(context.DueAt)
                         }
                     </MudTd>
+                    <MudTd DataLabel="Hoàn thành" Style="white-space:nowrap">@When(context.CompletedAt)</MudTd>
                     <MudTd DataLabel="Trạng thái">
                         @if (Can("staff_tasks.update"))
                         {
@@ -194,10 +206,16 @@
                         }
                         @if (Shown(context) == LateFilter)
                         {
-                            <MudText Typo="Typo.caption" Class="todox-page-subtitle d-block">@StaffTaskStatuses.Label(context.Status), quá giờ hoàn thành</MudText>
+                            <MudText Typo="Typo.caption" Class="todox-page-subtitle d-block">@StaffTaskStatuses.Label(context.Status), quá hạn hoàn thành</MudText>
                         }
                     </MudTd>
                     <MudTd DataLabel="Thao tác" Style="text-align:right;white-space:nowrap">
+                        <MudTooltip Text="Lịch sử phản hồi">
+                            <MudBadge Content="@context.CommentCount" Visible="@(context.CommentCount > 0)" Color="Color.Warning" Overlap="true" Dot="false" Bordered="true">
+                                <MudIconButton Icon="@Icons.Material.Filled.ChatBubbleOutline" Size="Size.Small" aria-label="Lịch sử phản hồi"
+                                               OnClick="@(() => OpenHistory(context))" Disabled="_busy" data-testid="staff-task-history-open" />
+                            </MudBadge>
+                        </MudTooltip>
                         @if (Can("staff_tasks.update"))
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="Sửa" OnClick="@(() => OpenEdit(context))" Disabled="_busy" />
@@ -334,7 +352,9 @@
                     || (x.Note ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
                     || x.Products.Any(p => p.DisplayTitle.Contains(q, StringComparison.OrdinalIgnoreCase))
                     || (x.CustomerName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
-                    || (x.AssigneeName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
+                    || (x.AssigneeName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.AssignerName ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (x.LastComment ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
             }
             return list;
         }
@@ -358,6 +378,8 @@
         {
             { x => x.Source, source },
             { x => x.DefaultAssigneeId, DefaultAssignee(_assigneeFilter, AuthState.CurrentUser?.UserId, _assignees) },
+            { x => x.DefaultAssignerId, AuthState.CurrentUser?.UserId },
+            { x => x.CanComment, Can("staff_tasks.comment") },
             { x => x.Customers, _customers },
             { x => x.Assignees, _assignees },
             { x => x.ProductsEnabled, Tasks.ProductsEnabled }
@@ -365,7 +387,11 @@
         var dialog = await DialogService.ShowAsync<StaffTaskDialog>(source is null ? "Tạo công việc" : "Sửa công việc", parameters,
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false });
         var result = await dialog.Result;
-        if (result is null || result.Canceled || result.Data is not StaffTask model) return;
+        if (result is null || result.Canceled || result.Data is not StaffTask model)
+        {
+            if (source is not null) await Reload();
+            return;
+        }
 
         _busy = true;
         try
@@ -388,6 +414,19 @@
         {
             _busy = false;
         }
+    }
+
+    private async Task OpenHistory(StaffTask task)
+    {
+        var parameters = new DialogParameters<StaffTaskHistoryDialog>
+        {
+            { x => x.Item, task },
+            { x => x.CanComment, Can("staff_tasks.comment") }
+        };
+        var dialog = await DialogService.ShowAsync<StaffTaskHistoryDialog>("Lịch sử phản hồi", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        await dialog.Result;
+        await Reload(); // the dialog may have added comments
     }
 
     private async Task SetStatus(StaffTask task, string status)

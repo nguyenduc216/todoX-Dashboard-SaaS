@@ -11,7 +11,7 @@ public sealed class StaffTaskTests
     private static string Root => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
     private static string Read(params string[] parts) => File.ReadAllText(Path.Combine([Root, .. parts]));
 
-    private static StaffTask Task(string status, DateTime? due = null) => new() { Title = "x", Status = status, CompletedAt = due };
+    private static StaffTask Task(string status, DateTime? due = null) => new() { Title = "x", Status = status, DueAt = due };
 
     [Fact]
     public void Statuses_have_vietnamese_labels_and_only_new_in_progress_are_open()
@@ -58,6 +58,9 @@ public sealed class StaffTaskTests
         Assert.Null(StaffTaskRules.CompletedAtFor("in_progress", null, now));
         var entered = now.AddDays(-1);
         Assert.Equal(entered, StaffTaskRules.CompletedAtFor("done", entered, now));
+        // An unfinished task has no completion time; its plan is the due time.
+        Assert.Null(StaffTaskRules.CompletedAtFor("in_progress", entered, now));
+        Assert.Equal(entered, StaffTaskRules.CompletedAtFor("cancelled", entered, now));
 
         Assert.True(StaffTaskRules.IsLate(Task("in_progress", now.AddMinutes(-1)), now));
         Assert.False(StaffTaskRules.IsLate(Task("done", now.AddMinutes(-1)), now));
@@ -160,6 +163,52 @@ public sealed class StaffTaskTests
         Assert.Equal(StaffTasks.StatusHex(StaffTaskStatuses.Done), StaffTasks.StatusHex("done"));
         Assert.Equal("#EF4444", StaffTasks.StatusHex("__late"));
         Assert.NotEqual(StaffTasks.StatusHex("__open"), StaffTasks.StatusHex(StaffTaskStatuses.InProgress));
+    }
+
+    [Fact]
+    public void Late_reads_the_due_time_not_the_completion_time()
+    {
+        var now = new DateTime(2026, 11, 25, 9, 0, 0);
+        Assert.False(StaffTaskRules.IsLate(new StaffTask { Title = "x", Status = "in_progress", CompletedAt = now.AddDays(-1) }, now));
+        Assert.True(StaffTaskRules.IsLate(new StaffTask { Title = "x", Status = "in_progress", DueAt = now.AddDays(-1) }, now));
+
+        var start = new DateTime(2026, 11, 25, 8, 0, 0);
+        Assert.NotNull(StaffTaskRules.Validate(new StaffTask { Title = "x", StartAt = start, DueAt = start.AddHours(-1) }));
+        Assert.Null(StaffTaskRules.Validate(new StaffTask { Title = "x", StartAt = start, DueAt = start.AddHours(3) }));
+    }
+
+    [Fact]
+    public void Comments_are_validated_and_status_changes_are_written_to_the_history()
+    {
+        Assert.NotNull(StaffTaskRules.ValidateComment("   "));
+        Assert.NotNull(StaffTaskRules.ValidateComment(new string('a', StaffTaskComment.MaxLength + 1)));
+        Assert.Null(StaffTaskRules.ValidateComment("Đã quay xong, đang dựng"));
+        Assert.Equal("Đổi trạng thái: Mới → Đang thực hiện", StaffTaskRules.StatusChangeText("new", "in_progress"));
+
+        var repo = Read("TodoX.Web", "Services", "Studio", "StaffTaskRepository.cs");
+        Assert.Contains("Require(\"staff_tasks.comment\")", repo);
+        Assert.Contains("StaffTaskComment.KindStatus", repo);
+        Assert.Contains("StaffTaskComment.KindCreated", repo);
+        Assert.Contains("if (isNew && task.AssignerUserId is null) task.AssignerUserId = user.UserId;", repo);
+        Assert.Contains("t.due_at AS DueAt", repo);
+
+        var sql = Read("database", "manual", "studio", "20261125_staff_task_assigner_due_comments.sql");
+        Assert.Contains("add column if not exists assigner_user_id", sql);
+        Assert.Contains("add column if not exists due_at", sql);
+        Assert.Contains("create table if not exists studio.staff_task_comments", sql);
+        Assert.Contains("'staff_tasks', 'comment'", sql);
+        Assert.DoesNotContain("drop ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(Root, "database", "manual", "studio", "20261125_staff_task_assigner_due_comments.test.sql")));
+
+        var dialog = Read("TodoX.Web", "Components", "Dialogs", "StaffTaskDialog.razor");
+        Assert.Contains("Label=\"Người giao việc\"", dialog);
+        Assert.Contains("Label=\"Dự kiến hoàn thành\"", dialog);
+        Assert.Contains("<StaffTaskHistory", dialog);
+        var page = Read("TodoX.Web", "Components", "Pages", "StaffTasks.razor");
+        Assert.Contains("<MudTh>Người giao</MudTh>", page);
+        Assert.Contains("<MudTh>Dự kiến hoàn thành</MudTh>", page);
+        Assert.Contains("StaffTaskHistoryDialog", page);
+        Assert.Contains("\"comment\" => \"Phản hồi\"", Read("TodoX.Web", "Components", "Pages", "Permissions.razor"));
     }
 
     [Fact]

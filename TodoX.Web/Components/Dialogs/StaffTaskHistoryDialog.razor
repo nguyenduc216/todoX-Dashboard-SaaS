@@ -1,0 +1,27 @@
+@using TodoX.Web.Services.Studio
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Item.Title</MudText>
+        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+            Giao bởi @(Item.AssignerName ?? "—") · Thực hiện: @(Item.AssigneeName ?? "Chưa giao") · Hạn: @(Item.DueAt?.ToString("dd/MM/yyyy HH:mm") ?? "—")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <StaffTaskHistory TaskId="@Item.Id" CanComment="@CanComment" OnCommented="@(() => _changed = true)" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public StaffTask Item { get; set; } = default!;
+    [Parameter] public bool CanComment { get; set; }
+
+    private bool _changed;
+
+    // Ok(true) tells the page a comment was added, so it reloads the list.
+    private void Close() => MudDialog.Close(DialogResult.Ok(_changed));
+}
