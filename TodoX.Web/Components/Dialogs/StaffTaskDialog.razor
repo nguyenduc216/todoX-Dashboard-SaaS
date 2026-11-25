@@ -240,6 +240,9 @@
 
     private StaffTask _model = new();
     private DateTime? _startDate;
+    /// <summary>Giờ mặc định: bắt đầu 8:00 sáng, dự kiến hoàn thành 17:00 chiều.</summary>
+    internal static readonly TimeSpan DefaultStartTime = new(8, 0, 0);
+    internal static readonly TimeSpan DefaultDueTime = new(17, 0, 0);
     private TimeSpan? _startTime;
     private DateTime? _dueDate;
     private TimeSpan? _dueTime;
@@ -268,9 +271,9 @@
                 Products = Source.Products.ToList()
             };
         _startDate = _model.StartAt?.Date;
-        _startTime = _model.StartAt?.TimeOfDay;
+        _startTime = _model.StartAt?.TimeOfDay ?? DefaultStartTime;
         _dueDate = _model.DueAt?.Date;
-        _dueTime = _model.DueAt?.TimeOfDay;
+        _dueTime = _model.DueAt?.TimeOfDay ?? DefaultDueTime;
         _endDate = _model.CompletedAt?.Date;
         _endTime = _model.CompletedAt?.TimeOfDay;
     }
@@ -279,8 +282,8 @@
 
     private void Submit()
     {
-        _model.StartAt = Combine(_startDate, _startTime);
-        _model.DueAt = Combine(_dueDate, _dueTime);
+        _model.StartAt = Combine(_startDate, _startTime ?? DefaultStartTime);
+        _model.DueAt = Combine(_dueDate, _dueTime ?? DefaultDueTime);
         _model.CompletedAt = StaffTaskStatuses.IsOpen(_model.Status) ? null : Combine(_endDate, _endTime);
         _error = StaffTaskRules.Validate(_model);
         if (_error is null) MudDialog.Close(DialogResult.Ok(_model));

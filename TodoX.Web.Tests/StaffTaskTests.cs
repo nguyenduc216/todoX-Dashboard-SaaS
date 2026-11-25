@@ -212,6 +212,16 @@ public sealed class StaffTaskTests
     }
 
     [Fact]
+    public void New_tasks_default_to_eight_am_start_and_five_pm_due()
+    {
+        Assert.Equal(new TimeSpan(8, 0, 0), StaffTaskDialog.DefaultStartTime);
+        Assert.Equal(new TimeSpan(17, 0, 0), StaffTaskDialog.DefaultDueTime);
+        var dialog = Read("TodoX.Web", "Components", "Dialogs", "StaffTaskDialog.razor");
+        Assert.Contains("_startTime = _model.StartAt?.TimeOfDay ?? DefaultStartTime;", dialog);
+        Assert.Contains("_dueTime = _model.DueAt?.TimeOfDay ?? DefaultDueTime;", dialog);
+    }
+
+    [Fact]
     public void Late_is_automatic_and_counted_only_once()
     {
         var now = new DateTime(2026, 11, 19, 15, 0, 0);
