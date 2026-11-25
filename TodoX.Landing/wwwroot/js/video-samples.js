@@ -100,7 +100,10 @@
       heading.textContent = video.title;
     }
     body.append(el('span', 'vs-group', video.groupName), heading);
-    if (video.description) body.append(el('p', '', video.description));
+    // Always present (even empty) so every card keeps the same two-line description area.
+    const description = el('p', '', video.description || '');
+    if (video.description) description.title = video.description;
+    body.append(description);
     article.append(thumb, body);
     return article;
   };

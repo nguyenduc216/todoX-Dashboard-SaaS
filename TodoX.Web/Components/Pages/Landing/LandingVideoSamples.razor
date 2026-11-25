@@ -34,8 +34,59 @@
 
         <MudPaper Class="pa-4">
             <MudStack Spacing="3">
-                <MudText Typo="Typo.h6">Video trong kho (@_samples.Count)</MudText>
-                @if (_samples.Count == 0)
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap" Class="gap-2">
+                    <MudText Typo="Typo.h6">Video trong kho (@_samples.Count)</MudText>
+                    @if (_sortSupported && _samples.Count > 1)
+                    {
+                        @if (_sorting)
+                        {
+                            <MudStack Row="true" Spacing="2">
+                                <MudButton Variant="Variant.Text" Disabled="_busy" OnClick="CancelSort">Hủy</MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || !_orderChanged)" OnClick="SaveOrderAsync"
+                                           StartIcon="@Icons.Material.Filled.Save" data-testid="sample-sort-save">Lưu thứ tự</MudButton>
+                            </MudStack>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@(!CanUpdate || _busy)" OnClick="StartSort"
+                                       StartIcon="@Icons.Material.Filled.SwapVert" data-testid="sample-sort-start">Sắp xếp vị trí</MudButton>
+                        }
+                    }
+                </MudStack>
+                @if (_sorting)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        Kéo thả để đổi vị trí. Video ở trên cùng hiện đầu tiên ở trang /mau-video và trang chủ. Bấm "Lưu thứ tự" để áp dụng.
+                    </MudText>
+                    @* Native drag and drop (draggable rows); the arrow buttons do the same for touch screens. *@
+                    <div class="d-flex flex-column gap-2" data-testid="sample-sort-list">
+                        @foreach (var context in _sortItems)
+                        {
+                            var item = context;
+                            <div draggable="true" @ondragstart="@(() => _dragging = item)" @ondragend="@(() => _dragging = null)"
+                                 @ondragover:preventDefault="true" @ondragenter="@(() => _dragOver = item)"
+                                 @ondrop="@(() => DropOn(item))" data-testid="sample-sort-item"
+                                 style="@SortItemStyle(item)">
+                                <MudPaper Outlined="true" Class="pa-2 d-flex align-center gap-3">
+                                    <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Color="Color.Secondary" />
+                                    <MudText Typo="Typo.body2" Style="min-width:28px;font-weight:700">@(_sortItems.IndexOf(item) + 1)</MudText>
+                                    <img src="@item.PosterUrl" alt="" draggable="false" style="width:40px;height:40px;object-fit:cover;border-radius:4px" />
+                                    <div style="flex:1;min-width:0">
+                                        <MudText Typo="Typo.body2" Style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@item.Title</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@item.GroupName · @item.AspectRatio@(item.IsVisible ? "" : " · Đang ẩn")</MudText>
+                                    </div>
+                                    <MudIconButton Icon="@Icons.Material.Filled.VerticalAlignTop" Size="Size.Small" aria-label="Đưa lên đầu"
+                                                   Disabled="@(_sortItems.IndexOf(item) == 0)" OnClick="@(() => MoveTo(item, 0))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" aria-label="Lên một bậc"
+                                                   Disabled="@(_sortItems.IndexOf(item) == 0)" OnClick="@(() => MoveTo(item, _sortItems.IndexOf(item) - 1))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" aria-label="Xuống một bậc"
+                                                   Disabled="@(_sortItems.IndexOf(item) == _sortItems.Count - 1)" OnClick="@(() => MoveTo(item, _sortItems.IndexOf(item) + 1))" />
+                                </MudPaper>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (_samples.Count == 0)
                 {
                     <MudText Typo="Typo.body2">Chưa có video mẫu nào.</MudText>
                 }
@@ -43,6 +94,7 @@
                 {
                     <MudTable T="LandingVideoSample" Items="_samples" Dense="true" Hover="true" Elevation="0">
                         <HeaderContent>
+                            <MudTh>Vị trí</MudTh>
                             <MudTh>Ảnh</MudTh>
                             <MudTh>Tiêu đề</MudTh>
                             <MudTh>Nhóm dịch vụ</MudTh>
@@ -52,6 +104,7 @@
                             <MudTh></MudTh>
                         </HeaderContent>
                         <RowTemplate>
+                            <MudTd>@(_samples.IndexOf(context) + 1)</MudTd>
                             <MudTd><img src="@context.PosterUrl" alt="" style="max-width:64px;max-height:64px;object-fit:cover" /></MudTd>
                             <MudTd>@context.Title</MudTd>
                             <MudTd>
@@ -101,6 +154,12 @@
     private IReadOnlyList<ServiceDto> _services = [];
     private bool _ready;
     private bool _busy;
+    private bool _sortSupported;
+    private bool _sorting;
+    private bool _orderChanged;
+    private List<LandingVideoSample> _sortItems = [];
+    private LandingVideoSample? _dragging;
+    private LandingVideoSample? _dragOver;
     private string? _error;
     private bool CanView => AuthState.CurrentUser is not null && !AuthState.CurrentUser.IsCustomer && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingIndustryPermissions.View));
     private bool CanUpdate => CanView && LandingIntroVideoWriteAccess.CanWrite(AuthState.CurrentUser);
@@ -114,6 +173,7 @@
         {
             _services = await Catalog.GetServicesAsync();
             await ReloadAsync();
+            _sortSupported = await Repository.SupportsSortOrderAsync();
         }
         catch (Exception ex)
         {
@@ -126,6 +186,76 @@
     {
         _samples = (await Repository.ListAsync()).ToList();
         _links = LandingVideoSampleLinks.ShareUrls(_samples, LandingVideoSampleLinks.BaseUrl(Configuration));
+    }
+
+    private void StartSort()
+    {
+        if (!CanUpdate || _busy) return;
+        _error = null;
+        _sortItems = _samples.ToList();
+        _orderChanged = false;
+        _sorting = true;
+    }
+
+    private void CancelSort()
+    {
+        _sorting = false;
+        _sortItems = [];
+    }
+
+    private string SortItemStyle(LandingVideoSample item)
+    {
+        var style = "cursor:grab;border-radius:6px;";
+        if (_dragging is not null && _dragging != item && _dragOver == item) style += "outline:2px dashed var(--mud-palette-warning);";
+        if (_dragging == item) style += "opacity:.5;";
+        return style;
+    }
+
+    private void DropOn(LandingVideoSample target)
+    {
+        if (_dragging is { } item) MoveTo(item, _sortItems.IndexOf(target));
+        _dragging = null;
+        _dragOver = null;
+    }
+
+    /// <summary>Moves a sample to a new position in the list being sorted (drag and drop or the arrow buttons).</summary>
+    internal static bool Move<T>(List<T> items, T item, int index)
+    {
+        var from = items.IndexOf(item);
+        if (from < 0) return false;
+        index = Math.Clamp(index, 0, items.Count - 1);
+        if (index == from) return false;
+        items.RemoveAt(from);
+        items.Insert(index, item);
+        return true;
+    }
+
+    private void MoveTo(LandingVideoSample item, int index)
+    {
+        if (!Move(_sortItems, item, index)) return;
+        _orderChanged = !_sortItems.Select(x => x.Id).SequenceEqual(_samples.Select(x => x.Id));
+    }
+
+    private async Task SaveOrderAsync()
+    {
+        if (!CanUpdate || _busy || !_sorting) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Repository.SaveOrderAsync(_sortItems.Select(x => x.Id).ToList());
+            await ReloadAsync();
+            _sorting = false;
+            _sortItems = [];
+            Snackbar.Add("Đã lưu thứ tự video mẫu. Trang /mau-video cập nhật trong vài phút.", Severity.Success);
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Landing video sample order save failed.");
+            _error = "Không lưu được thứ tự. Vui lòng thử lại.";
+        }
+        finally { _busy = false; }
     }
 
     private async Task CopyLinkAsync(string link)

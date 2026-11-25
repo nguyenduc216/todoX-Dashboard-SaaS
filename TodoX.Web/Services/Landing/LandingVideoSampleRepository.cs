@@ -67,6 +67,54 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
 
     private static volatile bool _groupColumnReady;
     public const string VisibilityScript = "database/manual/landing/20261111_landing_video_samples_visible.sql";
+    public const string SortOrderScript = "database/manual/landing/20261125_landing_video_samples_sort_order.sql";
+    private static volatile bool _sortColumnReady;
+
+    private static async Task<bool> SupportsSortOrderAsync(System.Data.IDbConnection connection, CancellationToken ct)
+    {
+        if (_sortColumnReady) return true;
+        var count = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+            select count(*) from information_schema.columns
+            where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'sort_order'
+            """, cancellationToken: ct));
+        return _sortColumnReady = count == 1;
+    }
+
+    public async Task<bool> SupportsSortOrderAsync(CancellationToken ct = default)
+    {
+        if (_sortColumnReady) return true;
+        using var connection = await db.OpenAsync(ct);
+        return await SupportsSortOrderAsync(connection, ct);
+    }
+
+    /// <summary>
+    /// Saves the drag-and-drop order of Kho mẫu video: position 1 is shown first on /mau-video and the homepage.
+    /// Samples missing from the list (added meanwhile) keep their place after the ordered ones.
+    /// </summary>
+    public async Task SaveOrderAsync(IReadOnlyList<Guid> orderedIds, CancellationToken ct = default)
+    {
+        LandingIntroVideoWriteAccess.Demand(auth.CurrentUser);
+        if (orderedIds.Count == 0) return;
+        if (orderedIds.Distinct().Count() != orderedIds.Count) throw new ArgumentException("Danh sách sắp xếp bị trùng.", nameof(orderedIds));
+        using var connection = await db.OpenAsync(ct);
+        if (!await SupportsSortOrderAsync(connection, ct))
+            throw new InvalidOperationException($"Cần chạy script {SortOrderScript} trên database để sắp xếp video mẫu.");
+        using var tx = connection.BeginTransaction();
+        await connection.ExecuteAsync(new CommandDefinition("""
+            update landing.video_samples s
+               set sort_order = o.position, updated_at = now(), updated_by = @user
+              from unnest(@ids::uuid[]) with ordinality as o(id, position)
+             where s.id = o.id and s.sort_order is distinct from o.position
+            """, new { ids = orderedIds.ToArray(), user = auth.CurrentUser!.UserId.ToString() }, tx, cancellationToken: ct));
+        await connection.ExecuteAsync(new CommandDefinition("""
+            update landing.video_samples s
+               set sort_order = @count + r.position
+              from (select id, row_number() over (order by sort_order nulls first, created_at desc) as position
+                      from landing.video_samples where not (id = any(@ids::uuid[]))) r
+             where s.id = r.id
+            """, new { ids = orderedIds.ToArray(), count = orderedIds.Count }, tx, cancellationToken: ct));
+        tx.Commit();
+    }
     private static volatile bool _visibleColumnReady;
     public const string CustomerVersionsScript = "database/manual/landing/20261116_landing_video_sample_customer_versions.sql";
     private static volatile bool _customerVersionsReady;
@@ -210,6 +258,7 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
             : "null as ThumbnailPortraitUrl, null as ThumbnailLandscapeUrl, null as ShareImageUrl";
         var group = await SupportsGroupAsync(connection, ct) ? "s.sample_group" : "null";
         var visible = await SupportsVisibilityAsync(connection, ct) ? "s.is_visible" : "true";
+        var order = await SupportsSortOrderAsync(connection, ct) ? "s.sort_order nulls first, s.created_at desc" : "s.created_at desc";
         var customer = await SupportsCustomerVersionsAsync(connection, ct)
             ? "s.customer_id as CustomerId, s.customer_video_id as CustomerVideoId, (select coalesce(nullif(c.company_name, ''), c.full_name) from crm.customers c where c.id = s.customer_id) as CustomerName"
             : "null::uuid as CustomerId, null::uuid as CustomerVideoId, null as CustomerName";
@@ -219,7 +268,7 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
                    {group} as SampleGroup, {visible} as IsVisible, {thumbnails}, {customer}
             from landing.video_samples s
             left join catalog.services sv on sv.id = s.service_id
-            order by s.created_at desc
+            order by {order}
             """, cancellationToken: ct));
         return rows.ToList();
     }
@@ -271,6 +320,13 @@ public sealed class LandingVideoSampleRepository(TodoXConnectionFactory db, Auth
                 new { sample.Id, sample.SampleGroup }, cancellationToken: ct));
         else if (sample.SampleGroup is not null)
             throw new InvalidOperationException($"Cần chạy script {GroupScript} trên database để dùng nhóm {TvcGroupName}.");
+        // A new sample goes to the top of the list until it is moved.
+        if (await SupportsSortOrderAsync(connection, ct))
+            await connection.ExecuteAsync(new CommandDefinition("""
+                update landing.video_samples
+                   set sort_order = (select coalesce(min(sort_order), 1) - 1 from landing.video_samples where id <> @Id)
+                 where id = @Id and sort_order is null
+                """, new { sample.Id }, cancellationToken: ct));
         if (await SupportsVisibilityAsync(connection, ct))
             await connection.ExecuteAsync(new CommandDefinition(
                 "update landing.video_samples set is_visible = @IsVisible where id = @Id",

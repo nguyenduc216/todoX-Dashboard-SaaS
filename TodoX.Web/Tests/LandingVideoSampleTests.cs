@@ -361,6 +361,55 @@ public sealed class LandingVideoSampleTests
         Assert.Contains("from studio.customer_videos", repository);
     }
 
+    [Fact]
+    public void SamplesAreOrderedByDragAndDropPosition()
+    {
+        var list = new List<string> { "a", "b", "c", "d" };
+        Assert.True(TodoX.Web.Components.Pages.Landing.LandingVideoSamples.Move(list, "d", 0));
+        Assert.Equal(["d", "a", "b", "c"], list);
+        Assert.True(TodoX.Web.Components.Pages.Landing.LandingVideoSamples.Move(list, "d", 99));
+        Assert.Equal(["a", "b", "c", "d"], list);
+        Assert.False(TodoX.Web.Components.Pages.Landing.LandingVideoSamples.Move(list, "b", 1));
+        Assert.False(TodoX.Web.Components.Pages.Landing.LandingVideoSamples.Move(list, "x", 0));
+
+        var root = FindRoot();
+        var sql = File.ReadAllText(Path.Combine(root, "database", "manual", "landing", "20261125_landing_video_samples_sort_order.sql"));
+        Assert.Contains("add column if not exists sort_order integer", sql);
+        Assert.DoesNotContain("drop ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(root, "database", "manual", "landing", "20261125_landing_video_samples_sort_order.test.sql")));
+
+        var repository = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Services", "Landing", "LandingVideoSampleRepository.cs"));
+        Assert.Contains("public async Task SaveOrderAsync(IReadOnlyList<Guid> orderedIds", repository);
+        Assert.Contains("s.sort_order nulls first, s.created_at desc", repository);
+        var page = File.ReadAllText(Path.Combine(root, "TodoX.Web", "Components", "Pages", "Landing", "LandingVideoSamples.razor"));
+        Assert.Contains("Sắp xếp vị trí", page);
+        Assert.Contains("draggable=\"true\"", page);
+        Assert.Contains("Repository.SaveOrderAsync(", page);
+
+        var landing = File.ReadAllText(Path.Combine(root, "TodoX.Landing", "Data", "VideoSampleRepository.cs"));
+        Assert.Contains("Videos = OrderForDisplay(videos)", landing);
+        Assert.Contains("as SortOrder", landing);
+    }
+
+    [Fact]
+    public void SampleCardsHaveEqualHeightsWithTwoLineTitleAndDescription()
+    {
+        var www = Path.Combine(FindRoot(), "TodoX.Landing", "wwwroot");
+        var css = File.ReadAllText(Path.Combine(www, "css", "video-samples.css"));
+        Assert.Contains("align-items:stretch", css);
+        Assert.Contains(".vs-card{display:flex;flex-direction:column", css);
+        Assert.Contains(".vs-body{flex:1;", css);
+        Assert.Contains("min-height:calc(2em*1.35)", css);
+        Assert.Contains("min-height:calc(2em*1.5)", css);
+        Assert.Equal(2, css.Split("-webkit-line-clamp:2").Length - 1);
+        Assert.DoesNotContain("-webkit-line-clamp:3", css);
+        var js = File.ReadAllText(Path.Combine(www, "js", "video-samples.js"));
+        Assert.Contains("const description = el('p', '', video.description || '');", js);
+        var html = File.ReadAllText(Path.Combine(www, "mau-video.html"));
+        Assert.Contains("/css/video-samples.css?v=5", html);
+        Assert.Contains("/js/video-samples.js?v=6", html);
+    }
+
     private static string FindRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)

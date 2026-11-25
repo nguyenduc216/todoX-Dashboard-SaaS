@@ -24,6 +24,9 @@ public sealed class VideoSample
     // False: not listed on /mau-video or the homepage, but its own link (/mau-video/{slug}) still plays it,
     // so a sample can be sent to one customer without publishing it.
     public bool IsVisible { get; set; } = true;
+    /// <summary>Position set in Kho mẫu video (1 = first); null for a sample not placed yet.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? SortOrder { get; set; }
 
     // Computed from the title (not stored): readable share link that carries Open Graph previews.
     public string Slug { get; set; } = "";
@@ -35,7 +38,7 @@ public sealed record VideoSampleGroup(string Code, string Name, int Count);
 public sealed class VideoSampleCatalog
 {
     // Only groups that have at least one published video, in the service list's order, then "Video TVC doanh nghiệp", "Video truyền thông" last.
-    // Videos are newest first.
+    // Videos follow the order set in Kho mẫu video (landing.video_samples.sort_order).
     public List<VideoSampleGroup> Groups { get; set; } = [];
     public List<VideoSample> Videos { get; set; } = [];
 }
@@ -53,7 +56,7 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
     {
         var all = await LoadAllAsync(ct);
         var videos = all.Videos.Where(video => video.IsVisible).ToList();
-        // Group chips keep the service order; the videos themselves show newest first.
+        // Group chips keep the service order; the videos keep the order set in Kho mẫu video.
         var order = all.Groups.Select(group => group.Code).ToList();
         var groups = videos.GroupBy(video => video.GroupCode)
             .OrderBy(group => order.IndexOf(group.Key!))
@@ -91,13 +94,19 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
                 where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'is_visible'
                 """, cancellationToken: ct)) == 1;
             var visibleSelect = visibleColumn ? "s.is_visible" : "true";
-            // Rows come in group order (services, then TVC, then "Video truyền thông"); videos are re-sorted newest first below.
+            // sort_order comes from database/manual/landing/20261125_landing_video_samples_sort_order.sql; work without it.
+            var sortColumn = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+                select count(*) from information_schema.columns
+                where table_schema = 'landing' and table_name = 'video_samples' and column_name = 'sort_order'
+                """, cancellationToken: ct)) == 1;
+            var sortSelect = sortColumn ? "s.sort_order" : "null::integer";
+            // Rows come in group order (services, then TVC, then "Video truyền thông"); videos are re-sorted by their Kho mẫu video position below.
             var rows = await connection.QueryAsync<VideoSample>(new CommandDefinition($"""
                 select s.id as Id, s.title as Title, s.description as Description, s.aspect_ratio as AspectRatio,
                        s.video_url as VideoUrl, s.poster_url as PosterUrl, {thumbnails}
                        coalesce(sv.service_code, case when {sampleGroup} = 'tvc' then '{TvcGroupCode}' end) as GroupCode,
                        coalesce(sv.service_name, case when {sampleGroup} = 'tvc' then '{TvcGroupName}' end) as GroupName,
-                       s.created_at as CreatedAt, {visibleSelect} as IsVisible
+                       s.created_at as CreatedAt, {visibleSelect} as IsVisible, {sortSelect} as SortOrder
                 from landing.video_samples s
                 left join catalog.services sv on sv.id = s.service_id
                 where (sv.id is null or sv.status = 'active')
@@ -121,12 +130,12 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
                 video.Slug = slugs[video.Id];
                 video.SharePath = VideoSlug.SampleRoutePrefix + video.Slug;
             }
-            // Group chips keep the service order; the videos themselves show newest first.
+            // Group chips keep the service order; the videos follow the order set in Kho mẫu video (new ones first).
             var groups = videos.GroupBy(video => video.GroupCode)
                 .Select(group => new VideoSampleGroup(group.Key!, group.First().GroupName!, group.Count())).ToList();
             return new VideoSampleCatalog
             {
-                Videos = videos.OrderByDescending(video => video.CreatedAt ?? DateTimeOffset.MinValue).ToList(),
+                Videos = OrderForDisplay(videos),
                 Groups = groups
             };
         }
@@ -147,6 +156,13 @@ public sealed partial class VideoSampleRepository(LandingConnectionFactory db, I
         var listed = all.Videos.Where(video => video.IsVisible).ToList();
         return (sample, new VideoSampleCatalog { Videos = listed, Groups = all.Groups });
     }
+
+    /// <summary>Order of Kho mẫu video: unplaced (new) samples first, then by position, newest first on ties.</summary>
+    internal static List<VideoSample> OrderForDisplay(IEnumerable<VideoSample> videos)
+        => videos.OrderBy(video => video.SortOrder is null ? 0 : 1)
+            .ThenBy(video => video.SortOrder ?? 0)
+            .ThenByDescending(video => video.CreatedAt ?? DateTimeOffset.MinValue)
+            .ToList();
 
     private static bool IsPublishable(VideoSample video, string root)
         => video.AspectRatio is "9:16" or "16:9"
