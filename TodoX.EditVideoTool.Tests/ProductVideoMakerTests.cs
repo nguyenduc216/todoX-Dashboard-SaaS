@@ -53,6 +53,17 @@ public sealed class ProductVideoMakerTests
     }
 
     [Fact]
+    public void Motion_prompts_lose_the_spoken_line()
+    {
+        var silent = ProductVideoMaker.SilentMotion("SHOT: slow push-in. SPEECH: Language vi-VN; exact spoken dialogue: \"Mua ngay\"; finish by 3s. TIMELINE: hold.");
+        Assert.DoesNotContain("Mua ngay", silent);
+        Assert.Contains("SHOT: slow push-in.", silent);
+        Assert.Contains("TIMELINE: hold.", silent);
+        Assert.EndsWith("the narration is added later.", silent);
+        Assert.StartsWith("Gentle orbit.", ProductVideoMaker.SilentMotion("Gentle orbit."));
+    }
+
+    [Fact]
     public void Task_answers_give_task_status_and_file()
     {
         const string running = """{"task":"6f1c0e3a-1111-4222-8333-444455556666","kind":"video","status":"running","files":[]}""";

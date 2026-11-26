@@ -107,6 +107,17 @@ public sealed class ProductVideoMaker
         return (listed.FirstOrDefault(d => d.Seconds >= seconds) is { Text: not null } fit ? fit : listed[^1]).Text;
     }
 
+    private static readonly System.Text.RegularExpressions.Regex SpeechPart = new(
+        @"SPEECH:.*?(?=\b(?:TIMELINE|END_STATE|PRESERVE|VFX|INTERACTION|PERFORMANCE|SHOT):|$)",
+        System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// The agent writes the spoken line into the motion prompt (for models that talk); here TodoX reads the narration
+    /// itself, so the video is made without speech and nobody lip-syncs to words that are not heard.
+    /// </summary>
+    public static string SilentMotion(string motion) =>
+        SpeechPart.Replace(motion.Trim(), "").Trim() + " No speech, no dialogue and no lip movement; the narration is added later.";
+
     /// <summary>The value when the model lists it; a model with a single choice gets that one; otherwise none.</summary>
     public static string? Listed(IReadOnlyList<string> choices, string? wanted) =>
         wanted is not null && choices.Contains(wanted, StringComparer.OrdinalIgnoreCase) ? wanted : choices.Count == 1 ? choices[0] : null;
@@ -141,7 +152,7 @@ public sealed class ProductVideoMaker
         var videoTasks = new List<string>();
         for (var i = 0; i < scenes.Count; i++)
         {
-            videoTasks.Add(await SubmitAsync(new AiCreateInput("video", o.VideoModel.Model, scenes[i].MotionPrompt.Trim(), Listed(o.VideoModel.Ratios, o.Aspect),
+            videoTasks.Add(await SubmitAsync(new AiCreateInput("video", o.VideoModel.Model, SilentMotion(scenes[i].MotionPrompt), Listed(o.VideoModel.Ratios, o.Aspect),
                 o.VideoResolution, o.VideoMode, PickDuration(o.VideoModel.Durations, scenes[i].Seconds), [images[i]], null, null), o.Project, $"video cảnh {i + 1}", ct));
         }
 
