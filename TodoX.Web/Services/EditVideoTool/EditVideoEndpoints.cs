@@ -326,6 +326,19 @@ public static class EditVideoEndpoints
             return Results.Json(new { success = true });
         }).DisableAntiforgery();
 
+        // ---- script agents (the dashboard's 79AI Prompt Assistant): a product brief becomes scenes for the app to make
+        group.MapGet("/agent/services", async (HttpContext http, EditVideoLicenseService licenses, EditVideoAgentService agents, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? Results.Json(new { success = true, data = new { services = await agents.ListAsync(ct) } }) : ToResult(auth);
+        });
+
+        group.MapPost("/agent/script", async (HttpContext http, EditVideoAgentScriptRequest body, EditVideoLicenseService licenses, EditVideoAgentService agents, CancellationToken ct) =>
+        {
+            var auth = await licenses.AuthenticateDeviceAsync(BearerToken(http.Request), DeviceHash(http.Request), ClientIp(http), ct);
+            return auth.Ok ? ToResult(await agents.ScriptAsync(auth.Value.License, body, ct)) : ToResult(auth);
+        }).DisableAntiforgery();
+
         // ---- AI images & videos (Gommo/79AI through TodoX's account; results stay on Gommo's CDN)
         var ai = group.MapGroup("/ai");
 

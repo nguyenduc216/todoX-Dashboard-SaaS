@@ -338,6 +338,7 @@ builder.Services.AddHttpClient<TodoX.Web.Services.Maps.RoutingService>();
 builder.Services.AddScoped<EditVideoAiService>();
 builder.Services.AddScoped<EditVideoSkillService>();
 builder.Services.AddScoped<EditVideoSkillRunService>();
+builder.Services.AddScoped<EditVideoAgentService>();
 builder.Services.AddSingleton<EditVideoReleaseService>();
 builder.Services.AddScoped<ReupCampaignRepository>();
 builder.Services.AddScoped<ReupLogService>();

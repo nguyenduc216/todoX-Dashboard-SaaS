@@ -212,6 +212,14 @@ public sealed class TodoXServerClient
     public Task<ServerResult<JsonElement>> AiUploadAsync(string fileName, string base64, CancellationToken ct = default, string? project = null) =>
         SendAsync<JsonElement>(HttpMethod.Post, "ai/uploads", new { fileName, data = base64, project }, true, ct, TimeSpan.FromSeconds(180));
 
+    /// <summary>Video kinds whose 79AI script agent is ready (the dashboard's Prompt Assistant).</summary>
+    public Task<ServerResult<JsonElement>> AgentServicesAsync(CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, "agent/services", null, true, ct);
+
+    /// <summary>The script agent writes scenes from a product brief; free, it can take a minute or two.</summary>
+    public Task<ServerResult<JsonElement>> AgentScriptAsync(Guid service, string brief, int seconds, string? aspect, CancellationToken ct = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "agent/script", new { service, brief, seconds, aspect }, true, ct, TimeSpan.FromMinutes(6));
+
     public Task<ServerResult<JsonElement>> SkillsAsync(CancellationToken ct = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, "skills", null, true, ct, TimeSpan.FromSeconds(30));
 

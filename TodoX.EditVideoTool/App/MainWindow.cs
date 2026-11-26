@@ -205,6 +205,14 @@ public sealed partial class MainWindow : Form
         Go(Screen.Ai);
         await Task.Delay(300);
         Shot(this, "3-ai");
+        using (var product = new ProductVideoForm(_services, "shots") { StartPosition = FormStartPosition.Manual, Location = new Point(-6000, 0) })
+        {
+            product.Show(this);
+            await Task.Delay(4000);
+            Shot(product, "3-ai-product");
+            product.Close();
+        }
+
         Go(Screen.Library);
         await LoadLibraryAsync(refresh: false);
         foreach (var tab in Enum.GetValues<LibraryTab>())
@@ -571,6 +579,13 @@ public sealed partial class MainWindow : Form
         history.Click += (_, _) => ShowHistory(list);
         _tips.SetToolTip(history, "Mọi lệnh Claude đã làm trong dự án đang chọn: lệnh nào trừ điểm thì có số điểm trừ và số điểm còn; bấm đúp để mở file kết quả.");
         buttons.Controls.AddRange([create, open, sync, history]); // the resource folder is changed in Cài đặt › Thư mục
+        if (ai)
+        {
+            var product = Ui.Button("Tạo video từ sản phẩm", primary: true);
+            product.Click += (_, _) => OpenProductVideo(list);
+            _tips.SetToolTip(product, "Thêm ảnh và thông tin sản phẩm: agent TodoX viết kịch bản, TodoX tạo ảnh, video AI, giọng đọc và dựng thành video — không cần Claude.");
+            buttons.Controls.Add(product);
+        }
         _ = root;
         left.Controls.Add(list);
         left.Controls.Add(leftTitle);
@@ -883,6 +898,35 @@ public sealed partial class MainWindow : Form
         Say(created
             ? $"Đã tạo dự án \"{folder.Name}\" với các thư mục 01-anh … output. Bỏ tư liệu vào rồi nhờ Claude dựng."
             : $"Dự án \"{folder.Name}\" đã có, mở lại thư mục.");
+    }
+
+    /// <summary>"Tạo video từ sản phẩm" for the selected project (asks for a new one when none is selected).</summary>
+    private void OpenProductVideo(ListView list)
+    {
+        if (!_licensed)
+        {
+            Say("Kích hoạt TodoX EditVideo trước (bấm vào ô license ở góc trên).");
+            return;
+        }
+
+        if (list.SelectedItems.Count == 0)
+        {
+            NewProject(list);
+        }
+
+        if (list.SelectedItems.Count == 0 || list.SelectedItems[0].Tag is not string path)
+        {
+            Say("Chọn hoặc tạo một dự án trước.");
+            return;
+        }
+
+        var form = new ProductVideoForm(_services, Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)));
+        form.FormClosed += (_, _) =>
+        {
+            form.Dispose();
+            RefreshProjects();
+        };
+        form.Show(this);
     }
 
     private void OpenSelected(ListView list)
