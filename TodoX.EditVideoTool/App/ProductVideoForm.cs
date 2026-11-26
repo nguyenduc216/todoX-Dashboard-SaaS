@@ -178,10 +178,12 @@ internal sealed class ProductVideoForm : Form
         _scenes.RowHeadersVisible = false;
         _scenes.AllowUserToAddRows = false;
         _scenes.AllowUserToResizeRows = false;
-        _scenes.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
+        // Long prompts: fixed-height rows read from the top; the full text shows while editing a cell.
+        _scenes.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+        _scenes.RowTemplate.Height = 110;
         _scenes.EnableHeadersVisualStyles = false;
         _scenes.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Ui.Panel, ForeColor = Ui.Muted, SelectionBackColor = Ui.Panel, Font = new Font("Segoe UI", 9) };
-        _scenes.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Ui.Card, ForeColor = Ui.Ink, SelectionBackColor = Ui.CardHover, SelectionForeColor = Ui.Ink, WrapMode = DataGridViewTriState.True };
+        _scenes.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Ui.Card, ForeColor = Ui.Ink, SelectionBackColor = Ui.CardHover, SelectionForeColor = Ui.Ink, WrapMode = DataGridViewTriState.True, Alignment = DataGridViewContentAlignment.TopLeft };
         _scenes.Columns.Add(new DataGridViewTextBoxColumn { Name = "sec", HeaderText = "Giây", Width = 52 });
         _scenes.Columns.Add(new DataGridViewTextBoxColumn { Name = "voice", HeaderText = "Lời đọc", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 34 });
         _scenes.Columns.Add(new DataGridViewTextBoxColumn { Name = "image", HeaderText = "Ảnh cảnh (mô tả cho AI)", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 38 });
@@ -386,7 +388,9 @@ internal sealed class ProductVideoForm : Form
             if (!script.Ok)
             {
                 // The reason code (no secrets) helps TodoX support find the agent's error.
-                var reason = script.Detail is { } d && d.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? $" (mã: {r.GetString()})" : "";
+                var reason = script.Detail is { } d && d.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String
+                    ? $" (mã: {r.GetString()}{(d.TryGetProperty("provider", out var pm) && pm.ValueKind == JsonValueKind.String ? " — " + pm.GetString() : "")})"
+                    : "";
                 Say(Problem(script.ErrorCode, script.Message) + reason);
                 return;
             }
@@ -457,6 +461,12 @@ internal sealed class ProductVideoForm : Form
             _service.SelectedIndex = i;
             Say("Kiểu video: " + _service.SelectedItem);
             await WriteAsync();
+        }
+
+        if (Environment.GetEnvironmentVariable("TODOX_WINDOW_SHOTS") is { Length: > 0 } dir)
+        {
+            File.WriteAllText(Path.Combine(dir, "agent-log.txt"), _log.Text + Environment.NewLine + string.Join(Environment.NewLine + "---" + Environment.NewLine,
+                ReadScenes().Select(s => $"{s.Seconds}s | {s.Voice}{Environment.NewLine}IMG: {s.ImagePrompt}{Environment.NewLine}MOTION: {s.MotionPrompt}")));
         }
     }
 

@@ -88,7 +88,7 @@ public sealed class EditVideoAgentService
         {
             _logger.LogWarning("EDITVIDEO_AGENT_EMPTY license={License} service={Service} code={Code}", license.Id, service.Id, result.ErrorCode);
             return EditVideoResult<EditVideoAgentScript>.Fail("ai_failed", "Agent chưa viết được kịch bản lúc này. Thử lại hoặc viết rõ thông tin sản phẩm hơn.",
-                new { reason = result.ErrorCode, generationId = result.GenerationId });
+                new { reason = result.ErrorCode, provider = result.ErrorMessage is { Length: > 200 } m ? m[..200] : result.ErrorMessage, generationId = result.GenerationId });
         }
 
         var script = ToScript(result.GenerationId, PromptAssistantVideoOutputNormalizer.Normalize(result.GeneratedJson), _parser);
