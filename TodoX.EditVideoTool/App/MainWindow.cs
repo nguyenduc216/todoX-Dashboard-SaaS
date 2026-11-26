@@ -210,6 +210,12 @@ public sealed partial class MainWindow : Form
             product.Show(this);
             await Task.Delay(4000);
             Shot(product, "3-ai-product");
+            if (Environment.GetEnvironmentVariable("TODOX_WINDOW_SHOTS_AGENT") == "1")
+            {
+                await product.SampleScriptAsync();
+                Shot(product, "3-ai-product-script");
+            }
+
             product.Close();
         }
 

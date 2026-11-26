@@ -385,7 +385,9 @@ internal sealed class ProductVideoForm : Form
             var script = await _server.AgentScriptAsync(service, brief, seconds, ((Item)_aspect.SelectedItem!).Value, ct);
             if (!script.Ok)
             {
-                Say(Problem(script.ErrorCode, script.Message));
+                // The reason code (no secrets) helps TodoX support find the agent's error.
+                var reason = script.Detail is { } d && d.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? $" (mã: {r.GetString()})" : "";
+                Say(Problem(script.ErrorCode, script.Message) + reason);
                 return;
             }
 
@@ -435,6 +437,27 @@ internal sealed class ProductVideoForm : Form
             Ui.Style(_open, primary: true);
             Say($"Xong! Video: {_output}. Bấm \"Mở video\" để xem; bấm Đồng bộ ở màn hình chính để đưa lên Dashboard.");
         });
+    }
+
+    /// <summary>Window checks only (TODOX_WINDOW_SHOTS): fills a sample product and asks the agent for a script; nothing is paid.</summary>
+    internal async Task SampleScriptAsync()
+    {
+        _name.Text = "Serum dưỡng ẩm Hydra B5 30ml";
+        _price.Text = "299.000đ, mua 2 tặng 1 trong tuần này";
+        _highlights.Text = string.Join(Environment.NewLine, "Thấm nhanh, không nhờn", "Cấp ẩm 24 giờ", "Dùng được cho da nhạy cảm");
+        _contact.Text = "Inbox fanpage hoặc gọi 0900 000 000";
+        for (var i = 0; i < 120 && !_write.Enabled; i++)
+        {
+            await Task.Delay(500);
+        }
+
+        Say("Model ảnh: " + _imageModel.SelectedItem + " | model video: " + _videoModel.SelectedItem + " | giọng: " + _voice.SelectedItem);
+        for (var i = 0; i < _service.Items.Count && _scenes.Rows.Count == 0; i++)
+        {
+            _service.SelectedIndex = i;
+            Say("Kiểu video: " + _service.SelectedItem);
+            await WriteAsync();
+        }
     }
 
     private List<ProductScene> ReadScenes()
