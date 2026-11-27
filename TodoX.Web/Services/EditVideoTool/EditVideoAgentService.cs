@@ -11,7 +11,11 @@ public sealed record EditVideoAgentServiceRow(Guid Id, string Name, string? Desc
 
 public sealed record EditVideoAgentScene(int Index, string? Purpose, int Seconds, string ImagePrompt, string MotionPrompt, string Voice);
 
-public sealed record EditVideoAgentScript(Guid GenerationId, string? Title, string? Cta, int TotalSeconds, IReadOnlyList<EditVideoAgentScene> Scenes);
+public sealed record EditVideoAgentScript(Guid GenerationId, string? Title, string? Cta, int TotalSeconds, IReadOnlyList<EditVideoAgentScene> Scenes)
+{
+    /// <summary>Who wrote it: "79ai" (the service's agent) or "claude" (back-up when the agent failed).</summary>
+    public string Source { get; init; } = "79ai";
+}
 
 /// <summary>
 /// The dashboard's 79AI script agents (Prompt Assistant, one per service) for the EditVideo app: the app sends a
@@ -28,10 +32,12 @@ public sealed class EditVideoAgentService
     private readonly IServicePromptAssistantService _assistant;
     private readonly ITodoXVideoPromptParser _parser;
     private readonly ILogger<EditVideoAgentService> _logger;
+    private readonly EditVideoClaudeScriptWriter? _claude;
 
     public EditVideoAgentService(TodoXConnectionFactory factory, IServicePromptAssistantService assistant, ITodoXVideoPromptParser parser,
-        ILogger<EditVideoAgentService> logger)
+        ILogger<EditVideoAgentService> logger, EditVideoClaudeScriptWriter? claude = null)
     {
+        _claude = claude;
         _factory = factory;
         _assistant = assistant;
         _parser = parser;
@@ -73,6 +79,24 @@ public sealed class EditVideoAgentService
         }
 
         var input = PromptAssistantEndpoints.BuildAgentInput(new PromptAssistantGenerateRequest(service.Id, brief, Duration: body.Seconds, CreativeMode: true));
+        var failure = await AgentAsync(license, service, input, ct);
+        if (failure.Script is { } script)
+        {
+            return EditVideoResult<EditVideoAgentScript>.Success(script);
+        }
+
+        // The 79AI agent failed: Claude writes the script instead when an admin has saved a Claude key.
+        if (await ClaudeAsync(license, service, body, ct) is { } backup)
+        {
+            return EditVideoResult<EditVideoAgentScript>.Success(backup);
+        }
+
+        return EditVideoResult<EditVideoAgentScript>.Fail("ai_failed", failure.Message!, failure.Detail);
+    }
+
+    private async Task<(EditVideoAgentScript? Script, string? Message, object? Detail)> AgentAsync(EditVideoLicenseRow license,
+        EditVideoAgentServiceRow service, string input, CancellationToken ct)
+    {
         ServicePromptGenerationResult result;
         try
         {
@@ -81,13 +105,13 @@ public sealed class EditVideoAgentService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "EDITVIDEO_AGENT_FAILED license={License} service={Service}", license.Id, service.Id);
-            return EditVideoResult<EditVideoAgentScript>.Fail("ai_failed", "Agent chưa viết được kịch bản lúc này. Thử lại sau ít phút.");
+            return (null, "Agent chưa viết được kịch bản lúc này. Thử lại sau ít phút.", null);
         }
 
         if (string.IsNullOrWhiteSpace(result.GeneratedJson))
         {
             _logger.LogWarning("EDITVIDEO_AGENT_EMPTY license={License} service={Service} code={Code}", license.Id, service.Id, result.ErrorCode);
-            return EditVideoResult<EditVideoAgentScript>.Fail("ai_failed", "Agent chưa viết được kịch bản lúc này. Thử lại hoặc viết rõ thông tin sản phẩm hơn.",
+            return (null, "Agent chưa viết được kịch bản lúc này. Thử lại hoặc viết rõ thông tin sản phẩm hơn.",
                 new { reason = result.ErrorCode, provider = result.ErrorMessage is { Length: > 200 } m ? m[..200] : result.ErrorMessage, generationId = result.GenerationId });
         }
 
@@ -95,10 +119,43 @@ public sealed class EditVideoAgentService
         if (script is null)
         {
             _logger.LogWarning("EDITVIDEO_AGENT_NO_SCENES license={License} service={Service} generation={Generation}", license.Id, service.Id, result.GenerationId);
-            return EditVideoResult<EditVideoAgentScript>.Fail("ai_failed", "Kịch bản agent trả về chưa có cảnh dùng được. Bấm viết lại.");
+            return (null, "Kịch bản agent trả về chưa có cảnh dùng được. Bấm viết lại.", new { reason = "no_scenes", generationId = result.GenerationId });
         }
 
-        return EditVideoResult<EditVideoAgentScript>.Success(script);
+        return (script, null, null);
+    }
+
+    private async Task<EditVideoAgentScript?> ClaudeAsync(EditVideoLicenseRow license, EditVideoAgentServiceRow service, EditVideoAgentScriptRequest body,
+        CancellationToken ct)
+    {
+        if (_claude is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await _claude.WriteScriptAsync(service.Name, service.Description, body.Brief!, body.Seconds!.Value, body.Aspect, ct);
+            if (json is null)
+            {
+                return null;
+            }
+
+            var script = ToScript(Guid.NewGuid(), json, _parser);
+            if (script is null)
+            {
+                _logger.LogWarning("EDITVIDEO_AGENT_CLAUDE_NO_SCENES license={License} service={Service}", license.Id, service.Id);
+                return null;
+            }
+
+            _logger.LogInformation("EDITVIDEO_AGENT_CLAUDE_USED license={License} service={Service} scenes={Scenes}", license.Id, service.Id, script.Scenes.Count);
+            return script with { Source = "claude" };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "EDITVIDEO_AGENT_CLAUDE_FAILED license={License} service={Service}", license.Id, service.Id);
+            return null;
+        }
     }
 
     internal static string? Validate(EditVideoAgentScriptRequest body)

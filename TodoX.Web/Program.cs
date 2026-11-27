@@ -339,6 +339,7 @@ builder.Services.AddScoped<EditVideoAiService>();
 builder.Services.AddScoped<EditVideoSkillService>();
 builder.Services.AddScoped<EditVideoSkillRunService>();
 builder.Services.AddScoped<EditVideoAgentService>();
+builder.Services.AddScoped<EditVideoClaudeScriptWriter>();
 builder.Services.AddSingleton<EditVideoReleaseService>();
 builder.Services.AddScoped<ReupCampaignRepository>();
 builder.Services.AddScoped<ReupLogService>();

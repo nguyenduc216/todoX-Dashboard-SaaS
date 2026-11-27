@@ -42,4 +42,32 @@ public sealed class EditVideoAgentScriptTests
     [InlineData("4b0c2f3e-0000-4000-8000-000000000001", "Serum", 30, null)]
     public void Requests_are_checked(string? service, string brief, int seconds, string? expected) =>
         Assert.Equal(expected, EditVideoAgentService.Validate(new EditVideoAgentScriptRequest(service is null ? null : Guid.Parse(service), brief, seconds, "9:16")));
+    [Fact]
+    public void A_script_in_the_claude_back_up_shape_reads_like_the_agent_one()
+    {
+        const string json = """
+            {"video_title":"Serum A","cta":"Gọi 0900","scenes":[
+              {"scene_purpose":"hook","duration_seconds":6,"image_prompt":"Serum bottle on marble","motion_prompt":"slow push-in","tts_text":"Da khô mỗi sáng?"},
+              {"scene_purpose":"cta","duration_seconds":5,"image_prompt":"Bottle with flowers","motion_prompt":"gentle orbit","tts_text":"Gọi ngay hôm nay."}
+            ]}
+            """;
+
+        var script = EditVideoAgentService.ToScript(Guid.NewGuid(), json, Parser)! with { Source = "claude" };
+
+        Assert.Equal(2, script.Scenes.Count);
+        Assert.Equal(11, script.TotalSeconds);
+        Assert.Equal(("Da khô mỗi sáng?", "slow push-in"), (script.Scenes[0].Voice, script.Scenes[0].MotionPrompt));
+        Assert.Equal("claude", script.Source);
+    }
+
+    [Fact]
+    public void The_claude_request_carries_the_brief_length_and_frame()
+    {
+        var prompt = EditVideoClaudeScriptWriter.UserPrompt("Video bán hàng", null, "Sản phẩm: Serum X", 30, "16:9");
+        Assert.Contains("Kiểu video: Video bán hàng", prompt);
+        Assert.Contains("khoảng 30 giây", prompt);
+        Assert.Contains("Khung hình: 16:9", prompt);
+        Assert.Contains("Sản phẩm: Serum X", prompt);
+        Assert.DoesNotContain("Mô tả kiểu video", prompt);
+    }
 }

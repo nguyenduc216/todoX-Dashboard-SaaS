@@ -2,6 +2,7 @@
 @using TodoX.Web.Services.EditVideoTool
 @inject EditVideoAiSettingsService Settings
 @inject EditVideoConsentSkipService Skips
+@inject EditVideoClaudeScriptWriter Claude
 @inject AuthStateService AuthState
 @inject ISnackbar Snackbar
 
@@ -104,6 +105,27 @@ else
             <MudSwitch T="bool" @bind-Value="_fallback" Color="Color.Warning" Label="Bật model dự phòng" />
         </MudPaper>
 
+        <MudPaper Class="todox-card pa-4">
+            <MudText Typo="Typo.h6" Class="mb-1">Claude viết kịch bản dự phòng</MudText>
+            <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-3">
+                "Tạo video từ sản phẩm" nhờ agent 79AI của kiểu video viết kịch bản. Khi agent lỗi, TodoX nhờ Claude (@EditVideoClaudeScriptWriter.Model) viết thay,
+                nếu đã lưu khoá API Claude ở đây. Khoá được mã hoá, chỉ hiện 4 ký tự cuối. Chi phí Claude tính vào tài khoản Anthropic của khoá, khách không bị trừ điểm.
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                Trạng thái: @(_claudeHint is null ? "chưa có khoá — dự phòng đang tắt" : $"đã lưu khoá {_claudeHint}")
+            </MudText>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Spacing="2">
+                <MudTextField T="string" @bind-Value="_claudeKey" Label="Khoá API Claude (sk-ant-...)" InputType="InputType.Password"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:320px" autocomplete="new-password" />
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(string.IsNullOrWhiteSpace(_claudeKey) || _claudeBusy)"
+                           OnClick="SaveClaudeKeyAsync">Lưu khoá</MudButton>
+                @if (_claudeHint is not null)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Default" Disabled="_claudeBusy" OnClick="ClearClaudeKeyAsync">Xoá khoá</MudButton>
+                }
+            </MudStack>
+        </MudPaper>
+
         <div>
             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_saving" OnClick="SaveAsync">Lưu cài đặt</MudButton>
         </div>
@@ -147,6 +169,45 @@ else
     private Guid? _skipLicense;
     private string? _skipPassword;
     private bool _skipBusy;
+
+    private string? _claudeHint;
+    private string? _claudeKey;
+    private bool _claudeBusy;
+
+    private async Task SaveClaudeKeyAsync()
+    {
+        _claudeBusy = true;
+        try
+        {
+            await Claude.SaveKeyAsync(_claudeKey ?? "");
+            _claudeHint = await Claude.HintAsync();
+            Snackbar.Add("Đã lưu khoá Claude. Khi agent 79AI lỗi, Claude sẽ viết kịch bản thay.", Severity.Success);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _claudeKey = null;
+            _claudeBusy = false;
+        }
+    }
+
+    private async Task ClearClaudeKeyAsync()
+    {
+        _claudeBusy = true;
+        try
+        {
+            await Claude.ClearKeyAsync();
+            _claudeHint = null;
+            Snackbar.Add("Đã xoá khoá Claude: tắt viết kịch bản dự phòng.", Severity.Info);
+        }
+        finally
+        {
+            _claudeBusy = false;
+        }
+    }
 
     private async Task LoadSkipsAsync()
     {
@@ -195,6 +256,7 @@ else
         if (_admin)
         {
             await LoadAsync();
+            _claudeHint = await Claude.HintAsync();
         }
 
         _initialized = true;
